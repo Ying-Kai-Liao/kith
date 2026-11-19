@@ -12,6 +12,7 @@ struct PermissionIntro: View {
     let check: String?
     let hostName: String
     let tint: AgentTint
+    @State private var quoteOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -26,17 +27,23 @@ struct PermissionIntro: View {
                         // Plain text: `verbatim` never reads markdown or links from what the agent wrote.
                         Text(verbatim: "\u{201C}\(intent)\u{201D}")
                             .kithText(.body).foregroundStyle(Palette.ink)
-                            .lineLimit(2)
+                            .lineLimit(quoteOpen ? nil : 2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .fixedSize(horizontal: false, vertical: true)
+                    // Two lines until tapped, then all of it.
+                    .contentShape(Rectangle())
+                    .onTapGesture { quoteOpen.toggle() }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint(quoteOpen ? "Shows two lines" : "Shows all of it")
                 }
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Kith sees").kithText(.secondary).foregroundStyle(Palette.muted)
                 ForEach(Array(facts.enumerated()), id: \.offset) { _, fact in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Image(systemName: fact.symbol).font(.system(size: 14)).foregroundStyle(Palette.muted)
+                        // The eye is wider than tall: a smaller size keeps it inside the 18 pt column.
+                        Image(systemName: fact.symbol).font(.system(size: fact.symbol == "eye" ? 12 : 14)).foregroundStyle(Palette.muted)
                             .frame(width: 18)
                         Text(Self.line(fact, hostName: hostName)).kithText(.secondary).foregroundStyle(Palette.ink)
                             .frame(maxWidth: .infinity, alignment: .leading)

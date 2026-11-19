@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { cardFacts, factNote, factPieces, factSymbol } from './permission-facts.ts'
+import { cardFacts, factNote, factPieces, factSymbol, placeLine } from './permission-facts.ts'
 
 test('a fact is cut into plain and bold pieces in order', () => {
   assert.deepEqual(factPieces({ text: 'Runs a Python script written into the command, and ffmpeg', strong: ['Python script', 'ffmpeg'] }), [
@@ -41,4 +41,10 @@ test('no facts, or only broken ones, means today’s card', () => {
   assert.equal(cardFacts({ facts: [] }), null)
   assert.equal(cardFacts({ facts: [{ icon: 'terminal', text: '' }] }), null)
   assert.deepEqual(cardFacts({ facts: [{ icon: 'terminal', text: '' }, { icon: 'globe', text: 'Opens docs.rs' }] }), [{ icon: 'globe', text: 'Opens docs.rs' }])
+})
+
+test('the Mac stays named: Runs on <Mac> unless a fact already says where it runs', () => {
+  assert.equal(placeLine([{}], 'Runs on Mac mini · from coder', 'from coder'), 'Runs on Mac mini · from coder')
+  assert.equal(placeLine([{}, { place: true }], 'Runs on Mac mini · from coder', 'from coder'), 'from coder')
+  assert.equal(placeLine([{ place: true }], 'Runs on Mac mini'), undefined)
 })

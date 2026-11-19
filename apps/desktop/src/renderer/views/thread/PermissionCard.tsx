@@ -11,7 +11,7 @@ import { Text } from '../../components/Text'
 import { alwaysAllowLabel } from './permission-labels.ts'
 import { permissionOutcome } from './permission-outcome.ts'
 import { permissionChoices, sortedOptions } from './permission-options.ts'
-import { cardFacts } from './permission-facts.ts'
+import { cardFacts, placeLine } from './permission-facts.ts'
 import { PermissionIntro } from './PermissionIntro'
 import './permission-card.css'
 
@@ -57,13 +57,14 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
   const grant = d.sessionGrant
   // The host read the call: what the agent says, then what Kith sees. An older host sends no facts: today's card.
   const facts = cardFacts(d)
+  const place = `Runs on ${hostName}${cwd}${d.chain ? ` · ${d.chain}` : ''}`
   const common = {
     outcomeAction: !pending && grant?.state === 'live' && removeGrant ? { label: 'Remove', run: () => removeGrant(grant.id) } : undefined,
     pair,
     title: permissionHeadline(d.toolKind),
     subject: d.title ?? '',
-    place: `Runs on ${hostName}${cwd}${d.chain ? ` · ${d.chain}` : ''}`,
-    heading: facts ? d.chain : undefined,
+    place,
+    heading: facts ? placeLine(facts, place, d.chain) : undefined,
     body: facts ? <PermissionIntro agent={agent?.name ?? d.agent ?? 'The agent'} avatar={agent?.avatar} intent={d.intent} facts={facts} check={d.check} hostName={hostName} /> : undefined,
     waiting,
     outcome: pending ? undefined : permissionOutcome(entry),

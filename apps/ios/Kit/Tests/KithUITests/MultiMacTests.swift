@@ -298,3 +298,29 @@ private func card(_ id: String, chat: String, status: String = "pending", approv
     #expect(accounts.store(for: b.id)?.entries.isEmpty == true)
     #expect(accounts.store(for: a.id)?.bots["x"] != nil)
 }
+
+@MainActor @Test func theIntentFirstCardKeepsTheMacNamedAndOrdersItsButtonsAsTheMacDoes() {
+    var entry = card("p1", chat: "chat-sam")
+    entry.data.options = [
+        PermissionOption(optionId: "a", name: "Allow once", kind: "allow_once"),
+        PermissionOption(optionId: "w", name: "Always allow", kind: "allow_always"),
+        PermissionOption(optionId: "d", name: "Deny", kind: "reject_once"),
+        PermissionOption(optionId: "s", name: "This session", kind: "allow_session"),
+    ]
+    entry.data.chain = "from coder"
+    entry.data.facts = [CardFact(icon: "eye", text: "A shell command: grep, reads only")]
+    var model = PermissionCard(entry: entry, hostName: "Mac mini", respond: { _ in }).cardModel
+    // No fact says where it runs: the Mac stays named.
+    #expect(model.heading == "Runs on Mac mini · from coder")
+    #expect(model.options.map(\.title) == ["Allow", "Deny", "This session", "Always allow"])
+    #expect(model.pairedRows)
+    // A fact that says where (with this Mac's name) takes over; only who asked stays above.
+    entry.data.facts?.append(CardFact(icon: "folder", text: "In files/x", place: true))
+    model = PermissionCard(entry: entry, hostName: "Mac mini", respond: { _ in }).cardModel
+    #expect(model.heading == "from coder")
+    // Today's card (no facts) keeps today's order.
+    entry.data.facts = nil
+    model = PermissionCard(entry: entry, hostName: "Mac mini", respond: { _ in }).cardModel
+    #expect(model.options.map(\.title) == ["Allow", "Always allow", "Deny", "This session"])
+    #expect(!model.pairedRows)
+}

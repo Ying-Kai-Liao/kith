@@ -45,13 +45,19 @@ struct PermissionCard: View {
     /// The facts to draw, or nil for today's card (an older host sends none).
     private var facts: [CardFact]? { d.shownFacts }
 
-    /// The card's values; the option ids are the host's. With facts the "Runs on <Mac>" line gives way to the fact that
-    /// says where, so only who asked (`chain`) stays above.
+    /// The card's values; the option ids are the host's. "Runs on <Mac>" stays above unless a fact already says where
+    /// it runs (its `place`); then only who asked (`chain`) stays.
     var cardModel: DecisionCardModel {
-        DecisionCardModel(heading: facts == nil ? place : d.chain, question: headline, detail: d.title, options: ordered.map { o in
+        let named = facts?.contains { $0.place == true } ?? false
+        var model = DecisionCardModel(heading: named ? d.chain : place, question: headline, detail: d.title, options: ordered.map { o in
             DecisionOption(id: o.optionId, title: GuestPrompt.label(o, edge: d.edge), role: o.kind == "allow_once" ? .primary : o.kind.hasPrefix("allow") ? .normal : .destructive)
         })
+        model.pairedRows = macOrder
+        return model
     }
+
+    /// The intent-first card lays out its buttons as the Mac does: Allow | Deny, then This session | Always allow.
+    private var macOrder: Bool { facts != nil && d.edge == nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -89,7 +95,8 @@ struct PermissionCard: View {
                 details.padding(.horizontal, 4)
             }
         }
-        .padding(.trailing, 40)
+        // The intent-first card takes the full width so its quote and button pairs fit (361 pt on an iPhone).
+        .padding(.trailing, pending && waiting == nil && facts != nil ? 0 : 40)
         // A call the host could not read in full opens Details.
         .onAppear { if d.detailsOpen == true { expanded = true } }
         .animation(Motion.reduced(Motion.layout, reduceMotion), value: held)
@@ -124,9 +131,10 @@ struct PermissionCard: View {
         !(d.command ?? "").isEmpty || !(d.detail ?? "").isEmpty || !(d.diffs ?? []).isEmpty
     }
 
-    /// Ordered like Grok Bot: Allow once, Always allow, then Deny.
+    /// Ordered like Grok Bot: Allow once, Always allow, then Deny. The intent-first card goes in the Mac's order.
     private var ordered: [PermissionOption] {
-        let rank = ["allow_once": 0, "allow_always": 1, "reject_once": 2, "reject_always": 3]
+        let rank = macOrder ? ["allow_once": 0, "reject_once": 1, "allow_session": 2, "allow_always": 3, "reject_always": 4]
+                            : ["allow_once": 0, "allow_always": 1, "reject_once": 2, "reject_always": 3]
         return (d.options ?? []).sorted { (rank[$0.kind] ?? 9) < (rank[$1.kind] ?? 9) }
     }
 

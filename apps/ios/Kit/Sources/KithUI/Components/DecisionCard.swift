@@ -24,6 +24,8 @@ public struct DecisionCardModel: Equatable, Sendable {
     public var options: [DecisionOption]
     /// A bot from outside's request: its provider, for the avatar before the heading.
     public var botProvider: String?
+    /// Buttons two to a row (Allow | Deny, then This session | Always), so none is left alone on a row.
+    public var pairedRows = false
 
     public init(heading: String? = nil, question: String, detail: String? = nil, options: [DecisionOption]) {
         self.heading = heading
@@ -122,14 +124,24 @@ public struct DecisionCard: View {
                 }
             }
             if let detailsView { detailsView }
-            if model.fitsInRow {
+            if model.pairedRows {
+                VStack(spacing: 8) {
+                    ForEach(Array(stride(from: 0, to: model.options.count, by: 2)), id: \.self) { i in
+                        let pair = Array(model.options[i..<min(i + 2, model.options.count)])
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 8) { buttons(pair, singleLine: true) }
+                            VStack(spacing: 8) { buttons(pair, singleLine: false) }
+                        }
+                    }
+                }
+            } else if model.fitsInRow {
                 // One row when every label fits on one line; otherwise stacked, never wrapped mid-label.
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) { buttons(singleLine: true) }
-                    VStack(spacing: 8) { buttons(singleLine: false) }
+                    HStack(spacing: 8) { buttons(model.options, singleLine: true) }
+                    VStack(spacing: 8) { buttons(model.options, singleLine: false) }
                 }
             } else {
-                VStack(spacing: 8) { buttons(singleLine: false) }
+                VStack(spacing: 8) { buttons(model.options, singleLine: false) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -138,8 +150,8 @@ public struct DecisionCard: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func buttons(singleLine: Bool) -> some View {
-        ForEach(model.options) { option in
+    private func buttons(_ options: [DecisionOption], singleLine: Bool) -> some View {
+        ForEach(options) { option in
             Button { onChoose(option.id) } label: {
                 HStack(spacing: 6) {
                     Text(option.title)

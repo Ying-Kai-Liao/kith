@@ -92,12 +92,19 @@ export function DecisionCard(props: DecisionCardProps) {
         <div className="kc-decision-outcome kith-text-secondary">{`Waiting for ${waiting}`}</div>
       ) : (
         <div className="kc-decision-buttons" role="group">
-          {buttons.map((b) => (
-            <button key={b.id} className={`kc-decision-button ${b.tone}`} disabled={busy} onClick={b.run}>
-              <span className="kc-decision-label">{b.label}</span>
-              {pending === b.id ? <Spinner size={12} /> : null}
-            </button>
-          ))}
+          {/* A permission's buttons wrap in pairs (Allow|Deny, This session|Always), never one left alone on a row. */}
+          {(props.kind === 'permission' ? [buttons.slice(0, 2), buttons.slice(2)] : [buttons])
+            .filter((row) => row.length > 0)
+            .map((row) => (
+              <span key={row[0].id} className="kc-decision-button-pair">
+                {row.map((b) => (
+                  <button key={b.id} className={`kc-decision-button ${b.tone}`} disabled={busy} onClick={b.run}>
+                    <span className="kc-decision-label">{b.label}</span>
+                    {pending === b.id ? <Spinner size={12} /> : null}
+                  </button>
+                ))}
+              </span>
+            ))}
         </div>
       )}
     </section>

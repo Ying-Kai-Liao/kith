@@ -51,6 +51,11 @@ export function factNote(fact: Pick<CardFact, 'muted' | 'place'>, hostName: stri
   return [fact.muted, fact.place ? hostName : undefined].filter(Boolean).join(' · ')
 }
 
+/** The line above the intent: "Runs on <Mac> …" stays unless a fact already says where (its `place`), then only who asked. */
+export function placeLine(facts: Pick<CardFact, 'place'>[], runsOn: string, chain?: string): string | undefined {
+  return facts.some((f) => f.place) ? chain : runsOn
+}
+
 /**
  * The facts to draw, or null for today's card: a host that sent none, or only malformed ones, shows the old card.
  * A fact missing its text is dropped, so a half-written line never draws.
