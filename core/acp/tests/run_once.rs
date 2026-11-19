@@ -16,6 +16,7 @@ fn spec(env: &[(&str, &str)]) -> RunSpec {
     RunSpec {
         command: fake(),
         cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+        dirs: Vec::new(),
         env: env
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
@@ -57,6 +58,37 @@ async fn the_model_and_mcp_servers_reach_the_session() {
     let _ = std::fs::remove_file(&log);
     assert!(text.contains(r#""modelId": "fast-1""#), "{text}");
     assert!(text.contains(r#""name": "m""#), "{text}");
+}
+
+/// The params the agent got in `session/new` for a run with these extra folders.
+async fn session_new_params(name: &str, takes_dirs: bool) -> serde_json::Value {
+    let log = std::env::temp_dir().join(format!("kith-acp-{name}-{}", std::process::id()));
+    let mut env = vec![("FAKE_ACP_LOG", log.to_str().unwrap())];
+    if takes_dirs {
+        env.push(("FAKE_ACP_DIRS", "1"));
+    }
+    let mut s = spec(&env);
+    s.dirs = vec!["/work/notes".to_owned()];
+    run_once(s).await.unwrap();
+    let text = std::fs::read_to_string(&log).unwrap();
+    let _ = std::fs::remove_file(&log);
+    text.lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .find(|m| m["method"] == "session/new")
+        .unwrap()["params"]
+        .clone()
+}
+
+#[tokio::test]
+async fn extra_folders_reach_an_agent_that_takes_them() {
+    let p = session_new_params("dirs-yes", true).await;
+    assert_eq!(p["additionalDirectories"], json!(["/work/notes"]));
+}
+
+#[tokio::test]
+async fn extra_folders_are_left_out_for_an_agent_that_does_not_say_it_takes_them() {
+    let p = session_new_params("dirs-no", false).await;
+    assert!(p.get("additionalDirectories").is_none(), "{p}");
 }
 
 #[tokio::test]

@@ -651,6 +651,9 @@ enum KernelCmd {
         /// The folder the engine works in (default: here).
         #[arg(long)]
         cwd: Option<std::path::PathBuf>,
+        /// More folders the engine may work in (repeat it); only an engine that takes them gets them.
+        #[arg(long = "add-dir")]
+        dirs: Vec<std::path::PathBuf>,
         /// MCP servers for the run: `{"mcpServers": {...}}` as JSON or a file holding it.
         #[arg(long)]
         mcp_config: Option<String>,
@@ -1520,10 +1523,21 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Sub::Kernel { cmd } => {
-            if let KernelCmd::RunOnce { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task } =
-                cmd
+            if let KernelCmd::RunOnce {
+                engine,
+                model,
+                cwd,
+                dirs,
+                mcp_config,
+                json,
+                approve,
+                timeout,
+                acp_command,
+                task,
+            } = cmd
             {
-                let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
+                let args =
+                    runonce::Args { engine, model, cwd, dirs, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
             if let KernelCmd::CoreCall { method, params_stdin } = cmd {

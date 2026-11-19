@@ -2,7 +2,8 @@
 # kith-run-once-cost-check — a one-shot over ACP that crashes or times out still reports what the engine had spent:
 # `kith kernel run-once --json` puts cost_usd in its error, harness.py takes it into the result (total_cost_usd), so
 # kith ask settles it and a delegation's cap counts it. An older host binary sends none: no cost, no crash.
-# Also: `kith kernel accounts` notes reach core.log.
+# Also: a codex one-shot runs over its registry adapter with its MCP servers by name; `kith kernel accounts` notes
+# reach core.log.
 # Needs the Rust kith program (KITH_BIN, else a build under CARGO_TARGET_DIR / serve/host/target, before any installed one); skips without one.
 #
 #   kernel/tests/kith-run-once-cost-check     a few seconds; exits 1 when a check fails
@@ -38,6 +39,20 @@ run() {
 check "a crash after 0.25 spent: an error that carries the cost (kith ask settles it)" "[ \"\$(FAKE_ACP_MODE=crash FAKE_ACP_COST=0.25 run)\" = 'True 0.25' ]"
 check "a crash with nothing spent: an error, no cost, no traceback" "[ \"\$(FAKE_ACP_MODE=crash run)\" = 'True None' ]"
 check "a good run still reports its cost" "[ \"\$(FAKE_ACP_COST=0.25 run)\" = 'False 0.25' ]"
+
+# codex has no ACP mode of its own: the one-shot starts its registry adapter (codex-acp, here through a fake uvx), and
+# an MCP server goes as an ACP field, so a name like jev-browser reaches the engine as it is (codex's own -c keys kept
+# the quotes and dropped the server).
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/codex"
+printf '#!/bin/sh\nexec python3 "%s/fakes/fake-acp-agent"\n' "$T" > "$T/bin/uvx"
+chmod +x "$T/bin/codex" "$T/bin/uvx"
+mkdir -p "$T/serve"
+echo '{"agents": [{"id": "codex-acp", "name": "Codex", "distribution": {"uvx": {"package": "codex-acp"}}}]}' > "$T/serve/registry.json"
+echo '{"mcpServers": {"jev-browser": {"command": "node", "args": ["x.js"]}}}' > "$T/mcp.json"
+KITH_SERVE_HOME=$T/serve KITH_RUN_MCP=$T/mcp.json FAKE_ACP_LOG=$T/acp.log \
+  python3 "$KERNEL/adapters/harness.py" codex --output json -- hello 2>"$T/err" | tail -1 > "$T/codex.json"
+check "codex one-shot: answered over its registry adapter" "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert not d[\"is_error\"] and \"hello\" in d[\"result\"]' '$T/codex.json' 2>/dev/null"
+check "codex one-shot: the jev-browser MCP server reaches the engine by its own name" "python3 -c 'import json,sys; s=[json.loads(l) for l in open(sys.argv[1])]; n=[m[\"params\"][\"mcpServers\"] for m in s if m[\"method\"]==\"session/new\"]; assert [x[\"name\"] for x in n[0]]==[\"jev-browser\"]' '$T/acp.log' 2>/dev/null"
 
 # `kith kernel accounts` exits before the verbs that run through the core, yet its notes (a state write or a settings
 # migration it could not do) still go to core.log: the hook is set once for every kernel verb.

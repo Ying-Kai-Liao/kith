@@ -369,10 +369,9 @@ class Run:
     def acp_one_shot(self):
         """The run's result (the shape of <harness>_result) from `kith kernel run-once`, when the core does one-shots
         over ACP (lib/core-switched.txt `run-once`, or KITH_CORE=rust) and the engine's table row says `oneshot: acp`
-        with a native ACP mode. None: this run goes the harness's own way. Once run-once is switched, the per-engine
-        argv and *_result code above is dead for the engines whose row says `oneshot: acp` and that have a native ACP
-        mode: pi (no local mode) and opencode/qwen/agy stay here only for resumed runs and until the verb is switched
-        (docs/plans/one-bot-model.md A2b)."""
+        (its native ACP mode, or its registry adapter such as codex-acp). None: this run goes the harness's own way
+        (exit 78: no ACP command for it here). Since run-once is switched, the per-engine argv and *_result code above
+        serves only resumed runs, interactive runs and an older kith program (docs/plans/one-bot-model.md A2b)."""
         if not shutil.which(self.harness):
             return None   # the native path says what is missing, as it always has
         kith = run_once_bin()
@@ -380,9 +379,9 @@ class Run:
             return None
         if self.effort:
             note('%s over ACP takes no effort per run; this run is without effort %s' % (self.harness, self.effort))
-        if self.dirs[1:]:
-            note('%s over ACP works in one directory; this run is without %s' % (self.harness, ', '.join(self.dirs[1:])))
         cmd = [kith, 'kernel', 'run-once', self.harness, '--json', '--cwd', os.getcwd(), '--timeout', '86400']
+        for d in self.dirs[1:]:
+            cmd += ['--add-dir', d]   # an engine that does not take extra folders runs without them
         if self.model:
             cmd += ['--model', self.model]
         if self.bypass:
@@ -393,6 +392,8 @@ class Run:
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
         if p.returncode == 78:
             return None   # no ACP one-shot for this engine here; nothing was started
+        if p.returncode == 2 and '--add-dir' in p.stderr:
+            return None   # an older kith program that does not take extra folders; nothing was started
         sys.stderr.write(p.stderr)
         d = next(reversed(list(jsonl(p.stdout))), None)
         r = {'session': None, 'text': '', 'error': None, 'usage': {}, 'turns': 1}
