@@ -9,3 +9,4 @@ pkg	pkg
 project-id	project
 cost	cost-ledger	cost
 threads	threads-writer
+lifecycle	lifecycle

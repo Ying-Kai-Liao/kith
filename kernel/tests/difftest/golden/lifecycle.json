@@ -2,17 +2,15 @@
  {
   "name": "lifecycle-compact-sweep-compacted",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -70,22 +68,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-rc0",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -134,22 +131,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-claude-failed",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -211,22 +207,21 @@
     "write": "home/.kith/fail",
     "text": ""
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-claude-failed-direct",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -279,22 +274,21 @@
     "write": "home/.kith/fail",
     "text": ""
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-folder-gone",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -347,22 +341,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-held-by-claim",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -411,22 +404,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-held-sweep-leaves-it",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -479,22 +471,21 @@
     "write": "home/.kith/live/terminal/lc-held2.claim",
     "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-skipped-resumed",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -543,22 +534,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-skipped-newturn",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -607,22 +597,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-skipped-self",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -671,22 +660,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-skipped-under-floor",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -735,22 +723,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-claude-missing",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -799,22 +786,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-sweep-twice",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -868,22 +854,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-under-stub",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -941,22 +926,21 @@
     "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nwhile [ \"$1\" != -- ]; do\n  case $1 in --lock-dir) lock=$2; shift ;; --key) key=$2; shift ;; --status-fd) fd=$2; shift ;; esac\n  shift\ndone\nshift\nif [ -f \"$lock/$key.busy\" ]; then\n  [ -n \"$fd\" ] && eval \"echo busy >&$fd\"\n  exit 75\nfi\n[ -n \"$fd\" ] && { eval \"echo locked >&$fd\"; eval \"exec $fd>&-\"; }\nexec \"$@\"\n",
     "mode": "755"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-busy",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1026,22 +1010,21 @@
     "write": "home/.kith/core/locks/lc-busy.busy",
     "text": ""
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-no-stub-required",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1095,22 +1078,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-bad-session-id",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1164,22 +1146,21 @@
     "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nwhile [ \"$1\" != -- ]; do\n  case $1 in --lock-dir) lock=$2; shift ;; --key) key=$2; shift ;; --status-fd) fd=$2; shift ;; esac\n  shift\ndone\nshift\nif [ -f \"$lock/$key.busy\" ]; then\n  [ -n \"$fd\" ] && eval \"echo busy >&$fd\"\n  exit 75\nfi\n[ -n \"$fd\" ] && { eval \"echo locked >&$fd\"; eval \"exec $fd>&-\"; }\nexec \"$@\"\n",
     "mode": "755"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-sleep",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1239,22 +1220,21 @@
     "write": "home/.kith/live/terminal/lc-sl.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-sl\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-sl.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-sleep-big-no-question",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1309,22 +1289,21 @@
     "write": "home/.kith/live/terminal/lc-slb.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-slb\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-slb.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-end-ask",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1384,22 +1363,21 @@
     "write": "home/.kith/live/terminal/lc-endask.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-endask\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-endask.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"ask\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-end-schedule-big",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1455,22 +1433,21 @@
     "write": "home/.kith/live/terminal/lc-endsch.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-endsch\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-endsch.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"schedule\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-end-helper-question-compacts",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1525,22 +1502,21 @@
     "write": "home/.kith/live/terminal/lc-hq.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-hq\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-hq.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"helper\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-ask-waiting-by-wait-file",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1603,22 +1579,21 @@
     "write": "home/.kith/sessions/waits/bad.json",
     "text": "not json"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-ask-waiting-by-queue",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1681,22 +1656,21 @@
     "write": "home/.kith/sessions/queue/answered.json",
     "text": "{\"lc-aq\": 1}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-too-early",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1751,22 +1725,21 @@
     "write": "home/.kith/live/terminal/lc-early.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-early\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-early.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-short-cache-needs-at-sleep",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1828,22 +1801,21 @@
     "write": "home/.kith/live/terminal/lc-sc.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-sc\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-sc.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-at-sleep-default-life",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1899,22 +1871,21 @@
     "write": "home/.kith/live/terminal/lc-as.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-as\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-as.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-cache-life-garbage",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -1970,22 +1941,21 @@
     "write": "home/.kith/live/terminal/lc-cl.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-cl\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-cl.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-all-sessions-sorted-and-quiet",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2081,22 +2051,21 @@
     "write": "home/.kith/live/terminal/lc-h.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-h\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/gone.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-unsafe-session-id-state",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2147,22 +2116,21 @@
     "write": "home/.kith/live/terminal/lc.x.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc.x\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc.x.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-settled-and-stale",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2238,22 +2206,21 @@
     "write": "home/.kith/sessions/decisions/lc-stale.json",
     "text": "{\"decision\": \"compact\", \"at\": 5, \"idleSince\": 17.0, \"compacted\": false}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-pending-compact-retried",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2310,22 +2277,21 @@
     "write": "home/.kith/sessions/decisions/lc-pc.json",
     "text": "{\"decision\": \"compact\", \"at\": 5, \"idleSince\": 1767225600.0, \"compacted\": false}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-ended-stays-ended",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2385,22 +2351,21 @@
     "write": "home/.kith/sessions/decisions/lc-ended.json",
     "text": "{\"decision\": \"end\", \"at\": 5, \"idleSince\": 1767225600.0, \"compacted\": false, \"ended\": true, \"endedAt\": 6}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-live-claim-skips-all",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2458,22 +2423,21 @@
     "write": "home/.kith/live/terminal/lc-lc.claim",
     "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-takeover-claim-skips",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2528,22 +2492,21 @@
     "write": "home/.kith/live/terminal/lc-to.takeover.claim",
     "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"app\", \"takeover\": true}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-stale-claim-is-free",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2598,22 +2561,21 @@
     "write": "home/.kith/live/terminal/lc-dead.claim",
     "text": "{\"pid\": 2147483, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-sweep-no-state-dir",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2654,22 +2616,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-status-unknown",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2716,22 +2677,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-status-outstanding",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2785,22 +2745,21 @@
     "write": "home/.claude/projects/p/lc-out/mcp-tasks/a.meta.json",
     "text": "{}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-intent-then-status",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2872,22 +2831,21 @@
     "write": "home/.kith/live/terminal/lc-in.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-in\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-in.jsonl\", \"pid\": 4242, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-intent-for-other-pid-is-a-crash",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -2943,22 +2901,21 @@
     "write": "home/.kith/live/terminal/lc-ip.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-ip\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-ip.jsonl\", \"pid\": 4242, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-cli-usage-errors",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -3021,22 +2978,21 @@
    {
     "mkdir": "home/work"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-stub-claude-did-not-start",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -3096,22 +3052,21 @@
     "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nwhile [ \"$1\" != -- ]; do\n  case $1 in --lock-dir) lock=$2; shift ;; --key) key=$2; shift ;; --status-fd) fd=$2; shift ;; esac\n  shift\ndone\nshift\nif [ -f \"$lock/$key.busy\" ]; then\n  [ -n \"$fd\" ] && eval \"echo busy >&$fd\"\n  exit 75\nfi\n[ -n \"$fd\" ] && { eval \"echo locked >&$fd\"; eval \"exec $fd>&-\"; }\nexec \"$@\"\n",
     "mode": "755"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-stub-lock-error",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -3171,22 +3126,21 @@
     "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nexit 3\n",
     "mode": "755"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-stub-pass-then-claude-fails",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -3255,22 +3209,21 @@
     "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nwhile [ \"$1\" != -- ]; do\n  case $1 in --lock-dir) lock=$2; shift ;; --key) key=$2; shift ;; --status-fd) fd=$2; shift ;; esac\n  shift\ndone\nshift\nif [ -f \"$lock/$key.busy\" ]; then\n  [ -n \"$fd\" ] && eval \"echo busy >&$fd\"\n  exit 75\nfi\n[ -n \"$fd\" ] && { eval \"echo locked >&$fd\"; eval \"exec $fd>&-\"; }\nexec \"$@\"\n",
     "mode": "755"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-stub-require-stub-ok",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -3331,22 +3284,21 @@
     "text": "#!/bin/sh\nprintf 'kith-stub %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\nwhile [ \"$1\" != -- ]; do\n  case $1 in --lock-dir) lock=$2; shift ;; --key) key=$2; shift ;; --status-fd) fd=$2; shift ;; esac\n  shift\ndone\nshift\nif [ -f \"$lock/$key.busy\" ]; then\n  [ -n \"$fd\" ] && eval \"echo busy >&$fd\"\n  exit 75\nfi\n[ -n \"$fd\" ] && { eval \"echo locked >&$fd\"; eval \"exec $fd>&-\"; }\nexec \"$@\"\n",
     "mode": "755"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-claude-from-path",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -3403,22 +3355,21 @@
     "text": "#!/bin/sh\n# claude -p --resume SID /compact: logs the call and whether the writer claim file is there, then compacts (or fails, or waits).\nsid=$3\nprintf 'claude %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/live/terminal/$sid.claim\" ] && echo \"claim held\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/fail\" ] && exit 1\nnow=2026-01-02T00:00:00.000Z\nf=$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"'$now'\"}' \\\n  '{\"type\":\"user\",\"isCompactSummary\":true,\"timestamp\":\"'$now'\",\"message\":{\"content\":\"This session is being continued...\"}}' \\\n  '{\"type\":\"user\",\"timestamp\":\"'$now'\",\"message\":{\"content\":\"<command-name>/compact</command-name>\"}}' >> \"$f\"\n",
     "mode": "755"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-require-stub-not-1",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -3470,22 +3421,21 @@
     "write": "home/.kith/live/terminal/lc-r0.json",
     "text": "{\"v\": 1, \"sessionId\": \"lc-r0\", \"agent\": \"designer\", \"cwd\": \"{HOME}/work\", \"transcriptPath\": \"{HOME}/.claude/projects/p/lc-r0.jsonl\", \"pid\": null, \"startedAt\": \"2025-12-31T00:00:00Z\", \"kind\": \"terminal\"}"
    }
-  ]
+  ],
+  "needs": "rust"
  },
  {
   "name": "lifecycle-compact-uses-session-login-dir",
   "command": "lifecycle",
-  "unswitched": "kith-lifecycle has no Rust side yet",
   "program": {
    "old": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-old.py"
    ],
    "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
     "{BIN}",
-    "kernel",
-    "lifecycle",
-    "--kernel",
     "{KERNEL}"
    ]
   },
@@ -3543,6 +3493,7 @@
     "text": "#!/bin/sh\nprintf \"cfg=%s person=%s via=%s\\n\" \"$CLAUDE_CONFIG_DIR\" \"${KITH_PERSON-unset}\" \"${KITH_VIA-unset}\" >> \"$DIFFTEST_FAKELOG\"\n",
     "mode": "755"
    }
-  ]
+  ],
+  "needs": "rust"
  }
 ]

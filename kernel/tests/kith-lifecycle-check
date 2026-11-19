@@ -17,6 +17,13 @@ trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_LOGS=$T/logs CLAUDE_CONFIG_DIR=$T/claude KITH_WAKE_NO_KICK=1
 unset KITH_PERSON KITH_AGENT KITH_ROOM KITH_RESUME KITH_VIA CLAUDE_CODE_SESSION_ID HQ_HOME HQ_STATE KITH_CACHE_LIFE KITH_SLEEP_MINUTES
 mkdir -p "$HOME" "$KITH_STATE/live/terminal" "$CLAUDE_CONFIG_DIR/projects/p" "$CLAUDE_CONFIG_DIR/sessions" "$T/work"
+# KITH_LIFECYCLE_EXPECT=rust (with KITH_CORE=rust and KITH_BIN, the kith program): the script forwards to `kith kernel lifecycle`, and the
+# end of this check asserts the program was asked; any other value runs the Python, which the end asserts never asked it.
+if [[ ${KITH_LIFECYCLE_EXPECT:-} == rust ]]; then
+  printf '#!/bin/sh\necho "$*" >> "%s/kith-calls"\nexec "%s" "$@"\n' "$T" "$KITH_BIN" > "$T/kith-wrap"
+  chmod +x "$T/kith-wrap"
+  export KITH_BIN=$T/kith-wrap
+fi
 SK=$KERNEL/bin/kith-sessions
 LC=$KERNEL/bin/kith-lifecycle
 W=$KERNEL/bin/kith-wake
@@ -431,6 +438,13 @@ python3 "$W" wait --on mcp-task:t9 --session t-side --agent designer >/dev/null 
 is "a wait on an MCP task is refused" "$?" 1
 KITH_PERSON=anna python3 "$W" wait --on at:+1m --session g1 --agent coder >/dev/null 2>&1
 is "a guest's waiter stays refused (no sandbox to run its check in)" "$?" 1
+
+if [[ ${KITH_LIFECYCLE_EXPECT:-} == rust ]]; then
+  # (the program is also asked `kernel version` and `memory hook` whenever the script looks it up)
+  [[ $(grep -c '^kernel lifecycle ' "$T/kith-calls" 2>/dev/null) -ge 10 ]] && ok "the Rust core answered the sweeps" || bad "the Rust core answered the sweeps" "$(grep -c '^kernel lifecycle ' "$T/kith-calls" 2>/dev/null) calls"
+elif [[ -e $T/kith-calls ]]; then
+  bad "the Python answered" "the kith program was asked"
+fi
 
 [[ $fail == 0 ]] && echo "all ok" || echo "FAILED"
 exit $fail
