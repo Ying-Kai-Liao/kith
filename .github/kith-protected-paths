@@ -102,6 +102,7 @@ kernel/bin/kith-cost
 kernel/lib/core-switched.txt
 kernel/lib/kith_door_core.py
 kernel/tests/kith-door-core-check
+kernel/tests/kith-project-id-guest-check
 kernel/lib/kith_registry.py
 kernel/tests/fixtures/access_requests_parity.json
 kernel/tests/kith-auth-router-check
