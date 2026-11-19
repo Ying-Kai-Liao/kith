@@ -52,14 +52,15 @@ def takes(argv, machine):
         return True   # a switch file that exists and cannot be read counts as switched (as kith_claims does)
 
 
-def core(method, params, lost='the Kith core went away before it answered; `kith schedule ls` shows whether it was done'):
+def core(method, params, lost='the Kith core went away before it answered; `kith schedule ls` shows whether it was done',
+         timeout=60):
     """One owner call; the answer as a dict. Fail with the core's own words when it refuses."""
     bin_ = os.environ.get('KITH_BIN') or kith_paths.kith_bin()
     if not bin_:
         raise Fail('the schedules are the Kith core\'s on this Mac, and there is no kith program to ask it with')
     try:
         r = subprocess.run([bin_, 'kernel', 'core-call', method, '--params-stdin'], input=json.dumps(params),
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         raise Fail(lost)   # the request went out
     except (OSError, subprocess.SubprocessError) as e:
@@ -98,7 +99,7 @@ def log_of(agent, jid):
     return os.path.join(runs, names[-1]) if names else None
 
 
-def runs_of(agent=None, jid=None):
+def runs_of(agent=None, jid=None, timeout=60):
     """The newest run of each job, from the core: {(agent, id): run} with `log` filled in."""
     params = {}
     if agent:
@@ -106,7 +107,7 @@ def runs_of(agent=None, jid=None):
     if jid:
         params['id'] = jid
     out = {}
-    for v in core('schedule.runs', params).get('runs', []):
+    for v in core('schedule.runs', params, timeout=timeout).get('runs', []):
         run = {'agent': v['agent'], 'id': v['id'], 'at': v.get('at'), 'why': v.get('why'), 'pid': v.get('pid'),
                'log': v.get('log') or (None if v.get('state') in ('queued', 'cancelled') else log_of(v['agent'], v['id'])),
                'running': bool(v.get('running')), '_state': v.get('state')}
@@ -130,9 +131,9 @@ def job_row(r, last=None):
     return row
 
 
-def listing(agent=None):
+def listing(agent=None, timeout=60):
     """The jobs kith-sched lists: the cron ones (a routine that has only a trigger is the host's to show)."""
-    ans = core('schedule.jobs', {'agent': agent} if agent else {})
+    ans = core('schedule.jobs', {'agent': agent} if agent else {}, timeout=timeout)
     return [r for r in ans.get('jobs', []) if r.get('cron') is not None]
 
 
