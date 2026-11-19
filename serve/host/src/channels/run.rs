@@ -377,7 +377,7 @@ impl Core {
         fresh_backup: bool,
     ) -> Result<Attempt> {
         // A person's run (the env names one) gets a token of its own, revoked when this attempt ends.
-        let grant = crate::runauth::grant_for_env(&mut env, agent, wk, None);
+        let grant = crate::runauth::grant_for_env_async(&mut env, agent, wk, None).await;
         if let Some(ended) = self.with(|i| i.busy.get(wk).and_then(|b| b.ended)) {
             self.wake_not_run(task, false);
             return Ok(Attempt::Stopped(ended)); // stopped before the process existed
@@ -417,7 +417,7 @@ impl Core {
         self.wake_started(task);
         let pid = child.id();
         if let (Some(grant), Some(pid)) = (&grant, pid) {
-            grant.bind_pid(pid);
+            grant.bind_pid(pid).await;
         }
         let stop_now = self.with(|i| {
             let b = i.busy.get_mut(wk)?;

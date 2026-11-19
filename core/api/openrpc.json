@@ -2897,6 +2897,17 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "members",
+          "summary": "A room person's run: the people the turn is for. The token's audience is the room cut to what every one of them may see; a revoked member ends the token.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       ],
       "result": {
@@ -2934,6 +2945,9 @@
             "kind": "caller"
           },
           "project": {
+            "kind": "caller"
+          },
+          "members": {
             "kind": "caller"
           }
         }
@@ -3050,7 +3064,7 @@
         "run-token"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "kernel",
@@ -3091,7 +3105,7 @@
         "run-token"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "kernel",
@@ -10606,6 +10620,55 @@
           }
         },
         "hidden": true
+      }
+    },
+    {
+      "name": "run.resolve",
+      "summary": "Who a run token stands for, for the host's own socket: the token must be live, bound, the peer pid must be the run's process or below it and the run's person (and every member of a room turn's basis) must still be allowed. Answers the identity, or is refused.",
+      "params": [
+        {
+          "name": "token",
+          "summary": "The run's token.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The connecting process on the host's socket.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-run",
+          "resolve"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "token": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          }
+        }
       }
     },
     {

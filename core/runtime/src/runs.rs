@@ -43,6 +43,19 @@ pub(crate) struct RunIdentity {
     pub room: Option<String>,
     /// Fixed when the token is minted; `project-id` answers about this one only.
     pub project: Option<String>,
+    /// A room person's run: the people the turn is for. Empty for everyone else's. The token's audience is the room cut
+    /// to what every one of them may see (`kith recall` gets them as `KITH_ROOM_MEMBERS`, never from a request).
+    pub members: Vec<String>,
+}
+
+impl RunIdentity {
+    /// The identity as `run.resolve` answers it to the host.
+    pub(crate) fn to_json(&self) -> Value {
+        serde_json::json!({
+            "runId": self.run_id, "person": self.person, "agent": self.agent, "conversation": self.conversation,
+            "room": self.room, "project": self.project, "members": self.members,
+        })
+    }
 }
 
 struct Entry {
@@ -144,7 +157,7 @@ impl RunTokens {
     /// `run.mint`, `run.bind` and `run.end`, called by the owner (the owner socket; they are owner-only rows). `None`
     /// for any other method.
     pub(crate) fn owner_call(&self, method: &str, params: &Value) -> Option<Result<Value>> {
-        if !matches!(method, "run.mint" | "run.bind" | "run.end") {
+        if !matches!(method, "run.mint" | "run.bind" | "run.end" | "run.resolve") {
             return None;
         }
         Some(
@@ -169,8 +182,27 @@ impl RunTokens {
                     claim: opt("claim"),
                     room: opt("room"),
                     project: opt("project"),
+                    members: params
+                        .get("members")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .filter(|m| !m.is_empty())
+                        .map(str::to_owned)
+                        .collect(),
                 })?;
                 Ok(serde_json::json!({"runId": who.run_id, "token": token}))
+            }
+            "run.resolve" => {
+                let pid = params
+                    .get("pid")
+                    .and_then(Value::as_u64)
+                    .and_then(|p| u32::try_from(p).ok());
+                let who = self.resolve(&need("token")?, pid).ok_or_else(|| {
+                    Error::NotAllowed("kith-core: run.resolve: not authorized".into())
+                })?;
+                Ok(who.to_json())
             }
             "run.bind" => {
                 let pid = params
@@ -185,6 +217,14 @@ impl RunTokens {
         }
     }
 
+    /// The identity of a live run, by its id.
+    pub(crate) fn identity_of(&self, run_id: &str) -> Option<RunIdentity> {
+        self.locked()
+            .values()
+            .find(|e| e.identity.run_id == run_id)
+            .map(|e| e.identity.clone())
+    }
+
     /// Whether the run still has a token (not ended, not revoked).
     pub(crate) fn is_live(&self, run_id: &str) -> bool {
         self.locked().values().any(|e| e.identity.run_id == run_id)
@@ -197,7 +237,14 @@ impl RunTokens {
     pub(crate) fn end_people(&self, people: &[&str]) -> usize {
         let mut entries = self.locked();
         let before = entries.len();
-        entries.retain(|_, e| !people.contains(&e.identity.person.as_str()));
+        // A room turn's token ends too when any of the people it is for is named.
+        entries.retain(|_, e| {
+            !(people.contains(&e.identity.person.as_str())
+                || e.identity
+                    .members
+                    .iter()
+                    .any(|m| people.contains(&m.as_str())))
+        });
         before - entries.len()
     }
 
@@ -441,6 +488,7 @@ mod tests {
                 claim: None,
                 room: None,
                 project: None,
+                members: Vec::new(),
             })
             .unwrap();
         let held = t.locked();
