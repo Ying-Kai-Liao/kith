@@ -1240,7 +1240,7 @@ fn guest_sandbox(
         socks.extend(both(&sock));
     }
     // The core's run socket (recall, memory search and project-id are answered there): the one file of `<machine>/core` a guest
-    // may reach. The folder stays on the deny list and nothing else in it is opened (owner.sock, owner.token, core.db).
+    // may reach. The folder stays on the deny list and nothing else in it is opened (owner.sock, owner.token, the core's database).
     socks.extend(
         machine_both
             .iter()

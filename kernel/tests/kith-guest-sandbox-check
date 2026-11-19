@@ -110,7 +110,7 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: no excluded commands" "$(q "$S" '"excludedCommands" in sb')" False
   expect "$who: no network but the fixed host socket and the core's run socket (both spellings), even with no KITH_RUN_SOCKET" "$(q "$S" "sb['network']['allowUnixSockets'] == ['$T/linked state/run/host.sock', '$T/real state/run/host.sock', '$T/linked state/core/run.sock', '$T/real state/core/run.sock']")" True
   # M2(c): exactly the one file of <machine>/core. The folder stays denied for reading, and no other path inside it
-  # (owner.sock, owner.token, core.db, the attach socket) is a socket the sandbox may connect to or a path it may read or write.
+  # (owner.sock, owner.token, the core's database, the attach socket) is a socket the sandbox may connect to or a path it may read or write.
   expect "$who: run.sock is the only path of core/ the sandbox opens (sockets), the folder stays denied" "$(q "$S" "[x for x in sb['network']['allowUnixSockets'] if '/core/' in x and not x.endswith('/core/run.sock')] == [] and all('$T/%s/core' % d in dr for d in ('linked state', 'real state')) and not any('/core' in a for a in aw + fs['allowRead'] if not a.endswith('/core/run.sock'))")" True
   expect "$who: no local servers (a stray one could take the host's port), no domains unless the package or the owner grants some" "$(q "$S" '(sb["network"].get("allowLocalBinding"), "allowedDomains" in sb["network"])')" "(None, False)"
   W=$KITH_HOME/agents/echo/files/people/$who/.work
