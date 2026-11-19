@@ -191,6 +191,7 @@ pub(crate) fn run_identity_allowed(
 /// Whether `person` is a room person of `room`: `room-<slug>-<join gen>`, the id the host gives a room's people
 /// (`chat::room_turn::room_person_id`: the room lowercased with every character that is not a letter or digit as a dash,
 /// at most 32 of them, then the join gen). The parts are compared, not a prefix: room `a` is not room `a-b`.
+#[cfg(unix)]
 pub(crate) fn is_room_person_of(person: &str, room: &str) -> bool {
     let slug: String = room
         .chars()

@@ -864,8 +864,12 @@ pub(crate) async fn guest_identity(
         }
         let (t, ask) = (token.clone(), ask.clone());
         let asked = tokio::task::spawn_blocking(move || ask(&t, pid));
-        if let Ok(Ok(Some(identity))) = tokio::time::timeout(READ_BUDGET, asked).await {
-            return Some(identity);
+        match tokio::time::timeout(READ_BUDGET, asked).await {
+            Ok(Ok(Some(identity))) => return Some(identity),
+            // Only an answered no is worth another try (the bind may not have landed yet); a core that hangs or a task
+            // that failed would just stall the run's first call by the budget again.
+            Ok(Ok(None)) => {}
+            _ => return None,
         }
     }
     None
@@ -1048,6 +1052,23 @@ mod tests {
         let r = handle_request(&t, &req("nope", "consumeAccess", &json!([])), peer(1)).await;
         assert_eq!(r, Response::refused("not authorized"));
         assert!(r.to_line().contains("\"ok\":false"));
+    }
+
+    #[tokio::test]
+    async fn a_core_that_does_not_answer_is_asked_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        // A timeout is not an answered no: retrying it would hold the run's first call for the budget again and again.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let hung = {
+            let calls = calls.clone();
+            move |_: &str, _: u32| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(READ_BUDGET + Duration::from_millis(300));
+                None
+            }
+        };
+        assert!(guest_identity("t", peer(5), true, hung).await.is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

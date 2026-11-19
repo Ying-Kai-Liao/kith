@@ -69,7 +69,7 @@ static FINDER: OnceLock<Finder> = OnceLock::new();
 pub(crate) static TEST_KERNEL: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
 /// A test's kernel (`None`: no kernel), for as long as the guard lives. One test at a time holds it.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn use_kernel(bin: Option<PathBuf>) -> impl Drop {
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
     struct Guard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
@@ -208,7 +208,12 @@ pub(crate) fn run(tool: Tool, who: &RunIdentity, args: &[String]) -> Result<Valu
     // The tool is gone; anything it left behind in its group goes too, and the readers end at the pipes' close.
     end_group_of(child.id());
     let left = BUDGET.saturating_sub(started.elapsed());
-    let (Ok(stdout), Ok(stderr)) = (out.recv_timeout(left), err.recv_timeout(left)) else {
+    let Ok(stdout) = out.recv_timeout(left) else {
+        return Err(Error::Refused("timed out".into()));
+    };
+    // What is left is worked out again: the stdout wait has used some of it.
+    let left = BUDGET.saturating_sub(started.elapsed());
+    let Ok(stderr) = err.recv_timeout(left) else {
         return Err(Error::Refused("timed out".into()));
     };
     Ok(json!({
