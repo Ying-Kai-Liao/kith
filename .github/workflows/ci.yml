@@ -119,6 +119,8 @@ jobs:
               - 'core/api/**'
               - '**/Cargo.toml'
               - 'scripts/ci/**'
+              - '.github/kith-protected-paths'
+              - '.claude/skills/**'
               - '.github/workflows/ci.yml'
             # The kernel files the host's own unit tests run for real (the list: scripts/ci/host-kernel-tests.txt). A
             # change here runs only those tests (host-kernel), not the whole host suite.
@@ -398,6 +400,7 @@ jobs:
               Market check|kernel/tests/kith-market-check
               Cutover check|kernel/tests/kith-cutover-check
               Serve launch check|kernel/tests/kith-serve-launch-check
+              Protected paths check (.github/kith-protected-paths)|kernel/tests/kith-protected-paths-check
           - shard: 2
             checks: |
               Auth property check|kernel/tests/kith-auth-props
