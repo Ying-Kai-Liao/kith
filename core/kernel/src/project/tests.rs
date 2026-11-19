@@ -12,7 +12,7 @@ fn ctx(root: &Path) -> Ctx {
         state,
         home: root.join("home"),
         cwd: root.to_path_buf(),
-        guest: false,
+        guest: None,
     }
 }
 
@@ -50,14 +50,145 @@ fn repr_picks_quotes_like_python() {
     assert_eq!(repr("a\nb\\"), "'a\\nb\\\\'");
 }
 
+/// A host that answers one connection per reply in `replies` with exactly those bytes, and records the request lines.
+fn fake_host(sock: &Path, replies: Vec<Vec<u8>>) -> std::thread::JoinHandle<Vec<String>> {
+    use std::io::{Read, Write};
+    let listener = std::os::unix::net::UnixListener::bind(sock).unwrap();
+    std::thread::spawn(move || {
+        let mut seen = Vec::new();
+        for reply in replies {
+            let (mut c, _) = listener.accept().unwrap();
+            let mut got = Vec::new();
+            let mut one = [0u8; 1];
+            while c.read(&mut one).unwrap_or(0) == 1 {
+                got.push(one[0]);
+                if one[0] == b'\n' {
+                    break;
+                }
+            }
+            seen.push(String::from_utf8(got).unwrap());
+            let _ = c.write_all(&reply);
+        }
+        seen
+    })
+}
+
+fn guest_ctx(root: &Path, token: &str, sock: &Path) -> Ctx {
+    let mut c = ctx(root);
+    c.guest = Some(super::Guest {
+        token: token.into(),
+        socket: sock.as_os_str().to_owned(),
+    });
+    c
+}
+
+/// A unix socket path holds about 100 bytes: a short name inside the scratch folder.
+fn sock_in(root: &Path) -> std::path::PathBuf {
+    root.join("s")
+}
+
 #[test]
-fn a_guest_run_is_refused_not_answered() {
-    let root = scratch("guest");
-    let mut c = ctx(&root);
-    c.guest = true;
+fn a_guest_run_asks_the_host_and_relays_the_answer() {
+    let root = scratch("g1");
+    let sock = sock_in(&root);
+    let host = fake_host(
+        &sock,
+        vec![
+            br#"{"ok": true, "stdout": "alpha\n", "stderr": "", "code": 0}"#.to_vec(),
+            br#"{"ok": true, "stdout": "o\n", "stderr": "e\n", "code": 3}"#.to_vec(),
+            br#"{"ok": true, "stdout": "plain\n"}"#.to_vec(),
+            br#"{"ok": false, "error": "that project-id form is not available here"}"#.to_vec(),
+            br#"{"ok": false}"#.to_vec(),
+        ],
+    );
+    let c = guest_ctx(&root, "good", &sock);
+    assert_eq!(
+        go(&c, &[]),
+        Out {
+            stdout: "alpha\n".into(),
+            stderr: String::new(),
+            code: 0
+        }
+    );
+    assert_eq!(
+        go(&c, &["--info", "alpha"]),
+        Out {
+            stdout: "o\n".into(),
+            stderr: "e\n".into(),
+            code: 3
+        }
+    );
+    assert_eq!(go(&c, &["x"]).stdout, "plain\n");
+    assert_eq!(
+        go(&c, &["--list"]),
+        Out {
+            stdout: String::new(),
+            stderr: "project-id: that project-id form is not available here\n".into(),
+            code: 2
+        }
+    );
+    assert_eq!(go(&c, &[]).stderr, "project-id: the core refused\n");
+    // the request is the token, the method and the arguments, Python's json.dumps bytes, one line
+    assert_eq!(
+        host.join().unwrap(),
+        [
+            "{\"token\": \"good\", \"method\": \"projectId\", \"args\": []}\n",
+            "{\"token\": \"good\", \"method\": \"projectId\", \"args\": [\"--info\", \"alpha\"]}\n",
+            "{\"token\": \"good\", \"method\": \"projectId\", \"args\": [\"x\"]}\n",
+            "{\"token\": \"good\", \"method\": \"projectId\", \"args\": [\"--list\"]}\n",
+            "{\"token\": \"good\", \"method\": \"projectId\", \"args\": []}\n",
+        ]
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_guest_never_reads_the_registry() {
+    let root = scratch("g2");
+    let c = guest_ctx(&root, "t", &sock_in(&root));
+    // a registry that is not one, and no host: the answer is the unreachable host, not a registry error
+    std::fs::write(c.state.join("projects.json"), "not json").unwrap();
     let out = go(&c, &[]);
-    assert_eq!(out.code, 2);
-    assert!(out.stderr.contains("kernel/bin/project-id"));
+    assert_eq!(out.code, 1);
+    assert_eq!(
+        out.stderr,
+        "project-id: the Kith core could not be reached from this run\n"
+    );
+    let mut c = guest_ctx(&root, "t", &sock_in(&root));
+    c.state = root.join("no-such-state");
+    let _ = go(&c, &["--register", "x"]);
+    assert!(!root.join("no-such-state").exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_host_that_misbehaves_is_unreachable() {
+    let root = scratch("g3");
+    let sock = sock_in(&root);
+    let host = fake_host(
+        &sock,
+        vec![
+            Vec::new(),
+            b"not json\n".to_vec(),
+            b"[1]".to_vec(),
+            vec![b'x'; (1 << 20) + 1],
+            // what the Python client dies on: a null or non-integer code, a stdout that is not text
+            br#"{"ok": true, "code": null}"#.to_vec(),
+            br#"{"ok": true, "code": 1.5}"#.to_vec(),
+            br#"{"ok": true, "code": "3"}"#.to_vec(),
+            br#"{"ok": true, "stdout": 5}"#.to_vec(),
+        ],
+    );
+    let c = guest_ctx(&root, "t", &sock);
+    for _ in 0..8 {
+        let out = go(&c, &[]);
+        assert_eq!((out.code, out.stdout.as_str()), (1, ""));
+        assert_eq!(
+            out.stderr,
+            "project-id: the Kith core could not be reached from this run\n"
+        );
+    }
+    host.join().unwrap();
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -132,21 +263,42 @@ fn register_refuses_a_bad_id_and_an_unknown_parent() {
 #[test]
 fn a_token_that_is_not_utf8_still_makes_a_guest() {
     use std::ffi::OsString;
-    use std::os::unix::ffi::OsStringExt;
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
     let env = |token: OsString, socket: &'static str| {
         move |n: &str| match n {
             "KITH_RUN_TOKEN" => Some(token.clone()),
-            "KITH_RUN_SOCKET" => Some(OsString::from(socket)),
+            "KITH_CORE_RUN_SOCKET" => Some(OsString::from(socket)),
             _ => None,
         }
     };
     assert!(is_guest(env(OsString::from_vec(vec![0xff, 0xfe]), "/s")));
+    let g = super::Guest::from_env(env(OsString::from_vec(vec![0xff, 0xfe]), "/s")).unwrap();
+    assert_eq!(g.token.as_bytes(), [0xff, 0xfe]);
     assert!(is_guest(env(OsString::from("t"), "/s")));
     assert!(!is_guest(env(OsString::from(""), "/s")));
     assert!(
         is_guest(env(OsString::from("t"), "")),
         "the token alone makes a guest"
     );
+}
+
+#[test]
+fn a_guest_with_no_core_socket_is_answered_with_nothing() {
+    let root = scratch("g3");
+    let mut c = ctx(&root);
+    c.guest = super::Guest::from_env(|n| (n == "KITH_RUN_TOKEN").then(|| "t".into()));
+    assert!(c.guest.is_some());
+    std::fs::write(
+        c.state.join("projects.json"),
+        r#"{"projects":{"x":{"remotes":[],"paths":[]}}}"#,
+    )
+    .unwrap();
+    for args in [&[][..], &["--list"], &["--info", "x"]] {
+        let out = go(&c, args);
+        assert_eq!(out.code, 1);
+        assert_eq!(out.stdout, "");
+    }
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

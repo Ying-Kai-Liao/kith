@@ -187,31 +187,34 @@ fn the_real_lister_finds_this_homes_ticks_and_not_run_turn_or_another_homes() {
     let t = tempfile::tempdir().unwrap();
     let mine = t.path().join("my home/bin");
     let other = t.path().join("other/bin");
-    let mut tick_p = sleeper(&mine, "tick");
-    let mut run_turn = sleeper(&t.path().join("my home/run"), "run-turn");
-    let mut theirs = sleeper(&other, "tick");
+    let (tick_p, run_turn, theirs) = (
+        sleeper(&mine, "tick"),
+        sleeper(&t.path().join("my home/run"), "run-turn"),
+        sleeper(&other, "tick"),
+    );
+    let (tick_pid, run_pid, theirs_pid) = (tick_p.id(), run_turn.id(), theirs.id());
+    let _reap = Reaped(vec![tick_p, run_turn, theirs]);
     let program = mine.join("kith-sched").canonicalize().unwrap();
-    // The new process may not have exec'd its interpreter yet.
+    // The new processes may not have exec'd their interpreters yet: "not listed" means nothing before they show.
+    shows_own_argv(tick_pid, "tick");
+    shows_own_argv(run_pid, "run-turn");
+    shows_own_argv(theirs_pid, "tick");
     let until = std::time::Instant::now() + Duration::from_secs(5);
     let found = loop {
         let l = list_ticks(&program).unwrap();
-        if l.iter().any(|x| x.pid == tick_p.id()) || std::time::Instant::now() > until {
+        if l.iter().any(|x| x.pid == tick_pid) || std::time::Instant::now() > until {
             break l;
         }
         std::thread::sleep(Duration::from_millis(50));
     };
     let pids: Vec<u32> = found.iter().map(|x| x.pid).collect();
     // The shell may have forked its `sleep` and not yet exec'd it: that child shows the same arguments, so it may be listed too.
-    assert!(pids.contains(&tick_p.id()), "{found:?}");
+    assert!(pids.contains(&tick_pid), "{found:?}");
     assert!(
-        !pids.contains(&run_turn.id()) && !pids.contains(&theirs.id()),
+        !pids.contains(&run_pid) && !pids.contains(&theirs_pid),
         "{found:?}"
     );
     assert!(found.iter().all(|x| x.stamp.is_some()));
-    for c in [&mut tick_p, &mut run_turn, &mut theirs] {
-        c.kill().unwrap();
-        c.wait().unwrap();
-    }
 }
 
 #[test]
@@ -241,4 +244,68 @@ fn a_process_list_that_cannot_be_read_refuses_and_never_reads_as_no_tick() {
     )
     .unwrap_err();
     assert!(why.contains("cannot be read"), "{why}");
+}
+
+/// Kills and reaps its children, also when an assert fails first.
+struct Reaped(Vec<std::process::Child>);
+
+impl Drop for Reaped {
+    fn drop(&mut self) {
+        for c in &mut self.0 {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
+/// Waits until the process table shows `pid` with its own arguments (a freshly spawned one lists its parent's, or
+/// nothing, until it has exec'd), so that "is not listed" is a statement about a process that can be listed.
+fn shows_own_argv(pid: u32, verb: &str) {
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while !kith_kernel::procstart::own_commands()
+        .iter()
+        .any(|(p, args)| *p == pid && args.iter().any(|a| a == verb))
+    {
+        assert!(
+            std::time::Instant::now() < until,
+            "pid {pid} never showed `{verb}`"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// The form the installer writes for launchd's `dev.kith.sched`: `kith-uv run --quiet --script <kith-sched> tick`. The
+/// launcher is a real program here (a script that loops on `sleep`, never `exec`, so it keeps its own arguments), so
+/// `ps` shows the same argument shape as on Kai's Mac.
+#[test]
+fn the_real_lister_finds_a_tick_behind_the_uv_launcher_and_not_its_run_turn() {
+    let t = tempfile::tempdir().unwrap();
+    let dir = t.path().join("my home/bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    let launcher = dir.join("kith-uv");
+    std::fs::write(&launcher, "#!/bin/sh\nwhile :; do sleep 1; done\n").unwrap();
+    let mut perm = std::fs::metadata(&launcher).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+    std::fs::set_permissions(&launcher, perm).unwrap();
+    let sched = dir.join("kith-sched");
+    std::fs::write(&sched, "#!/usr/bin/env python3\n").unwrap();
+    let run = |verb: &str| {
+        std::process::Command::new(&launcher)
+            .args(["run", "--quiet", "--script"])
+            .arg(&sched)
+            .arg(verb)
+            .spawn()
+            .unwrap()
+    };
+    let (tick_p, run_turn) = (run("tick"), run("run-turn"));
+    let (tick_pid, run_pid) = (tick_p.id(), run_turn.id());
+    let _reap = Reaped(vec![tick_p, run_turn]);
+    shows_own_argv(tick_pid, "tick");
+    shows_own_argv(run_pid, "run-turn");
+    // `/var` is `/private/var` on a Mac: the program is given as the lister resolves it.
+    let found = list_ticks(&sched.canonicalize().unwrap()).unwrap();
+    let pids: Vec<u32> = found.iter().map(|x| x.pid).collect();
+    assert!(pids.contains(&tick_pid), "{found:?}");
+    assert!(!pids.contains(&run_pid), "{found:?}");
+    assert!(found.iter().all(|x| x.stamp.is_some()));
 }

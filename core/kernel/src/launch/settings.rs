@@ -1179,6 +1179,27 @@ struct GuestCtx<'a> {
     pkg: &'a str,
 }
 
+/// `path`, then where each link on it points (up to 16), then its real path, so a sandbox that reads links as links before it
+/// follows them can open the whole way to the file. A path that is not a link is just itself.
+fn link_chain(path: &Path) -> Vec<String> {
+    let mut chain = vec![s(path)];
+    let mut at = path.to_path_buf();
+    for _ in 0..16 {
+        let Ok(to) = fs::read_link(&at) else { break };
+        at = if to.is_absolute() {
+            to
+        } else {
+            at.parent().map(|p| p.join(&to)).unwrap_or(to)
+        };
+        chain.push(s(&at));
+    }
+    let real = s(&realpath(path));
+    if !chain.contains(&real) {
+        chain.push(real);
+    }
+    chain
+}
+
 /// Anyone but the owner: the OS sandbox around Bash and every process it starts, read limits, and the write rules (W).
 fn guest_sandbox(
     i: &Input<'_>,
@@ -1269,6 +1290,12 @@ fn guest_sandbox(
         if !d.is_empty() {
             allow.extend(both(&d));
         }
+    }
+    // The kith program, so a guest's `project-id` (the stub at bin/project-id runs `kith kernel project-id`, which asks the host)
+    // can start it: the file and each link on the way to it (~/.local/bin/kith -> ~/.kith/cli/current/bin/kith -> the release).
+    // The launch gives the run KITH_BIN with this same path.
+    if let Some(bin) = i.kith_bin.filter(|b| !b.is_empty()) {
+        allow.extend(link_chain(Path::new(bin)));
     }
     if !i.ctmp.is_empty() {
         allow.push(i.ctmp.to_owned());

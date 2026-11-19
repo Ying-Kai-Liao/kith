@@ -555,8 +555,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
-    /// The kith project of a directory, as `kernel/bin/project-id` answers it (routed from `kith` while `project-id` is switched; a guest run is
-    /// refused here and stays with the Python, which asks the host over the run socket).
+    /// The kith project of a directory (`kernel/bin/project-id` is a stub that runs this; a guest run asks the host over the run socket).
     #[command(name = "project-id", disable_help_flag = true)]
     ProjectId {
         /// The kernel folder (default: the one this program finds).
@@ -1046,7 +1045,7 @@ fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
         state: kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env).state,
         home,
         cwd: std::env::current_dir().unwrap_or_default(),
-        guest: kith_kernel::project::is_guest(|n| std::env::var_os(n)),
+        guest: kith_kernel::project::Guest::from_env(|n| std::env::var_os(n)),
     };
     let out = kith_kernel::project::run(&ctx, args);
     print!("{}", out.stdout);

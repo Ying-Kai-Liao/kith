@@ -13,7 +13,6 @@
 //! core step down.
 
 use std::collections::{HashMap, HashSet};
-#[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -121,19 +120,35 @@ pub(crate) struct HolderState {
     pub ending: usize,
 }
 
+/// The holder program a host running `kith` would start: `override_bin` (that host's `$KITH_HOLDER_BIN`) if it is set,
+/// else `kith-holder` beside `kith`. One lookup for the daemon (its own program and environment) and for the schedules
+/// gate (the program and environment launchd's plist gives the host), so they cannot disagree.
+pub(crate) fn holder_exe(
+    override_bin: Option<std::ffi::OsString>,
+    kith: Option<&Path>,
+) -> Option<PathBuf> {
+    if let Some(e) = override_bin.filter(|v| !v.is_empty()) {
+        let e = PathBuf::from(e);
+        return e.is_file().then_some(e);
+    }
+    kith_kernel::helpers::beside(
+        kith?,
+        if cfg!(windows) {
+            "kith-holder.exe"
+        } else {
+            "kith-holder"
+        },
+    )
+}
+
 fn find_exe(cfg: &HolderConfig) -> Option<PathBuf> {
     if let Some(e) = &cfg.exe {
         return e.is_file().then(|| e.clone());
     }
-    if let Some(e) = std::env::var_os("KITH_HOLDER_BIN").filter(|v| !v.is_empty()) {
-        let e = PathBuf::from(e);
-        return e.is_file().then_some(e);
-    }
-    beside_this(if cfg!(windows) {
-        "kith-holder.exe"
-    } else {
-        "kith-holder"
-    })
+    holder_exe(
+        std::env::var_os("KITH_HOLDER_BIN"),
+        std::env::current_exe().ok().as_deref(),
+    )
 }
 
 /// The holder secret: made once, owner-only, in the core folder.

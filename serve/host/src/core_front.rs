@@ -545,6 +545,8 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.secretShare",
     "people.secretBrowser",
     "people.agentAccess",
+    // `kith people grant`, see `ROUTED_WRITES`; `people.revoke` above is the mirror's and takes the same call
+    "people.grant",
     // `kith schedule` once the schedules are the core's (bin/kith, kernel/lib/kith_sched_core.py): the reads, the edits of a
     // jobs.json and the run-now. Owner only like the rest; nothing here runs without a daemon.
     "schedule.jobs",
@@ -555,6 +557,13 @@ const CORE_CALL_METHODS: &[&str] = &[
     "schedule.runNow",
     // the probe before a Keychain write: only a daemon that is switched answers it, see `DAEMON_ONLY_READS`
     "people.revision",
+    // a guest door's row on a switched Mac (kernel/lib/kith_door_core.py): start, mark live, end and the sweep. Daemon only (not
+    // embedded: no daemon is exit 3, which the caller reads as "no answer"). Exit 4 also covers a bad call, so only `doors.start`
+    // reads it as a refusal.
+    "doors.start",
+    "doors.markLive",
+    "doors.end",
+    "doors.sweep",
 ];
 
 /// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
@@ -589,6 +598,8 @@ const ROUTED_WRITES: &[&str] = &[
     "people.secretShare",
     "people.secretBrowser",
     "people.agentAccess",
+    // `kith people grant` (kernel/lib/kith_people_access.py): a write that widens access, so it needs `viaSwitch`
+    "people.grant",
 ];
 
 /// A read that only a switched daemon answers: `kith-auth set` asks it before it writes a Keychain item, so that no daemon,
@@ -908,6 +919,17 @@ mod tests {
         assert!(!ROUTED_READS.iter().any(|m| ROUTED_WRITES.contains(m)));
         for m in DAEMON_ONLY_READS {
             assert!(CORE_CALL_METHODS.contains(m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(!kith_core::embedded(m), "{m} must not run without the daemon");
+        }
+    }
+
+    /// A guest door's row (`kernel/lib/kith_door_core.py`) is the daemon's: with no daemon the call is exit 3, which the caller
+    /// reads as "no answer", never as a start or a sweep that ran in an embedded core.
+    #[test]
+    fn the_door_calls_are_on_core_call_and_never_embedded() {
+        for m in ["doors.start", "doors.markLive", "doors.end", "doors.sweep"] {
+            assert!(CORE_CALL_METHODS.contains(&m), "{m} is not on CORE_CALL_METHODS");
             #[cfg(unix)]
             assert!(!kith_core::embedded(m), "{m} must not run without the daemon");
         }

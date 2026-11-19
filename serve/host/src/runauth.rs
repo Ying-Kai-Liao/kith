@@ -30,9 +30,8 @@
 //! the run and the call's key, and answers `{"ok": true, "allowed": bool}`, true once. An owner token only, and only its own
 //! run's yeses; nothing in the run's folder can stand in for it.
 //!
-//! Two more read-only methods give a guest the kernel tools its sandbox keeps it from running itself: `memorySearch`
-//! (`kith-memory search`, as the token's person and agent) and `projectId` (`project-id`: the project the run was
-//! launched in, from the token, and `--info` of that one). Guest tokens only, same answer shape as `recall`.
+//! `recall`, `memorySearch` and `projectId` (the kernel tools a guest's sandbox keeps it from running itself) are not methods
+//! here: the core answers them on its own run socket (`core/runtime/src/runtools.rs`), and a guest is recognised by its token alone.
 //!
 //! The token also has to come from the run it was issued to: on macOS a process of the same user can read another
 //! process's environment (`ps eww` shows a Python or Node child's), so a token alone could be lifted from a
