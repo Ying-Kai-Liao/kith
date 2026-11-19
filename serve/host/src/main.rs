@@ -933,12 +933,15 @@ fn core_migrate_authority(_: &kith_kernel::paths::Paths, _: bool, _: bool) -> i3
 fn cutover_verb(p: &kith_kernel::paths::Paths, args: &[String]) -> i32 {
     let home = kith_kernel::paths::process_home();
     let kernel = kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));
-    match kith_core::cutover(p, &kernel, args) {
-        Ok(lines) => {
-            for line in &lines {
+    match kith_core::cutover_outcome(p, &kernel, args) {
+        Ok((code, out, err)) => {
+            for line in &out {
                 println!("{line}");
             }
-            0
+            for line in &err {
+                eprintln!("{line}");
+            }
+            code
         }
         Err(e) => {
             eprintln!("{e}");

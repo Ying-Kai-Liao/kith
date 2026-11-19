@@ -52,7 +52,12 @@ const MAX_SLOTS: usize = 2000;
 pub(crate) fn serves_write(method: &str) -> bool {
     matches!(
         method,
-        "schedule.tick" | "schedule.runNow" | "schedule.fire"
+        "schedule.tick"
+            | "schedule.runNow"
+            | "schedule.fire"
+            | "schedule.put"
+            | "schedule.drop"
+            | "schedule.setPaused"
     )
 }
 
@@ -535,7 +540,7 @@ pub(super) const READS: usize = 3;
 /// Brings one agent's index up to its file, reading the file again when it changed under the transaction. When the file
 /// cannot be read (or keeps changing), the agent is planned from its last index row: the index decides, so a due slot
 /// still gets its row. The problem, if any, is said in the report.
-fn settle(
+pub(super) fn settle(
     core: &mut Core,
     paths: &Paths,
     mut a: AgentJobs,
@@ -1079,6 +1084,7 @@ pub(crate) fn call_write(core: &mut Core, method: &str, params: &Value) -> Resul
             run_now(core, &paths, &ctx, need("agent")?, need("id")?, &key, now)
         }
         "schedule.fire" => super::hooks::call(core, &paths, &ctx, params, now),
+        m if super::edit::serves(m) => super::edit::call(core, m, params, now),
         _ => Err(Error::NotServed(format!(
             "kith-core: {method} is not answered in the core yet"
         ))),

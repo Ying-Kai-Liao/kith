@@ -290,9 +290,56 @@ def launchd_jobs(name, sched, now, errors):
     return out
 
 
+CORE_WAIT = 5   # seconds for both core calls together: the host gives up on the whole page at 45
+
+
+def local_iso(text):
+    """A local minute or time from the core ('2026-11-04T08:00') as the card has always had it: with seconds and an offset
+    (the app's rich cards parse RFC 3339). Text that is no time is passed on as it is."""
+    try:
+        return dt.datetime.fromisoformat(text).astimezone().isoformat(timespec='seconds')
+    except (TypeError, ValueError):
+        return text
+
+
+def core_schedules(name):
+    """The jobs once the schedules are the Kith core's (state.json is a tombstone): its rows in the card's shape. The
+    status is the core's own word for the newest run (running, queued, failed, cancelled, done)."""
+    import time
+    import kith_sched_core
+    t0 = time.monotonic()
+    slow = {'lost': 'the Kith core did not answer within %d s' % CORE_WAIT}
+    jobs = kith_sched_core.listing(name, timeout=CORE_WAIT, **slow)
+    runs = kith_sched_core.runs_of(name, timeout=max(1, CORE_WAIT - (time.monotonic() - t0)), **slow)
+    out = []
+    for j in jobs:
+        run = runs.get((name, j['id']))
+        state = (run.get('_state') or 'done') if run else None
+        if state == 'running' and run.get('pid') and not run.get('running'):   # its process died: the core ends the turn soon
+            state = 'done'
+        out.append({'id': j.get('id'), 'cron': j.get('cron'), 'task': j.get('task') or '', 'paused': bool(j.get('paused')),
+                    'last_run': local_iso(run['at']) if run and run.get('at') else None,
+                    'last_status': state,
+                    'next_run': None if j.get('paused') else local_iso(j.get('next')), 'source': 'kith',
+                    'person': j.get('person')})
+    return out
+
+
 def schedules(name, errors=None):
     errors = {} if errors is None else errors
     sched = tool('kith-sched')
+    import kith_sched_core
+    if kith_sched_core.takes(['ls'], MACHINE):   # the rule kith-sched itself follows: the switch file, not `stepping`
+        try:
+            out = core_schedules(name)
+        except kith_sched_core.Fail as e:   # no fallback to the files: they are a note by now
+            out = []
+            errors['schedules'] = one_line(e)
+        before = errors.get('schedules')
+        rows = launchd_jobs(name, sched, dt.datetime.now(), errors)
+        if before and errors.get('schedules') != before:   # a broken plist must not hide why the core's rows are missing
+            errors['schedules'] = '; '.join([before, errors['schedules']])[:300]
+        return out + rows
     f = sched.jobs_file(name)
     jobs = read_json(f) if f.exists() else []
     last = sched.machine().get('last', {})

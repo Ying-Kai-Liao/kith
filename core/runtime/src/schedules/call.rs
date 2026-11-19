@@ -1,7 +1,6 @@
-//! The `schedule.jobs`, `schedule.show` and `schedule.next` rows (M4-2): the agents' jobs.json definitions joined with the
-//! run state in core.db. Reads only; the write rows (`schedule.add`, `.edit`, `.pause` ...) are not served here, so the
-//! daemon runs nothing and `kith-sched` keeps writing. `schedule.jobs` prints what `kith-sched ls --json` prints for
-//! `jobs`, plus what the core adds (`problems`, `orphans`, `tick`).
+//! The `schedule.jobs`, `schedule.show`, `schedule.next` and `schedule.runs` rows (M4-2): the agents' jobs.json definitions
+//! joined with the run state in core.db. Reads only; the verbs that change a jobs.json are `edit.rs`'s. `schedule.jobs` prints
+//! what `kith-sched ls --json` prints for `jobs`, plus what the core adds (`problems`, `orphans`, `tick`).
 
 use rusqlite::{Connection, OptionalExtension as _, params};
 use serde_json::{Map, Value, json};
@@ -12,7 +11,10 @@ use crate::error::{Error, Result};
 
 /// The rows this module answers.
 pub(crate) fn serves(method: &str) -> bool {
-    matches!(method, "schedule.jobs" | "schedule.show" | "schedule.next")
+    matches!(
+        method,
+        "schedule.jobs" | "schedule.show" | "schedule.next" | "schedule.runs"
+    )
 }
 
 /// Answers a `schedule.*` read for the caller's view of the folders (`params`), with the cron rule that is wired.
@@ -41,6 +43,10 @@ pub(crate) fn call_with(
     match method {
         "schedule.jobs" => ctx.list(&known_agent(&paths, agent)?),
         "schedule.next" => ctx.next(&known_agent(&paths, agent)?),
+        "schedule.runs" => {
+            known_agent(&paths, agent)?;
+            ctx.latest_runs(agent, params.get("id").and_then(Value::as_str))
+        }
         "schedule.show" => {
             let agent = agent.ok_or_else(|| bad("agent is required"))?;
             let id = params
@@ -58,7 +64,7 @@ pub(crate) fn call_with(
 
 /// The index for the agent asked for (all when none). An agent that is not there is refused as `kith-sched` refuses it,
 /// naming the agents there are; with the agents folder unmounted nothing is known, so that is a status, not a refusal.
-fn known_agent(paths: &kith_kernel::paths::Paths, agent: Option<&str>) -> Result<Index> {
+pub(super) fn known_agent(paths: &kith_kernel::paths::Paths, agent: Option<&str>) -> Result<Index> {
     let idx = index(paths, agent);
     if let Some(a) = agent
         && idx.mounted
@@ -69,9 +75,26 @@ fn known_agent(paths: &kith_kernel::paths::Paths, agent: Option<&str>) -> Result
             .into_iter()
             .map(|a| a.agent)
             .collect();
-        return Err(bad(&format!("no agent {a:?} (have: {})", have.join(" "))));
+        return Err(bad(&format!("no agent '{a}' (have: {})", have.join(" "))));
     }
     Ok(idx)
+}
+
+/// One job as `schedule.jobs` shows it (what `kith schedule add` answers with), on this machine's clock and cron rule.
+pub(super) fn row_of(
+    core: &Core,
+    paths: &kith_kernel::paths::Paths,
+    agent: &str,
+    job: &Value,
+) -> Result<Value> {
+    let local = local_mac(&paths.machine);
+    Ctx {
+        conn: core.conn(),
+        rule: &super::TriggerRule,
+        now: now_ms(),
+        local: local.as_deref(),
+    }
+    .job_row(agent, job)
 }
 
 fn bad(what: &str) -> Error {
@@ -217,6 +240,92 @@ impl Ctx<'_> {
             .collect())
     }
 
+    /// The newest run of every job that has one (all agents', or one agent's, or one job's): what `kith schedule log` lists
+    /// and `ls` shows as `last`. Once the schedules are the core's a run is a fire that made a turn, so the newest fire with a
+    /// turn is the run, with how its turn went and its claim's process; a job that has none yet shows the run the import
+    /// carried over from `kith-sched` (`sched_runs`), which nothing writes after the switch.
+    fn latest_runs(&self, agent: Option<&str>, job: Option<&str>) -> Result<Value> {
+        let mut stmt = self.conn.prepare(
+            "SELECT agent, job, slot, turn_id, at, tstate, pid, pid_started, ended FROM (
+               SELECT f.agent, f.job, f.slot, f.turn_id, f.at, t.state AS tstate, c.pid, c.pid_started,
+                      c.end_reason AS ended,
+                      ROW_NUMBER() OVER (PARTITION BY f.agent, f.job ORDER BY f.at DESC, f.slot DESC) AS n
+               FROM sched_fires f
+                 LEFT JOIN turns t ON t.id = CAST(f.turn_id AS INTEGER)
+                 LEFT JOIN claims c ON c.claim_id = t.claim_id
+               WHERE f.outcome = 'fired' AND f.turn_id IS NOT NULL
+                 AND (?1 IS NULL OR f.agent = ?1) AND (?2 IS NULL OR f.job = ?2))
+             WHERE n = 1",
+        )?;
+        let mut runs: Vec<(String, Value)> = stmt
+            .query_map(params![agent, job], |r| {
+                let (agent, job, slot): (String, String, String) =
+                    (r.get(0)?, r.get(1)?, r.get(2)?);
+                let at: i64 = r.get(4)?;
+                let tstate: Option<String> = r.get(5)?;
+                let pid: Option<i64> = r.get(6)?;
+                let alive = matches!(tstate.as_deref(), Some("claimed" | "running"))
+                    && pid.is_some_and(|p| {
+                        super::running::alive(
+                            p,
+                            r.get::<_, Option<String>>(7).ok().flatten().as_deref(),
+                        )
+                    });
+                let state = match tstate.as_deref() {
+                    Some("claimed" | "running") => "running",
+                    Some("queued" | "parked") => "queued",
+                    Some("failed") => "failed",
+                    Some("cancelled") => "cancelled",
+                    _ => "done",
+                };
+                let at_local = super::local_minute(at).unwrap_or_default();
+                let why = if slot.starts_with("manual:") {
+                    "run by hand".to_owned()
+                } else if slot.starts_with("event:") {
+                    "event".to_owned()
+                } else {
+                    let due = super::ms_of_slot(&slot).and_then(super::local_minute);
+                    format!(
+                        "due {}",
+                        due.as_deref().and_then(|d| d.get(11..16)).unwrap_or("?")
+                    )
+                };
+                Ok((
+                    at_local.clone(),
+                    json!({
+                        "agent": agent, "id": job, "at": at_local, "slot": slot,
+                        "turn": r.get::<_, Option<String>>(3)?, "why": why, "pid": pid, "log": null,
+                        "running": alive, "state": state,
+                        "outcome": r.get::<_, Option<String>>(8)?,
+                    }),
+                ))
+            })?
+            .collect::<std::result::Result<_, _>>()?;
+        // The imported history of a job the fire has not run since.
+        let mut hist = self.conn.prepare(
+            "SELECT * FROM sched_runs WHERE id IN (SELECT MAX(id) FROM sched_runs GROUP BY agent, job)
+               AND (?1 IS NULL OR agent = ?1) AND (?2 IS NULL OR job = ?2)",
+        )?;
+        let imported = hist
+            .query_map(params![agent, job], |r| {
+                let mut run = self.run_json(r)?.json;
+                run["agent"] = json!(r.get::<_, String>("agent")?);
+                run["id"] = json!(r.get::<_, String>("job")?);
+                Ok(run)
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for run in imported {
+            let own = runs
+                .iter()
+                .any(|(_, x)| x["agent"] == run["agent"] && x["id"] == run["id"]);
+            if !own {
+                runs.push((run["at"].as_str().unwrap_or_default().to_owned(), run));
+            }
+        }
+        runs.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(json!({"runs": runs.into_iter().map(|r| r.1).collect::<Vec<_>>()}))
+    }
+
     fn tick(&self) -> Result<Value> {
         let rows = self
             .conn
@@ -339,7 +448,7 @@ impl Ctx<'_> {
         let Some(job) = a.jobs.iter().find(|j| job_id(j) == id) else {
             let have: Vec<String> = a.jobs.iter().map(job_id).collect();
             return Err(bad(&format!(
-                "{agent} has no job {id:?} (have: {})",
+                "{agent} has no job '{id}' (have: {})",
                 if have.is_empty() {
                     "none".into()
                 } else {
