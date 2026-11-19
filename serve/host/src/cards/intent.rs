@@ -59,7 +59,12 @@ fn plain(raw: &str) -> String {
             _ => w.to_owned(),
         })
         .collect();
-    let joined: String = words.join(" ").chars().filter(|c| !c.is_control() && !matches!(c, '`' | '*')).collect();
+    // Control, zero-width and bidi-override characters could reorder or hide text in the agent's quote.
+    let hidden = |c: &char| {
+        c.is_control()
+            || matches!(c, '`' | '*' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
+    };
+    let joined: String = words.join(" ").chars().filter(|c| !hidden(c)).collect();
     let trimmed = joined.trim_start_matches(['#', '>', '-', ' ']).trim();
     let cut: String = trimmed.chars().take(MAX_INTENT).collect();
     cut.trim().to_owned()
@@ -419,15 +424,7 @@ impl Scanner {
                 }
                 '$' if self.peek(1) == Some('(') => self.dollar(&mut w, subs)?,
                 '`' => self.backtick(&mut w, subs)?,
-                '$' if self.peek(1) == Some('{') => {
-                    while let Some(n) = self.peek(0) {
-                        w.push(n);
-                        self.i += 1;
-                        if n == '}' {
-                            break;
-                        }
-                    }
-                }
+                '$' if self.peek(1) == Some('{') => self.brace(&mut w, subs)?,
                 n => {
                     w.push(n);
                     self.i += 1;
@@ -443,7 +440,10 @@ impl Scanner {
             // $(( arithmetic ))
             self.i += 1;
             let body = self.paren_body()?;
-            let _ = body;
+            // Arithmetic still expands a substitution inside it.
+            if body.contains("$(") || body.contains('`') {
+                return Err(());
+            }
             if self.peek(0) == Some(')') {
                 self.i += 1;
             }
@@ -453,6 +453,44 @@ impl Scanner {
         subs.push(self.paren_body()?);
         w.push_str("$()");
         Ok(())
+    }
+
+    /// `${ … }`: nested braces are counted and a substitution inside goes to `subs`. Quotes are not honoured, so a
+    /// `$( )` that only looks quoted is still read (it may be live, as in a heredoc).
+    fn brace(&mut self, w: &mut String, subs: &mut Vec<String>) -> Scan<()> {
+        w.push_str("${");
+        self.i += 2;
+        let mut depth = 1;
+        while let Some(n) = self.peek(0) {
+            match n {
+                '\\' => {
+                    if let Some(c) = self.peek(1) {
+                        w.push(c);
+                    }
+                    self.i += 2;
+                }
+                '$' if self.peek(1) == Some('(') => self.dollar(w, subs)?,
+                '`' => self.backtick(w, subs)?,
+                '{' => {
+                    depth += 1;
+                    w.push(n);
+                    self.i += 1;
+                }
+                '}' => {
+                    depth -= 1;
+                    w.push(n);
+                    self.i += 1;
+                    if depth == 0 {
+                        return Ok(());
+                    }
+                }
+                _ => {
+                    w.push(n);
+                    self.i += 1;
+                }
+            }
+        }
+        Err(())
     }
 
     fn backtick(&mut self, w: &mut String, subs: &mut Vec<String>) -> Scan<()> {
@@ -470,9 +508,11 @@ impl Scanner {
         Ok(())
     }
 
-    /// Skips the bodies of heredocs started on the line that just ended.
-    fn heredoc_bodies(&mut self, pending: &mut Vec<(String, bool)>) {
-        for (delim, strip) in pending.drain(..) {
+    /// Skips the bodies of heredocs started on the line that just ended. The body of an unquoted one expands
+    /// `$( )`, backticks and `${ }` like a word does, so what is inside them goes to `subs`.
+    fn heredoc_bodies(&mut self, pending: &mut Vec<(String, bool, bool)>, subs: &mut Vec<String>) -> Scan<()> {
+        for (delim, strip, quoted) in pending.drain(..) {
+            let mut body = String::new();
             loop {
                 if self.i >= self.c.len() {
                     break;
@@ -487,8 +527,24 @@ impl Scanner {
                 if (if strip { line.trim_start_matches('\t') } else { line }) == delim {
                     break;
                 }
+                body.push_str(line);
+                body.push('\n');
+            }
+            if !quoted {
+                let mut inner = Scanner { c: body.chars().collect(), i: 0 };
+                let mut sink = String::new();
+                while let Some(ch) = inner.peek(0) {
+                    match ch {
+                        '\\' => inner.i += 2,
+                        '$' if inner.peek(1) == Some('(') => inner.dollar(&mut sink, subs)?,
+                        '$' if inner.peek(1) == Some('{') => inner.brace(&mut sink, subs)?,
+                        '`' => inner.backtick(&mut sink, subs)?,
+                        _ => inner.i += 1,
+                    }
+                }
             }
         }
+        Ok(())
     }
 }
 
@@ -497,7 +553,7 @@ fn scan(cmd: &str) -> Scan<Vec<Stage>> {
     let mut stages = Vec::new();
     let mut cur = Stage::default();
     let mut next_piped = false;
-    let mut pending: Vec<(String, bool)> = Vec::new();
+    let mut pending: Vec<(String, bool, bool)> = Vec::new();
     let end = |cur: &mut Stage, stages: &mut Vec<Stage>, piped: bool, next_piped: &mut bool| {
         let done = std::mem::take(cur);
         if !done.words.is_empty() || !done.writes.is_empty() || !done.subs.is_empty() {
@@ -535,7 +591,7 @@ fn scan(cmd: &str) -> Scan<Vec<Stage>> {
             '\n' => {
                 s.i += 1;
                 end(&mut cur, &mut stages, false, &mut next_piped);
-                s.heredoc_bodies(&mut pending);
+                s.heredoc_bodies(&mut pending, &mut cur.subs)?;
             }
             '|' => {
                 let or = s.peek(1) == Some('|');
@@ -588,8 +644,11 @@ fn scan(cmd: &str) -> Scan<Vec<Stage>> {
                                 s.i += 1;
                             }
                             s.skip_blanks();
+                            let from = s.i;
                             let delim = s.word(&mut cur.subs)?;
-                            pending.push((delim, strip));
+                            // Any quoting of the delimiter makes the body literal.
+                            let quoted = s.c[from..s.i].iter().any(|c| matches!(c, '\'' | '"' | '\\'));
+                            pending.push((delim, strip, quoted));
                         }
                     }
                     _ => {
@@ -623,6 +682,8 @@ const TEXT_ARGS: &[&str] = &[
     "echo", "printf", "grep", "egrep", "fgrep", "rg", "sed", "awk", "cat", "head", "tail", "wc", "jq", "tr", "cut",
     "sort", "diff", "test", "[",
 ];
+/// Where a program named with a path is still taken for the program of that name.
+const TRUSTED_DIRS: &[&str] = &["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"];
 const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash", "ksh"];
 
 /// One program the command runs, as the card names it.
@@ -704,6 +765,13 @@ impl Folder {
         while let Some(first) = words.first().map(String::as_str) {
             match first {
                 "for" => {
+                    // `for PATH in …` sets a variable like an assignment does.
+                    if words.get(1).is_some_and(|v| {
+                        matches!(v.as_str(), "PATH" | "IFS" | "ENV" | "BASH_ENV" | "PAGER" | "SHELL")
+                            || ["LD_", "DYLD_", "GIT_"].iter().any(|p| v.starts_with(p))
+                    }) {
+                        self.all_read_only = false;
+                    }
                     let n = match words.iter().position(|w| w == "in") {
                         Some(p) if words[p + 1..].iter().all(|w| !w.contains(['$', '*', '?', '`', '~', '{'])) => {
                             Some(u32::try_from(words.len() - p - 1).unwrap_or(u32::MAX))
@@ -750,6 +818,8 @@ impl Folder {
                     && !n.starts_with(|c: char| c.is_ascii_digit())
             });
             if is_assign {
+                // PATH=, GIT_EXTERNAL_DIFF=, LD_PRELOAD= and the like change what a program runs.
+                self.all_read_only = false;
                 words = &words[1..];
                 continue;
             }
@@ -757,6 +827,7 @@ impl Folder {
                 "env" | "command" | "nohup" | "exec" | "builtin" => {
                     words = &words[1..];
                     while words.first().is_some_and(|w| w.contains('=') && !w.starts_with('-')) {
+                        self.all_read_only = false;
                         words = &words[1..];
                     }
                     if words.first().is_some_and(|w| w.starts_with('-')) {
@@ -768,7 +839,15 @@ impl Folder {
             }
         }
         let Some(prog_word) = words.first() else { return };
-        let prog = prog_word.rsplit('/').next().unwrap_or(prog_word).to_owned();
+        if prog_word.contains("$()") || prog_word.contains('`') {
+            self.unreadable = true;
+            return;
+        }
+        // A program is known by its name only when it comes from a system folder. `./cat` or `/tmp/x/git` is
+        // an unknown program that happens to share a name, and is shown as written.
+        let trusted_dir = prog_word.rsplit_once('/').is_none_or(|(d, _)| TRUSTED_DIRS.contains(&d));
+        let prog =
+            if trusted_dir { prog_word.rsplit('/').next().unwrap_or(prog_word).to_owned() } else { prog_word.clone() };
         let args = &words[1..];
         if prog == "cd" {
             let target = args.iter().find(|a| !a.starts_with('-'));
@@ -784,6 +863,9 @@ impl Folder {
             return;
         }
         if NOISE.contains(&prog.as_str()) {
+            if matches!(prog.as_str(), "export" | "unset" | "read") {
+                self.all_read_only = false;
+            }
             if !self.noise.contains(&prog) {
                 self.noise.push(prog);
             }
@@ -795,7 +877,7 @@ impl Folder {
             Some(n) => self.times = self.times.max(n),
             None => self.unknown_loop = true,
         }
-        let ro = self.program(&prog, args, st, depth, places);
+        let ro = self.program(&prog, args, st, depth, places) && trusted_dir;
         if !ro {
             self.all_read_only = false;
         }
@@ -1075,9 +1157,58 @@ impl Folder {
                 false
             }
             "sort" => {
-                if has("-o") || has("--output") {
-                    self.tool("sort", false);
-                    return false;
+                // Only flags known to leave the files alone; -o, -T and --compress-program write or run.
+                let mut it = args.iter();
+                while let Some(a) = it.next() {
+                    if let Some(long) = a.strip_prefix("--") {
+                        let name = long.split('=').next().unwrap_or(long);
+                        let ok = matches!(
+                            name,
+                            "reverse"
+                                | "numeric-sort"
+                                | "general-numeric-sort"
+                                | "human-numeric-sort"
+                                | "version-sort"
+                                | "month-sort"
+                                | "unique"
+                                | "ignore-case"
+                                | "ignore-leading-blanks"
+                                | "dictionary-order"
+                                | "ignore-nonprinting"
+                                | "stable"
+                                | "check"
+                                | "merge"
+                                | "zero-terminated"
+                                | "key"
+                                | "field-separator"
+                        );
+                        if !ok || long.is_empty() {
+                            self.unreadable = true;
+                            return false;
+                        }
+                        if matches!(name, "key" | "field-separator") && !long.contains('=') {
+                            it.next();
+                        }
+                    } else if flag(a) {
+                        let bundle: Vec<char> = a[1..].chars().collect();
+                        for (i, c) in bundle.iter().enumerate() {
+                            match c {
+                                'n' | 'r' | 'u' | 'f' | 'h' | 'V' | 'b' | 's' | 'c' | 'C' | 'd' | 'g' | 'i' | 'M'
+                                | 'm' | 'z' => {}
+                                'k' | 't' => {
+                                    // The rest of the bundle is the value, else the next word is.
+                                    if i + 1 == bundle.len() {
+                                        it.next();
+                                    }
+                                    break;
+                                }
+                                _ => {
+                                    self.unreadable = true;
+                                    return false;
+                                }
+                            }
+                        }
+                    }
                 }
                 self.tool("sort", true);
                 true

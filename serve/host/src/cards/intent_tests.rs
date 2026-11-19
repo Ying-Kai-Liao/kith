@@ -107,6 +107,94 @@ fn reads_only_is_left_out_unless_every_stage_is_known_and_plain() {
     }
 }
 
+// The reviewer's round 1 (#1055): each of these ran a program while the card said `reads only`.
+
+#[test]
+fn an_unquoted_heredoc_body_is_read_for_substitutions() {
+    for cmd in [
+        "cat <<EOF\n$(rm -rf ~/x)\nEOF",
+        "cat <<EOF\n`rm -rf ~/x`\nEOF",
+        "cat <<EOF\n${X:-$(rm -rf ~/x)}\nEOF",
+        "cat <<-EOF\n\t$(rm -rf ~/x)\n\tEOF",
+        "cat <<E\"O\"F\n$(rm -rf ~/x)\nEOF\ncat <<EOF\n$(rm -rf ~/x)\nEOF",
+    ] {
+        let r = bash(cmd);
+        assert!(!says_reads_only(&r), "{cmd:?}: {:?}", texts(&r));
+        assert!(
+            texts(&r).iter().any(|t| t.starts_with("Deletes") || t.contains("rm") || t == CANT_READ),
+            "{cmd:?} must name the rm: {:?}",
+            texts(&r)
+        );
+    }
+    // A quoted delimiter makes the body literal text.
+    for cmd in ["cat <<'EOF'\n$(rm -rf ~/x)\nEOF", "cat <<\"EOF\"\n`rm -rf ~/x`\nEOF", "cat <<\\EOF\n$(rm x)\nEOF"] {
+        let r = bash(cmd);
+        assert!(says_reads_only(&r), "{cmd:?}: {:?}", texts(&r));
+    }
+}
+
+#[test]
+fn a_substitution_inside_an_unquoted_brace_expansion_is_read() {
+    for cmd in
+        ["cat ${X:-$(rm -rf ~/x)}", "cat ${X:-`rm -rf ~/x`}", "cat ${X:-${Y:-$(rm -rf ~/x)}}", "cat ${X:-unclosed"]
+    {
+        let r = bash(cmd);
+        assert!(!says_reads_only(&r), "{cmd:?}: {:?}", texts(&r));
+    }
+    assert!(!says_reads_only(&bash("cat $(($(rm -rf ~/x) + 1))")));
+    assert!(says_reads_only(&bash("cat ${HOME}/a ${X:-b}")));
+}
+
+#[test]
+fn sort_is_read_only_only_with_flags_that_leave_files_alone() {
+    for cmd in [
+        "sort -ofoo.txt in",
+        "sort -uo foo in",
+        "sort -o foo in",
+        "sort --output=foo in",
+        "sort --compress-program=./x in",
+        "sort -T /tmp in",
+        "sort -rn --mystery in",
+    ] {
+        let r = bash(cmd);
+        assert!(!says_reads_only(&r), "{cmd:?}: {:?}", texts(&r));
+    }
+    for cmd in ["sort -u in", "sort -nr in", "sort -t, -k2,2 in", "sort -k 2 -r in", "sort --reverse --key=2 in"] {
+        assert!(says_reads_only(&bash(cmd)), "{cmd:?}");
+    }
+}
+
+#[test]
+fn an_environment_change_is_never_reads_only() {
+    for cmd in [
+        "PATH=/tmp/x ls",
+        "GIT_EXTERNAL_DIFF=./x git diff",
+        "export PATH=/tmp/x; ls",
+        "PATH=/tmp/x; ls",
+        "env PATH=/tmp/x ls",
+        "unset X; ls",
+        "for PATH in /tmp/x; do ls; done",
+        "LD_PRELOAD=./x.so cat f",
+    ] {
+        let r = bash(cmd);
+        assert!(!says_reads_only(&r), "{cmd:?}: {:?}", texts(&r));
+    }
+}
+
+#[test]
+fn a_program_named_by_a_path_outside_the_system_folders_is_not_the_program_it_is_called() {
+    for cmd in
+        ["./cat foo", "/tmp/x/git status", "../bin/ls", "~/bin/grep x f", "/usr/local/evil/cat f", "$(printf rm) -rf x"]
+    {
+        let r = bash(cmd);
+        assert!(!says_reads_only(&r), "{cmd:?}: {:?}", texts(&r));
+    }
+    assert_eq!(texts(&bash("./cat foo")), ["A shell command: ./cat"]);
+    for cmd in ["/bin/ls", "/usr/bin/cat f", "/usr/local/bin/git status", "/opt/homebrew/bin/rg x"] {
+        assert!(says_reads_only(&bash(cmd)), "{cmd:?}");
+    }
+}
+
 #[test]
 fn reads_only_when_it_is_so() {
     for cmd in [
@@ -252,6 +340,7 @@ fn the_intent_is_one_plain_line_of_at_most_200_characters() {
         Some("Fetch freemusicarchive.org now")
     );
     assert_eq!(say(&"x".repeat(500)).unwrap().chars().count(), 200);
+    assert_eq!(say("Safe\u{202e}txt\u{200b}.\u{feff}ok").as_deref(), Some("Safetxt.ok"));
     assert_eq!(say("   \n  "), None);
     assert_eq!(intent("Bash", &json!({"command": "ls"})), None);
     assert_eq!(intent("Bash", &json!({"command": "ls", "description": 7})), None);
