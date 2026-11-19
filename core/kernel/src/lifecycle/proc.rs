@@ -93,6 +93,22 @@ pub fn pipe() -> std::io::Result<(RawFd, RawFd)> {
     Ok((fds[0], fds[1]))
 }
 
+/// [`pipe`] with both ends moved to the lowest free descriptors from 3 up: the stub's status pipe is named on its command line, and a
+/// POSIX shell (dash) cannot redirect to a descriptor above 9, which a process with many open files would otherwise hand out.
+pub fn pipe_low() -> std::io::Result<(RawFd, RawFd)> {
+    let (r, w) = pipe()?;
+    let low = |fd: RawFd| {
+        // SAFETY: F_DUPFD_CLOEXEC on a descriptor this module owns.
+        let dup = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
+        if dup < 0 {
+            return fd;
+        }
+        close(fd);
+        dup
+    };
+    Ok((low(r), low(w)))
+}
+
 pub fn close(fd: RawFd) {
     // SAFETY: closing a descriptor this module owns; a second close only fails.
     unsafe { libc::close(fd) };

@@ -60,7 +60,10 @@ fn mark_switched(paths: &Paths, module: &str) {
     std::fs::write(core.join(format!("cutover/{module}.switch")), format!("state=switched\nat={at}\n")).unwrap();
     rusqlite::Connection::open(core.join("core.db"))
         .unwrap()
-        .execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)", [format!("cutover:{module}"), format!("at={at};digest=")])
+        .execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+            [format!("cutover:{module}"), format!("at={at};digest=")],
+        )
         .unwrap();
 }
 
