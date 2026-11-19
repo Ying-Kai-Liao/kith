@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# kith-project-id-guest-check — the guest branch of project-id: a run for someone other than the owner (KITH_RUN_TOKEN and
+# KITH_RUN_SOCKET both set) asks the host over the run socket and never reads projects.json. A fake host answers the way
+# serve/host/src/runauth.rs does (the bare form from the token's project, `--info` of that project only, every other line
+# refused), so the transport is checked byte for byte: the request line, the relayed stdout/stderr and exit code, and each
+# way the socket can fail. Run on kernel/bin/project-id before the guest client moved to Rust (core/kernel/src/project/guest.rs)
+# and after, with the same expectations. Needs, since the move, the Rust program: KITH_BIN or KITH_DIFFTEST_BIN (without
+# one the check says so and exits 0).
+#
+#   [KITH_DIFFTEST_BIN=/path/to/kith] kernel/tests/kith-project-id-guest-check
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -n "${KITH_DIFFTEST_BIN:-}" ] && [ -z "${KITH_BIN:-}" ]; then export KITH_BIN=$KITH_DIFFTEST_BIN; fi
+if [ ! -f "$KERNEL/bin/project-id" ]; then echo "skip: no project-id"; exit 0; fi
+if ! grep -q '^import ' "$KERNEL/bin/project-id" && [ -z "${KITH_BIN:-}" ]; then
+  echo "skip: no Rust program (KITH_BIN or KITH_DIFFTEST_BIN)"; exit 0
+fi
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-pid-guest.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home TZ=UTC
+unset KITH_STATE HQ_STATE KITH_HOME KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CORE HQ_HOME KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_MACHINE
+mkdir -p "$HOME" "$T/state" "$T/w"
+export KITH_STATE=$T/state
+P=$KERNEL/bin/project-id
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+
+# The registry the owner path reads; a guest must never reach it (the marker project would show if it did).
+mkdir -p "$T/w/mine"
+printf '{\n  "projects": {\n    "owner-only-marker": {"remotes": [], "paths": ["%s"]}\n  }\n}\n' "$T/w/mine" > "$KITH_STATE/projects.json"
+
+cat > "$T/fake-host.py" <<'PY'
+# A host that answers the way runauth.rs does for project-id: the token "good" is bound to project "alpha".
+import json, os, socket, sys
+path, log, count = sys.argv[1], sys.argv[2], int(sys.argv[3])
+srv = socket.socket(socket.AF_UNIX); srv.bind(path); srv.listen(8)
+open(log + '.ready', 'w').close()
+for _ in range(count):
+    c, _a = srv.accept()
+    data = b''
+    while not data.endswith(b'\n'):
+        chunk = c.recv(65536)
+        if not chunk: break
+        data += chunk
+    open(log, 'ab').write(data)
+    try: req = json.loads(data)
+    except ValueError: req = {}
+    args = req.get('args')
+    if req.get('token') != 'good' or req.get('method') != 'projectId':
+        reply = {'ok': False, 'error': 'not authorized'}
+    elif args == []:
+        reply = {'ok': True, 'stdout': 'alpha\n', 'stderr': '', 'code': 0}
+    elif args == ['--info', 'alpha']:
+        reply = {'ok': True, 'stdout': 'alpha\t/home/alpha\n', 'stderr': '', 'code': 0}
+    elif req.get('token') == 'good' and isinstance(args, list):
+        reply = {'ok': False, 'error': 'that project-id form is not available here'}
+    else:
+        reply = {'ok': False, 'error': 'not authorized'}
+    if req.get('token') == 'noisy':
+        reply = {'ok': True, 'stdout': 'out line\n', 'stderr': 'err line\n', 'code': 3}
+    if req.get('token') == 'silent':
+        reply = {'ok': True, 'stdout': '', 'stderr': '', 'code': 1}
+    if req.get('token') == 'huge':
+        
+        try: c.sendall(b'x' * (2 << 20))
+        except OSError: pass
+        c.close(); continue
+    if req.get('token') == 'junk':
+        c.sendall(b'not json\n'); c.close(); continue
+    if req.get('token') == 'hangup':
+        c.close(); continue
+    if req.get('token') == 'nocode':
+        reply = {'ok': True, 'stdout': 'plain\n'}
+    c.sendall(json.dumps(reply).encode() + b'\n')
+    c.close()
+PY
+fakehost() { # count -> starts the fake host, waits until it listens
+  rm -f "$T/s.sock" "$T/req.log" "$T/req.log.ready"
+  python3 "$T/fake-host.py" "$T/s.sock" "$T/req.log" "$1" & FH=$!
+  for _ in $(seq 50); do [ -e "$T/req.log.ready" ] && break; sleep 0.1; done
+}
+guest() { # TOKEN ARGS... -> $T/out $T/err, rc
+  local tok=$1; shift
+  env KITH_RUN_TOKEN="$tok" KITH_RUN_SOCKET="$T/s.sock" "$P" "$@" >"$T/out" 2>"$T/err"; rc=$?
+}
+said() { [ "$(cat "$T/out")" = "$1" ]; }
+asked() { python3 - "$T/req.log" "$1" <<'PY'
+import json, sys
+lines = open(sys.argv[1]).read().split('\n')
+want = json.loads(sys.argv[2])
+sys.exit(0 if [json.loads(l) for l in lines if l] == want else 1)
+PY
+}
+
+fakehost 1
+guest good; wait $FH
+check "bare form: the project of the token, exit 0" "said alpha && [ $rc = 0 ] && [ ! -s $T/err ]"
+check "bare form: the request is the token, projectId and no args, one line" "asked '[{\"token\":\"good\",\"method\":\"projectId\",\"args\":[]}]' && [ \"\$(wc -l < $T/req.log | tr -d ' ')\" = 1 ]"
+check "bare form: the registry is not what answered" "! grep -q owner-only-marker $T/out"
+
+fakehost 1
+(cd "$T/w/mine" && guest good); wait $FH
+check "bare form from a folder the registry knows: still the host's answer" "said alpha && [ $rc = 0 ]"
+
+fakehost 1
+guest good --info alpha; wait $FH
+check "--info of the launch project: the host's lines" "said \"\$(printf 'alpha\t/home/alpha')\" && [ $rc = 0 ]"
+check "--info: the request carries the args" "asked '[{\"token\":\"good\",\"method\":\"projectId\",\"args\":[\"--info\",\"alpha\"]}]'"
+
+fakehost 1
+guest good --info beta; wait $FH
+check "--info of another project: the host's refusal on stderr, exit 2, nothing on stdout" "[ $rc = 2 ] && [ ! -s $T/out ] && [ \"\$(cat $T/err)\" = 'project-id: that project-id form is not available here' ]"
+
+for form in "--list" "--children alpha" "--where alpha" "--root" "--register x" "-x" "/tmp"; do
+  fakehost 1
+  # shellcheck disable=SC2086
+  guest good $form; wait $FH
+  check "'$form' is the host's to refuse: exit 2, host text, nothing on stdout" "[ $rc = 2 ] && [ ! -s $T/out ] && [ \"\$(cat $T/err)\" = 'project-id: that project-id form is not available here' ]"
+done
+
+fakehost 1
+guest bad; wait $FH
+check "a token the host does not know: its words, exit 2" "[ $rc = 2 ] && [ \"\$(cat $T/err)\" = 'project-id: not authorized' ]"
+
+fakehost 1
+guest noisy; wait $FH
+check "stdout, stderr and the exit code are the host's" "said 'out line' && [ \"\$(cat $T/err)\" = 'err line' ] && [ $rc = 3 ]"
+
+fakehost 1
+guest silent; wait $FH
+check "a run with no project: nothing printed, exit 1" "[ $rc = 1 ] && [ ! -s $T/out ] && [ ! -s $T/err ]"
+
+fakehost 1
+guest nocode; wait $FH
+check "an answer with no code is exit 0" "said plain && [ $rc = 0 ]"
+
+fakehost 1
+guest hangup; wait $FH
+check "the host hangs up without answering: unreachable, exit 1" "[ $rc = 1 ] && [ ! -s $T/out ] && [ \"\$(cat $T/err)\" = 'project-id: the Kith host could not be reached from this run' ]"
+
+fakehost 1
+guest junk; wait $FH
+check "an answer that is not JSON: unreachable, exit 1" "[ $rc = 1 ] && [ \"\$(cat $T/err)\" = 'project-id: the Kith host could not be reached from this run' ]"
+
+fakehost 1
+guest huge; wait $FH
+check "an answer over 1 MiB: unreachable, exit 1" "[ $rc = 1 ] && [ ! -s $T/out ] && [ \"\$(cat $T/err)\" = 'project-id: the Kith host could not be reached from this run' ]"
+
+rm -f "$T/s.sock"
+guest good
+check "no socket file: unreachable, exit 1, no registry read" "[ $rc = 1 ] && [ ! -s $T/out ] && [ \"\$(cat $T/err)\" = 'project-id: the Kith host could not be reached from this run' ]"
+printf 'not a socket' > "$T/s.sock"
+guest good
+check "a socket path that is a plain file: unreachable, exit 1" "[ $rc = 1 ] && [ \"\$(cat $T/err)\" = 'project-id: the Kith host could not be reached from this run' ]"
+rm -f "$T/s.sock"
+
+# A guest never falls through to the registry: a poisoned one changes nothing.
+printf 'not json' > "$KITH_STATE/projects.json"
+guest good
+check "a guest with an unreadable registry and no host: still unreachable, not a registry error" "[ $rc = 1 ] && [ \"\$(cat $T/err)\" = 'project-id: the Kith host could not be reached from this run' ]"
+rm -rf "$KITH_STATE/projects.json"
+env KITH_STATE="$T/missing" KITH_RUN_TOKEN=good KITH_RUN_SOCKET="$T/s.sock" "$P" >"$T/out" 2>"$T/err"; rc=$?
+check "a guest with no state folder at all: unreachable, and nothing is created" "[ $rc = 1 ] && [ ! -e $T/missing ]"
+
+# Both must be set and not empty: otherwise this is the owner path, which reads the registry and never the socket.
+printf '{\n  "projects": {\n    "owner-only-marker": {"remotes": [], "paths": ["%s"]}\n  }\n}\n' "$T/w/mine" > "$KITH_STATE/projects.json"
+fakehost 1
+(cd "$T/w/mine" && env KITH_RUN_TOKEN=good "$P" >"$T/out" 2>"$T/err"); rc=$?
+check "token without a socket: the owner path, the registry answers" "said owner-only-marker && [ $rc = 0 ] && [ ! -e $T/req.log ]"
+(cd "$T/w/mine" && env KITH_RUN_SOCKET="$T/s.sock" "$P" >"$T/out" 2>"$T/err"); rc=$?
+check "socket without a token: the owner path" "said owner-only-marker && [ $rc = 0 ] && [ ! -e $T/req.log ]"
+(cd "$T/w/mine" && env KITH_RUN_TOKEN= KITH_RUN_SOCKET="$T/s.sock" "$P" >"$T/out" 2>"$T/err"); rc=$?
+check "an empty token: the owner path" "said owner-only-marker && [ $rc = 0 ] && [ ! -e $T/req.log ]"
+(cd "$T/w/mine" && env KITH_RUN_TOKEN=good KITH_RUN_SOCKET= "$P" >"$T/out" 2>"$T/err"); rc=$?
+check "an empty socket path: the owner path" "said owner-only-marker && [ $rc = 0 ] && [ ! -e $T/req.log ]"
+kill $FH 2>/dev/null; wait $FH 2>/dev/null
+
+echo
+if [ $fails = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
