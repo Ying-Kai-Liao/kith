@@ -1,0 +1,18 @@
+{
+  "fakes": "claude auth login cfg=<HOME>/.kith/accounts/claude/other\n",
+  "state:home/.kith/accounts/claude/.hidden/": "<empty dir>\n",
+  "state:home/.kith/accounts/claude/other/": "<empty dir>\n",
+  "state:home/.kith/accounts/claude/work/": "<empty dir>\n",
+  "state:home/.kith/accounts/codex/b/": "<empty dir>\n",
+  "state:home/.kith/accounts/codex/c/": "<empty dir>\n",
+  "state:home/.kith/settings.json": "{\n  \"accounts\": [\n    \"claude:work\",\n    \"claude\",\n    \"codex:b\",\n    \"claude:other\"\n  ],\n  \"agents\": {}\n}\n",
+  "state:home/.kith/settings.json.lock": "",
+  "state:kith/agents/cdx/role/agent.md": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: not added\n",
+  "step0.stdout": "Before adding a second Claude subscription account:\n\n  Anthropic's usage policy does not allow using several accounts to get past usage limits. Accounts used that\n  way can be suspended without notice. Whether to do this is your decision; kith only keeps the logins apart.\n\n  Allowed ways to get more room: a Claude API key (kith account add claude-api:<profile>) or another provider\n  (kith account add codex <name>).\n\nAdd this account? Type y to continue: ",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "Login for claude:other in <HOME>/.kith/accounts/claude/other\n\n\nclaude:other is account 4 in the set (kith account order|move changes the order)\n"
+}
