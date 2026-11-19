@@ -46,7 +46,7 @@ fn valid(handle: &str) -> bool {
 
 /// One writer of a handle-only person's revoked state and its stamp at a time, from the read of kith-auth to the stamp:
 /// every exchange and the owner's own change. Without it an exchange decides on a stale read and keeps a stamp that
-/// disagrees with kith-auth for good (architect's HandleExchange model, fix A).
+/// disagrees with kith-auth for good (the architect's `HandleExchange` model, fix A).
 static EXCHANGE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The owner revoked or restored `who`, a person known only by handle, here: kith-auth's state, then the stamp, under
