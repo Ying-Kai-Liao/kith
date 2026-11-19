@@ -8,7 +8,11 @@ use super::{Ctx, J, Map, settings};
 use std::fmt::Write as _;
 
 fn scope(agent: &str) -> &str {
-    if agent.is_empty() { "every agent" } else { agent }
+    if agent.is_empty() {
+        "every agent"
+    } else {
+        agent
+    }
 }
 
 /// The ids a command edits: the agent's own list or the one it follows (the global set), none when there is none yet.
@@ -106,7 +110,9 @@ pub(super) fn move_(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> 
             ));
         }
         let mut ids: Vec<String> = cur.into_iter().filter(|i| *i != entry).collect();
-        let at = usize::try_from(place - 1).unwrap_or(usize::MAX).min(ids.len());
+        let at = usize::try_from(place - 1)
+            .unwrap_or(usize::MAX)
+            .min(ids.len());
         ids.insert(at, entry.clone());
         Ok(ids)
     };
@@ -164,7 +170,10 @@ pub(super) fn set(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> {
 
 pub(super) fn policy(ctx: &Ctx<'_>, args: &[String]) -> Result<Verb, Verb> {
     if args.is_empty() {
-        return Ok(Verb::out(format!("{}\n", settings::policy(&settings::read(ctx)))));
+        return Ok(Verb::out(format!(
+            "{}\n",
+            settings::policy(&settings::read(ctx))
+        )));
     }
     if args.len() != 1 {
         return Err(Verb::die("account policy [fill|spread]", 2));
@@ -197,7 +206,8 @@ pub(super) fn cross_harness(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb
             word(settings::cross_harness(&s, &agent))
         )));
     }
-    let usage = "account cross-harness [on|off] [--agent A] | account cross-harness reset --agent A";
+    let usage =
+        "account cross-harness [on|off] [--agent A] | account cross-harness reset --agent A";
     if args.len() != 1
         || !["on", "off", "reset"].contains(&args[0].as_str())
         || (args[0] == "reset" && agent.is_empty())
@@ -218,8 +228,12 @@ pub(super) fn cross_harness(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb
 }
 
 pub(super) fn migrate_verb(ctx: &Ctx<'_>) -> Result<Verb, Verb> {
-    let wrote = settings::migrate_file(ctx)
-        .map_err(|e| Verb::die(&format!("{}: {e}", ctx.machine.join("settings.json").display()), 1))?;
+    let wrote = settings::migrate_file(ctx).map_err(|e| {
+        Verb::die(
+            &format!("{}: {e}", ctx.machine.join("settings.json").display()),
+            1,
+        )
+    })?;
     Ok(Verb::out(
         if wrote {
             "settings.json is now in the new shape\n"

@@ -18,19 +18,24 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
 mod backups;
 mod change;
 #[cfg(test)]
 mod change_tests;
+#[cfg(unix)]
 mod cli;
 mod clock;
+#[cfg(unix)]
 mod edits;
 mod listing;
+#[cfg(unix)]
 mod logins;
 mod mirror;
 pub use mirror::main_claude_paths;
 mod pick;
 mod pyjson;
+#[cfg(unix)]
 mod set_verbs;
 pub mod settings;
 mod state;
@@ -42,13 +47,14 @@ pub use change::{
 };
 pub use listing::rows_from;
 mod verbs;
+#[cfg(unix)]
+pub use cli::run_account;
 pub use pick::{Pick, Skipped, Status, pick_from};
 pub use settings::read_settings;
 pub use state::{
     FileState, Fixed, Snapshot, StateHold, StateSource, hold, out_marks_from, record_started,
     replace, snapshot, state_file, tombstoned,
 };
-pub use cli::run_account;
 pub use verbs::{VERBS, Verb, pick_value, run_verb};
 
 type Map = serde_json::Map<String, Value>;

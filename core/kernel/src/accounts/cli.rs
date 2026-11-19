@@ -11,8 +11,15 @@ fn json_errors(as_json: bool, v: Result<Verb, Verb>) -> Verb {
     match v {
         Err(v) if as_json && v.stderr.starts_with("kith: ") => {
             let msg = v.stderr["kith: ".len()..].trim_end_matches('\n');
-            let out = J::Obj(vec![("ok", J::Bool(false)), ("error", J::Str(msg.to_owned()))]);
-            Verb { stdout: out.dumps() + "\n", stderr: String::new(), code: v.code }
+            let out = J::Obj(vec![
+                ("ok", J::Bool(false)),
+                ("error", J::Str(msg.to_owned())),
+            ]);
+            Verb {
+                stdout: out.dumps() + "\n",
+                stderr: String::new(),
+                code: v.code,
+            }
         }
         Ok(v) | Err(v) => v,
     }
@@ -25,8 +32,26 @@ pub fn run_account(ctx: &Ctx<'_>, mut args: Vec<String>, stdin: &dyn Fn() -> Str
     }
     let verb = args.remove(0);
     let known = [
-        "add", "login", "list", "ls", "remove", "rm", "order", "move", "set", "policy", "pin", "cross-harness",
-        "unpin", "migrate", "out", "clear", "usage", "pick", "backup", "use",
+        "add",
+        "login",
+        "list",
+        "ls",
+        "remove",
+        "rm",
+        "order",
+        "move",
+        "set",
+        "policy",
+        "pin",
+        "cross-harness",
+        "unpin",
+        "migrate",
+        "out",
+        "clear",
+        "usage",
+        "pick",
+        "backup",
+        "use",
     ];
     if !known.contains(&verb.as_str()) {
         return Verb::die(&format!("unknown command: {verb} (kith account --help)"), 2);

@@ -75,7 +75,9 @@ fn exit_code(s: std::process::ExitStatus) -> i32 {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt as _;
-        s.code().or_else(|| s.signal().map(|n| 256 - n)).unwrap_or(1)
+        s.code()
+            .or_else(|| s.signal().map(|n| 256 - n))
+            .unwrap_or(1)
     }
     #[cfg(not(unix))]
     {
@@ -86,7 +88,9 @@ fn exit_code(s: std::process::ExitStatus) -> i32 {
 /// `harness_login`: the harness's own login, in its folder (`None`: the default login). Its exit code.
 fn harness_login(h: &str, d: Option<&Path>) -> Result<i32, Verb> {
     if d.is_some() && h == "codex" {
-        say("This logs Codex in separately from your usual Codex login (device code; the browser step is yours).\n");
+        say(
+            "This logs Codex in separately from your usual Codex login (device code; the browser step is yours).\n",
+        );
     }
     let mut cmd;
     if let Some(d) = d {
@@ -95,7 +99,11 @@ fn harness_login(h: &str, d: Option<&Path>) -> Result<i32, Verb> {
         cmd.args(&argv[1..]).env(k, v);
     } else {
         cmd = std::process::Command::new(h);
-        cmd.args(if h == "claude" { &["auth", "login"][..] } else { &["login"][..] });
+        cmd.args(if h == "claude" {
+            &["auth", "login"][..]
+        } else {
+            &["login"][..]
+        });
     }
     cmd.status()
         .map(exit_code)
@@ -117,7 +125,11 @@ fn make_folder(d: &Path) -> Result<(), Verb> {
 /// harness's default login goes in first: adding a second login must not take the first out of use. Its place.
 fn join_set(ctx: &Ctx<'_>, entry: &str) -> Result<usize, Verb> {
     let h = super::parse(entry).map_err(|e| Verb::die(&e, 2))?.0;
-    let own = if h == "claude-api" { "claude".to_owned() } else { h };
+    let own = if h == "claude-api" {
+        "claude".to_owned()
+    } else {
+        h
+    };
     edit_with(ctx, |s| {
         let mut ids = super::set_verbs::current(s, "");
         if !ids.iter().any(|i| super::in_family(i, &own)) {
@@ -165,11 +177,17 @@ pub(super) fn add(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> {
                 ("ok", J::Bool(false)),
                 (
                     "error",
-                    J::s("adding a second Claude subscription account needs --yes after the warning is shown"),
+                    J::s(
+                        "adding a second Claude subscription account needs --yes after the warning is shown",
+                    ),
                 ),
                 ("warning", J::s(WARNING)),
             ]);
-            return Ok(Verb { stdout: out.dumps() + "\n", code: 2, ..Verb::default() });
+            return Ok(Verb {
+                stdout: out.dumps() + "\n",
+                code: 2,
+                ..Verb::default()
+            });
         }
         make_folder(&d)?;
         let (argv, (k, v)) = login_command(&h, &d);
@@ -204,7 +222,9 @@ pub(super) fn add(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> {
     let code = harness_login(&h, Some(&d))?;
     if code != 0 {
         return Err(Verb::die(
-            &format!("the login ended with exit {code}; run kith account add {h} {n} again to retry"),
+            &format!(
+                "the login ended with exit {code}; run kith account add {h} {n} again to retry"
+            ),
             code,
         ));
     }
@@ -250,7 +270,9 @@ pub(super) fn login(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> 
     let code = harness_login(&h, d.as_deref())?;
     if code != 0 {
         return Err(Verb::die(
-            &format!("the login ended with exit {code}; run kith account login {entry} again to retry"),
+            &format!(
+                "the login ended with exit {code}; run kith account login {entry} again to retry"
+            ),
             code,
         ));
     }
@@ -324,7 +346,11 @@ pub(super) fn remove(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb>
         } else {
             format!(
                 "{entry} is not in the set{}\n",
-                if n.is_some() { "" } else { " (the default login is not deleted by kith)" }
+                if n.is_some() {
+                    ""
+                } else {
+                    " (the default login is not deleted by kith)"
+                }
             )
         }));
     }
@@ -369,7 +395,10 @@ pub(super) fn remove(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb>
                 .dumps()
                     + "\n";
             } else {
-                out = format!("removed {entry} from the set and deleted {}.\n", d.display());
+                out = format!(
+                    "removed {entry} from the set and deleted {}.\n",
+                    d.display()
+                );
                 if h == "claude" {
                     out += "Claude Code may keep a Keychain item for it; `CLAUDE_CONFIG_DIR=<dir> claude auth logout` before removing drops that too.\n";
                 }
@@ -388,9 +417,32 @@ pub(super) fn remove(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb>
         _ => {
             out = format!(
                 "removed {entry} from the set{}\n",
-                if n.is_some() || h == "claude-api" { "" } else { " (its login on this Mac is not touched)" }
+                if n.is_some() || h == "claude-api" {
+                    ""
+                } else {
+                    " (its login on this Mac is not touched)"
+                }
             );
         }
     }
     Ok(Verb::out(out))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    #[test]
+    fn an_account_folder_is_for_the_owner_only() {
+        let root = std::env::temp_dir().join(format!("kith-login-mode-{}", std::process::id()));
+        let d = root.join("accounts").join("claude").join("work");
+        make_folder(&d).unwrap_or_else(|e| panic!("{}", e.stderr));
+        let mode = std::fs::metadata(&d)
+            .unwrap_or_else(|e| panic!("{e}"))
+            .permissions()
+            .mode();
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(mode & 0o777, 0o700);
+    }
 }

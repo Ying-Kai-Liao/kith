@@ -20,10 +20,7 @@ pub fn dedup(ids: &[String]) -> Vec<String> {
 
 /// Runs `f` on the settings under the lock and writes the result. `f` may refuse with a [`Verb`]: nothing is written
 /// then. A file that cannot be read or written is exit 1 with its reason, as `kith_settings.edit`'s `ValueError`.
-pub fn edit_with<T>(
-    ctx: &Ctx<'_>,
-    f: impl FnOnce(&mut Map) -> Result<T, Verb>,
-) -> Result<T, Verb> {
+pub fn edit_with<T>(ctx: &Ctx<'_>, f: impl FnOnce(&mut Map) -> Result<T, Verb>) -> Result<T, Verb> {
     let mut refused: Option<Verb> = None;
     let mut out: Option<T> = None;
     let r = crate::settings::edit(ctx, |s| match f(s) {

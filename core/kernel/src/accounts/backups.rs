@@ -12,10 +12,21 @@ use std::fmt::Write as _;
 fn chain_target(ctx: &Ctx<'_>, s: &Map, agent: &str) -> (String, Vec<String>, &'static str) {
     let (order, wher) = if agent.is_empty() {
         let ids = current(s, "");
-        (if ids.is_empty() { vec!["claude".to_owned()] } else { ids }, "global")
+        (
+            if ids.is_empty() {
+                vec!["claude".to_owned()]
+            } else {
+                ids
+            },
+            "global",
+        )
     } else {
         let harness = super::agent_harness(super::agent_md_of(ctx, agent).as_deref());
-        let wher = if settings::accounts(s, agent).1 == "agent" { "agent" } else { "global" };
+        let wher = if settings::accounts(s, agent).1 == "agent" {
+            "agent"
+        } else {
+            "global"
+        };
         (super::static_order(s, agent, &harness).0, wher)
     };
     let mut it = order.into_iter();
@@ -40,15 +51,27 @@ fn write_backups(ctx: &Ctx<'_>, s: &mut Map, agent: &str, ids: &[String]) {
 }
 
 fn scope(agent: &str) -> String {
-    if agent.is_empty() { "for every agent".to_owned() } else { format!("for {agent}") }
+    if agent.is_empty() {
+        "for every agent".to_owned()
+    } else {
+        format!("for {agent}")
+    }
 }
 
 fn who(agent: &str) -> &str {
-    if agent.is_empty() { "every agent" } else { agent }
+    if agent.is_empty() {
+        "every agent"
+    } else {
+        agent
+    }
 }
 
 fn jagent(agent: &str) -> J {
-    if agent.is_empty() { J::Null } else { J::Str(agent.to_owned()) }
+    if agent.is_empty() {
+        J::Null
+    } else {
+        J::Str(agent.to_owned())
+    }
 }
 
 fn strs(ids: &[String]) -> J {
@@ -68,7 +91,10 @@ fn position(at: &str) -> Result<i64, String> {
 pub(super) fn backup(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> {
     let as_json = args.iter().any(|a| a == "--json");
     if args.is_empty() || !["list", "add", "remove", "set", "reset"].contains(&args[0].as_str()) {
-        return Err(Verb::die("backup list|add|remove|set|reset (kith account --help)", 2));
+        return Err(Verb::die(
+            "backup list|add|remove|set|reset (kith account --help)",
+            2,
+        ));
     }
     let sub = args.remove(0);
     flag(&mut args, "--json");
@@ -87,10 +113,17 @@ fn list(ctx: &Ctx<'_>, mut args: Vec<String>, as_json: bool) -> Result<Verb, Ver
     let mut table: Vec<(String, bool, String)> = Vec::new();
     for i in &ids {
         let (ready, why) = super::check(ctx, i, &agent).unwrap_or_else(|e| (false, Some(e)));
-        let fix = if ready { None } else { super::fix(i, &agent).ok().flatten() };
+        let fix = if ready {
+            None
+        } else {
+            super::fix(i, &agent).ok().flatten()
+        };
         let mut f = vec![
             ("id", J::Str(i.clone())),
-            ("model", super::split(i).1.map_or(J::Null, |m| J::Str(m.to_owned()))),
+            (
+                "model",
+                super::split(i).1.map_or(J::Null, |m| J::Str(m.to_owned())),
+            ),
             ("ready", J::Bool(ready)),
         ];
         if !ready {
@@ -113,14 +146,26 @@ fn list(ctx: &Ctx<'_>, mut args: Vec<String>, as_json: bool) -> Result<Verb, Ver
     }
     let mut out = String::new();
     if table.is_empty() {
-        let who = if agent.is_empty() { "any agent" } else { &agent };
+        let who = if agent.is_empty() {
+            "any agent"
+        } else {
+            &agent
+        };
         let _ = writeln!(out, "no backups for {who} (kith account add)");
     } else {
-        let list = if wher == "agent" { "its own list" } else { "the global list" };
+        let list = if wher == "agent" {
+            "its own list"
+        } else {
+            "the global list"
+        };
         let _ = writeln!(out, "backups for {} ({list}):", who(&agent));
     }
     for (n, (id, ready, why)) in table.iter().enumerate() {
-        let state = if *ready { "ready".to_owned() } else { format!("not ready: {why}") };
+        let state = if *ready {
+            "ready".to_owned()
+        } else {
+            format!("not ready: {why}")
+        };
         let _ = writeln!(out, "  {}. {id:<22} {state}", n + 1);
     }
     Ok(Verb::out(out))
@@ -148,7 +193,11 @@ fn write_all(ctx: &Ctx<'_>, sub: &str, mut args: Vec<String>) -> Result<Verb, Ve
         write_backups(ctx, s, &agent, &ids);
         Ok(())
     })?;
-    let list = if ids.is_empty() { "none".to_owned() } else { ids.join(", ") };
+    let list = if ids.is_empty() {
+        "none".to_owned()
+    } else {
+        ids.join(", ")
+    };
     Ok(Verb::out(format!("backups for {}: {list}\n", who(&agent))))
 }
 
@@ -164,16 +213,34 @@ fn plan(ids: Vec<String>, entry: &str, add: bool, place: Option<i64>) -> Done {
     if add {
         if ids.contains(&entry.to_owned()) && place.is_none() {
             let place = ids.iter().position(|i| i == entry).map_or(0, |p| p + 1);
-            return Done { changed: false, ids, place };
+            return Done {
+                changed: false,
+                ids,
+                place,
+            };
         }
         let mut new: Vec<String> = ids.into_iter().filter(|i| i != entry).collect();
-        let at = place.map_or(new.len(), |p| usize::try_from(p - 1).unwrap_or(usize::MAX).min(new.len()));
+        let at = place.map_or(new.len(), |p| {
+            usize::try_from(p - 1).unwrap_or(usize::MAX).min(new.len())
+        });
         new.insert(at, entry.to_owned());
-        Done { changed: true, place: at + 1, ids: new }
+        Done {
+            changed: true,
+            place: at + 1,
+            ids: new,
+        }
     } else if !ids.contains(&entry.to_owned()) {
-        Done { changed: false, ids, place: 0 }
+        Done {
+            changed: false,
+            ids,
+            place: 0,
+        }
     } else {
-        Done { changed: true, ids: ids.into_iter().filter(|i| i != entry).collect(), place: 0 }
+        Done {
+            changed: true,
+            ids: ids.into_iter().filter(|i| i != entry).collect(),
+            place: 0,
+        }
     }
 }
 
@@ -183,7 +250,10 @@ fn change(ctx: &Ctx<'_>, sub: &str, mut args: Vec<String>, as_json: bool) -> Res
     let add = sub == "add";
     if args.len() != 1 {
         let tail = if add { " [--at N]" } else { "" };
-        return Err(Verb::die(&format!("backup {sub} <id> [--agent A]{tail}"), 2));
+        return Err(Verb::die(
+            &format!("backup {sub} <id> [--agent A]{tail}"),
+            2,
+        ));
     }
     let entry = args.remove(0);
     super::parse(&entry).map_err(|e| Verb::die(&e, 2))?;
@@ -195,7 +265,12 @@ fn change(ctx: &Ctx<'_>, sub: &str, mut args: Vec<String>, as_json: bool) -> Res
         None => None,
     };
     // what the file says now (an unreadable one reads as nothing) decides whether anything is written at all
-    let mut done = plan(chain_target(ctx, &settings::read(ctx), &agent).1, &entry, add, place);
+    let mut done = plan(
+        chain_target(ctx, &settings::read(ctx), &agent).1,
+        &entry,
+        add,
+        place,
+    );
     if done.changed {
         done = edit_with(ctx, |s| {
             let done = plan(chain_target(ctx, s, &agent).1, &entry, add, place);
@@ -207,22 +282,35 @@ fn change(ctx: &Ctx<'_>, sub: &str, mut args: Vec<String>, as_json: bool) -> Res
     }
     let sc = scope(&agent);
     let base = |changed: bool| {
-        vec![("ok", J::Bool(true)), ("changed", J::Bool(changed)), ("entry", J::Str(entry.clone())), ("agent", jagent(&agent))]
+        vec![
+            ("ok", J::Bool(true)),
+            ("changed", J::Bool(changed)),
+            ("entry", J::Str(entry.clone())),
+            ("agent", jagent(&agent)),
+        ]
     };
     if add {
         if !done.changed {
             if as_json {
                 let mut f = base(false);
-                f.push(("position", J::Int(i64::try_from(done.place).unwrap_or(i64::MAX))));
+                f.push((
+                    "position",
+                    J::Int(i64::try_from(done.place).unwrap_or(i64::MAX)),
+                ));
                 f.push(("backups", strs(&done.ids)));
                 return Ok(Verb::out(J::Obj(f).dumps() + "\n"));
             }
-            return Ok(Verb::out(format!("{entry} is already in the backups {sc} (--at N moves it)\n")));
+            return Ok(Verb::out(format!(
+                "{entry} is already in the backups {sc} (--at N moves it)\n"
+            )));
         }
-        let (ready, why) = super::check(ctx, &entry, &agent).map_err(|e| Verb::die(&e, 2))?;
+        let (ready, why) = super::check(ctx, &entry, &agent).map_err(|e| Verb::die(&e, 1))?;
         if as_json {
             let mut f = base(true);
-            f.push(("position", J::Int(i64::try_from(done.place).unwrap_or(i64::MAX))));
+            f.push((
+                "position",
+                J::Int(i64::try_from(done.place).unwrap_or(i64::MAX)),
+            ));
             f.push(("backups", strs(&done.ids)));
             f.push(("ready", J::Bool(ready)));
             if !ready {
