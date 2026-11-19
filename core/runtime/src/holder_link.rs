@@ -1079,7 +1079,7 @@ fn end_groups(
 }
 
 #[cfg(unix)]
-fn signal_group(pid: u32, signal: &str) -> bool {
+pub(crate) fn signal_group(pid: u32, signal: &str) -> bool {
     // An absolute path, never `kill` from PATH: this ends process groups, and the daemon's PATH is not its own to trust.
     // (unsafe code is forbidden here, so no killpg.)
     let kill = ["/bin/kill", "/usr/bin/kill"]

@@ -339,7 +339,8 @@ async fn run_bound(
         // The kernel's own commands never carry the host's run token: that is for the run. A person's launch may be
         // handed one of its own in `extra` (see `launch`), bound to the kernel process below.
         .env_remove(crate::runauth::TOKEN_ENV)
-        .env_remove(crate::runauth::SOCKET_ENV);
+        .env_remove(crate::runauth::SOCKET_ENV)
+        .env_remove(crate::runauth::CORE_SOCKET_ENV);
     // Tests give the kernel its temp folders here: the process environment is shared with every other test.
     #[cfg(test)]
     command.envs(
@@ -782,7 +783,7 @@ pub async fn launch(
     person: Option<&str>,
     room: &str,
     members: &Members,
-    access: Option<&(crate::runauth::RunGrant, [(String, String); 2])>,
+    access: Option<&(crate::runauth::RunGrant, Vec<(String, String)>)>,
     engine: Option<&ThreadEngine>,
 ) -> Result<Launch> {
     let mut args = command::launch(agent, backup, project);
@@ -813,6 +814,7 @@ pub async fn launch(
     // Only the host hands a run its token (see `runauth`), whatever the kernel's answer says.
     launch.env.remove(crate::runauth::TOKEN_ENV);
     launch.env.remove(crate::runauth::SOCKET_ENV);
+    launch.env.remove(crate::runauth::CORE_SOCKET_ENV);
     // An owner's ask token (the kernel may fetch one for the owner's run) is no part of a person's launch.
     if person.is_some() {
         launch.env.remove(crate::runauth::ASK_TOKEN_ENV);

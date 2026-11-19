@@ -60,6 +60,7 @@ fn id(person: &str, project: Option<&str>) -> RunIdentity {
         claim: Some("claim-1".into()),
         room: Some("1:1:echo:sam".into()),
         project: project.map(Into::into),
+        members: Vec::new(),
     }
 }
 
@@ -457,6 +458,7 @@ fn the_run_socket_is_owner_only_and_leaves_with_the_server() {
 #[test]
 fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
     use crate::daemon::{Config, Daemon};
+    let _no_kernel = crate::runtools::use_kernel(None);
     let (_t, m) = machine();
     let p = paths(&m);
     let d = Daemon::spawn_with(
@@ -512,7 +514,7 @@ fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
     );
     assert_eq!(got[0]["ok"], true, "{got:?}");
     assert_eq!(got[0]["stdout"], "alpha\n");
-    // `--info` of its own project is the kernel's tool: not answered here yet, and nothing else is either.
+    // The kernel's tools run in the core (`runtools`); this daemon has no kernel to run them with, so they fail closed.
     let got = ask(
         &Tree::Child,
         json!({"token": token, "method": "projectId", "args": ["--info", "alpha"]}),
@@ -524,7 +526,7 @@ fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
     );
     assert_eq!(
         got[0],
-        json!({"ok": false, "error": "that isn't answered by the core yet"})
+        json!({"ok": false, "error": "kith isn't available on this computer"})
     );
     let got = ask(
         &Tree::Child,
@@ -634,7 +636,8 @@ fn revoke_through_the_daemon_ends_the_tokens_and_a_revoked_person_cannot_mint() 
         let _ = sh.wait();
         out[0]["ok"] == true
     };
-    // Nobody is minted for an id that is not a person here.
+    // The authority is not switched on this machine: a person core.db was never told of (invited since the import) is
+    // minted for, the host's own check having decided the launch.
     assert!(matches!(
         crate::reach(
             &p,
@@ -642,7 +645,7 @@ fn revoke_through_the_daemon_ends_the_tokens_and_a_revoked_person_cannot_mint() 
             &json!({"agent": "echo", "person": "ghost", "conversation": "t1"}),
             false
         ),
-        crate::Reached::Refused(Error::NotAllowed(_))
+        crate::Reached::Answered(_)
     ));
     let (sam, bot, amy) = (mint("sam"), mint("bot-a"), mint("amy"));
     assert_eq!(sam.2, sock.to_string_lossy(), "the mint says where to ask");
@@ -676,6 +679,18 @@ fn revoke_through_the_daemon_ends_the_tokens_and_a_revoked_person_cannot_mint() 
     // A removal ends the token too.
     owner("people.removePerson", &json!({"id": "amy"}));
     assert!(!works(&amy));
+    assert!(
+        matches!(
+            crate::reach(
+                &p,
+                "run.mint",
+                &json!({"agent": "echo", "person": "amy", "conversation": "t1"}),
+                false
+            ),
+            crate::Reached::Refused(Error::NotAllowed(_))
+        ),
+        "a removed person is retired: no token, switched or not"
+    );
 
     // The token is shown once: no file of the machine folder holds any of them.
     let mut dirs = vec![m.clone()];
@@ -697,3 +712,6 @@ fn revoke_through_the_daemon_ends_the_tokens_and_a_revoked_person_cannot_mint() 
     }
     drop(d);
 }
+
+#[path = "runsock_tools_tests.rs"]
+mod tools;

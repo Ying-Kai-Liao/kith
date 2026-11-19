@@ -25,7 +25,7 @@ use crate::holder_link::{self, HolderConfig, HolderState};
 use crate::layout::Layout;
 use crate::lock::{self, Role};
 use crate::owner::{self, Handler, Reached, Server};
-use crate::runs::RunTokens;
+use crate::runs::{RunIdentity, RunTokens};
 use crate::runsock::{self, RunHandler};
 use crate::terminal::Terminals;
 use crate::{busy, log};
@@ -83,6 +83,8 @@ pub(crate) struct Shared {
     runs: Arc<RunTokens>,
     socket: PathBuf,
     run_socket: PathBuf,
+    /// Where the cutover switches are, for the one question the run tokens ask of them (`authority_switched`).
+    layout: Layout,
     started: Instant,
     pub(crate) terminals: Terminals,
     key_load: crate::secrets::KeyLoader,
@@ -122,6 +124,43 @@ impl Shared {
     pub(crate) fn replay_open_removals(&self) {}
 
     /// Runs `f` on the core. The core is gone once the daemon has stopped.
+    /// Whether the authority is the core's (its switch is taken). Until it is, core.db knows only the people the import
+    /// found and the narrowings mirrored since, so a run token's person that it does not know is not refused for that
+    /// alone (`authority::run_allowed_in`). Read from the switch file on each call; an unreadable one is "switched",
+    /// which refuses more, never less.
+    pub(crate) fn authority_switched(&self) -> bool {
+        crate::cutover::authority_switched(&self.layout)
+    }
+
+    /// A run-socket call. The checks run under the core lock a revoke commits under; the kernel tools do not (a recall
+    /// takes seconds), so the checks run again after them, and a run revoked meanwhile gets no output.
+    fn run_call(&self, who: &RunIdentity, row: &str, params: &Value) -> Result<Value> {
+        let switched = self.authority_switched();
+        let live = |c: &mut Core| {
+            if !self.runs.is_live(&who.run_id) {
+                return Err(Error::NotAllowed("kith-core: this run has ended".into()));
+            }
+            c.run_gate(who, row, params, switched).map(|_| ())
+        };
+        let args: Vec<String> = params["args"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect();
+        let Some(tool) = crate::runtools::Tool::of_row(row, &args) else {
+            return self.with_core(|c| {
+                live(c)?;
+                c.call_run(who, row, params, switched)
+            });
+        };
+        self.with_core(|c| live(c))?;
+        let out = crate::runtools::run(tool, who, &args)?;
+        self.with_core(|c| live(c))?;
+        Ok(out)
+    }
+
     pub(crate) fn with_core<R>(&self, f: impl FnOnce(&mut Core) -> Result<R>) -> Result<R> {
         let mut guard = self
             .core
@@ -243,14 +282,30 @@ impl Shared {
             return Ok(answer);
         }
         if method == "run.mint" {
-            // Minting is a claim on authority too: refuse a revoked person, inside the lock a revoke commits under,
-            // so a mint cannot slip in beside a suspension.
-            let person = params
-                .get("person")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
+            // Minting is a claim on authority too: refuse a revoked person (and a revoked member of a room turn's
+            // basis), inside the lock a revoke commits under, so a mint cannot slip in beside a suspension.
+            let get = |k: &str| params.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+            let ask = RunIdentity {
+                run_id: String::new(),
+                agent: String::new(),
+                person: get("person").unwrap_or_default().to_owned(),
+                conversation: String::new(),
+                claim: None,
+                room: get("room").map(str::to_owned),
+                project: None,
+                members: params
+                    .get("members")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .filter(|m| !m.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            };
+            let switched = self.authority_switched();
             let mut answer = self.with_core(|c| {
-                crate::call::run_person_allowed(c.conn(), person, method)?;
+                crate::call::run_identity_allowed(c.conn(), &ask, switched, method)?;
                 self.runs.owner_call(method, params).unwrap_or_else(|| {
                     Err(Error::NoSuchMethod("kith-core: no method run.mint".into()))
                 })
@@ -259,6 +314,24 @@ impl Shared {
             if let Some(o) = answer.as_object_mut() {
                 o.insert("socket".into(), json!(self.run_socket.to_string_lossy()));
             }
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
+        if method == "run.resolve" {
+            // The host's own socket asks who a card call is from. The token is resolved and the run's people are checked
+            // again in one locked step, so a revoke that committed first is refused here.
+            let switched = self.authority_switched();
+            let answer = self.with_core(|c| {
+                let answer = self.runs.owner_call(method, params).ok_or_else(|| {
+                    Error::NoSuchMethod("kith-core: no method run.resolve".into())
+                })??;
+                let who = self
+                    .runs
+                    .identity_of(answer["runId"].as_str().unwrap_or_default())
+                    .ok_or_else(|| Error::NotAllowed("kith-core: run.resolve: not authorized".into()))?;
+                crate::call::run_identity_allowed(c.conn(), &who, switched, method)?;
+                Ok(answer)
+            })?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
@@ -478,6 +551,7 @@ impl Daemon {
             runs: Arc::new(RunTokens::new()),
             socket: owner::endpoint(&layout),
             run_socket: runsock::endpoint(&layout),
+            layout: layout.clone(),
             started: Instant::now(),
             terminals: Terminals::new(),
             key_load: cfg
@@ -649,16 +723,7 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
     }
     // The run socket is not the owner's way in: a daemon that cannot open it still serves the owner, and says so.
     let for_runs = shared.clone();
-    let run_handler: Arc<RunHandler> = Arc::new(move |who, row, params| {
-        for_runs.with_core(|c| {
-            // Under the lock an end or a revoke commits under: a run whose token is gone (ended, revoked, the
-            // person removed) is refused even if its request resolved a moment before.
-            if !for_runs.runs.is_live(&who.run_id) {
-                return Err(Error::NotAllowed("kith-core: this run has ended".into()));
-            }
-            c.call_run(who, row, params)
-        })
-    });
+    let run_handler: Arc<RunHandler> = Arc::new(move |who, row, params| for_runs.run_call(who, row, params));
     match runsock::Server::bind(layout, shared.runs.clone(), run_handler) {
         Ok(server) => {
             *shared
