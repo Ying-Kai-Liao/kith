@@ -832,7 +832,7 @@ jobs:
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
           # The pkg and project-id switches: the launch's two lookups are the core's, per verb, and a guest's project-id stays Python.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
-          # The cost switch: the ported kith-cost verbs are the core's, tag/record stay Python, and the launch's budget checks hold on both paths.
+          # The cost switch: every kith-cost verb (tag and record too) is the core's, KITH_CORE=python the Python's, and the launch's budget checks hold on both paths.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
           # The revoke stopgap: kith-auth reaches the core with no daemon, through the embedded core-call.
           KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-embedded-check
