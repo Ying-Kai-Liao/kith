@@ -1464,5 +1464,47 @@
   ],
   "unswitched": "usage text of the Python script",
   "stderr": false
+ },
+ {
+  "name": "sessions-epoch-files-mode-prints-nothing",
+  "command": "sessions",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/bin/kith-sessions"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1"
+  },
+  "setup": [],
+  "run": [
+   [
+    "epoch",
+    "p1"
+   ],
+   [
+    "epoch",
+    "p1",
+    "extra"
+   ]
+  ],
+  "normalize": [
+   [
+    "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
+    "<PSTART>"
+   ]
+  ],
+  "stderr": false
  }
 ]
