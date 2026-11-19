@@ -54,20 +54,34 @@ impl Core {
         }
     }
 
-    /// A method of the run socket, as the run its token names. The identity comes from the token table, never from the
-    /// params. Only `run.projectId` is answered here (it needs nothing but the identity); the kernel tools stay with
-    /// the host's host.sock until a later step switches them.
-    // A method of Core on purpose, though it reads nothing of it yet: no handler runs without the lock and generation.
+    /// The checks every run-socket call passes, under the core lock: the row exists and is open to a run token, the
+    /// params fit, and the run's person (and a room turn's basis) is still allowed. A second door behind the token table:
+    /// `people.suspend` ends the tokens inside the same locked core call, and this runs under that lock too, so a request
+    /// that resolved just before the end is still refused here. `switched` is whether the authority is the core's.
+    // A method of Core on purpose: no handler runs without the lock and generation.
+    pub(crate) fn run_gate(
+        &self,
+        who: &RunIdentity,
+        method: &str,
+        params: &Value,
+        switched: bool,
+    ) -> Result<&'static kith_api::Method> {
+        let row = check(kith_api::Principal::RunToken, method, params)?;
+        run_identity_allowed(self.conn(), who, switched, method)?;
+        Ok(row)
+    }
+
+    /// A method of the run socket, as the run its token names, for the rows the core answers from the identity alone:
+    /// `run.projectId` with no arguments. The kernel tools (`run.recall`, `run.memorySearch`, `run.projectId --info`) run
+    /// in `runtools`, outside this lock, between two [`Self::run_gate`] checks.
     pub(crate) fn call_run(
         &self,
         who: &RunIdentity,
         method: &str,
         params: &Value,
+        switched: bool,
     ) -> Result<Value> {
-        let row = check(kith_api::Principal::RunToken, method, params)?;
-        // A second door behind the token table: `people.suspend` ends the tokens inside the same locked core call, and
-        // this runs under that lock too, so a request that resolved just before the end is still refused here.
-        run_person_allowed(self.conn(), &who.person, method)?;
+        let row = self.run_gate(who, method, params, switched)?;
         let args = params.get("args").and_then(Value::as_array);
         match (row.name, args.map(Vec::as_slice)) {
             ("run.projectId", None | Some([])) => Ok(match &who.project {
@@ -121,30 +135,82 @@ impl Core {
     }
 }
 
-/// Whether the person of a run may still have one: known, and not revoked (nor, for a bot, its owner). Used at mint and
-/// again at every run-socket call, under the core lock a revoke commits under. Where the authority tables are not served
-/// (not Unix yet) nothing can be checked, so it refuses: a run token is never minted or honoured unchecked.
-pub(crate) fn run_person_allowed(
+/// Whether a run may still have a token: its person is allowed (`authority::run_allowed_in`) and, for a room person's
+/// turn, so is every member of the basis. A room person (`room-<room>-<n>`, the host's id, never a human's) is no one the
+/// authority tables know, so it is the basis that counts: the id must be of the turn's own room and the basis must not be
+/// empty, a room person is always for somebody. Used at mint, at every run-socket call and in `run.resolve`, under the
+/// core lock a revoke commits under. Where the authority tables are not served (not Unix yet) nothing can be checked, so
+/// it refuses: a run token is never minted or honoured unchecked.
+pub(crate) fn run_identity_allowed(
     conn: &rusqlite::Connection,
-    person: &str,
+    who: &RunIdentity,
+    switched: bool,
     method: &str,
 ) -> Result<()> {
     #[cfg(unix)]
     {
-        if crate::authority::run_allowed_in(conn, person)? {
-            return Ok(());
+        let refused = |id: &str| {
+            Error::NotAllowed(format!(
+                "kith-core: {method}: {id} is revoked or not a person here, so no run of theirs is served"
+            ))
+        };
+        let room_person = who.person.starts_with("room-");
+        if room_person {
+            let own_room = who
+                .room
+                .as_deref()
+                .is_some_and(|r| is_room_person_of(&who.person, r));
+            if !own_room || who.members.is_empty() {
+                return Err(refused(&who.person));
+            }
+        } else if !who.members.is_empty() {
+            // A basis belongs to a room person only.
+            return Err(refused(&who.person));
         }
-        Err(Error::NotAllowed(format!(
-            "kith-core: {method}: {person} is revoked or not a person here, so no run of theirs is served"
-        )))
+        let ids = if room_person {
+            who.members.as_slice()
+        } else {
+            std::slice::from_ref(&who.person)
+        };
+        for id in ids {
+            if !crate::authority::run_allowed_in(conn, id, switched)? {
+                return Err(refused(id));
+            }
+        }
+        Ok(())
     }
     #[cfg(not(unix))]
     {
-        let _ = (conn, person);
+        let _ = (conn, who, switched);
         Err(Error::NotAllowed(format!(
             "kith-core: {method}: run tokens are not served on this platform yet"
         )))
     }
+}
+
+/// Whether `person` is a room person of `room`: `room-<slug>-<join gen>`, the id the host gives a room's people
+/// (`chat::room_turn::room_person_id`: the room lowercased with every character that is not a letter or digit as a dash,
+/// at most 32 of them, then the join gen). The parts are compared, not a prefix: room `a` is not room `a-b`.
+#[cfg(unix)]
+pub(crate) fn is_room_person_of(person: &str, room: &str) -> bool {
+    let slug: String = room
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .take(32)
+        .collect();
+    person
+        .strip_prefix("room-")
+        .and_then(|rest| rest.strip_prefix(slug.as_str()))
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|generation| {
+            !generation.is_empty() && generation.bytes().all(|b| b.is_ascii_digit())
+        })
 }
 
 /// The shared door check: the method exists, is open to `who` and takes these params.

@@ -32,7 +32,7 @@ search, which also finds text FTS doesn't split into words (Chinese, for one).
 In a run for someone other than the owner (KITH_PERSON, checked with kith-auth) it searches only that agent's shared
 memory and theirs (memory/shared/, memory/people/<id>/), its learned skills, their people/<id>.md and the current
 project's shared files: never user.md, the owner's memory, other people, other agents, --agent or --all. A search in
-such a run (KITH_RUN_TOKEN and KITH_RUN_SOCKET set) is asked of the host over the run socket and only takes words, -n N
+such a run (KITH_RUN_TOKEN set) is asked of the core over its run socket (KITH_CORE_RUN_SOCKET) and only takes words, -n N
 and --json.
 """
 import datetime as dt, json, os, re, sqlite3, subprocess, sys

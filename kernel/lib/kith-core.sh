@@ -28,7 +28,8 @@ kith_cutover_refuse() {
 }
 
 # kith_core_prime   looks up the program and its module list once and keeps them in shell variables, so the launch's
-# several kith_core_exec calls (pkg, project-id x3) do not each spawn `kith_paths.py --bin` and `kith kernel version`.
+# several kith_core_exec calls (pkg) and the project_id calls (they pass the program as KITH_BIN to the stub) do not each spawn
+# `kith_paths.py --bin` and `kith kernel version`.
 # Subshells inherit the variables; nothing is exported. The decision is the same as without it, made earlier.
 kith_core_prime() {
   _kith_core_bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || _kith_core_bin=""
@@ -244,7 +245,7 @@ import json, os, sys
 # (the core drops the token names too; kith_env_sync mirrors KITH_ names as HQ_ ones, so both spellings are listed here).
 drop = {"TERM_SESSION_ID", "ITERM_SESSION_ID", "TMUX", "TMUX_PANE", "SSH_TTY", "WINDOWID", "COLUMNS", "LINES", "SHLVL", "_"}
 for p in ("KITH_", "HQ_"):
-    drop |= {p + n for n in ("RUN_TOKEN", "RUN_SOCKET", "ASK_TOKEN", "ASK_SOCKET")}
+    drop |= {p + n for n in ("RUN_TOKEN", "RUN_SOCKET", "CORE_RUN_SOCKET", "ASK_TOKEN", "ASK_SOCKET")}
 env = {k: v for k, v in os.environ.items() if k not in drop and not k.startswith(("KITH_RUN_", "HQ_RUN_", "KITH_CALL_", "HQ_CALL_"))}
 size = None
 for fd in (2, 0, 1):
