@@ -393,7 +393,7 @@ pub(crate) fn usable_kith_bin(bin: &Path) -> bool {
 }
 
 /// Whether `bin` has the `kernel readfence` verb: the running program, or one that answers `kernel readfence --help`. An older
-/// kith would read `kernel` as an agent name, so the launch keeps the Python fence for it.
+/// kith would read `kernel` as an agent name, so the launch uses the running program for the fence instead.
 pub(crate) fn knows_readfence(bin: &Path) -> bool {
     let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
     if std::env::current_exe()
@@ -1304,7 +1304,11 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .filter(|b| usable_kith_bin(Path::new(b)))
         .map(str::to_owned)
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
-    let fence_bin = kith_bin.clone().filter(|b| knows_readfence(Path::new(b)));
+    // An older kith has no `kernel readfence`; this program always has it.
+    let fence_bin = kith_bin
+        .clone()
+        .filter(|b| knows_readfence(Path::new(b)))
+        .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
     if perm_mode.is_empty() {
         perm_mode.clear();
     }
