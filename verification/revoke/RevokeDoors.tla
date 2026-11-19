@@ -748,7 +748,7 @@ SweepOwed(m) ==
     /\ revoked[m] /\ ~owed[m]
     /\ \E w \in Who : turn[m][w] \in Live
     /\ owed' = [owed EXCEPT ![m] = TRUE]
-    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, cutDone, bdoor, ptick, alw, link>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, cutDone, bdoor, ptick, alw, link, gbox>>
 \* MODEL VS CODE (stated, not hidden): this model drops the row when P is not revoked now. The code (core_holders.rs retry_owed) is more
 \* careful and less exact: it drops a whole sweep only if the row was owed while P was SUSPENDED in the host store and P has no suspend rows
 \* now. A revoke that left nothing to suspend (a person known only by a chat handle) or whose suspend_person failed is never dropped, so
@@ -766,7 +766,7 @@ RetrySweep(m) ==
                                                        THEN (IF KillSplit THEN "ending" ELSE "aborted")
                                                        ELSE turn[m][w]]]
                ELSE turn
-    /\ UNCHANGED <<auth, door, gdoor, ext4, cutDone, bdoor, ptick, alw, link>>
+    /\ UNCHANGED <<auth, door, gdoor, ext4, cutDone, bdoor, ptick, alw, link, gbox>>
 \* KillSent: the host's one signal (end_kills -> end_claimed on a detached task) lands.
 KillSent(m) ==
     /\ KillSplit

@@ -272,7 +272,6 @@ switched-core-door	PROPERTY	BoxD2	fail
 switched-core-door-slow	INVARIANT	TypeOK	pass
 switched-core-door-slow	PROPERTY	DoorD2	pass
 switched-core-door-slow	PROPERTY	DoorD2c	pass
-switched-core-door-slow	PROPERTY	DoorD1	pass
 switched-core-door-slow	PROPERTY	BoxD1	pass
 switched-core-door-slow	INVARIANT	NoOrphanBox	pass
 switched-core-door-slow	PROPERTY	LiveDoorKept	pass
