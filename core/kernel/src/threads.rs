@@ -388,7 +388,8 @@ fn take_in(
         proc_start: os::proc_start(pid),
         at: iso_utc(),
         kind: how.kind.to_owned(),
-        person: how.person.map(str::to_owned),
+        // An empty person is no person (Python's `if person:`), so the claim stays the owner's.
+        person: how.person.filter(|p| !p.is_empty()).map(str::to_owned),
         agent: how.agent.map(str::to_owned),
         takeover: how.takeover,
     };
