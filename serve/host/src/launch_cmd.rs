@@ -208,6 +208,8 @@ pub fn print_settings(a: &Args) -> Result<()> {
     };
     let once_id = a.once_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let mode = a.mode.clone().or_else(|| kith_kernel::paths::process_env("KITH_PERMISSION_MODE")).unwrap_or_default();
+    let cost_bin =
+        kith_kernel::launch::assemble::cost_hook_bin(&c.kernel, &std::env::vars().collect(), kith_bin.as_deref());
     let input = settings::Input {
         agent: &a.agent,
         paths: &c.p,
@@ -223,6 +225,7 @@ pub fn print_settings(a: &Args) -> Result<()> {
         user_home: &c.home,
         kith_bin: kith_bin.as_deref(),
         fence_bin: kith_bin.as_deref(),
+        cost_bin: cost_bin.as_deref(),
         plugins_json: &plugins_json,
         owner_terminal: a.terminal,
         api_helper: a.api_helper.as_deref().unwrap_or_default(),

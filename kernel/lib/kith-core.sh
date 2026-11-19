@@ -64,25 +64,31 @@ kith_core_exec() {
   KITH_BIN=$bin exec "$bin" kernel $verb "$@"
 }
 
-# kith_cost_ported ARGS...   succeeds when `kith-cost ARGS` is a line the Rust core answers (core/kernel/src/cost/mod.rs `run`):
-# limit AGENT, sync, spent PERSON, usage --json, agent NAME --json, members AGENT, bots --json. Every other line (tag and record,
-# which write the ledger, the text reports, a bare `kith cost`, -h) is Python's, so `cost` in core-switched.txt moves exactly these.
-kith_cost_ported() {
-  local a json=0
-  for a in "$@"; do [[ $a == --json ]] && json=1; done
-  case ${1:-} in
-    limit|spent|members) [[ $# -ge 2 ]] ;;
-    sync) return 0 ;;
-    usage|bots) [[ $json == 1 ]] ;;
-    agent) [[ $# -ge 2 && $json == 1 ]] ;;
-    *) return 1 ;;
-  esac
+# kith_core_bin VERB   prints the program kith_core_exec VERB would run (and returns 0), or returns 1 when the Python answers:
+# the same rule without the exec, for a caller that has to name the program (the SessionStart hook of `kith AGENT`).
+kith_core_bin() {
+  local verb=$1 module bin ver
+  [[ ${KITH_CORE:-} == python ]] && return 1
+  read -r module _ < <(awk -F'\t' -v v="$verb" '$1 == v { print $2, ($3 != "" ? $3 : $2); exit }' "$KITH/lib/core-switched.txt" 2>/dev/null) || true
+  if [[ -z $module ]]; then
+    [[ ${KITH_CORE:-} == rust ]] || return 1
+    module=${verb%% *}
+  fi
+  if [[ -n ${_kith_core_primed:-} ]]; then
+    bin=$_kith_core_bin ver=$_kith_core_ver
+  else
+    bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+    ver=$("$bin" kernel version 2>/dev/null)
+  fi
+  [[ -n $bin && $ver == *"\"$module\""* ]] || return 1
+  printf '%s' "$bin"
 }
 
-# kith_cost ARGS...   `kith-cost ARGS`: the core's when `cost` is switched and the line is one it answers, else the Python.
+# kith_cost ARGS...   `kith-cost ARGS`: the core's when `cost` is switched and the program has the `cost-ledger` module (tag and
+# record write the ledger, so a program that only has the read verbs is not enough), else the Python, which stays the rollback.
 # A subshell, because kith_core_exec execs; `KITH_PERSON_WAS=.. kith_cost ..` reaches whichever answers.
 kith_cost() {
-  ( if kith_cost_ported "$@"; then kith_core_exec cost --kernel "$KITH" "$@" || :; fi; exec "$KITH/bin/kith-cost" "$@" )
+  ( kith_core_exec cost --kernel "$KITH" "$@" || :; exec "$KITH/bin/kith-cost" "$@" )
 }
 
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag
