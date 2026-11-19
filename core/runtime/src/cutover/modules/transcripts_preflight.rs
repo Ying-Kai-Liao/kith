@@ -42,6 +42,12 @@ fn kernel_for_hook(
     let shipped = "share/kith/kernel";
     // Like `find_kernel`, a set `$KITH_KERNEL` is the only candidate: it never falls through to the installed CLI.
     let tried: Vec<PathBuf> = match set(kernel) {
+        Some(k) if !k.join("bin/kith-sessions").is_file() => {
+            return Err(format!(
+                "$KITH is not set and $KITH_KERNEL={} has no bin/kith-sessions, so the kith-sessions the SessionStart hook runs cannot be found (set $KITH=<kernel dir>, or point $KITH_KERNEL at a kernel)",
+                k.display()
+            ));
+        }
         Some(k) => vec![k],
         None => vec![
             machine.join("cli/current").join(shipped),
@@ -203,7 +209,11 @@ mod kernel_tests {
         let dev = t.path().join("dev");
         let e = kernel_for_hook(None, Some(dev.clone().into()), t.path()).unwrap_err();
         assert!(
-            e.contains(&dev.display().to_string()) && !e.contains("cli/current"),
+            e.contains(&dev.display().to_string())
+                && e.contains("$KITH_KERNEL=")
+                && e.contains("has no bin/kith-sessions")
+                && !e.contains("no kernel with bin/kith-sessions is installed")
+                && !e.contains("cli/current"),
             "{e}"
         );
         fake_kernel(&dev, "x");
