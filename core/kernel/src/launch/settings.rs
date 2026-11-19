@@ -141,6 +141,9 @@ pub struct Input<'a> {
     pub kith_bin: Option<&'a str>,
     /// `kith_bin` when it also knows `kernel readfence` (the Rust read fence), else None: the fence stays the Python hook.
     pub fence_bin: Option<&'a str>,
+    /// `kith_bin` when `cost` is switched and it has the `cost-ledger` module (see `assemble::cost_hook_bin`), else None: the
+    /// `SessionStart` hook then stays `bin/kith-cost tag`.
+    pub cost_bin: Option<&'a str>,
     /// `claude plugin list --json` (`[]` when it failed).
     pub plugins_json: &'a str,
     /// The owner at their own terminal: their plugins stay as their settings have them.
@@ -755,7 +758,17 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     let sm = st.as_object_mut().ok_or_else(|| bad("settings"))?;
     {
         let hooks = obj(sm, "hooks")?;
-        list(hooks, "SessionStart")?.push(json!({"hooks": [{"type": "command", "command": format!("\"{kernel}/bin/kith-cost\" tag"), "timeout": 10}]}));
+        // The ledger's writer: the Rust `kith kernel cost tag` when the program has it and `cost` is switched, else the Python.
+        let cost_hook = match i.cost_bin.filter(|b| !b.is_empty()) {
+            Some(bin) => format!(
+                "{} kernel cost --kernel {} tag",
+                bash_q(bin),
+                bash_q(&kernel)
+            ),
+            None => format!("\"{kernel}/bin/kith-cost\" tag"),
+        };
+        list(hooks, "SessionStart")?
+            .push(json!({"hooks": [{"type": "command", "command": cost_hook, "timeout": 10}]}));
         // Lists the session in the apps when it is a listable terminal run; never fails the session.
         list(hooks, "SessionStart")?.push(json!({"hooks": [{"type": "command", "command": format!("\"{kernel}/bin/kith-sessions\" record"), "timeout": 5}]}));
         for (event, cmd) in [

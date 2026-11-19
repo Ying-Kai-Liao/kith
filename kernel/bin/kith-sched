@@ -6,7 +6,7 @@
   kith-sched rm AGENT ID                                 remove a job
   kith-sched pause|resume AGENT ID                       keep a job but stop or restart it
   kith-sched run AGENT ID                                run a job now, in the background
-  kith-sched log [AGENT [ID] | AGENT/ID]                 the last runs, with the path of each run's output
+  kith-sched log [AGENT [ID]]                            the last runs, with the path of each run's output
   kith-sched prune                                       trim old run logs, rotate auth.log, drop dead terminal records (tick does it hourly)
   kith-sched tick                                        (launchd, every minute) start the jobs that are due
   kith-sched run-turn AGENT JOB --turn N --claim C       (the Kith host, once the core fires the schedules) run the core's turn N of a job
@@ -761,7 +761,9 @@ def log(agent=None, jid=None):
             state = 'failed' if v.get('error') else 'running' if still_running(v, clock()) else 'done'
             print('%s  %-24s %-7s %s' % (v['at'], k, state, v['log'].replace(str(Path.home()), '~', 1)))
     if agent and jid:
-        runs = sorted((LOGS / 'runs' / agent).glob(jid + '-*.log'))
+        # Exact job name: `do-b` must not pick up `do-b-c`'s logs (the glob `do-b-*.log` did). The pattern is shared with the core's log.
+        mine = kith_sched_core.log_name(jid)
+        runs = sorted(f for f in (LOGS / 'runs' / agent).glob('*.log') if mine.fullmatch(f.name))
         if runs:
             print('\n' + runs[-1].read_text()[-3000:])
 
@@ -927,7 +929,7 @@ def main(argv):
     if cmd == '--install': return install()
     if cmd == '--uninstall': return uninstall()
     if cmd == 'ls': return ls(rest[0] if rest else None)
-    if cmd == 'log': return log(*(rest[0].split('/', 1) if len(rest) == 1 and '/' in rest[0] else rest[:2]))
+    if cmd == 'log': return log(*rest[:2])
     if cmd == 'add':
         opts, pos, i = {}, [], 0
         while i < len(rest):
@@ -972,10 +974,10 @@ def main(argv):
                 if not me.get('owner') and me.get('person') != them.get('person'):
                     sys.exit('kith-sched: %s/%s runs for %s; only they or the owner can start it by hand'
                              % (agent, jid, job['person']))
-            run_log = start(agent, job, clock().replace(second=0, microsecond=0), 'run by hand')
-            if not run_log:
+            started = start(agent, job, clock().replace(second=0, microsecond=0), 'run by hand')
+            if not started:
                 sys.exit(1)
-            print('started → %s' % run_log)
+            print('started → %s' % started)
             return
         with editing(agent) as jobs:
             job = find(agent, jid, jobs)

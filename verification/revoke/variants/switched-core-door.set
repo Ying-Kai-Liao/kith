@@ -1,0 +1,7 @@
+\* the switched doors (M2(b)): authority on the core, the door table, and a start that is the core's one-step doors.start
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE
+CoreDoorStart = TRUE
