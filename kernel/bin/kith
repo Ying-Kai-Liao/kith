@@ -607,9 +607,9 @@ if [[ $p_owner == 1 ]] && lim=$(kith_cost limit "$agent" --sh 2>/dev/null) && [[
   fi
 fi
 # Launch-time lookups are the kernel's own, whoever the run is for: a guest token in the environment would narrow them.
-# They are the Rust core's when `project-id` is switched. A guest's own calls never come through here (the token is dropped
-# above): they reach bin/project-id, which asks the host over the run socket and which the core does not replace.
-project_id() { ( unset KITH_RUN_TOKEN; kith_core_exec project-id --kernel "$KITH" "$@" || true; exec "$KITH/bin/project-id" "$@" ); }
+# bin/project-id is a stub for `kith kernel project-id`. A guest's own calls never come through here (the token is dropped
+# above): they reach the stub too, and the program asks the core over its run socket.
+project_id() { ( unset KITH_RUN_TOKEN; [[ -z ${_kith_core_bin:-} ]] || export KITH_BIN=$_kith_core_bin; exec "$KITH/bin/project-id" "$@" ); }
 if [[ -n $project ]]; then
   project_id --list | cut -f1 | cut -d' ' -f1 | grep -qx -- "$project" \
     || { echo "kith: unknown project '$project'. Known: $(project_id --list | cut -f1 | cut -d' ' -f1 | tr '\n' ' ')" >&2
@@ -867,6 +867,7 @@ state_projects="$KITH_STATE/projects"$'\n'"$KITH_STATE_REAL/projects"
 [[ $p_owner == 0 ]] && state_projects=""
 learned="$src_pkg/skills/learned"$'\n'"$(cd "$src_pkg" && pwd -P)/skills/learned"
 [[ $p_owner == 0 ]] && learned=""
+guest_kbin=""   # the kith program a guest run is given (claude only), below
 if [[ $harness == claude ]]; then
 # The owner at their own terminal (same test as `terminal` below, which the settings fill needs earlier): their plugins stay on.
 owner_terminal=0
@@ -885,6 +886,12 @@ if mbin=$(python3 "$KITH/lib/kith_paths.py" --bin) && [[ -n $mbin ]]; then
   # Claude Code blocks a tool call on exit 2, which an older kith binary's usage error also exits with; the hook says
   # "deny" in JSON instead, and any failure of its own lets the write through.
   mem_pre+=" || true" mem_post+=" || true"
+  # A guest's project-id is the stub in bin/, which runs `kith kernel project-id` on a program that lists project-guest: the run is
+  # given this one (the launch's lookup above, whose module list kith_core_prime read) only when it does, and the settings below
+  # open it to the sandbox's reads. Otherwise the run gets none and the stub looks for its own.
+  if [[ $p_owner == 0 && ${_kith_core_bin:-} == "$mbin" && ${_kith_core_ver:-} == *'"project-guest"'* ]]; then
+    guest_kbin=$mbin; export KITH_BIN=$mbin
+  fi
   # Anyone but the owner: a hook that fails (the binary gone, a usage error, a crash) denies the write instead of letting it through.
   [[ $p_owner == 0 ]] && mem_pre="out=\$(${mem_pre% || true}) || out='{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"the memory check could not run, so this write is refused\"}}'; printf '%s\\n' \"\$out\""
 else
@@ -1009,6 +1016,11 @@ if os.environ["P_OWNER"] == "0":
     socks = [x for m in machine for x in both(m + "/run/host.sock")]
     if os.environ.get("KITH_RUN_SOCKET"):
         socks += both(os.environ["KITH_RUN_SOCKET"])
+    # The core run socket (recall, memory search and project-id are answered there) is the one file of <machine>/core a guest
+    # may reach: the folder stays on the deny list above and nothing else in it is opened (owner.sock, owner.token, the core database).
+    socks += [x for m in machine for x in both(m + "/core/run.sock")]
+    if os.environ.get("KITH_CORE_RUN_SOCKET"):
+        socks += both(os.environ["KITH_CORE_RUN_SOCKET"])
     s["sandbox"] = {
         "enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False, "autoAllowBashIfSandboxed": True,
         "filesystem": {"denyRead": list(dict.fromkeys(deny_read)), "allowWrite": list(dict.fromkeys(allow_write))},
@@ -1143,7 +1155,7 @@ if [[ $p_owner == 0 && $harness == claude ]]; then
   [[ $wide == 1 && $PWD != "$files" ]] && { echo "kith: working directory $PWD is wider than a guest may read; working in $files" >&2; cd "$files"; }
   read_dirs=$PWD
   for ((i = 1; i < ${#dirs[@]}; i += 2)); do read_dirs+=$'\n'"${dirs[i]}"; done
-  READ_DIRS=$read_dirs RUN_OUTBOX=$run_outbox WORK=$work CTMP=$ctmp GUARD_TREES=$(printf '%s\n' "$KITH" "$src_pkg/role" "$src_pkg/skills" "$pkg" "$src_pkg" "$KITH_STATE/people" "$KITH_STORE") python3 -I -c '
+  GUEST_KBIN=$guest_kbin READ_DIRS=$read_dirs RUN_OUTBOX=$run_outbox WORK=$work CTMP=$ctmp GUARD_TREES=$(printf '%s\n' "$KITH" "$src_pkg/role" "$src_pkg/skills" "$pkg" "$src_pkg" "$KITH_STATE/people" "$KITH_STORE") python3 -I -c '
 import json, os, re, sys
 f = sys.argv[1]
 s = json.load(open(f))
@@ -1160,6 +1172,19 @@ for d in os.environ["READ_DIRS"].split("\n"):
 for d in (os.environ.get("WORK"), home + "/.local/share/uv", home + "/.local/bin"):
     if d:
         allow += both(d)
+# The kith program (the project-id stub of a guest runs it), the file and each link on the way to it.
+kb = os.environ.get("GUEST_KBIN")
+if kb:
+    chain, at = [kb], kb
+    for _ in range(16):
+        if not os.path.islink(at):
+            break
+        to = os.readlink(at)
+        at = to if os.path.isabs(to) else os.path.join(os.path.dirname(at), to)
+        chain.append(at)
+    if os.path.realpath(kb) not in chain:
+        chain.append(os.path.realpath(kb))
+    allow += chain
 if os.environ["CTMP"]:   # the Claude Code temp folder of theirs (above), never run/t around it
     allow.append(os.environ["CTMP"])
 if os.environ.get("RUN_OUTBOX"):   # its own outbox, which kith-send writes (made writable above)
@@ -1309,8 +1334,8 @@ emit_launch() {
   [[ $harness == claude ]] || allowed_tools=""
   # A guest's workspace (above): Claude Code reads its temp dir from the process environment, not the settings, so the host
   # has to start it with these.
-  local work_env=""; [[ $p_owner == 1 ]] || work_env="CLAUDE_CODE_TMPDIR KITH_WORK CLAUDE_ENV_FILE"
-  ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_GEN KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
+  local work_env=""; [[ $p_owner == 1 ]] || work_env="CLAUDE_CODE_TMPDIR KITH_WORK CLAUDE_ENV_FILE${guest_kbin:+ KITH_BIN}"
+  ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_CORE_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_GEN KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
     ADD_DIRS=$add_dirs ALLOWED=$allowed_tools SETTINGS=$settings MCP=$(merged_mcp) PROMPT=$prompt PERM_MODE=$perm_mode NO_SLASH=$no_slash CALL_MODEL=$call_model \
     BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib ENGINE_SPEC=$engine_spec \
     python3 -I -c '

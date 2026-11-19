@@ -112,6 +112,11 @@ pub(super) const ROWS: &[Method] = &[
             ),
             caller("room", "string", "The room, when the run is in one."),
             caller("project", "string", "The project the run was launched in."),
+            caller(
+                "members",
+                "[string]",
+                "A room person's run: the people the turn is for. The token's audience is the room cut to what every one of them may see; a revoked member ends the token.",
+            ),
         ],
         "json",
         &["kernel", "core-run", "mint"],
