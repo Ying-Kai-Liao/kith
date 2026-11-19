@@ -143,6 +143,9 @@ pub struct Input<'a> {
     /// `kith_bin` when `cost` is switched and it has the `cost-ledger` module (see `assemble::cost_hook_bin`), else None: the
     /// `SessionStart` hook then stays `bin/kith-cost tag`.
     pub cost_bin: Option<&'a str>,
+    /// `kith_bin` when `threads` is switched and it has the `threads-writer` module (see `assemble::threads_hook_bin`), else
+    /// None: the registry's `SessionStart` hook then stays `bin/kith-sessions record`.
+    pub threads_bin: Option<&'a str>,
     /// `claude plugin list --json` (`[]` when it failed).
     pub plugins_json: &'a str,
     /// The owner at their own terminal: their plugins stay as their settings have them.
@@ -768,8 +771,18 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         };
         list(hooks, "SessionStart")?
             .push(json!({"hooks": [{"type": "command", "command": cost_hook, "timeout": 10}]}));
-        // Lists the session in the apps when it is a listable terminal run; never fails the session.
-        list(hooks, "SessionStart")?.push(json!({"hooks": [{"type": "command", "command": format!("\"{kernel}/bin/kith-sessions\" record"), "timeout": 5}]}));
+        // Lists the session in the apps when it is a listable terminal run; never fails the session. The Rust `kith kernel
+        // threads record` when the program has it and `threads` is switched, else the Python, as the ledger's hook above.
+        let sessions_hook = match i.threads_bin.filter(|b| !b.is_empty()) {
+            Some(bin) => format!(
+                "{} kernel threads --kernel {} record",
+                bash_q(bin),
+                bash_q(&kernel)
+            ),
+            None => format!("\"{kernel}/bin/kith-sessions\" record"),
+        };
+        list(hooks, "SessionStart")?
+            .push(json!({"hooks": [{"type": "command", "command": sessions_hook, "timeout": 5}]}));
         for (event, cmd) in [
             ("PreToolUse", &mem_pre),
             ("PostToolUse", &mem_post),

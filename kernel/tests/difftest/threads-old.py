@@ -4,7 +4,7 @@
 The verbs kith-sessions has (record, resolve, claim, terminal, proc, sweep) run through it unchanged. The two the Rust verb
 adds for tests and the two-actor race call kith-sessions' own functions:
 
-  release PID     release_claims(PID): gives back every claim PID holds
+  release-pid PID release_claims(PID): gives back every claim PID holds
   holder SID      the live claim on SID under either name, as its file says; exit 1 when there is none
 """
 import importlib.util, json, os, sys
@@ -18,7 +18,7 @@ spec.loader.exec_module(ks)
 
 
 def main(argv):
-    if argv[:1] == ['release'] and len(argv) == 2:
+    if argv[:1] == ['release-pid'] and len(argv) == 2:
         ks.release_claims(int(argv[1]))
     elif argv[:1] == ['holder'] and len(argv) == 2:
         for takeover in (False, True):

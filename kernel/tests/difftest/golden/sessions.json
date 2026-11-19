@@ -606,7 +606,6 @@
     "<PSTART>"
    ]
   ],
-  "unswitched": "usage text of the Python script",
   "stderr": false
  },
  {
@@ -1052,7 +1051,6 @@
     "<PSTART>"
    ]
   ],
-  "unswitched": "usage text of the Python script",
   "stderr": false
  },
  {
@@ -1249,11 +1247,12 @@
     "11111111-1111-4111-8111-111111111111"
    ],
    "new": [
-    "{BIN}",
-    "kernel",
-    "threads",
-    "--kernel",
-    "{KERNEL}"
+    "sh",
+    "-c",
+    "\"$2\" kernel threads --kernel \"$0\" terminal \"$1\" $$ && \"$2\" kernel threads --kernel \"$0\" release \"$1\"; echo \"exit $?\"; ls \"$HOME/.kith/live/terminal\" | sort",
+    "{KERNEL}",
+    "11111111-1111-4111-8111-111111111111",
+    "{BIN}"
    ]
   },
   "env": {
@@ -1273,8 +1272,7 @@
     "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
     "<PSTART>"
    ]
-  ],
-  "unswitched": "release SID (the caller's parent) has no Rust verb: kernel threads has release PID"
+  ]
  },
  {
   "name": "sessions-release-not-ours-touches-nothing",
@@ -1319,8 +1317,7 @@
     "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
     "<PSTART>"
    ]
-  ],
-  "unswitched": "release SID has no Rust verb"
+  ]
  },
  {
   "name": "sessions-latest-and-pick-need-the-ledger",
@@ -1362,7 +1359,6 @@
     "<PSTART>"
    ]
   ],
-  "unswitched": "pick / latest have no Rust verb",
   "stdin": "\n"
  },
  {
@@ -1424,8 +1420,7 @@
     "(?:\\b[A-Z][a-z]{2} [A-Z][a-z]{2} \\d{1,2} \\d\\d:\\d\\d:\\d\\d \\d{4}\\b|\\be\\d{10,}\\b|\\bb[0-9a-f-]{36}:\\d+\\b)",
     "<PSTART>"
    ]
-  ],
-  "unswitched": "pick / latest have no Rust verb"
+  ]
  },
  {
   "name": "sessions-no-verb-prints-the-usage",
@@ -1462,7 +1457,6 @@
     "<PSTART>"
    ]
   ],
-  "unswitched": "usage text of the Python script",
   "stderr": false
  },
  {
