@@ -104,6 +104,8 @@ sys.stdin.read()
 open(T + '/calls', 'a').write(sys.argv[3] + '\n')
 if os.path.exists(T + '/down'):
     sys.stderr.write('no core daemon answers\n'); sys.exit(3)
+if os.path.exists(T + '/hang'):
+    import time; time.sleep(60)
 if sys.argv[3] == 'schedule.jobs':
     print(json.dumps({'jobs': [
         {'agent': 'echo', 'id': 'daily', 'cron': '0 8 * * *', 'task': 'say hi', 'paused': False, 'next': '2099-01-01T08:00'},
@@ -130,7 +132,11 @@ OUT=$(RUN_STATE=failed "$KITH" echo --info-json 2>/dev/null)
 check "switched: a failed run says failed" "is \"[j['last_status'] for j in d['schedules'] if j['id'] == 'daily']\" \"['failed']\""
 touch "$T/down"; OUT=$("$KITH" echo --info-json 2>/dev/null); rc=$?
 check "switched, core down: exit 0, the reason in errors.schedules, no kith rows, launchd rows kept" "[ $rc = 0 ] && is \"(sorted(j['source'] for j in d['schedules']), 'not answering' in d['errors']['schedules'], 'bad.plist' in d['errors']['schedules'])\" \"(['launchd', 'launchd', 'launchd'], True, True)\""
-rm "$T/down"; printf 'state=stepping\n' > "$KITH_MACHINE/core/cutover/schedules.switch"
+rm "$T/down"; touch "$T/hang"; OUT=$("$KITH" echo --info-json 2>/dev/null); rc=$?; rm "$T/hang"
+check "switched, core hung: the page still comes back, in about the cap, saying the core did not answer" "[ $rc = 0 ] && is \"('did not answer' in d['errors']['schedules'], d['skills'] is not None)\" \"(True, True)\""
+OUT=$(RUN_STATE=running "$KITH" echo --info-json 2>/dev/null)
+check "switched: a 'running' run whose process is gone is not shown as running" "is \"[j['last_status'] for j in d['schedules'] if j['id'] == 'daily']\" \"['done']\""
+printf 'state=stepping\n' > "$KITH_MACHINE/core/cutover/schedules.switch"
 printf '{"tick":"2026-10-22T10:00","last":{"echo/daily":{"at":"2026-10-22T08:00","pid":999999,"log":"/x","why":"due"}}}\n' > "$KITH_MACHINE/sched/state.json"
 : > "$T/calls"; OUT=$("$KITH" echo --info-json 2>/dev/null)
 check "stepping: the files again, the core is not asked" "is \"[j['id'] for j in d['schedules'] if j['source'] == 'kith']\" \"['daily', 'off']\" && [ ! -s $T/calls ]"

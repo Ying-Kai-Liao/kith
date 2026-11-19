@@ -308,14 +308,18 @@ def core_schedules(name):
     import time
     import kith_sched_core
     t0 = time.monotonic()
-    jobs = kith_sched_core.listing(name, timeout=CORE_WAIT)
-    runs = kith_sched_core.runs_of(name, timeout=max(1, CORE_WAIT - (time.monotonic() - t0)))
+    slow = {'lost': 'the Kith core did not answer within %d s' % CORE_WAIT}
+    jobs = kith_sched_core.listing(name, timeout=CORE_WAIT, **slow)
+    runs = kith_sched_core.runs_of(name, timeout=max(1, CORE_WAIT - (time.monotonic() - t0)), **slow)
     out = []
     for j in jobs:
         run = runs.get((name, j['id']))
+        state = (run.get('_state') or 'done') if run else None
+        if state == 'running' and run.get('pid') and not run.get('running'):   # its process died: the core ends the turn soon
+            state = 'done'
         out.append({'id': j.get('id'), 'cron': j.get('cron'), 'task': j.get('task') or '', 'paused': bool(j.get('paused')),
                     'last_run': local_iso(run['at']) if run and run.get('at') else None,
-                    'last_status': (run.get('_state') or 'done') if run else None,
+                    'last_status': state,
                     'next_run': None if j.get('paused') else local_iso(j.get('next')), 'source': 'kith',
                     'person': j.get('person')})
     return out

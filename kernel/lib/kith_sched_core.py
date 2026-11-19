@@ -99,7 +99,7 @@ def log_of(agent, jid):
     return os.path.join(runs, names[-1]) if names else None
 
 
-def runs_of(agent=None, jid=None, timeout=60):
+def runs_of(agent=None, jid=None, timeout=60, **kw):
     """The newest run of each job, from the core: {(agent, id): run} with `log` filled in."""
     params = {}
     if agent:
@@ -107,7 +107,7 @@ def runs_of(agent=None, jid=None, timeout=60):
     if jid:
         params['id'] = jid
     out = {}
-    for v in core('schedule.runs', params, timeout=timeout).get('runs', []):
+    for v in core('schedule.runs', params, timeout=timeout, **kw).get('runs', []):
         run = {'agent': v['agent'], 'id': v['id'], 'at': v.get('at'), 'why': v.get('why'), 'pid': v.get('pid'),
                'log': v.get('log') or (None if v.get('state') in ('queued', 'cancelled') else log_of(v['agent'], v['id'])),
                'running': bool(v.get('running')), '_state': v.get('state')}
@@ -131,9 +131,9 @@ def job_row(r, last=None):
     return row
 
 
-def listing(agent=None, timeout=60):
+def listing(agent=None, timeout=60, **kw):
     """The jobs kith-sched lists: the cron ones (a routine that has only a trigger is the host's to show)."""
-    ans = core('schedule.jobs', {'agent': agent} if agent else {}, timeout=timeout)
+    ans = core('schedule.jobs', {'agent': agent} if agent else {}, timeout=timeout, **kw)
     return [r for r in ans.get('jobs', []) if r.get('cron') is not None]
 
 
