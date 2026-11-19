@@ -80,7 +80,7 @@ def core(method, params, lost):
     if not isinstance(ans, dict):
         return {}
     if ans.get('noCore'):
-        # An embedded core with no database: on a switched Mac that is a lost core.db, never a fresh start.
+        # An embedded core with no database: on a switched Mac that is a lost core database, never a fresh start.
         raise Fail('there is no core database on this Mac, so nothing was recorded')
     return ans
 

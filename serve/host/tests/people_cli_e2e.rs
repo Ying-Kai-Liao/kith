@@ -72,7 +72,8 @@ impl Lab {
         for agent in ["mel", "house"] {
             let role = kith_home.join("agents").join(agent).join("role");
             std::fs::create_dir_all(&role).unwrap();
-            std::fs::write(role.join("agent.md"), format!("---\nname: {agent}\ndescription: test\n---\nbody\n")).unwrap();
+            std::fs::write(role.join("agent.md"), format!("---\nname: {agent}\ndescription: test\n---\nbody\n"))
+                .unwrap();
         }
         let real = repo().join("kernel");
         std::os::unix::fs::symlink(real.join("lib"), kernel.join("lib")).unwrap();
@@ -207,7 +208,8 @@ impl Lab {
 impl Drop for Lab {
     fn drop(&mut self) {
         // The holder the host started is detached: ended with the test.
-        if let Ok(out) = Command::new(KITH).env_clear().envs(self.env(None)).args(["kernel", "core-status", "--json"]).output()
+        if let Ok(out) =
+            Command::new(KITH).env_clear().envs(self.env(None)).args(["kernel", "core-status", "--json"]).output()
             && let Some(pid) =
                 serde_json::from_slice::<Value>(&out.stdout).ok().and_then(|v| v["holder"]["pid"].as_u64())
         {

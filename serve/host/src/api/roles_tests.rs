@@ -191,7 +191,16 @@ async fn every_router_method_is_denied_to_members_unless_listed() {
         assert!(!roles::member_may(m), "{m} is local-only and must not be on the member list");
         assert!(call(&r, &sam, m, json!({})).await.is_err());
     }
-    for m in ["createInvite", "invites", "revokeInvite", "people", "setPersonAccess", "enforcePersonAccess", "revokePerson", "audit"] {
+    for m in [
+        "createInvite",
+        "invites",
+        "revokeInvite",
+        "people",
+        "setPersonAccess",
+        "enforcePersonAccess",
+        "revokePerson",
+        "audit",
+    ] {
         assert!(!roles::member_may(m), "{m} is the owner's");
         assert!(call(&r, &sam, m, json!({})).await.unwrap_err().is::<NotAllowed>());
     }
