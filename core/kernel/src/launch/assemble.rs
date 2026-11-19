@@ -229,6 +229,7 @@ fn cost_core(
     let cenv = crate::cost::Env {
         now: env.get("KITH_COST_NOW").cloned(),
         person_was: person_was.to_owned(),
+        ..crate::cost::Env::default()
     };
     let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
     let out = crate::cost::run(&paths, &cenv, &args);
@@ -408,6 +409,38 @@ pub(crate) fn knows_readfence(bin: &Path) -> bool {
         std::time::Duration::from_secs(10),
     )
     .is_some_and(|o| o.contains("kith kernel readfence"))
+}
+
+/// Whether `bin` lists `module` in `kernel version`: the running program, or one whose `kernel version` names it. An older kith
+/// has `kernel cost` (the read verbs) but not the `cost-ledger` module, which `tag` and `record` are part of.
+pub(crate) fn knows_module(bin: &Path, module: &str) -> bool {
+    let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
+    if std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .is_ok_and(|me| me == real)
+    {
+        return crate::MODULES.contains(&module);
+    }
+    secrets::run_with_timeout(
+        bin,
+        &["kernel", "version"],
+        std::time::Duration::from_secs(10),
+    )
+    .is_some_and(|o| o.contains(&format!("\"{module}\"")))
+}
+
+/// The program the `SessionStart` hook runs for the cost ledger (`kith kernel cost tag`): `kith_bin` when `cost` is switched (a
+/// line in `lib/core-switched.txt` and no `KITH_CORE=python`) and the program has the `cost-ledger` module. `None` keeps the
+/// Python hook, `bin/kith-cost tag`, which stays as the rollback and for runs that hold the old path. `kith_core_bin cost` in
+/// lib/kith-core.sh decides the same way for the bash launch.
+pub fn cost_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Option<String> {
+    kith_bin
+        .filter(|b| {
+            !b.is_empty()
+                && switched(kernel, env, "cost")
+                && knows_module(Path::new(b), "cost-ledger")
+        })
+        .map(str::to_owned)
 }
 
 /// `kith_paths.guest_tmp_ready`: the guest's Claude Code temp folder, made.
@@ -1309,6 +1342,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .clone()
         .filter(|b| knows_readfence(Path::new(b)))
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
+    let cost_bin = cost_hook_bin(kernel, &env, kith_bin.as_deref());
     if perm_mode.is_empty() {
         perm_mode.clear();
     }
@@ -1339,6 +1373,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             user_home: &home_dir,
             kith_bin: kith_bin.as_deref(),
             fence_bin: fence_bin.as_deref(),
+            cost_bin: cost_bin.as_deref(),
             plugins_json: &plugins_json,
             owner_terminal: false,
             api_helper: &bget(&be, "backup_api_helper"),

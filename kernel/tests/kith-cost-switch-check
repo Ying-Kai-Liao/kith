@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # kith-cost-switch-check — the `cost` switch (kernel/lib/core-switched.txt): the verbs the core ports (limit, spent, sync,
 # usage --json, agent NAME --json, members, bots --json) are answered by the Rust core when the line is there, by the Python
-# when KITH_CORE=python or the line is gone; tag, record, the text reports and a bare `kith cost` stay Python. Which side
+# when KITH_CORE=python or the line is gone; tag, record, the text reports and a bare `kith cost` are the core's too (the module `cost-ledger`). Which side
 # answered is read from a stub standing in for kernel/bin/kith-cost in a copy of the kernel folder: it logs its call and
 # runs the real script. Also the launch's budget checks on both paths (the bash script and `--launch-json`): the owner, a
 # member under and over a budget, a bot guest, a guest whose budget is NaN, inf or text (refused, as the Python), and
@@ -46,7 +46,7 @@ reset() { rm -f "$LOG"; touch "$LOG"; }
 AUTH() { python3 "$T/k/bin/kith-auth" "$@"; }
 SW=$T/k/lib/core-switched.txt
 cp "$SW" "$T/switched.keep"
-grep -q '^cost	cost$' "$SW" || { echo "FAIL core-switched.txt has no cost line"; exit 1; }
+grep -q '^cost	cost-ledger	cost$' "$SW" || { echo "FAIL core-switched.txt has no cost line"; exit 1; }
 
 AUTH person kai owner >/dev/null; AUTH person sam >/dev/null; AUTH person eve >/dev/null
 AUTH bot bot-s --of sam name=Scout >/dev/null
@@ -87,10 +87,12 @@ reset; KITH_CORE=python "$KITH" cost limit echo --sh > "$T/py.out" 2>/dev/null
 check "limit set and over: same bytes either way" "[ \"\$(calls '')\" -ge 1 ] && cmp -s '$T/rust.out' '$T/py.out'"
 "$KITH" echo set limit 0 >/dev/null 2>&1
 
-# 3. tag and record, the text reports and a bare `kith cost` stay Python with the line on.
+# 3. tag and record, the text reports and a bare `kith cost` are the core's with the line on, and the Python with KITH_CORE=python.
 for line in "tag x" "record" "people month" "month" ""; do
   reset; "$KITH" cost $line >/dev/null 2>&1 </dev/null
-  check "switched: kith cost ${line:-<bare>} still reaches kith-cost" "[ \"\$(calls '')\" -ge 1 ]"
+  check "switched: kith cost ${line:-<bare>} is the core's, kith-cost is not run" "[ \"\$(calls '')\" = 0 ]"
+  reset; KITH_CORE=python "$KITH" cost $line >/dev/null 2>&1 </dev/null
+  check "KITH_CORE=python: kith cost ${line:-<bare>} is Python's" "[ \"\$(calls '')\" -ge 1 ]"
 done
 
 # 4. Rollback: the line gone, kith-cost is asked again.

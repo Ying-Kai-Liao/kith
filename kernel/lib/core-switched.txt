@@ -7,4 +7,4 @@ account	account
 account-state	account-state	accounts
 pkg	pkg
 project-id	project
-cost	cost
+cost	cost-ledger	cost

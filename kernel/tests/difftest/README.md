@@ -190,8 +190,13 @@ subagent `.meta.json`), a hand-written `cost.db`, the bridge's `state.json`, an 
 periods, the forecast and the limit's month. Cases pin it with `TZ`, including Sydney across the daylight-saving start (a month's midnight keeps
 the offset of "now", as the Python does), New York, Lord Howe, December and February. `tag` and `record` keep the real clock.
 
-Not covered (no Rust side yet, `kith kernel cost` exits 2): `today|week|month|all`, `agents`, `agent NAME` as text, `people`, `session`, `csv`,
-and the hooks `tag` / `record`. A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
+R2 added the rest: `cost-text-*` (`today|week|month|all`, `agents`, `agent NAME` as text, `people`, `session`, `csv`, the usage errors),
+`cost-tag-*` (the SessionStart hook: every env variable, empty-but-set values, replays, an old ledger, odd stdin) and `cost-record-*`
+(`adapters/harness.py`'s row). The text reports start their periods from the real clock (Python's `since_of` ignores `KITH_COST_NOW`), so
+the cases that depend on it (`cost-text-relative-*`) seed rows with sqlite's `strftime('now', '-N days')` and mask days and times; the fixed-date
+cases use `all`. Tag/record error texts after `kith-cost tag: ` are masked (`<E>`): Python's exception wording is not frozen, one stderr line
+and exit 0 are. Left out on purpose: reports on a NULL project, a model-less row in `agent NAME`, NULL output tokens (the Python
+raises a traceback; the core prints a line). A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
 that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`). This is the one intended
 difference of the `cost` switch (`kernel/lib/core-switched.txt`, `kernel/tests/kith-cost-switch-check`): the Python raises, the core does not.
 

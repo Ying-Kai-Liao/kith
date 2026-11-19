@@ -131,6 +131,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -279,6 +295,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -429,6 +461,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -576,6 +624,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -726,6 +790,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -874,6 +954,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -1026,6 +1122,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -1180,6 +1292,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -1331,6 +1459,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -1484,6 +1628,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -1635,6 +1795,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -1788,6 +1964,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -1939,6 +2131,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -2092,6 +2300,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -2243,6 +2467,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -2396,6 +2636,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -2543,6 +2799,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -2692,6 +2964,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -2835,6 +3123,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -2983,6 +3287,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -3148,6 +3468,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -3312,6 +3648,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -3460,6 +3812,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -3607,6 +3975,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -3760,6 +4144,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -3908,6 +4308,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -4058,6 +4474,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -4206,6 +4638,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -4364,6 +4812,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -4520,6 +4984,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -4678,6 +5158,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -4834,6 +5330,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -4993,6 +5505,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -5149,6 +5677,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -5307,6 +5851,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -5463,6 +6023,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -5634,6 +6210,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -5794,6 +6386,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -5956,6 +6564,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -6113,6 +6737,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -6272,6 +6912,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -6428,6 +7084,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -6586,6 +7258,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -6742,6 +7430,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -6903,6 +7607,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -7185,6 +7905,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -7466,6 +8202,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -7626,6 +8378,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -7778,6 +8546,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -7939,6 +8723,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -8091,6 +8891,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -8252,6 +9068,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -8404,6 +9236,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -8562,6 +9410,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -8718,6 +9582,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -8865,6 +9745,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -9014,6 +9910,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -9181,6 +10093,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -9347,6 +10275,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -9497,6 +10441,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -9658,6 +10618,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -9811,6 +10787,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -9966,6 +10958,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -10116,6 +11124,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -10271,6 +11295,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -10421,6 +11461,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -10576,6 +11632,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -10729,6 +11801,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -10884,6 +11972,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -11036,6 +12140,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -11190,6 +12310,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -11347,6 +12483,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -11502,6 +12654,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -11659,6 +12827,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -11750,6 +12934,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -11852,6 +13052,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -11952,6 +13168,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -12054,6 +13286,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -12154,6 +13402,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -12313,6 +13577,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -12469,6 +13749,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -12632,6 +13928,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -12802,6 +14114,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -12958,6 +14286,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -13117,6 +14461,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -13274,6 +14634,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -13471,6 +14847,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -13667,6 +15059,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -13753,6 +15161,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -13826,6 +15250,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -13975,6 +15415,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -14066,6 +15522,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -14167,6 +15639,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -14337,6 +15825,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -14501,6 +16005,22 @@
   ],
   "normalize": [
    [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -14651,6 +16171,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
@@ -14807,6 +16343,22 @@
    ]
   ],
   "normalize": [
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG>\""
+   ],
+   [
+    "^\"[^\"]*kith-cost\" tag$",
+    "<COSTTAG>"
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG>"
+   ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
