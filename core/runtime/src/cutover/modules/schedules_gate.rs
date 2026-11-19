@@ -90,21 +90,29 @@ pub(super) fn launchd_has_holder(home: &Path) -> Result<(), String> {
 
 /// [`launchd_has_holder`] for a host that runs `kith` with `KITH_HOLDER_BIN` = `over`.
 pub(super) fn holder_for(kith: Option<&Path>, over: Option<String>) -> Result<(), String> {
-    if crate::holder_link::holder_exe(over.map(Into::into), kith).is_some() {
+    if crate::holder_link::holder_exe(over.clone().map(Into::into), kith).is_some() {
         return Ok(());
     }
+    // A set override is the only place the host looks (it does not fall back to beside kith), so name it.
+    let looked = match over.filter(|o| !o.is_empty()) {
+        Some(o) => format!("its KITH_HOLDER_BIN {o} is not a file"),
+        None => format!(
+            "none beside {}",
+            kith.map_or_else(
+                || "kith (no program found in dev.kith.serve.plist)".to_owned(),
+                |k| k.display().to_string()
+            )
+        ),
+    };
     Err(format!(
-        "there is no kith-holder for launchd's host ({}; looked for KITH_HOLDER_BIN in its plist, then beside kith), so cron turns would stay queued; update kith first",
-        kith.map_or_else(
-            || "no program found in dev.kith.serve.plist".to_owned(),
-            |k| k.display().to_string()
-        )
+        "there is no kith-holder for launchd's host ({looked}), so cron turns would stay queued; update kith first"
     ))
 }
 
 /// `KITH_HOLDER_BIN` in the plist's `EnvironmentVariables`, unescaped.
 fn plist_env_holder(xml: &str) -> Option<String> {
     let env = xml.split_once("<key>EnvironmentVariables</key>")?.1;
+    let env = env.split_once("</dict>").map_or(env, |(d, _)| d);
     let rest = env.split_once("<key>KITH_HOLDER_BIN</key>")?.1;
     let value = rest.split_once("<string>")?.1.split_once("</string>")?.0;
     Some(unescape(value))

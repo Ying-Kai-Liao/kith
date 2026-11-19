@@ -187,34 +187,34 @@ fn the_real_lister_finds_this_homes_ticks_and_not_run_turn_or_another_homes() {
     let t = tempfile::tempdir().unwrap();
     let mine = t.path().join("my home/bin");
     let other = t.path().join("other/bin");
-    let mut tick_p = sleeper(&mine, "tick");
-    let mut run_turn = sleeper(&t.path().join("my home/run"), "run-turn");
-    let mut theirs = sleeper(&other, "tick");
+    let (tick_p, run_turn, theirs) = (
+        sleeper(&mine, "tick"),
+        sleeper(&t.path().join("my home/run"), "run-turn"),
+        sleeper(&other, "tick"),
+    );
+    let (tick_pid, run_pid, theirs_pid) = (tick_p.id(), run_turn.id(), theirs.id());
+    let _reap = Reaped(vec![tick_p, run_turn, theirs]);
     let program = mine.join("kith-sched").canonicalize().unwrap();
     // The new processes may not have exec'd their interpreters yet: "not listed" means nothing before they show.
-    shows_own_argv(tick_p.id(), "tick");
-    shows_own_argv(run_turn.id(), "run-turn");
-    shows_own_argv(theirs.id(), "tick");
+    shows_own_argv(tick_pid, "tick");
+    shows_own_argv(run_pid, "run-turn");
+    shows_own_argv(theirs_pid, "tick");
     let until = std::time::Instant::now() + Duration::from_secs(5);
     let found = loop {
         let l = list_ticks(&program).unwrap();
-        if l.iter().any(|x| x.pid == tick_p.id()) || std::time::Instant::now() > until {
+        if l.iter().any(|x| x.pid == tick_pid) || std::time::Instant::now() > until {
             break l;
         }
         std::thread::sleep(Duration::from_millis(50));
     };
     let pids: Vec<u32> = found.iter().map(|x| x.pid).collect();
     // The shell may have forked its `sleep` and not yet exec'd it: that child shows the same arguments, so it may be listed too.
-    assert!(pids.contains(&tick_p.id()), "{found:?}");
+    assert!(pids.contains(&tick_pid), "{found:?}");
     assert!(
-        !pids.contains(&run_turn.id()) && !pids.contains(&theirs.id()),
+        !pids.contains(&run_pid) && !pids.contains(&theirs_pid),
         "{found:?}"
     );
     assert!(found.iter().all(|x| x.stamp.is_some()));
-    for c in [&mut tick_p, &mut run_turn, &mut theirs] {
-        c.kill().unwrap();
-        c.wait().unwrap();
-    }
 }
 
 #[test]
