@@ -4,30 +4,42 @@
 # The usage text is `kith kernel project-id -h`. Same stdout, stderr and exit codes as the program.
 #
 # Finds the program without Python, the way the Python kernel's lookup did minus its `memory hook` probe: the first candidate
-# whose `kernel version` lists "project-guest" (a program without it refuses a guest run, and there is no Python to go back to):
+# whose `kernel version` lists "project" ("project-guest" for a guest run: a program without it refuses a guest, and there is no
+# Python to go back to):
 #   $KITH_BIN, the release this file sits in (<release>/share/kith/kernel/bin -> <release>/bin/kith), a kith on PATH that is
 #   not a kernel entry, the host kith serve installed, a build in the checkout (the builds come first with KITH_DEV_BIN=1).
 # None found: one line on stderr and exit 3 (the code of "this moved", as for a tombstone). Callers treat any non-zero as
 # "no project", and the line shows.
 self=$0
-while [ -L "$self" ]; do
+n=0
+while [ -L "$self" ] && [ $n -lt 16 ]; do
   link=$(readlink "$self") || break
   case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+  n=$((n + 1))
 done
 # The logical path, as bin/kith keeps it (it may be a link to a path with spaces).
 kernel=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd)
+if [ -z "$kernel" ]; then
+  echo "project-id: cannot find the kernel folder this script sits in" >&2
+  exit 3
+fi
+# A guest run (token and socket both set) needs a program that answers it; the owner's run, any that has the verb.
+need='"project"'
+if [ -n "${KITH_RUN_TOKEN:-}" ] && [ -n "${KITH_RUN_SOCKET:-}" ]; then need='"project-guest"'; fi
 
 # A kith program: executable, not a kernel bash entry (the last three parts of its real path are kernel/bin/kith), and its
-# `kernel version` lists project-guest.
+# `kernel version` lists the module $need names.
 usable() {
   [ -n "$1" ] && [ -f "$1" ] && [ -x "$1" ] || return 1
   f=$1
-  while [ -L "$f" ]; do
+  k=0
+  while [ -L "$f" ] && [ $k -lt 16 ]; do
     l=$(readlink "$f") || return 1
     case $l in /*) f=$l ;; *) f=$(dirname "$f")/$l ;; esac
+    k=$((k + 1))
   done
   case $(cd "$(dirname "$f")" 2>/dev/null && pwd -P)/$(basename "$f") in */kernel/bin/kith) return 1 ;; esac
-  "$1" kernel version 2>/dev/null | grep -q '"project-guest"'
+  "$1" kernel version 2>/dev/null | grep -q "$need"
 }
 # Each try sets bin and succeeds on a usable program (a path may have a space: nothing here is split).
 try() { usable "$1" && bin=$1; }

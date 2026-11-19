@@ -392,6 +392,23 @@ pub(crate) fn usable_kith_bin(bin: &Path) -> bool {
     .is_some_and(|o| o.to_lowercase().contains("phase"))
 }
 
+/// Whether `bin`'s `kernel version` lists `module`: the running program, or one that says so.
+pub(crate) fn lists_module(bin: &Path, module: &str) -> bool {
+    let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
+    if std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .is_ok_and(|me| me == real)
+    {
+        return true;
+    }
+    secrets::run_with_timeout(
+        bin,
+        &["kernel", "version"],
+        std::time::Duration::from_secs(10),
+    )
+    .is_some_and(|o| o.contains(&format!("\"{module}\"")))
+}
+
 /// Whether `bin` has the `kernel readfence` verb: the running program, or one that answers `kernel readfence --help`. An older
 /// kith would read `kernel` as an agent name, so the launch uses the running program for the fence instead.
 pub(crate) fn knows_readfence(bin: &Path) -> bool {
@@ -1296,6 +1313,16 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .filter(|b| usable_kith_bin(Path::new(b)))
         .map(str::to_owned)
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
+    // A guest's `project-id` is the stub at bin/project-id, which only takes a program whose `kernel version` lists project-guest
+    // and runs inside the sandbox, where the program this opens is the only one it can start: so a guest's program is the launch's
+    // only when it lists the module, else this one (it always does).
+    let kith_bin = if p_owner {
+        kith_bin
+    } else {
+        kith_bin
+            .filter(|b| lists_module(Path::new(b), "project-guest"))
+            .or_else(|| std::env::current_exe().ok().map(|e| s(&e)))
+    };
     // An older kith has no `kernel readfence`; this program always has it.
     let fence_bin = kith_bin
         .clone()

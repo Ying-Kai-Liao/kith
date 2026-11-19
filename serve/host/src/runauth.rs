@@ -929,19 +929,20 @@ async fn project_info(args: Vec<String>) -> Response {
         let bin = crate::agent::hq::bin()?;
         let kernel = bin.canonicalize().unwrap_or(bin).parent()?.parent()?.to_path_buf();
         let home = kith_kernel::paths::process_home();
-        let ctx = kith_kernel::project::Ctx {
-            state: kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env).state,
-            home,
-            cwd: std::env::current_dir().unwrap_or_default(),
-            guest: None,
-        };
-        Some(kith_kernel::project::run(&ctx, &args))
+        let state = kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env).state;
+        Some(project_answer(state, home, &args))
     });
     match work.await {
         Ok(Some(out)) => Response::Ok { stdout: out.stdout, stderr: out.stderr, code: out.code },
         Ok(None) => Response::refused("kith isn't available on this computer"),
         Err(_) => Response::refused("could not run that"),
     }
+}
+
+/// The answer of `project-id ARGS` on the registry in `state`, for the host's side of the socket (not a guest run: `guest: None`).
+fn project_answer(state: PathBuf, home: PathBuf, args: &[String]) -> kith_kernel::project::Out {
+    let ctx = kith_kernel::project::Ctx { state, home, cwd: std::env::current_dir().unwrap_or_default(), guest: None };
+    kith_kernel::project::run(&ctx, args)
 }
 
 /// Env names the recall child must not inherit from the host: identity comes from the token only.
@@ -1337,6 +1338,26 @@ mod tests {
             std::fs::set_permissions(bin.join(tool), std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         bin.join("kith")
+    }
+
+    #[test]
+    fn the_host_answers_a_guests_info_from_the_registry_itself() {
+        let dir = std::env::temp_dir().join(format!("kr-reg-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("projects.json"),
+            r#"{"projects": {"alpha": {"remotes": [], "paths": [], "home": "/h/alpha"}, "beta": {"parent": "alpha", "remotes": [], "paths": []}}}"#,
+        )
+        .unwrap();
+        let ask = |args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+            project_answer(dir.clone(), dir.clone(), &args)
+        };
+        let got = ask(&["--info", "beta"]);
+        assert_eq!((got.stdout.as_str(), got.code), ("beta\t-\nalpha\t/h/alpha\n", 0), "{got:?}");
+        let got = ask(&["--info", "nope"]);
+        assert_eq!(got.code, 1, "{got:?}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]

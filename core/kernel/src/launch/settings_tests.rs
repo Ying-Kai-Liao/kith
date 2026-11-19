@@ -252,7 +252,8 @@ fn guest_sandbox_is_closed_and_fails_closed() {
 #[test]
 fn guest_may_read_the_kith_program_and_every_link_on_the_way_to_it() {
     // ~/.local/bin/kith -> ~/.kith/cli/current/bin/kith, cli/current -> 0.1: a guest's stub starts `kith kernel project-id`,
-    // and the sandbox reads each link as a link before it follows it.
+    // and the sandbox reads each link as a link before it follows it. `link_chain` follows the file's own links; the link in the
+    // middle of a path (cli/current) is added by the walk up from each allowed path, which the last assertion below pins.
     let t = Tree::new();
     let root = t.root.clone();
     t.put("home/.kith/cli/0.1/bin/kith", "#!/bin/sh\n");

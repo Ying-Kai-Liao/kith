@@ -5,7 +5,8 @@
 # refused), so the transport is checked byte for byte: the request line, the relayed stdout/stderr and exit code, and each
 # way the socket can fail. Run on kernel/bin/project-id before the guest client moved to Rust (core/kernel/src/project/guest.rs)
 # and after, with the same expectations. Needs, since the move, the Rust program: KITH_BIN or KITH_DIFFTEST_BIN (without
-# one the check says so and exits 0).
+# one the check says so and exits 0). The last section (a stand-in guest sandbox, sandbox-exec) runs on macOS only and in no CI
+# job: run it by hand on a Mac with the built program.
 #
 #   [KITH_DIFFTEST_BIN=/path/to/kith] kernel/tests/kith-project-id-guest-check
 set -uo pipefail
@@ -179,6 +180,25 @@ check "an empty token: the owner path" "said owner-only-marker && [ $rc = 0 ] &&
 (cd "$T/w/mine" && env KITH_RUN_TOKEN=good KITH_RUN_SOCKET= "$P" >"$T/out" 2>"$T/err"); rc=$?
 check "an empty socket path: the owner path" "said owner-only-marker && [ $rc = 0 ] && [ ! -e $T/req.log ]"
 kill $FH 2>/dev/null; wait $FH 2>/dev/null
+
+# The stub's choice of program (the Python had none): an older program that has the verb but not the guest client is good enough
+# for the owner and refused for a guest, which then has nothing to run and is told so.
+if ! grep -q '^import ' "$P"; then
+  cat > "$T/oldkith" <<'SH'
+#!/bin/sh
+[ "$1 $2" = "kernel version" ] && echo '{"abi":1,"modules":["project"]}'
+[ "$1 $2" = "kernel project-id" ] && echo old-program-ran
+exit 0
+SH
+  chmod +x "$T/oldkith"
+  old_env() { env -u KITH_RUN_TOKEN -u KITH_RUN_SOCKET -u KITH_DEV_BIN PATH=/usr/bin:/bin CARGO_TARGET_DIR="$T/none" KITH_BIN="$T/oldkith" "$@"; }
+  old_env "$P" >"$T/out" 2>"$T/err"; rc=$?
+  check "owner: a program with the verb but no guest client still answers" "said old-program-ran && [ $rc = 0 ]"
+  old_env KITH_RUN_TOKEN=good KITH_RUN_SOCKET="$T/s.sock" "$P" >"$T/out" 2>"$T/err"; rc=$?
+  check "guest: the same program is refused, one line, exit 3" "[ $rc = 3 ] && [ ! -s $T/out ] && [ \"\$(wc -l < $T/err | tr -d ' ')\" = 1 ] && grep -q 'was not found' $T/err"
+  env -u KITH_RUN_TOKEN -u KITH_RUN_SOCKET PATH=/usr/bin:/bin CARGO_TARGET_DIR="$T/none" KITH_BIN="$T/nothing" "$P" >"$T/out" 2>"$T/err"; rc=$?
+  check "no program at all: one line on stderr and exit 3" "[ $rc = 3 ] && [ ! -s $T/out ] && grep -q 'was not found' $T/err"
+fi
 
 # A guest's Bash runs in an OS sandbox that reads nothing but what its settings allow (macOS only, a stand-in profile built from the
 # generated allowRead/denyRead of a real guest launch). The stub must start the kith program from inside it: the program sits in

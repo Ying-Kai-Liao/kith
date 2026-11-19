@@ -149,10 +149,10 @@ try:
     claude.chmod(0o755)
     stub = T / 'fakebin' / 'kith-bin'   # the host's binary, which the memory hooks run: here, by its path only
     # The stub bin/project-id runs `kernel project-id` on a program whose `kernel version` lists project-guest: this one says only
-    # that (the router then keeps every other verb on the Python, as before) and hands `kernel project-id` to the real program,
+    # those two (the router then keeps every other verb on the Python, as before) and hands `kernel project-id` to the real program,
     # KITH_BIN or KITH_DIFFTEST_BIN of this check's own environment.
     stub.write_text('#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "<PHASE>"\n'
-                    '[ "$1 $2" = "kernel version" ] && echo \'{"abi":1,"modules":["project-guest"]}\'\n'
+                    '[ "$1 $2" = "kernel version" ] && echo \'{"abi":1,"modules":["project","project-guest"]}\'\n'
                     '[ "$1 $2" = "kernel project-id" ] && exec "%s" "$@"\nexit 0\n' % REAL_KITH)
     stub.chmod(0o755)
     env = {k: v for k, v in os.environ.items()

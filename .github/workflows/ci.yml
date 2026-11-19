@@ -330,7 +330,7 @@ jobs:
             host_core:
               # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
               # memory and summary), and the libs those programs load on every call.
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-project-id-*-check,kernel/tests/kith-project-check,kernel/tests/kith-contract-check,kernel/tests/kith-load-check,kernel/tests/kith-json-misc-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -773,6 +773,47 @@ jobs:
           cargo clippy --manifest-path host/Cargo.toml -p kith-attach --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-attach --locked
 
+  # The kernel checks that need the kith program: `bin/project-id` is a stub for `kith kernel project-id`, so a check that registers
+  # or looks up a project (kith project, a launch with -p) or the guest client itself runs against the built program. The shards
+  # above have none. Runs on any kernel change, like them; only the one `kith` binary is built (the host's cache is restored).
+  kernel-program:
+    name: kernel checks with the kith program
+    needs: changes
+    if: needs.changes.outputs.kernel == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install pinned toolchain
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: host-linux-test
+          save-if: false
+      - name: Build the kith program
+        run: cargo build --manifest-path serve/host/Cargo.toml --bin kith
+      - name: Checks
+        run: |
+          failed=0
+          for c in kernel/tests/kith-project-id-guest-check kernel/tests/kith-project-id-lock-check kernel/tests/kith-project-check \
+                   kernel/tests/kith-contract-check kernel/tests/kith-load-check kernel/tests/kith-json-misc-check; do
+            echo "::group::$c"
+            # stdin from /dev/null: a check that reads stdin must not eat the rest of the list.
+            if KITH_BIN="$PWD/serve/host/target/debug/kith" "$c" </dev/null; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error title=kernel check failed::$c"
+              failed=$((failed + 1))
+            fi
+          done
+          [ "$failed" = 0 ] || { echo "$failed check(s) failed, see the ::error lines above"; exit 1; }
+
   # Builds every test binary once and ships them as a nextest archive, so the shards below only run tests.
   host-build:
     needs: changes
@@ -828,14 +869,6 @@ jobs:
           # The pkg switch and the project-id stub: the launch's pkg lookup is the core's, per verb, and project-id (a stub for the
           # Rust verb) is the program's in the bash launch and in process in the Rust one.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
-          # project-id is `kith kernel project-id` behind the stub kernel/bin/project-id: its guest client (the run socket, a fake host),
-          # the lock of parallel registers, and the kernel checks that register or look up a project (they need the program).
-          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-project-id-guest-check
-          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-project-id-lock-check
-          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-project-check
-          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-contract-check
-          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-load-check
-          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-json-misc-check
           # The cost switch: the ported kith-cost verbs are the core's, tag/record stay Python, and the launch's budget checks hold on both paths.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
           # The revoke stopgap: kith-auth reaches the core with no daemon, through the embedded core-call.
@@ -1360,7 +1393,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
-    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, registry-step, schedule-fire, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, kernel-program, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, registry-step, schedule-fire, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
