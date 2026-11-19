@@ -655,3 +655,130 @@ fn a_kith_sched_tick_that_started_before_the_step_holds_it_up_until_it_ends() {
     assert!(text(&through).contains("schedules: switched"), "{}", text(&through));
     drop(tick);
 }
+
+// --- (e) -------------------------------------------------------------------------------------------------------------------
+
+/// `kith-sched ARGS --json` as one JSON answer and its exit code.
+fn cli_json(lab: &Lab, args: &[&str]) -> (i32, Value) {
+    let mut all: Vec<&str> = args.to_vec();
+    all.push("--json");
+    let out = lab.sched(None, &all);
+    let v = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{args:?}: {e}: {}", text(&out)));
+    (out.status.code().unwrap_or(-1), v)
+}
+
+fn jobs_text(lab: &Lab, agent: &str) -> String {
+    std::fs::read_to_string(lab.kith_home.join("agents").join(agent).join("jobs.json")).unwrap_or_default()
+}
+
+fn job_rows(v: &Value, id: &str) -> Value {
+    v["jobs"].as_array().unwrap().iter().find(|j| j["id"] == id).unwrap_or_else(|| panic!("no {id} in {v}")).clone()
+}
+
+fn count(lab: &Lab, sql: &str) -> i64 {
+    lab.db().query_row(sql, [], |r| r.get(0)).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn kith_schedule_on_a_switched_mac_talks_to_the_core_in_kith_scheds_words() {
+    let lab = Lab::new("e", None);
+    lab.step_before_schedules();
+    let hourly = json!({"id": "hourly", "cron": "0 * * * *", "task": "do it"});
+    std::fs::write(lab.kith_home.join("agents/mel/jobs.json"), format!("{}\n", json!([hourly]))).unwrap();
+    // What kith-sched itself answers before the switch: the shapes, and the file `add` leaves, to compare with after it.
+    let (rc, before_ls) = cli_json(&lab, &["ls", "mel"]);
+    assert_eq!(rc, 0, "{before_ls}");
+    let add = |agent: &'static str| ["add", agent, "0 9 * * *", "Do B!", "-m", "sonnet", "-e", "low"];
+    let (rc, before_add) = cli_json(&lab, &add("house"));
+    assert_eq!(rc, 0, "{before_add}");
+    let house_file = jobs_text(&lab, "house");
+    let b: Value = serde_json::from_str(&house_file).unwrap();
+    assert_eq!(house_file, format!("{}\n", serde_json::to_string_pretty(&b).unwrap()), "kith-sched's file format");
+
+    lab.step_ok("schedules");
+    let host = lab.start_host().await;
+    lab.wait_core_gate();
+
+    // ls: the same job rows, key for key and value for value, as kith-sched printed.
+    let mut now_ls = Value::Null;
+    until("the daemon to answer ls", 30, || {
+        let (rc, v) = cli_json(&lab, &["ls", "mel"]);
+        now_ls = v;
+        rc == 0
+    });
+    assert_eq!(now_ls["jobs"], before_ls["jobs"], "ls changed shape across the switch");
+    assert!(now_ls.as_object().unwrap().contains_key("ticking"));
+    // add: the file it leaves is the one kith-sched writes, the answer has the same keys, the index has the job at once.
+    let (rc, added) = cli_json(&lab, &add("mel"));
+    assert_eq!(rc, 0, "{added}");
+    let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+    assert_eq!(keys(&added), keys(&before_add));
+    assert_eq!(keys(&added["job"]), keys(&before_add["job"]));
+    assert_eq!(added["job"]["id"], "do-b");
+    let want = json!([hourly, b[0]]);
+    assert_eq!(jobs_text(&lab, "mel"), format!("{}\n", serde_json::to_string_pretty(&want).unwrap()));
+    assert_eq!(count(&lab, "SELECT count(*) FROM sched_jobs WHERE agent = 'mel'"), 2);
+    // A guest's run adds as that person: the CLI is the owner socket's caller, the guest's token is not involved.
+    let guest = lab
+        .cmd("python3")
+        .arg(lab.kernel.join("bin/kith-sched"))
+        .args(["add", "mel", "5 5 * * *", "guest job", "--json"])
+        .env("KITH_PERSON", "sam")
+        .output()
+        .unwrap();
+    let guest: Value = serde_json::from_slice(&guest.stdout).unwrap_or_else(|e| panic!("{e}: {}", text(&guest)));
+    assert_eq!(guest["job"]["person"], "sam", "{guest}");
+
+    // pause and resume change the file and the index, and say whether they changed anything.
+    let direct = lab.owner("schedule.setPaused", &json!({"agent": "mel", "id": "do-b", "paused": true})).unwrap();
+    assert_eq!(direct["indexed"], true, "{direct}");
+    let (_, p0) = cli_json(&lab, &["resume", "mel", "do-b"]);
+    assert_eq!(p0["changed"], true);
+    let (_, p) = cli_json(&lab, &["pause", "mel", "do-b"]);
+    assert_eq!(p, json!({"ok": true, "agent": "mel", "id": "do-b", "changed": true}));
+    assert!(jobs_text(&lab, "mel").contains("\"paused\": true"));
+    assert_eq!(count(&lab, "SELECT paused FROM sched_jobs WHERE agent = 'mel' AND job = 'do-b'"), 1);
+    let (_, listed) = cli_json(&lab, &["ls", "mel"]);
+    let row = job_rows(&listed, "do-b");
+    assert_eq!((row["paused"].clone(), row["next"].clone()), (json!(true), Value::Null));
+    let (_, again) = cli_json(&lab, &["pause", "mel", "do-b"]);
+    assert_eq!(again["changed"], false);
+    let (_, resumed) = cli_json(&lab, &["resume", "mel", "do-b"]);
+    assert_eq!(resumed["changed"], true);
+
+    // run: queued through the fire, started by the host, and shown by ls and log once it has run.
+    let (rc, ran) = cli_json(&lab, &["run", "mel", "hourly"]);
+    assert_eq!(rc, 0, "{ran}");
+    assert_eq!((ran["queued"].clone(), ran["pid"].clone()), (json!(true), Value::Null));
+    until("the run to start and its turn to end", 45, || {
+        lab.runs_log().len() == 1 && !lab.turns().is_empty() && lab.turns().iter().all(|t| t.1 == "done")
+    });
+    let (_, listed) = cli_json(&lab, &["ls", "mel"]);
+    let last = job_rows(&listed, "hourly")["last"].clone();
+    assert_eq!(last["why"], "run by hand", "{last}");
+    assert_eq!(last["running"], false, "{last}");
+    assert!(last["log"].as_str().is_some_and(|l| Path::new(l).is_file()), "the run's log file: {last}");
+    let (_, log) = cli_json(&lab, &["log", "mel", "hourly"]);
+    assert_eq!(log["runs"].as_array().unwrap().len(), 1, "{log}");
+    assert_eq!(log["runs"][0]["why"], "run by hand");
+    let (rc, nope) = cli_json(&lab, &["run", "mel", "nope"]);
+    assert_eq!(rc, 1);
+    assert!(nope["error"].as_str().unwrap().contains("mel has no job 'nope'"), "{nope}");
+
+    // rm: gone from the file and the index (the guest's job stays).
+    for id in ["do-b", "hourly"] {
+        let (rc, gone) = cli_json(&lab, &["rm", "mel", id]);
+        assert_eq!((rc, gone["changed"].clone()), (0, json!(true)), "{gone}");
+    }
+    assert_eq!(count(&lab, "SELECT count(*) FROM sched_jobs WHERE agent = 'mel'"), 1);
+    // The tombstoned state.json was never written, and kith-sched's own editor never ran.
+    assert!(std::fs::read_to_string(lab.machine.join("sched/state.json")).unwrap().contains("kith_tombstone"));
+
+    // Without a daemon nothing is done and the line says so: the files are the core's, so there is no fallback.
+    lab.stop_host(host);
+    let before = jobs_text(&lab, "mel");
+    let out = lab.sched(None, &["add", "mel", "1 1 * * *", "late"]);
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(text(&out).contains("Kith core is not answering"), "{}", text(&out));
+    assert_eq!(jobs_text(&lab, "mel"), before);
+}
