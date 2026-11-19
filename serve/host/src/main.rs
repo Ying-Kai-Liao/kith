@@ -507,9 +507,9 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
-    /// What Claude Code usage costs, the verbs the launch and the apps call (`kernel/bin/kith-cost`): `limit AGENT [--json|--sh]`,
-    /// `spent PERSON [AGENT]`, `usage [PERIOD] --json`, `agent NAME [PERIOD] --json`, `members AGENT`, `bots --json` and `sync`.
-    /// Prints what `kith-cost` prints, with its exit codes (2: a verb the core does not have yet). Not routed from `kith` yet.
+    /// What Claude Code usage costs, every verb of `kernel/bin/kith-cost`: the launch's and the apps' (`limit`, `spent`, `usage --json`,
+    /// `agent NAME --json`, `members`, `bots --json`, `sync`), the ledger's writers (`tag`, `record`) and the text reports.
+    /// Prints what `kith-cost` prints, with its exit codes. `kith cost` routes here when `cost` is in core-switched.txt.
     // -h/--help belong to kith-cost's own usage text, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Cost {

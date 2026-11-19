@@ -73,6 +73,8 @@ kith_core_bin() {
   if [[ -z $module ]]; then
     [[ ${KITH_CORE:-} == rust ]] || return 1
     module=${verb%% *}
+    # the cost hook needs the ledger's writers, not just the read verbs an older program has under `cost`
+    [[ $module == cost ]] && module=cost-ledger
   fi
   if [[ -n ${_kith_core_primed:-} ]]; then
     bin=$_kith_core_bin ver=$_kith_core_ver

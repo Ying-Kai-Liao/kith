@@ -119,7 +119,9 @@ impl Env {
         Env {
             now: crate::paths::process_env("KITH_COST_NOW"),
             person_was: crate::paths::process_env("KITH_PERSON_WAS").unwrap_or_default(),
-            vars: std::env::vars()
+            // vars_os: a variable that is not UTF-8 must not stop the hook; it is not one of ours
+            vars: std::env::vars_os()
+                .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
                 .filter(|(k, _)| k.starts_with("KITH_"))
                 .collect(),
             stdin: None,

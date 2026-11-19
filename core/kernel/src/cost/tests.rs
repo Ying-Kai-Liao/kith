@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use super::{Env, Out, Paths, pyfmt, run};
+use super::{Env, Now, Out, Paths, pyfmt, run};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -348,6 +348,20 @@ fn record_writes_one_request_and_keeps_the_first_run_row() {
 }
 
 #[test]
+fn periods_start_where_since_of_starts_them() {
+    use chrono::DateTime;
+    // Sydney, daylight saving (+11:00): today starts at local midnight, a week and a month are plain 7 and 30 days back
+    let now = Now::at(DateTime::parse_from_rfc3339("2026-11-19T01:30:00+11:00").unwrap());
+    let at = |p| super::reports::since_at(&now, p);
+    assert_eq!(at("today"), "2026-11-18T13:00:00");
+    assert_eq!(at("week"), "2026-11-11T14:30:00");
+    assert_eq!(at("month"), "2026-10-19T14:30:00");
+    // any other word is everything
+    assert_eq!(at("all"), "0");
+    assert_eq!(at("yesterday"), "0");
+}
+
+#[test]
 fn csv_quotes_like_python_and_ends_lines_with_crlf() {
     let (p, root) = world("csv");
     let row = r#"{"id": "r1", "session": "s-r", "turn": "a,b \"c\"", "cost": 2}"#;
@@ -388,7 +402,7 @@ fn the_same_message_in_two_files_ends_as_the_later_path() {
 fn a_tiny_pace_never_reaches_the_limit() {
     // The Python raises OverflowError here (days out of range); the core answers "stays under".
     let at = chrono::DateTime::parse_from_rfc3339("2026-11-01T10:30:00+00:00").unwrap();
-    let now = super::Now::at(at);
+    let now = Now::at(at);
     let days = [(at.date_naive(), 0.00012)];
     let limit = serde_json::Number::from(100);
     let f = super::views::forecast(&now, &days, 0.00012, Some(&limit));
@@ -402,13 +416,13 @@ fn a_tiny_pace_never_reaches_the_limit() {
 
 #[test]
 fn the_clock_takes_epoch_seconds_and_iso_text() {
-    let epoch = super::Now::from_env(Some("1793880000")).unwrap();
+    let epoch = Now::from_env(Some("1793880000")).unwrap();
     assert_eq!(epoch.0.timestamp(), 1_793_880_000);
-    let iso = super::Now::from_env(Some(" 2026-11-05T12:00:00+10:00 ")).unwrap();
+    let iso = Now::from_env(Some(" 2026-11-05T12:00:00+10:00 ")).unwrap();
     assert_eq!(iso.0.timestamp(), 1_793_844_000);
-    assert!(super::Now::from_env(Some("not a time")).is_err());
+    assert!(Now::from_env(Some("not a time")).is_err());
     // blank is the real clock
-    assert!(super::Now::from_env(Some("  ")).is_ok());
+    assert!(Now::from_env(Some("  ")).is_ok());
 }
 
 /// A kernel folder whose `bin/kith-auth` prints `body` and exits `code`, whatever it is asked.

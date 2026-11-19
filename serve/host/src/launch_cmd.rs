@@ -208,8 +208,13 @@ pub fn print_settings(a: &Args) -> Result<()> {
     };
     let once_id = a.once_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let mode = a.mode.clone().or_else(|| kith_kernel::paths::process_env("KITH_PERMISSION_MODE")).unwrap_or_default();
-    let cost_bin =
-        kith_kernel::launch::assemble::cost_hook_bin(&c.kernel, &std::env::vars().collect(), kith_bin.as_deref());
+    let cost_bin = kith_kernel::launch::assemble::cost_hook_bin(
+        &c.kernel,
+        &std::env::vars_os()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+            .collect(),
+        kith_bin.as_deref(),
+    );
     let input = settings::Input {
         agent: &a.agent,
         paths: &c.p,

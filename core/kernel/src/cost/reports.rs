@@ -69,7 +69,11 @@ fn broken(e: &dyn std::fmt::Display) -> Out {
 /// `since_of(period)`: where a period starts, as the ledger writes its stamps. Today is since local midnight, a week 7 days
 /// back and a month 30 days back (not the calendar month); any other word is everything (`0`). The real clock, always.
 fn since_of(period: &str) -> String {
-    let now = Now::at(chrono::Local::now().fixed_offset());
+    since_at(&Now::at(chrono::Local::now().fixed_offset()), period)
+}
+
+/// `since_of` at a given instant.
+pub(super) fn since_at(now: &Now, period: &str) -> String {
     match period {
         "today" => Now::utc_text(now.midnight()),
         "week" => Now::utc_text(now.0 - chrono::Duration::days(7)),

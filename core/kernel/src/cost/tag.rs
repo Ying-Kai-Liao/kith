@@ -46,11 +46,17 @@ fn bind(v: &Value) -> Result<Sql, String> {
     match v {
         Value::Null => Ok(Sql::Null),
         Value::Bool(b) => Ok(Sql::Integer(i64::from(*b))),
-        Value::Number(n) => n
-            .as_i64()
-            .map(Sql::Integer)
-            .or_else(|| n.as_f64().map(Sql::Real))
-            .ok_or_else(|| "Python int too large to convert to SQLite INTEGER".to_owned()),
+        Value::Number(n) => match n.as_i64() {
+            Some(i) => Ok(Sql::Integer(i)),
+            // an integer past i64 is one Python refuses to bind; only a float may be a REAL
+            None if n.is_u64() => {
+                Err("Python int too large to convert to SQLite INTEGER".to_owned())
+            }
+            None => n
+                .as_f64()
+                .map(Sql::Real)
+                .ok_or_else(|| "bad number".to_owned()),
+        },
         Value::String(s) => Ok(Sql::Text(s.clone())),
         Value::Array(_) => Err("Error binding parameter: type 'list' is not supported".to_owned()),
         Value::Object(_) => Err("Error binding parameter: type 'dict' is not supported".to_owned()),
