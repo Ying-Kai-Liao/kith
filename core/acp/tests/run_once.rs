@@ -61,22 +61,45 @@ async fn the_model_and_mcp_servers_reach_the_session() {
     assert!(text.contains(r#""name": "m""#), "{text}");
 }
 
-/// The `session/set_mode` ids an agent listing `listed` got for a run asking `modes`.
-async fn modes_set(name: &str, listed: &str, modes: &[&str]) -> Vec<String> {
+/// What an agent listing `listed` got for a run asking `modes`: the run's answer or error, the `session/set_mode` ids,
+/// and whether the task was sent.
+async fn mode_run(
+    name: &str,
+    listed: &str,
+    modes: &[&str],
+    approve: bool,
+) -> (Result<String, String>, Vec<String>, bool) {
     let log = std::env::temp_dir().join(format!("kith-acp-{name}-{}", std::process::id()));
     let mut s = spec(&[
         ("FAKE_ACP_LOG", log.to_str().unwrap()),
         ("FAKE_ACP_MODES", listed),
     ]);
     s.modes = modes.iter().map(|m| (*m).to_owned()).collect();
-    assert_eq!(run_once(s).await.unwrap().text, "echo: say hi");
+    s.approve = approve;
+    let out = run_once(s)
+        .await
+        .map(|o| o.text)
+        .map_err(|e| format!("{e:#}"));
     let text = std::fs::read_to_string(&log).unwrap();
     let _ = std::fs::remove_file(&log);
-    text.lines()
-        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+    let sent: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let set = sent
+        .iter()
         .filter(|m| m["method"] == "session/set_mode")
         .map(|m| m["params"]["modeId"].as_str().unwrap().to_owned())
-        .collect()
+        .collect();
+    let prompted = sent.iter().any(|m| m["method"] == "session/prompt");
+    (out, set, prompted)
+}
+
+/// The `session/set_mode` ids of a run that answered.
+async fn modes_set(name: &str, listed: &str, modes: &[&str]) -> Vec<String> {
+    let (out, set, _) = mode_run(name, listed, modes, false).await;
+    assert_eq!(out.unwrap(), "echo: say hi");
+    set
 }
 
 #[tokio::test]
@@ -98,17 +121,24 @@ async fn the_session_is_set_to_the_first_asked_mode_the_agent_lists() {
 }
 
 #[tokio::test]
-async fn a_session_whose_agent_lists_none_of_the_modes_runs_as_it_started() {
-    assert!(
-        modes_set("mode-none", "agent", &["workspace-write"])
-            .await
-            .is_empty()
-    );
-    assert!(
-        modes_set("mode-unlisted", "", &["workspace-write"])
-            .await
-            .is_empty()
-    );
+async fn a_run_whose_agent_lists_none_of_the_modes_is_not_sent() {
+    for (name, listed) in [("mode-none", "agent"), ("mode-unlisted", "")] {
+        let (out, set, prompted) = mode_run(name, listed, &["workspace-write"], false).await;
+        assert!(
+            out.as_ref()
+                .is_err_and(|e| e.contains("none of the session modes workspace-write")),
+            "{out:?}"
+        );
+        assert!(set.is_empty() && !prompted, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn an_approved_run_whose_agent_lists_none_of_the_modes_runs_as_it_started() {
+    let (out, set, prompted) =
+        mode_run("mode-none-ok", "agent", &["agent-full-access"], true).await;
+    assert_eq!(out.unwrap(), "echo: say hi");
+    assert!(set.is_empty() && prompted);
     assert!(
         modes_set("mode-unasked", "agent,workspace-write", &[])
             .await

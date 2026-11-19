@@ -3,7 +3,7 @@
 //! `chat/oneshot.rs`; this is the launcher the `kith` program and the kernel's one-shots use.
 
 use crate::client::{Acp, Failure, FailureKind, Incoming, content_text};
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -194,7 +194,7 @@ async fn session(
         .ok_or_else(|| anyhow!("agent returned no sessionId"))?
         .to_owned();
     if !spec.modes.is_empty() {
-        select_mode(acp, &created, &sid, &spec.modes).await?;
+        select_mode(acp, &created, &sid, &spec.modes, spec.approve).await?;
     }
     if let Some(model) = spec.model.as_deref().filter(|m| !m.is_empty()) {
         select_model(acp, &created, &sid, model).await?;
@@ -239,8 +239,15 @@ async fn session(
     })
 }
 
-/// The first of `modes` the agent lists in `session/new`. None listed: the session stays as it started, said on stderr.
-async fn select_mode(acp: &Acp, created: &Value, sid: &str, modes: &[String]) -> Result<()> {
+/// The first of `modes` the agent lists in `session/new`. None listed: a run without `approve` ends before its task is
+/// sent (the agent's own mode may reach further than asked); an approved one stays as it started, said on stderr.
+async fn select_mode(
+    acp: &Acp,
+    created: &Value,
+    sid: &str,
+    modes: &[String],
+    approve: bool,
+) -> Result<()> {
     let listed = created["modes"]["availableModes"]
         .as_array()
         .map(Vec::as_slice)
@@ -249,6 +256,12 @@ async fn select_mode(acp: &Acp, created: &Value, sid: &str, modes: &[String]) ->
         .iter()
         .find(|m| listed.iter().any(|l| l["id"].as_str() == Some(m.as_str())))
     else {
+        if !approve {
+            bail!(
+                "this agent offers none of the session modes {}; the task was not sent",
+                modes.join(", ")
+            );
+        }
         eprintln!(
             "kith: this agent offers none of the session modes {}; this run is in its own mode",
             modes.join(", ")
