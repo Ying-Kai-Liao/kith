@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# kith-requires-switched-check — kernel/lib/requires-switched.txt and the `kith kernel cutover status` questions that read it
+# (retire-python plan, Step 0). The file is shipped by scripts/stage-kernel.sh (it copies kernel/ whole), every name in it is
+# a cutover module of the program from the same build, and `status --require FILE` / `status MODULE` / `status --json` answer
+# by exit code on a Mac with nothing switched. Needs the Rust program: KITH_DIFFTEST_BIN=/path/to/kith (without one the check
+# says so and exits 0).
+#
+#   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-requires-switched-check
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$KERNEL/.." && pwd)"
+REAL=${KITH_DIFFTEST_BIN:-}
+if [ -z "$REAL" ] || [ ! -x "$REAL" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN)"; exit 0; fi
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-requires-switched-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/home/.kith TZ=UTC
+unset KITH_STATE HQ_STATE KITH_MACHINE HQ_MACHINE KITH_CORE KITH_BIN HQ_HOME
+mkdir -p "$HOME"
+FILE=$KERNEL/lib/requires-switched.txt
+fails=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1"; fails=$((fails + 1)); }
+expect() { # name, wanted exit code, command...
+  local name=$1 want=$2 got; shift 2
+  "$@" > "$T/out" 2> "$T/err"; got=$?
+  if [ "$got" = "$want" ]; then ok "$name"; else bad "$name (exit $got, wanted $want): $(cat "$T/out" "$T/err")"; fi
+}
+
+[ -f "$FILE" ] && ok "the file is in the repo" || bad "kernel/lib/requires-switched.txt is missing"
+
+# The staging ships it (stage-kernel.sh copies kernel/ whole; this fails if that ever stops being true).
+sh "$ROOT/scripts/stage-kernel.sh" "$T/share" 0.0.0 > /dev/null 2>&1
+[ -f "$T/share/kernel/lib/requires-switched.txt" ] && ok "stage-kernel ships it" || bad "stage-kernel does not ship it"
+
+# Every listed name is a module of this build ("unknown module" would otherwise mean a packaging bug).
+"$REAL" kernel cutover modules > "$T/modules" 2>/dev/null
+sed 's/#.*//; s/[[:space:]]//g; /^$/d' "$FILE" | while read -r name; do
+  grep -qx "$name" "$T/modules" || { echo "FAIL $name is not a cutover module (kith kernel cutover modules)"; echo x > "$T/unknown"; }
+done
+[ -f "$T/unknown" ] && fails=$((fails + 1)) || ok "every listed name is a cutover module of this build"
+
+# On this empty Mac nothing is switched: the repo file must hold no module the release needs yet, or the answer is no.
+if [ -z "$(sed 's/#.*//; s/[[:space:]]//g; /^$/d' "$FILE")" ]; then
+  expect "an empty list passes" 0 "$REAL" kernel cutover status --require "$FILE"
+else
+  expect "a listed module that is not switched here fails" 1 "$REAL" kernel cutover status --require "$FILE"
+fi
+
+printf '# a list\naccounts # why\n\nauthority\nnot-a-module\n' > "$T/req.txt"
+expect "unswitched modules fail --require" 1 "$REAL" kernel cutover status --require "$T/req.txt"
+grep -q 'accounts: not switched; run: kith migrate step accounts' "$T/err" && ok "it names the step" || bad "no step line: $(cat "$T/err")"
+grep -q 'not-a-module: unknown module' "$T/err" && ok "it names an unknown module" || bad "no unknown line: $(cat "$T/err")"
+expect "status MODULE fails when not switched" 1 "$REAL" kernel cutover status accounts
+expect "status with no arguments still exits 0" 0 "$REAL" kernel cutover status
+grep -q '^accounts: not switched$' "$T/out" && ok "and prints its lines as before" || bad "plain status changed: $(cat "$T/out")"
+expect "--json exits 0" 0 "$REAL" kernel cutover status --json
+python3 -I -c 'import json,sys; d=json.load(sys.stdin)["modules"]["accounts"]; sys.exit(0 if d=={"state":"not switched","ok":False} else 1)' < "$T/out" && ok "--json is on stdout" || bad "no json: $(cat "$T/out")"
+expect "--json with a failing --require still prints to stdout" 1 "$REAL" kernel cutover status --require "$T/req.txt" --json
+python3 -I -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["ok"] is False else 1)' < "$T/out" && ok "and says ok:false" || bad "json: $(cat "$T/out")"
+expect "a file that is not there fails" 1 "$REAL" kernel cutover status --require "$T/nope.txt"
+expect "--require without a file is a usage error" 1 "$REAL" kernel cutover status --require
+
+[ "$fails" = 0 ] && echo "kith-requires-switched-check: all ok" || { echo "kith-requires-switched-check: $fails failed"; exit 1; }
