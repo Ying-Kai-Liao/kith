@@ -306,3 +306,15 @@ async fn an_owed_cut_older_than_an_undo_that_could_not_read_the_ids_is_dropped_n
     assert!(owed(&r.hub).is_empty(), "the row is gone");
     assert!(held(&r, "sam") && !set_aside(&r, "sam"), "the undone person was not cut");
 }
+
+/// The cloud's revoke sets the person aside and its undo gives them back inside `apply_revoked`'s own locked section, not
+/// left to the caller after it (a revoke landing in that gap would be undone).
+#[tokio::test]
+async fn the_clouds_revoke_and_undo_set_aside_and_give_back_in_the_flips_own_hold() {
+    let (r, _core) = switched_with_sam().await;
+    members::locked_run(&r.bin, &["handle", "sam", "kith", "user_sam"]).await.unwrap();
+    members::apply_revoked(&r.hub, Some(&r.bin), Some(&["user_sam".to_owned()])).await.unwrap();
+    assert!(set_aside(&r, "sam"), "set aside by the apply itself");
+    members::apply_revoked(&r.hub, Some(&r.bin), Some(&[])).await.unwrap();
+    assert!(!set_aside(&r, "sam"), "given back by the apply itself, with no help from the caller");
+}

@@ -304,27 +304,45 @@ pub async fn auth_person(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
 pub async fn apply_revoked(hub: &Hub, bin: Option<&Path>, listed: Option<&[String]>) -> Result<Revoked> {
     let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(Revoked::default()) };
     let mut out = Revoked::default();
-    for p in auth_people(bin).await?.into_iter().filter(|p| !p.kith.is_empty() && !p.owner && p.bot_of.is_empty()) {
-        let revoked = listed.contains(&p.kith);
-        if revoked == p.revoked_at.is_some() {
-            continue;
-        }
-        let flag = if revoked { "--revoke" } else { "--unrevoke" };
-        // Each person is logged on their own (a pull can change several): a core that missed the change is said here, once
-        // per person, because kith-auth exits 0 for it.
-        let said = {
-            let _w = crate::api::people::AUTH_WRITES.lock().await;
-            let said = crate::api::authority::run_auth_noted(bin, &["person", &p.id, flag, "--local"]).await;
-            if !revoked && said.is_ok() {
-                crate::remote::core_revokes::clear_owed(hub, &p.id).await;
+    let applied: Result<()> = async {
+        for p in auth_people(bin).await?.into_iter().filter(|p| !p.kith.is_empty() && !p.owner && p.bot_of.is_empty()) {
+            let revoked = listed.contains(&p.kith);
+            if revoked == p.revoked_at.is_some() {
+                continue;
             }
-            said
+            let flag = if revoked { "--revoke" } else { "--unrevoke" };
+            // Each person is logged on their own (a pull can change several): a core that missed the change is said here,
+            // once per person, because kith-auth exits 0 for it.
+            let said = {
+                let _w = crate::api::people::AUTH_WRITES.lock().await;
+                let said = crate::api::authority::run_auth_noted(bin, &["person", &p.id, flag, "--local"]).await;
+                if said.is_ok() {
+                    // The set-aside or the give-back in the flip's own hold: a give-back landing after a re-revoke would
+                    // hand a revoked person their devices back (architect's RevokePark model).
+                    if revoked {
+                        crate::remote::core_revokes::set_aside_held(hub, &p.id).await;
+                    } else {
+                        crate::remote::core_revokes::clear_owed(hub, &p.id).await;
+                        crate::remote::core_revokes::restore_held(hub, &p.id).await;
+                    }
+                }
+                said
+            }
+            .with_context(|| format!("kith-auth person {} {flag}", p.id))?
+            .1;
+            account::note_stderr(&p.id, &said);
+            tracing::info!(person = p.id, revoked, "applied the owner's revoke from the cloud");
+            if revoked { out.cut.push(p.id) } else { out.restored.push(p.id) }
         }
-        .with_context(|| format!("kith-auth person {} {flag}", p.id))?
-        .1;
-        account::note_stderr(&p.id, &said);
-        tracing::info!(person = p.id, revoked, "applied the owner's revoke from the cloud");
-        if revoked { out.cut.push(p.id) } else { out.restored.push(p.id) }
+        Ok(())
+    }
+    .await;
+    if let Err(e) = applied {
+        // A later person failed: the ones revoked before it are cut off now, not left running until a later pull.
+        for person in std::mem::take(&mut out.cut) {
+            crate::api::people::cut_off_held(hub, &person).await;
+        }
+        return Err(e);
     }
     Ok(out)
 }
@@ -334,7 +352,7 @@ pub async fn apply_revoked(hub: &Hub, bin: Option<&Path>, listed: Option<&[Strin
 pub struct Revoked {
     /// Newly revoked: the caller cuts them off.
     pub cut: Vec<String>,
-    /// Undone on another Mac: the caller gives back what the revoke kept.
+    /// Undone on another Mac: what the revoke kept was given back here, in the undo's own locked section.
     pub restored: Vec<String>,
 }
 
