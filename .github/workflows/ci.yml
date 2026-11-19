@@ -411,8 +411,8 @@ jobs:
               Call check|kernel/tests/kith-call-check
               Chain check|kernel/tests/kith-chain-check
               People check (kith people, kith invite, kith bot ls/invite/revoke/decide/auto-allow --json, against a stub host)|kernel/tests/kith-people-check
-              Account check (kith account add/remove/list --json, the login command returned and not run)|kernel/tests/kith-account-check
-              Accounts tombstone check (a tombstoned state.json refuses writes; kith-account exits 4)|kernel/tests/kith-accounts-tombstone-check
+              Account stub check (bin/kith-account hands the line to the kith program; with none, one line and exit 1)|kernel/tests/kith-account-stub-check
+              Accounts tombstone check (a tombstoned state.json refuses the Python readers)|kernel/tests/kith-accounts-tombstone-check
               Schedules tombstone check (a tombstoned sched state.json stops kith-sched; routine jobs are not its own)|kernel/tests/kith-sched-tombstone-check
               Schedules core check (kith-sched ls/add/rm/pause/resume/run/log ask the core once the schedules are switched; same words and --json shapes, never the Python editor)|kernel/tests/kith-sched-core-check
               Schedules tick.lock check (kith-sched holds sched/tick.lock across read, decide, record, save; a held lock starts nothing)|kernel/tests/kith-sched-tick-lock-check

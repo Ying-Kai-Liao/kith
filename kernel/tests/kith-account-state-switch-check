@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # kith-account-state-switch-check — the `account-state` switch (kernel/lib/core-switched.txt) and the step of the accounts
 # module: `kith account list|pick|out|clear|usage` is answered by `kith kernel account-state` when the line is there and a
-# kith program lists the module, by bin/kith-account (Python) when KITH_CORE=python, when the line is gone, or when the
-# program is too old. After `kith kernel cutover step accounts` the state is the core's table, state.json is a tombstone, and
+# kith program lists the module; with KITH_CORE=python, with the line gone or with a program too old there is no Python
+# body left to answer (bin/kith-account is a stub, R3): one line and exit 1, and the core is not asked. After `kith kernel cutover step accounts` the state is the core's table, state.json is a tombstone, and
 # nothing reads the tombstone: the verbs, the Python readers (lib/kith_accounts.py) and a launch's `--record` all go through
 # the core; KITH_CORE=python is refused; the rollback writes the file back with the marks made in between. Needs the Rust
 # program: KITH_DIFFTEST_BIN=/path/to/kith (without one the check says so and exits 0).
@@ -46,7 +46,8 @@ FAR=4102444800
 KITH=$KERNEL/bin/kith
 W=$T/bin/kith-wrap
 
-# 1. Switched: each line reaches `kernel account-state`; the answer and the file are the Python's.
+# 1. Switched: each line reaches `kernel account-state`; KITH_CORE=python reaches nothing. (That the answer and the file are
+# the Python kernel's words is golden/account-state.json, replayed by CI against this program.)
 LINES=(
   "account out claude:work --until $FAR --reason maintenance"
   "account clear claude:work"
@@ -60,34 +61,24 @@ for l in "${LINES[@]}"; do
   reset; KITH_BIN=$W "$KITH" $l > "$T/rust.out" 2>"$T/rust.err"; echo $? > "$T/rust.rc"
   hit=$(hits); cp "$S" "$T/rust.file" 2>/dev/null || : > "$T/rust.file"
   reset; KITH_CORE=python KITH_BIN=$W "$KITH" $l > "$T/py.out" 2>"$T/py.err"; echo $? > "$T/py.rc"
-  pyhit=$(hits); cp "$S" "$T/py.file" 2>/dev/null || : > "$T/py.file"
+  pyhit=$(hits)
   check "rust answers: $l" "[ \"$hit\" = 1 ]"
-  check "KITH_CORE=python keeps it in Python: $l" "[ \"$pyhit\" = 0 ]"
-  # last_started and the times a write makes are the clock's; compare the rest.
-  check "same stdout, stderr, exit code and file: $l" "cmp -s '$T/rust.out' '$T/py.out' && cmp -s '$T/rust.err' '$T/py.err' && cmp -s '$T/rust.rc' '$T/py.rc' && python3 -c '
-import json, sys
-def load(p):
-    t = open(p).read()
-    d = json.loads(t) if t else None
-    for e in ((d or {}).get(\"accounts\") or {}).values():
-        for k in (\"cleared_at\", \"since\", \"last_started\"): e.pop(k, None)
-    return d
-assert load(sys.argv[1]) == load(sys.argv[2])' '$T/rust.file' '$T/py.file'"
+  check "KITH_CORE=python asks the core nothing and says so: $l" "[ \"$pyhit\" = 0 ] && [ \"\$(cat '$T/py.rc')\" = 1 ] && grep -q 'needs the kith program' '$T/py.err'"
 done
 
-# 2. Rollback: the line removed from a copy of the kernel folder, the Python answers again.
+# 2. Rollback: the line removed from a copy of the kernel folder, nothing answers (the Python body is gone).
 cp -R "$KERNEL" "$T/k"
 grep -v '^account-state	' "$KERNEL/lib/core-switched.txt" > "$T/k/lib/core-switched.txt"
 reset; KITH_BIN=$W "$T/k/bin/kith" account clear claude:work > "$T/out" 2>&1
-check "line removed: Python answers" "[ \"\$(hits)\" = 0 ] && grep -q 'ready again' '$T/out'"
+check "line removed: one line, exit 1, the core not asked" "[ \"\$(hits)\" = 0 ] && grep -q 'needs the kith program' '$T/out'"
 
-# 3. A program that does not list the module: the Python answers, silently.
-reset; KITH_BIN=$T/bin/kith-old "$KITH" account clear claude:work > "$T/out" 2>&1
-check "program without the module: Python answers" "! grep -q '^kernel account-state' '$LOG' && grep -q 'ready again' '$T/out'"
+# 3. A program that does not list the module: one line, exit 1.
+reset; CARGO_TARGET_DIR=$T/no-build PATH=$T/bin:/usr/bin:/bin KITH_BIN=$T/bin/kith-old "$KITH" account clear claude:work > "$T/out" 2>&1
+check "program without the module: one line, exit 1" "! grep -q '^kernel account-state' '$LOG' && grep -q 'needs the kith program' '$T/out'"
 
 # 4. The step. state.json becomes a tombstone and the core holds the marks.
 reset
-KITH_CORE=python "$KITH" account out claude:work --until $FAR --reason before > /dev/null
+KITH_BIN=$W "$KITH" account out claude:work --until $FAR --reason before > /dev/null
 "$REAL" kernel core-migrate > "$T/out" 2>&1
 DBF=$(ls "$MACHINE"/core/*.db 2>/dev/null | head -1)   # the core's database file, found rather than named
 check "the core is made" "[ -s '$DBF' ]"
@@ -136,18 +127,15 @@ KITH_BIN=$W python3 "$KERNEL/lib/kith_accounts.py" main-env echo "$KITH_HOME/age
 check "main-env --state with the core refusing: exit 4" "[ $rc = 4 ]"
 rm -f "$DBF"*; mv "$T/db.keep" "$DBF"
 
-# No program: Python fails closed, never reads the note.
+# KITH_CORE=python once the module moved: refused, never handed a note it cannot read.
 KITH_BIN=$T/bin/kith-old KITH_CORE=python "$KITH" account list > "$T/out" 2>&1
 check "KITH_CORE=python is refused once the module moved" "grep -q 'has moved to the core' '$T/out'"
-# kith_bin also finds a build in the checkout (serve/host/target/debug/kith, which CI's host-build has), so point it at none.
-CARGO_TARGET_DIR=$T/no-build PATH=/usr/bin:/bin python3 -I "$KERNEL/bin/kith-account" list > "$T/out" 2>&1; rc=$?
-check "the Python verb without a core fails closed" "[ $rc = 1 ] && grep -q 'moved to the Kith core' '$T/out'"
 
 # 5. Rollback: the file again, with the marks made after the step.
 "$REAL" kernel cutover rollback accounts > "$T/out" 2>&1
 check "rollback writes state.json back" "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); a=d[\"accounts\"]; assert a[\"codex:b\"][\"out_until\"]==$FAR and a[\"claude\"][\"last_started\"]>1000000000, d' '$S'"
-KITH_CORE=python "$KITH" account list --json > "$T/out" 2>&1
-check "Python answers again after the rollback" "grep -q 'out of usage' '$T/out'"
+KITH_BIN=$W "$KITH" account list --json > "$T/out" 2>&1
+check "the file is read again after the rollback, with the marks" "grep -q 'out of usage' '$T/out'"
 
 echo
 if [ "$fails" = 0 ]; then echo "all checks passed"; else echo "$fails check(s) failed"; exit 1; fi
