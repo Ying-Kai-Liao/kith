@@ -260,8 +260,10 @@ else
   fx l-e75 55 150000 "$Q"
   is "a claude that itself exits 75 is a failure, not busy" "$(STUB_MODE=e75 python3 "$LC" sweep --session l-e75)" "l-e75 compact failed: exit 75"
   fx l-lockerr 55 150000 "$Q"
-  : > "$T/afile"
-  is "a lock error is reported with its reason" "$(KITH_MACHINE=$T/afile python3 "$LC" sweep --session l-lockerr | sed 's/ (kith-stub exit [0-9]*)//')" "l-lockerr compact failed: the conversation lock could not be taken"
+  # (the lock folder is a file: a machine folder that is itself a file would read as an unreadable switch, which the Rust takers
+  # answer as Writer mode)
+  mkdir -p "$T/amachine/core"; : > "$T/amachine/core/locks"
+  is "a lock error is reported with its reason" "$(KITH_MACHINE=$T/amachine python3 "$LC" sweep --session l-lockerr | sed 's/ (kith-stub exit [0-9]*)//')" "l-lockerr compact failed: the conversation lock could not be taken"
 
   # the lock is held for the compaction's whole life, and the claim names the stub (claude descends from it)
   fx l-life 55 150000 "$Q"

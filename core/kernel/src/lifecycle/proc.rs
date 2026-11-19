@@ -17,6 +17,18 @@ use crate::paths::Env;
 /// How long a compaction may run before claude is killed.
 pub const COMPACT_TIMEOUT: Duration = Duration::from_secs(900);
 
+/// One parked child at a time in this process. A forked copy holds every descriptor the process has, so a second child forked while
+/// the first is parked would keep the first one's `go` open: closing it would never wake the first, and each would wait on the other.
+/// The sweep forks one at a time; this keeps concurrent callers (the tests) the same.
+static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Held for the whole life of a parked child, from before [`parked`] to after [`reap`] and the closes.
+pub fn exclusive() -> std::sync::MutexGuard<'static, ()> {
+    ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// A parked child: write `1` to `go` to start it, close `go` to make it exit unrun; an exec that fails writes why to `err`.
 pub struct Parked {
     pub pid: i32,

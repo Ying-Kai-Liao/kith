@@ -266,6 +266,7 @@ impl Sweep<'_> {
         since: f64,
         at: Option<f64>,
     ) -> Result<String, String> {
+        let _one = proc::exclusive();
         let sid = str_of(e, "sessionId").unwrap_or("").to_owned();
         let t = str_of(e, "transcriptPath").unwrap_or("");
         let env = self.c.env;

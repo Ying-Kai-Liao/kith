@@ -483,6 +483,7 @@ fn status_of_an_unknown_session_and_an_intent_for_a_known_one() {
 
 #[test]
 fn a_failed_exec_is_told_the_way_python_tells_it() {
+    let _one = super::proc::exclusive();
     let (r, w) = super::proc::pipe().unwrap();
     super::proc::close(r);
     super::proc::close(w);
