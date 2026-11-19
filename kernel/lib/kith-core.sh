@@ -93,7 +93,6 @@ kith_cost() {
   ( kith_core_exec cost --kernel "$KITH" "$@" || :; exec "$KITH/bin/kith-cost" "$@" )
 }
 
-
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag
 # loop of bin/kith: a flag with a value skips it, `--`, a word or a task that starts with a dash ends the flags).
 kith_launch_json_flag() {

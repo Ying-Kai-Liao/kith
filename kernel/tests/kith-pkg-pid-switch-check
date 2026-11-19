@@ -70,12 +70,12 @@ check "KITH_CORE=python: kith-pkg resolve is not run" "[ \"\$(calls 'kith-pkg re
 check "KITH_CORE=python: project-id is run" "[ \"\$(calls project-id)\" -ge 1 ]"
 check "KITH_CORE=python: the package snapshot is still the core's (no live folder)" "grep -q 'echo@' '$T/py.out' && ! grep -q 'running the live folder' '$T/err'"
 
-# 3. Rollback per verb: the project-id line gone from the copy, that program is asked again. The pkg line gone changes nothing for
-# the Rust launch, which resolves in process: kith-pkg resolve is never run.
+# 3. Rollback per verb: the project-id line gone from the copy, that program is asked again. The pkg line is no rollback any more:
+# both launches resolve through the program that lists the module whatever the line says, and kith-pkg resolve is never run.
 cp "$T/k/lib/core-switched.txt" "$T/switched.keep"
 grep -v '^pkg	' "$T/switched.keep" > "$T/k/lib/core-switched.txt"
 reset; (cd "$T/work/proj" && "$KITH" echo --launch-json 2>/dev/null) > /dev/null
-check "pkg line removed: neither program is run (the Rust launch resolves in process)" "[ \"\$(calls 'kith-pkg resolve')\" = 0 ] && [ \"\$(calls project-id)\" = 0 ]"
+check "pkg line removed: neither program is run (the launch resolves through the program, not the line)" "[ \"\$(calls 'kith-pkg resolve')\" = 0 ] && [ \"\$(calls project-id)\" = 0 ]"
 grep -v '^project-id	' "$T/switched.keep" > "$T/k/lib/core-switched.txt"
 reset; (cd "$T/work/proj" && "$KITH" echo --launch-json 2>/dev/null) > /dev/null
 check "project-id line removed: project-id is run, kith-pkg resolve is not" "[ \"\$(calls project-id)\" -ge 1 ] && [ \"\$(calls 'kith-pkg resolve')\" = 0 ]"
@@ -114,8 +114,8 @@ check "bash path, room-ledger line removed: the hooks name the stub, not the pro
 check "room-ledger line removed: same launch object on both launch paths" "[ \"\$(norm < '$T/b.nolg')\" = \"\$(norm < '$T/rust.nolg')\" ]"
 
 grep -v '^pkg	' "$NOLAUNCH" > "$T/sw.nopkg"
-reset; bash_launch "$T/sw.nopkg" X=1 > /dev/null
-check "bash path, pkg line removed: kith-pkg resolve is not run (no fallback), the live folder runs" "[ \"\$(calls 'kith-pkg resolve')\" = 0 ] && [ \"\$(calls project-id)\" = 0 ] && grep -q 'no kith program with the pkg module' '$T/err' && grep -q 'running the live folder' '$T/err'"
+reset; bash_launch "$T/sw.nopkg" X=1 > "$T/b.nopkg"
+check "bash path, pkg line removed: no rollback, the snapshot is still the program's and kith-pkg resolve is not run" "[ \"\$(calls 'kith-pkg resolve')\" = 0 ] && [ \"\$(calls project-id)\" = 0 ] && grep -q 'echo@' '$T/b.nopkg' && ! grep -q 'live folder' '$T/err'"
 grep -v '^project-id	' "$NOLAUNCH" > "$T/sw.nopid"
 reset; bash_launch "$T/sw.nopid" X=1 > /dev/null
 check "bash path, project-id line removed: project-id is run, kith-pkg resolve is not" "[ \"\$(calls project-id)\" -ge 1 ] && [ \"\$(calls 'kith-pkg resolve')\" = 0 ]"

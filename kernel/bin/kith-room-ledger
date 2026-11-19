@@ -7,9 +7,11 @@
 # Unlike the other stubs, a program that is not found is NOT an error exit: this is a hook of every Write, Edit and MultiEdit, and
 # its command ends in `|| true`, so it must exit 0 whatever happens. But "nothing recorded" is not the safe direction either: a
 # `post` that is skipped leaves the older, wider record in place for the new text, and a `pre` that is skipped lets the `post`
-# record a note from before the ledger as wide as the room. So with no program a `pre` for a path under a `rooms/` folder says
-# "deny" in the PreToolUse JSON on stdout (exit 2 would be swallowed by the `|| true`): room notes are refused while the program
-# is missing, nothing else is. A `post` prints nothing. The path is judged as written and with its folder's links resolved.
+# record a note from before the ledger as wide as the room. So with no program a `pre` for a `file_path` under the run's own
+# `<home>/memory/rooms/` says "deny" in the PreToolUse JSON on stdout (exit 2 would be swallowed by the `|| true`): room notes are
+# refused while the program is missing, nothing else is (not a file whose content mentions rooms/, not another folder named
+# rooms). A `post` prints nothing. The path is judged as written and with its folder's links resolved, as the program does; only
+# when no file_path can be read is the whole input matched, for `/memory/rooms/`.
 #
 # Finds the program without Python (see bin/project-id): the first candidate whose `kernel version` lists "room-ledger":
 #   $KITH_BIN, the release this file sits in (<release>/share/kith/kernel/bin -> <release>/bin/kith), a kith on PATH that is
@@ -64,13 +66,21 @@ if [ -n "$bin" ]; then exec "$bin" kernel room-ledger --kernel "$kernel" "$@"; f
 
 # No program: refuse a room note's write (see the head of this file), do nothing else.
 [ "${1:-}" = pre ] || exit 0
+home=${5:-}
 input=$(cat 2>/dev/null) || exit 0
 file=$(printf '%s' "$input" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
 room=
-case $input in *rooms/*) room=1 ;; esac
-case $file in
-  /*) dir=$(cd "$(dirname "$file")" 2>/dev/null && pwd -P) && case $dir/ in */rooms/*) room=1 ;; esac ;;
-esac
+if [ -z "$file" ]; then
+  case $input in */memory/rooms/*) room=1 ;; esac
+elif [ -n "$home" ]; then
+  case $file in "$home"/memory/rooms/*) room=1 ;; esac
+  case $file in
+    /*)
+      dir=$(cd "$(dirname "$file")" 2>/dev/null && pwd -P) || dir=
+      mem=$(cd "$home/memory" 2>/dev/null && pwd -P) || mem=
+      [ -z "$mem" ] || case $dir/ in "$mem"/rooms/*) room=1 ;; esac ;;
+  esac
+fi
 [ -n "$room" ] || exit 0
 printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"the room ledger could not run (no kith program lists the room-ledger module; kith update), so this write to a room note is refused"}}'
 exit 0

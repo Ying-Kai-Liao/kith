@@ -475,15 +475,18 @@ shared=$home/memory/shared
 
 # The pinned package (prompt.md = agent.md body + PROTOCOL.md). If versioning itself breaks, run the live folder
 # rather than not at all.
-# `resolve` is the Rust core's (`pkg` in lib/core-switched.txt) and has no Python fallback: kith_core_exec returns only when this
-# Mac has no program that lists the module, and the run then names that and takes the live folder. KITH_CORE=python does not reach
-# it: there is no Python to go back to (the rollback is a previous release). The rest of kith-pkg stays Python.
+# `resolve` is the Rust core's and has no Python fallback: the program that lists the `pkg` module answers, whatever
+# lib/core-switched.txt or KITH_CORE says (there is no Python to go back to; the rollback is a previous release), and a Mac without
+# one names that and takes the live folder. The rest of kith-pkg stays Python.
 . "$KITH/lib/kith-core.sh"
 [[ -n ${_kith_core_primed:-} ]] || kith_core_prime   # one program lookup for the pkg call and the project_id calls below
 pkg_missing() {
   echo "kith: no kith program with the pkg module was found (kith update); $agent runs its live folder, so a pin or rollback is ignored until one is" >&2
 }
-pkg=$({ KITH_CORE= kith_core_exec pkg --kernel "$KITH" resolve "$agent" || { pkg_missing; false; }; }) && [[ -f $pkg/prompt.md ]] \
+if [[ -n ${_kith_core_bin:-} && ${_kith_core_ver:-} == *'"pkg"'* ]]; then
+  pkg=$(KITH_BIN=$_kith_core_bin "$_kith_core_bin" kernel pkg --kernel "$KITH" resolve "$agent")
+else pkg=""; pkg_missing; fi
+[[ -f $pkg/prompt.md ]] \
   || { echo "kith: $agent: package snapshot failed; running the live folder" >&2; pkg=$src_pkg; }
 export KITH_AGENT=$agent KITH_AGENT_DIR=$pkg KITH_AGENT_HOME=$home KITH_AGENT_VERSION=${pkg##*@}
 [[ $pkg == "$src_pkg" ]] && KITH_AGENT_VERSION=live
