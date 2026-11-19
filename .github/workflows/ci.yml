@@ -263,6 +263,10 @@ jobs:
               - 'serve/host/src/hub/room_turns.rs'
               - 'serve/host/src/agent/bot/room_turn.rs'
               - 'serve/host/src/runauth/room.rs'
+              # a room person's token is the core's now: the basis rules, the revoke of a member and the tool run
+              - 'core/runtime/src/runs.rs'
+              - 'core/runtime/src/runtools.rs'
+              - 'core/runtime/src/call.rs'
               - 'core/kernel/src/launch/room.rs'
               # RoomsRename.tla: a join, a removal and a leave over every id held_under returns (R-rename)
               - 'serve/host/src/chat/room_people.rs'
