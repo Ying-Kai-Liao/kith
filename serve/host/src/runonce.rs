@@ -10,14 +10,15 @@ use std::io::Read as _;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Exit code for "this engine has no ACP one-shot here" (a registry adapter only, or a native one-shot): the caller
-/// runs the engine its own way. Nothing was started. (BSD `EX_CONFIG`.)
+/// Exit code for "this engine has no ACP one-shot here" (a native one-shot, or neither an ACP mode nor a registry
+/// adapter to start): the caller runs the engine its own way. Nothing was started. (BSD `EX_CONFIG`.)
 pub const NOT_AVAILABLE: i32 = 78;
 
 pub struct Args {
     pub engine: String,
     pub model: Option<String>,
     pub cwd: Option<PathBuf>,
+    pub dirs: Vec<PathBuf>,
     pub mcp_config: Option<String>,
     pub json: bool,
     pub approve: bool,
@@ -32,15 +33,26 @@ pub async fn run(a: Args) -> Result<i32> {
         engines::find(&a.engine).ok_or_else(|| anyhow!("no engine called {} (kith engines lists them)", a.engine))?;
     let command = match a.acp_command.clone().or_else(|| std::env::var("KITH_RUN_ONCE_ACP_COMMAND").ok()) {
         Some(c) if !c.is_empty() => c,
+        _ if !matches!(engine.oneshot, Oneshot::Acp) => {
+            eprintln!("kith: {} has no ACP one-shot on this computer; run it its own way", engine.name);
+            return Ok(NOT_AVAILABLE);
+        }
         _ => {
-            let Some(local) = engine.local.filter(|_| matches!(engine.oneshot, Oneshot::Acp)) else {
-                eprintln!("kith: {} has no ACP one-shot on this computer; run it its own way", engine.name);
-                return Ok(NOT_AVAILABLE);
-            };
             let Some((_, path)) = engines::detect(engine, &|b| crate::agent::backends::which(b)) else {
                 bail!("{} is not installed ({})", engine.bins[0], engine.setup);
             };
-            local.replace("{bin}", &crate::shell::quote(&path.to_string_lossy()))
+            match engine.local {
+                Some(local) => local.replace("{bin}", &crate::shell::quote(&path.to_string_lossy())),
+                // No ACP mode in the CLI itself (codex): its registry adapter, as the app's chats start it.
+                None => match crate::agent::backends::launch_candidates(engine.id, |_| {}).await {
+                    Ok(cmds) if !cmds.is_empty() => cmds[0].acp(),
+                    other => {
+                        let why = other.err().map(|e| format!(" ({e:#})")).unwrap_or_default();
+                        eprintln!("kith: {} has no ACP adapter to start here{why}; run it its own way", engine.name);
+                        return Ok(NOT_AVAILABLE);
+                    }
+                },
+            }
         }
     };
     let task = if a.task.is_empty() {
@@ -67,6 +79,7 @@ pub async fn run(a: Args) -> Result<i32> {
     let spec = RunSpec {
         command,
         cwd: cwd.to_string_lossy().into_owned(),
+        dirs: a.dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect(),
         env: Vec::new(),
         model: a.model,
         mcp_servers,

@@ -12,6 +12,8 @@ pub struct RunSpec {
     /// The engine's ACP command line (its row's `local` mode with `{bin}` resolved, or a registry adapter's).
     pub command: String,
     pub cwd: String,
+    /// More folders the engine may work in (ACP `additionalDirectories`); sent only to an agent that says it takes them.
+    pub dirs: Vec<String>,
     /// Added to the agent's environment; kept out of the command line (it can hold API keys).
     pub env: Vec<(String, String)>,
     pub model: Option<String>,
@@ -163,21 +165,28 @@ async fn session(
     cost: &mut Option<f64>,
 ) -> Result<Outcome> {
     // The handshake is answered before anything else is read, but a hung agent still ends at the run's deadline.
-    acp.request(
-        "initialize",
-        json!({
-            "protocolVersion": 1,
-            "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
-            "clientInfo": {"name": "kith", "title": "Kith", "version": env!("CARGO_PKG_VERSION")},
-        }),
-    )
-    .await?;
-    let created = acp
+    let init = acp
         .request(
-            "session/new",
-            json!({"cwd": spec.cwd, "mcpServers": spec.mcp_servers}),
+            "initialize",
+            json!({
+                "protocolVersion": 1,
+                "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
+                "clientInfo": {"name": "kith", "title": "Kith", "version": env!("CARGO_PKG_VERSION")},
+            }),
         )
         .await?;
+    let mut new_session = json!({"cwd": spec.cwd, "mcpServers": spec.mcp_servers});
+    if !spec.dirs.is_empty() {
+        if init["agentCapabilities"]["sessionCapabilities"]["additionalDirectories"].is_object() {
+            new_session["additionalDirectories"] = json!(spec.dirs);
+        } else {
+            eprintln!(
+                "kith: this agent works in one directory over ACP; this run is without {}",
+                spec.dirs.join(", ")
+            );
+        }
+    }
+    let created = acp.request("session/new", new_session).await?;
     let sid = created["sessionId"]
         .as_str()
         .ok_or_else(|| anyhow!("agent returned no sessionId"))?
