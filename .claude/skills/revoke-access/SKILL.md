@@ -491,3 +491,30 @@ revoke again; `unfinished`). The apps do not render `undoNote` yet. Tests: `api/
 (`a_revoke_of_the_new_id_with_the_core_down_says_it_did_not_happen_and_what_to_do`,
 `an_undo_that_cannot_read_the_ids_leaves_a_note_until_a_later_undo_reads_them`,
 `an_owed_cut_older_than_an_undo_that_could_not_read_the_ids_is_dropped_not_paid`), `remote/core_revokes.rs` unit tests.
+
+## Guest doors on the core's rows (2026-11-19, M2(b), flow/core-followups-doors)
+
+On a switched Mac a person's own guest door is a row of the core's `doors` table (`kernel/lib/kith_door_core.py`, called by `kith_door.py`
+`run` and `sweep_report`; the host's `doors.rs` still shells `kith door sweep`). The model splits what the old rows folded into one action:
+`gdoor` is the ROW (`idle` -> `running` open -> `killed` swept -> `reaped` confirmed gone, or `done` ended), `gbox` is the BOX (`no`, `up`, `gone`,
+`never`). New switches (all FALSE in `base.consts`): `CoreDoorStart` (needs `RouterDoor`, `GuestDoor`, `CoreDoorHook`: `DoorStart` is then ONE
+step, the core's `doors.start`, so `DoorD2` holds on the row; the box starts later with no check, `BoxStart`; the supervisor's markLive and the
+sweeper's kill are `BoxKill`; its `doors.end` is `RowEnd`/`Reap`), `CoreSlow` (a core call with no answer is a step that changes nothing, in both
+forms: `DoorStartTimeout` before the commit, `StartLost` after it with the reply lost; `DoorSweepTimeout`), and the breaks `TimeoutOpen` (a start
+with no answer starts the box with no row), `TimeoutKills` (a recheck with no answer ends a live door of an allowed person) and `ReapLive` (the
+sweeper confirms a swept row gone before the box started). Properties: `NoOrphanBox` (a running box always has its row, open or swept and not
+reaped), `BoxD1` (a box up for a revoked person stops, liveness), `BoxD2` (the box starts only while not revoked: FAILS by design on
+`switched-core-door`, bounded by `BoxKill`), `LiveDoorKept` (a running door ends only because the person is revoked or has no row), and
+`DoorNoResurrect` now lets a swept row go to `reaped`. Rows: `switched-core-door` (TypeOK, DoorD2, DoorD2c, DoorD1, DoorNoResurrect,
+DoorsCutWithRevoke, DoorCutAtSweep, NoOrphanBox, BoxD1 pass; BoxD2 fails), `switched-core-door-slow` (DoorD2, DoorD2c, DoorD1, BoxD1, NoOrphanBox,
+LiveDoorKept pass), and `broken-door-timeout-open` / `broken-door-reap-live` (`NoOrphanBox` fails), `broken-door-timeout-kills` (`LiveDoorKept`
+fails). Not in the model: a room door keeps the file path (its row would have no basis), so `switched-router-door` stays the row for it; a door
+started before the switch has a claim file and no row, and the file's sweep (named person, gone supervisor, `left`, recheck) ends it.
+
+The rule for a call with no answer, in the code's words: a start with no answer starts nothing and ends the id it may have written; a sweep's
+recheck with no answer leaves running doors alone (`{"unknown": true}`, the host asks again in 10 s); a named person, a gone supervisor and a
+definite `revoked` end a door with no answer from the core; the sweeper calls `doors.end` on a swept row only when its supervisor is gone.
+`kith-auth door` with no answer (a timeout, a core that did not answer) is state `unknown` and ends no running door (it ended it before).
+Bound left: an untick that `kith-auth` cannot judge leaves a door up to `RUN_LIMIT_S` (3600 s). Tests: `kernel/tests/kith-door-core-check`
+(a stub core: answers, refuses, down, hung; scratch edits of each rule were run and fail it). SYNC is not moved (the other covered changes since it
+have not been read).
