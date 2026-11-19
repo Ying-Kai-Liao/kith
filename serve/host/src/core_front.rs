@@ -874,6 +874,17 @@ mod tests {
         }
     }
 
+    /// A guest door's row (kernel/lib/kith_door_core.py) is the daemon's: with no daemon the call is exit 3, which the caller
+    /// reads as "no answer", never as a start or a sweep that ran in an embedded core.
+    #[test]
+    fn the_door_calls_are_on_core_call_and_never_embedded() {
+        for m in ["doors.start", "doors.markLive", "doors.end", "doors.sweep"] {
+            assert!(CORE_CALL_METHODS.contains(&m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(!kith_core::embedded(m), "{m} must not run without the daemon");
+        }
+    }
+
     fn args(line: &str) -> Vec<OsString> {
         std::iter::once("kith serve").chain(line.split(' ')).map(OsString::from).collect()
     }
