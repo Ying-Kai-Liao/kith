@@ -81,6 +81,7 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
+mod runtools;
 // The revoke order (M3-10d): claims of the person and their bots, then their ask tree. First caller is the kith-auth bridge (M2-18).
 #[cfg(unix)]
 #[allow(dead_code, reason = "first caller is the kith-auth bridge after M2-18")]
@@ -131,6 +132,7 @@ pub use daemon::status;
 pub use db::Core;
 pub use error::Error;
 pub use owner::Reached;
+pub use runtools::set_kernel_finder;
 
 use kith_kernel::paths::Paths;
 

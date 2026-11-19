@@ -951,7 +951,7 @@ async fn run_door(hub: &Arc<Hub>, turn: &Turn, live: &[Card], person: Option<&st
     let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> =
         spawn.env.iter().map(|(k, v)| (k.into(), v.into())).collect();
     let asked = reply.and_then(|c| crate::runauth::AskReply::parse(c.reply_to.as_deref()?, c.asked_by.as_deref()));
-    let grant = crate::runauth::grant_for_env(&mut env, &turn.agent, session, asked);
+    let grant = crate::runauth::grant_for_env_async(&mut env, &turn.agent, session, asked).await;
     spawn.env = env.iter().filter_map(|(k, v)| Some((k.to_str()?.to_owned(), v.to_str()?.to_owned()))).collect();
     #[cfg(test)]
     {
@@ -1334,7 +1334,7 @@ async fn exec(bin: &Path, spawn: &Spawn, grant: Option<crate::runauth::RunGrant>
         Err(error) => return Exec::Failed(format!("{error}")),
     };
     if let (Some(g), Some(pid)) = (&grant, child.id()) {
-        g.bind_pid(pid);
+        g.bind_pid(pid).await;
     }
     // The tail of stderr, kept while the run goes on so a full pipe never stalls it.
     let tail = Arc::new(Mutex::new(String::new()));

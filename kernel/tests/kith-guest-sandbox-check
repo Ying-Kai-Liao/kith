@@ -2,7 +2,7 @@
 # kith-guest-sandbox-check — every run for anyone but the owner (an invited person, a bot) carries Claude Code's OS
 # sandbox in its generated settings: enabled, fail closed, no escape hatch, no excluded commands, the credential folders
 # (both spellings) and the membership's Read denials unreadable, only the run's own folders writable, no network but the
-# host socket. The owner's settings carry no "sandbox" key at all. Inspects the JSON of `--launch-json`; no real claude,
+# host socket and the core's run socket. The owner's settings carry no "sandbox" key at all. Inspects the JSON of `--launch-json`; no real claude,
 # so it runs on Linux CI. Throwaway HOME and KITH_HOME; fake `claude` on PATH.
 #
 #   kernel/tests/kith-guest-sandbox-check     a few seconds; exits 1 when a check fails
@@ -77,6 +77,19 @@ expect "owner: no workspace env, no limits note" "$(lj "[k for k in $WORKVARS + 
 # Chrome planted in it. The launch env names the workspace once, as KITH_WORK, which only lib/guest-env.sh reads.
 expect "guest: the launch env points its shell at the workspace and sets none of it for the run" "$(KITH_PERSON=guest lj "[k for k in $WORKVARS if k in e], e.get('KITH_WORK','').endswith('/people/guest/.work'), e.get('CLAUDE_ENV_FILE','').endswith('/lib/guest-env.sh')")" "[] True True"
 expect "guest: nothing in the launch env but KITH_WORK is inside their folder" "$(KITH_PERSON=guest lj "sorted(k for k, v in e.items() if '/people/guest' in str(v))")" "['KITH_WORK']"
+# A guest's project-id is the stub bin/project-id, which runs `kith kernel project-id` on a program that lists project-guest: the run
+# gets the launch's program as KITH_BIN, and the sandbox may read it (and the links on the way to it), only when it lists the module.
+# Otherwise the run has no KITH_BIN (not even one inherited), so the stub looks for its own. The owner's env never has it.
+cat > "$T/bin/kith-fake-guest" <<'SH'
+#!/bin/sh
+[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"
+[ "$1 $2" = "kernel version" ] && echo '{"abi":1,"modules":["project-guest"]}'
+exit 0
+SH
+chmod +x "$T/bin/kith-fake-guest"
+expect "guest: a program without project-guest is not given to the run" "$(KITH_PERSON=guest lj "'KITH_BIN' in e")" "False"
+expect "guest: a program with project-guest is the run's KITH_BIN and the sandbox may read it" "$(KITH_BIN=$T/bin/kith-fake-guest KITH_PERSON=guest lj "e.get('KITH_BIN') == '$T/bin/kith-fake-guest', '$T/bin/kith-fake-guest' in j['settings']['sandbox']['filesystem']['allowRead']")" "True True"
+expect "owner: no KITH_BIN in the launch env" "$(KITH_BIN=$T/bin/kith-fake-guest lj "'KITH_BIN' in e")" "False"
 expect "guest: CLAUDE_ENV_FILE gives their shell the workspace" "$(KITH_WORK=/w sh -c '. "$1"; echo "$TMPDIR $XDG_CACHE_HOME $UV_CACHE_DIR $npm_config_cache $PUPPETEER_CACHE_DIR $NODE_USE_ENV_PROXY"' _ "$KERNEL/lib/guest-env.sh")" "/w/tmp /w/cache /w/cache/uv /w/cache/npm /w/cache/puppeteer 1"
 expect "owner: CLAUDE_ENV_FILE changes nothing without KITH_WORK" "$(env -u KITH_WORK TMPDIR=/t sh -c '. "$1"; echo "$TMPDIR ${npm_config_cache:-unset}"' _ "$KERNEL/lib/guest-env.sh")" "/t unset"
 expect "guest: guest-env.sh sets exactly the workspace vars kith_paths.py names" "$(env -i KITH_WORK=/w /bin/sh -c '. "$1"; env' _ "$KERNEL/lib/guest-env.sh" | python3 -c "
@@ -108,7 +121,10 @@ for who in guest bot-3f9a1c2e; do
   S=$(KITH_PERSON=$who settings)
   expect "$who: sandbox on, fail closed, no escape hatch" "$(q "$S" '(sb.get("enabled"), sb.get("failIfUnavailable"), sb.get("allowUnsandboxedCommands"))')" "(True, True, False)"
   expect "$who: no excluded commands" "$(q "$S" '"excludedCommands" in sb')" False
-  expect "$who: no network but the fixed host socket (both spellings), even with no KITH_RUN_SOCKET" "$(q "$S" "sb['network']['allowUnixSockets'] == ['$T/linked state/run/host.sock', '$T/real state/run/host.sock']")" True
+  expect "$who: no network but the fixed host socket and the core's run socket (both spellings), even with no KITH_RUN_SOCKET" "$(q "$S" "sb['network']['allowUnixSockets'] == ['$T/linked state/run/host.sock', '$T/real state/run/host.sock', '$T/linked state/core/run.sock', '$T/real state/core/run.sock']")" True
+  # M2(c): exactly the one file of <machine>/core. The folder stays denied for reading, and no other path inside it
+  # (owner.sock, owner.token, the core's database, the attach socket) is a socket the sandbox may connect to or a path it may read or write.
+  expect "$who: run.sock is the only path of core/ the sandbox opens (sockets), the folder stays denied" "$(q "$S" "[x for x in sb['network']['allowUnixSockets'] if '/core/' in x and not x.endswith('/core/run.sock')] == [] and all('$T/%s/core' % d in dr for d in ('linked state', 'real state')) and not any('/core' in a for a in aw + fs['allowRead'] if not a.endswith('/core/run.sock'))")" True
   expect "$who: no local servers (a stray one could take the host's port), no domains unless the package or the owner grants some" "$(q "$S" '(sb["network"].get("allowLocalBinding"), "allowedDomains" in sb["network"])')" "(None, False)"
   W=$KITH_HOME/agents/echo/files/people/$who/.work
   expect "$who: the workspace is writable, given to the shell only" "$(q "$S" "'$W' in aw and s['env'].get('KITH_WORK') == '$W' and s['env'].get('CLAUDE_ENV_FILE','').endswith('/lib/guest-env.sh')")" True
@@ -160,9 +176,14 @@ done
 # the host socket: allowed when the run has one, and the names pass through the launch JSON env
 SOCK=$T/real\ state/run/host.sock
 S=$(KITH_PERSON=guest KITH_RUN_SOCKET=$SOCK KITH_RUN_TOKEN=tok settings)
-expect "guest with the contract socket: no extra entry" "$(q "$S" "len(sb['network']['allowUnixSockets']) == 2 and '$SOCK' in sb['network']['allowUnixSockets']")" True
+expect "guest with the contract socket: no extra entry" "$(q "$S" "len(sb['network']['allowUnixSockets']) == 4 and '$SOCK' in sb['network']['allowUnixSockets']")" True
 S2=$(KITH_PERSON=guest KITH_RUN_SOCKET=$T/elsewhere.sock settings)
-expect "a KITH_RUN_SOCKET that differs is allowed too" "$(q "$S2" "'$T/elsewhere.sock' in sb['network']['allowUnixSockets'] and len(sb['network']['allowUnixSockets']) == 3")" True
+expect "a KITH_RUN_SOCKET that differs is allowed too" "$(q "$S2" "'$T/elsewhere.sock' in sb['network']['allowUnixSockets'] and len(sb['network']['allowUnixSockets']) == 5")" True
+S3=$(KITH_PERSON=guest KITH_CORE_RUN_SOCKET=$T/real\ state/core/run.sock settings)
+expect "the KITH_CORE_RUN_SOCKET the host names is the same file: no extra entry" "$(q "$S3" "len(sb['network']['allowUnixSockets']) == 4")" True
+# A core socket named somewhere else is the host's word for where the daemon listens: allowed as that exact path, and the folder it is in is not opened.
+S4=$(KITH_PERSON=guest KITH_CORE_RUN_SOCKET=$T/other-core/run.sock settings)
+expect "a KITH_CORE_RUN_SOCKET that differs is allowed too, its folder is not" "$(q "$S4" "'$T/other-core/run.sock' in sb['network']['allowUnixSockets'] and '$T/other-core' not in aw + fs['allowRead']")" True
 expect "guest with a socket: the socket's folder is not denied" "$(q "$S" "not any('$SOCK'.startswith(d + '/') or '$SOCK' == d for d in dr)")" True
 # globs in the membership Read rules deny the parent folder
 S=$(KITH_PERSON=guest settings)
@@ -383,15 +404,17 @@ expect "no capabilities and nothing kept: no allowedDomains again" "$(doms guest
 # model turn (KITH_REAL_MODEL, default haiku).
 if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
   echo "-- real sandbox run"
+  [ -z "${KITH_DIFFTEST_BIN:-}" ] || export KITH_BIN=$KITH_DIFFTEST_BIN   # the stub bin/project-id needs a real kith program
   AH=$KITH_HOME/agents/echo; SLICE=$AH/files/people/guest; mkdir -p "$SLICE" "$AH/files/people/other" "$AH/memory/people/guest" "$AH/memory/shared"
   : > "$AH/files/people/other/private.txt"; mkdir -p "$KITH_STATE/secrets"
   mkdir -p "$SLICE/clone/.git/hooks" "$SLICE/clone/.claude" "$T/proj/.git/hooks" "$T/proj/.claude"
   echo hello > "$T/proj/README.md"; echo hi > "$SLICE/readable.txt"
   MACH=$(python3 "$KERNEL/lib/kith_paths.py" --sh | sed -n "s/^export KITH_MACHINE=//p" | tr -d "'")
-  mkdir -p "$MACH/run"
+  mkdir -p "$MACH/run" "$MACH/core"
   # the two sockets: the host's (fixed place) and a run socket elsewhere; plain listeners that answer nothing
   printf 'import socket, sys, time\nkeep = []\nfor p in sys.argv[1:]:\n    s = socket.socket(socket.AF_UNIX); s.bind(p); s.listen(5); keep.append(s)\ntime.sleep(240)\n' > "$T/listen.py"
-  python3 "$T/listen.py" "$MACH/run/host.sock" "$T/run s.sock" "$T/other.sock" &
+  # the core's run socket (the one file of core/ a guest may reach) and a stand-in for the owner socket beside it (it may not)
+  python3 "$T/listen.py" "$MACH/run/host.sock" "$T/run s.sock" "$T/other.sock" "$MACH/core/run.sock" "$MACH/core/owner.sock" &
   LISTENER=$!
   trap 'kill $LISTENER 2>/dev/null; rm -rf "$T"' EXIT
   sleep 1
@@ -422,8 +445,14 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
     echo "r write-project-claude-md touch '$T/proj/CLAUDE.md'"
     echo "r write-project-claude-dir touch '$T/proj/.claude/settings.json'"
     echo "r write-zshrc touch '$REAL_HOME/.zshrc-probe-should-not-exist'"
+    # the stub starts `kith kernel project-id` from the Kith folder (KITH_BIN and its links are opened) and the client reaches the
+    # listener, which answers nothing: that is the guest client's "could not be reached" line, not a program that never started
+    [ -z "${KITH_DIFFTEST_BIN:-}" ] || echo "r project-id sh -c \"'$KERNEL/bin/project-id' 2>&1 | grep -q 'could not be reached'\""
     echo "r sock-host python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$MACH/run/host.sock')\""
     echo "r sock-run python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$T/run s.sock')\""
+    echo "r sock-core-run python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$MACH/core/run.sock')\""
+    echo "r sock-core-owner python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$MACH/core/owner.sock')\""
+    echo "r read-core-folder ls '$MACH/core'"
     echo "r sock-other python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$T/other.sock')\""
     echo "r net-curl curl -sS -m 5 https://example.com"
     echo "r read-owner-uv-cache ls '$REAL_HOME/.cache/uv'"   # the owner's uv cache (uv's default place)
@@ -436,8 +465,9 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
   echo "probe output:"; cat "$SLICE/probe.out.err" | cut -c1-200 | grep -v "xcode\|xcrun\|developer\|^See\|^If dev\|^Use" ; cat "$SLICE/probe.out" 2>/dev/null || { echo "(no probe output)"; tail -5 "$T/real.err"; tail -5 "$T/real.out"; }
   rexpect() { local got; got=$(sed -n "s/^$1 //p" "$SLICE/probe.out" 2>/dev/null); expect "real: $1 $2" "${got:-none}" "$2"; }
   for n in read-ssh read-keychains read-home read-backup read-other-slice read-state-secrets \
-           write-hooks write-claude-dir write-claude-md write-envrc write-project write-project-hooks write-project-claude-md write-project-claude-dir write-zshrc net-curl sock-other read-owner-uv-cache; do rexpect $n denied; done
-  for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run uv-run uv-own-cache shell-workspace; do rexpect $n ok; done
+           write-hooks write-claude-dir write-claude-md write-envrc write-project write-project-hooks write-project-claude-md write-project-claude-dir write-zshrc net-curl sock-other sock-core-owner read-core-folder read-owner-uv-cache; do rexpect $n denied; done
+  for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run sock-core-run uv-run uv-own-cache shell-workspace; do rexpect $n ok; done
+  [ -z "${KITH_DIFFTEST_BIN:-}" ] || rexpect project-id ok   # with a real program (KITH_DIFFTEST_BIN): the guest's project-id starts it
   rm -f "$REAL_HOME/.zshrc-probe-should-not-exist"
 
   # A compound with a cd and an export (what a guest's agent runs for uv) must not ask: Claude Code's own ask for a command it
