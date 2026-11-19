@@ -105,6 +105,7 @@ fn build(specs: &[(usize, usize, usize)], bind: bool) -> (Arc<RunTokens>, Vec<Li
                     claim: (i % 2 == 0).then(|| format!("claim{i}")),
                     room: ROOMS[r].map(Into::into),
                     project: PROJECTS[(p + i) % PROJECTS.len()].map(Into::into),
+                    members: Vec::new(),
                 })
                 .unwrap();
             let pid = BASE + u32::try_from(i).unwrap() * SPACING;
@@ -924,6 +925,7 @@ pub(crate) fn prop_reused_pid_and_unreadable_start() -> Result<(), String> {
                         claim: None,
                         room: ROOMS[r].map(Into::into),
                         project: None,
+                        members: Vec::new(),
                     })
                     .unwrap();
                 let pid = BASE + u32::try_from(i).unwrap() * SPACING;
