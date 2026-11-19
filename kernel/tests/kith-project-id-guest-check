@@ -5,8 +5,9 @@
 # refused), so the transport is checked byte for byte: the request line, the relayed stdout/stderr and exit code, and each
 # way the socket can fail. Run on kernel/bin/project-id before the guest client moved to Rust (core/kernel/src/project/guest.rs)
 # and after, with the same expectations. Needs, since the move, the Rust program: KITH_BIN or KITH_DIFFTEST_BIN (without
-# one the check says so and exits 0). The last section (a stand-in guest sandbox, sandbox-exec) runs on macOS only and in no CI
-# job: run it by hand on a Mac with the built program.
+# one the check says so and exits 0). The last section (a guest sandbox: sandbox-exec, and srt, the sandbox runtime Claude Code uses, when it is
+# installed, both with the filesystem rules of a real guest launch) runs on macOS only and in no CI job: run it by hand on a Mac
+# with the built program.
 #
 #   [KITH_DIFFTEST_BIN=/path/to/kith] kernel/tests/kith-project-id-guest-check
 set -uo pipefail
@@ -233,6 +234,30 @@ PY
   (cd "$T/w" && sandbox-exec -f "$S/guest.sb" env -i PATH=/usr/bin:/bin HOME="$S/home" KITH_BIN="$GBIN" KITH_RUN_TOKEN=good KITH_RUN_SOCKET="$SOCK" "$P" >"$T/out" 2>"$T/err"); rc=$?
   kill $FH 2>/dev/null; wait $FH 2>/dev/null
   check "sandboxed guest: the stub starts the kith program and the host answers" "said alpha && [ $rc = 0 ]"
+  # The same run under srt (@anthropic-ai/sandbox-runtime, the sandbox Claude Code itself uses) with the launch's own filesystem and
+  # socket rules, when it is installed: the profile above is a stand-in, this is the real one.
+  if command -v srt >/dev/null; then
+    python3 - "$S/launch.json" "$S/srt.json" <<'PY'
+import json, sys
+sb = json.load(open(sys.argv[1]))["settings"]["sandbox"]
+json.dump({"filesystem": sb["filesystem"], "network": {"allowedDomains": [], "deniedDomains": [], "allowUnixSockets": sb["network"].get("allowUnixSockets", [])}}, open(sys.argv[2], "w"))
+PY
+    fakehost 1
+    (cd "$T/w" && srt --settings "$S/srt.json" -c "env -i PATH=/usr/bin:/bin HOME='$S/home' KITH_BIN='$GBIN' KITH_RUN_TOKEN=good KITH_RUN_SOCKET='$SOCK' '$P'" >"$T/out" 2>"$T/err"); rc=$?
+    kill $FH 2>/dev/null; wait $FH 2>/dev/null
+    check "under srt, the sandbox runtime of Claude Code: the stub starts the kith program and the host answers" "said alpha && [ $rc = 0 ]"
+    # the control: the same rules with the program's folder (and its links) left out of allowRead
+    python3 - "$S/srt.json" "$S/srt-closed.json" "$S/kh/cli" <<'PY'
+import json, sys
+c = json.load(open(sys.argv[1]))
+c["filesystem"]["allowRead"] = [a for a in c["filesystem"]["allowRead"] if sys.argv[3] not in a]
+json.dump(c, open(sys.argv[2], "w"))
+PY
+    fakehost 1
+    (cd "$T/w" && srt --settings "$S/srt-closed.json" -c "env -i PATH=/usr/bin:/bin HOME='$S/home' KITH_BIN='$GBIN' KITH_RUN_TOKEN=good KITH_RUN_SOCKET='$SOCK' '$P'" >"$T/out" 2>"$T/err"); rc=$?
+    kill $FH 2>/dev/null; wait $FH 2>/dev/null
+    check "under srt without the program's folder open: no answer (so the check proves something)" "[ $rc != 0 ] && ! said alpha"
+  fi
   # Without the opening the same run fails: this is what the launch's allowRead is for.
   grep -v "$S/kh/cli" "$S/guest.sb" > "$S/closed.sb"
   (cd "$T/w" && sandbox-exec -f "$S/closed.sb" env -i PATH=/usr/bin:/bin HOME="$S/home" KITH_BIN="$GBIN" KITH_RUN_TOKEN=good KITH_RUN_SOCKET="$SOCK" "$P" >"$T/out" 2>"$T/err"); rc=$?
