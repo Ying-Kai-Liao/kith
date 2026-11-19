@@ -155,7 +155,7 @@ check "claude/codex not installed: not ready, says so" "is \"(d['chain'][1]['rea
 # --- launch-json per entry --------------------------------------------------------------------------------------------
 OUT=$("$KITH" echo --launch-json --backup claude:work 2>/dev/null); rc=$?
 check "claude:<name>: harness claude, CLAUDE_CONFIG_DIR set, provider and account" "[ $rc = 0 ] && is \"(d['harness'], d['backup'], d['provider'], d['account'], d['env']['CLAUDE_CONFIG_DIR'], d['env']['KITH_PROVIDER'], d['env']['KITH_ACCOUNT'])\" \"('claude', 'claude:work', 'claude', 'work', '$M/accounts/claude/work', 'claude', 'work')\""
-check "claude:<name>: same shape (settings, claude_args, model kept) and the cost hook is in settings" "is \"(d['model'], isinstance(d['claude_args'], list), 'kith-cost' in str(d['settings']['hooks']['SessionStart']))\" \"('sonnet', True, True)\""
+check "claude:<name>: same shape (settings, claude_args, model kept) and the cost hook is in settings" "is \"(d['model'], isinstance(d['claude_args'], list), ('kith-cost' in str(d['settings']['hooks']['SessionStart']) or 'kernel cost' in str(d['settings']['hooks']['SessionStart'])))\" \"('sonnet', True, True)\""
 "$KITH" echo --launch-json --backup claude:nobody >/dev/null 2>"$T/err"; rc=$?
 check "an account that doesn't exist: exit 4, one line" "[ $rc = 4 ] && [ \$(wc -l < $T/err) = 1 ]"
 "$KITH" echo --launch-json --backup pi >/dev/null 2>"$T/err"; rc=$?
