@@ -565,7 +565,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// The Pre/PostToolUse hook of `kernel/bin/kith-room-ledger` (not routed from the launch yet; the hook JSON is on stdin).
+    /// The Pre/PostToolUse hook of `kernel/bin/kith-room-ledger` (the launch registers it as the hook; the hook JSON is on stdin).
     #[command(name = "room-ledger", disable_help_flag = true)]
     RoomLedger {
         /// The kernel folder (default: the one this program finds).

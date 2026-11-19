@@ -475,11 +475,15 @@ shared=$home/memory/shared
 
 # The pinned package (prompt.md = agent.md body + PROTOCOL.md). If versioning itself breaks, run the live folder
 # rather than not at all.
-# `resolve` is the Rust core's when `pkg` is switched (lib/core-switched.txt); kith_core_exec returns otherwise (or with
-# KITH_CORE=python) and the Python answers. The rest of kith-pkg stays Python.
+# `resolve` is the Rust core's (`pkg` in lib/core-switched.txt) and has no Python fallback: kith_core_exec returns only when this
+# Mac has no program that lists the module, and the run then names that and takes the live folder. KITH_CORE=python does not reach
+# it: there is no Python to go back to (the rollback is a previous release). The rest of kith-pkg stays Python.
 . "$KITH/lib/kith-core.sh"
 [[ -n ${_kith_core_primed:-} ]] || kith_core_prime   # one program lookup for the pkg call and the project_id calls below
-pkg=$({ kith_core_exec pkg --kernel "$KITH" resolve "$agent" || "$KITH/bin/kith-pkg" resolve "$agent"; }) && [[ -f $pkg/prompt.md ]] \
+pkg_missing() {
+  echo "kith: no kith program with the pkg module was found (kith update); $agent runs its live folder, so a pin or rollback is ignored until one is" >&2
+}
+pkg=$({ KITH_CORE= kith_core_exec pkg --kernel "$KITH" resolve "$agent" || { pkg_missing; false; }; }) && [[ -f $pkg/prompt.md ]] \
   || { echo "kith: $agent: package snapshot failed; running the live folder" >&2; pkg=$src_pkg; }
 export KITH_AGENT=$agent KITH_AGENT_DIR=$pkg KITH_AGENT_HOME=$home KITH_AGENT_VERSION=${pkg##*@}
 [[ $pkg == "$src_pkg" ]] && KITH_AGENT_VERSION=live
@@ -876,7 +880,11 @@ plugins=$(claude plugin list --json 2>/dev/null || echo '[]')
 # checks and blocks a refused write with the reason; after it, `post` records the version. Files that aren't memory
 # return at once. Without the kith binary (a kernel checkout never built) writes still go through, unchecked.
 # Room notes also get a write-time record of who was in the room (bin/kith-room-ledger); it never blocks a write.
-ledger_pre=$(printf '%q pre --agent %q --home %q || true' "$KITH/bin/kith-room-ledger" "$agent" "$home")
+# The Rust `kith kernel room-ledger` when `room-ledger` is switched and the program lists it, else the stub at the old path, which
+# forwards (or does nothing: a hook never fails). Quoted with %q as the memory hook below is, so both launch paths write the same bytes.
+ledger_cmd=$(printf '%q' "$KITH/bin/kith-room-ledger")
+if lbin=$(kith_core_bin room-ledger); then ledger_cmd=$(printf '%q kernel room-ledger --kernel %q' "$lbin" "$KITH"); fi
+ledger_pre=$(printf '%s pre --agent %q --home %q || true' "$ledger_cmd" "$agent" "$home")
 ledger_post=${ledger_pre/ pre --agent / post --agent }
 mem_pre="" mem_post=""
 if mbin=$(python3 "$KITH/lib/kith_paths.py" --bin) && [[ -n $mbin ]]; then
@@ -906,7 +914,8 @@ if [[ $p_owner == 0 && -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX && -d $KIT
   [[ $(dirname "$ob") == "$(cd "$KITH_MACHINE/outbox" && pwd -P)" && $(basename "$ob") != .* ]] && run_outbox=$ob
 fi
 [[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
-fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK=$cost_hook SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
+# The live folder (a launch without a package snapshot) may have no settings.json: an empty one then.
+fill < <([[ -f $pkg/settings.json ]] && cat "$pkg/settings.json" || echo "{}") | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK=$cost_hook SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
 $learned
 $state_projects" python3 -I -c '
 import json, os, re, sys

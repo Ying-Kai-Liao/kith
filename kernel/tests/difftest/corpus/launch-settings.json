@@ -137,6 +137,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -303,6 +311,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -471,6 +487,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -634,6 +658,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -802,6 +834,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -968,6 +1008,14 @@
    "new": "permission_mode"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -1136,6 +1184,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -1308,6 +1364,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -1475,6 +1539,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -1644,6 +1716,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -1811,6 +1891,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -1980,6 +2068,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -2147,6 +2243,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -2316,6 +2420,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -2483,6 +2595,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -2652,6 +2772,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -2815,6 +2943,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -2980,6 +3116,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -3139,6 +3283,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -3303,6 +3455,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -3482,6 +3642,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -3660,6 +3828,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -3824,6 +4000,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -3987,6 +4171,14 @@
    "new": "add_dirs"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -4156,6 +4348,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -4320,6 +4520,14 @@
    "new": "disable_slash_commands"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -4486,6 +4694,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -4650,6 +4866,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -4824,6 +5048,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -4996,6 +5228,14 @@
    "new": "add_dirs"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -5170,6 +5410,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -5342,6 +5590,14 @@
    "new": "disable_slash_commands"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -5519,6 +5775,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -5691,6 +5955,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -5865,6 +6137,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -6037,6 +6317,14 @@
    "new": "permission_mode"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -6222,6 +6510,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -6398,6 +6694,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -6576,6 +6880,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -6749,6 +7061,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -6924,6 +7244,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -7096,6 +7424,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -7270,6 +7606,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -7442,6 +7786,14 @@
    "new": "cwd"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -7620,6 +7972,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -7771,8 +8131,8 @@
     "text": "---\nname: Beta\ndescription: x\n---\nx\n"
    },
    {
-    "write": "kith/agents/\u00c9clair/role/agent.md",
-    "text": "---\nname: \u00c9clair\ndescription: x\n---\nx\n"
+    "write": "kith/agents/Éclair/role/agent.md",
+    "text": "---\nname: Éclair\ndescription: x\n---\nx\n"
    },
    {
     "write": "kith/agents/my agent/role/agent.md",
@@ -7811,11 +8171,11 @@
     "text": "f\n"
    },
    {
-    "write": "kith/agents/echo/memory/\u00e4rger.md",
+    "write": "kith/agents/echo/memory/ärger.md",
     "text": "m\n"
    },
    {
-    "write": "kith/agents/echo/files/\u00e4rger.md",
+    "write": "kith/agents/echo/files/ärger.md",
     "text": "f\n"
    },
    {
@@ -7859,15 +8219,15 @@
     "text": "P\n"
    },
    {
-    "write": "kith/agents/echo/memory/people/\u00c9mile/MEMORY.md",
+    "write": "kith/agents/echo/memory/people/Émile/MEMORY.md",
     "text": "p\n"
    },
    {
-    "write": "kith/agents/echo/files/people/\u00c9mile/n.md",
+    "write": "kith/agents/echo/files/people/Émile/n.md",
     "text": "p\n"
    },
    {
-    "write": "kith/state/people/\u00c9mile.md",
+    "write": "kith/state/people/Émile.md",
     "text": "P\n"
    },
    {
@@ -7916,6 +8276,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -8068,8 +8436,8 @@
     "text": "---\nname: Beta\ndescription: x\n---\nx\n"
    },
    {
-    "write": "kith/agents/\u00c9clair/role/agent.md",
-    "text": "---\nname: \u00c9clair\ndescription: x\n---\nx\n"
+    "write": "kith/agents/Éclair/role/agent.md",
+    "text": "---\nname: Éclair\ndescription: x\n---\nx\n"
    },
    {
     "write": "kith/agents/my agent/role/agent.md",
@@ -8108,11 +8476,11 @@
     "text": "f\n"
    },
    {
-    "write": "kith/agents/echo/memory/\u00e4rger.md",
+    "write": "kith/agents/echo/memory/ärger.md",
     "text": "m\n"
    },
    {
-    "write": "kith/agents/echo/files/\u00e4rger.md",
+    "write": "kith/agents/echo/files/ärger.md",
     "text": "f\n"
    },
    {
@@ -8156,15 +8524,15 @@
     "text": "P\n"
    },
    {
-    "write": "kith/agents/echo/memory/people/\u00c9mile/MEMORY.md",
+    "write": "kith/agents/echo/memory/people/Émile/MEMORY.md",
     "text": "p\n"
    },
    {
-    "write": "kith/agents/echo/files/people/\u00c9mile/n.md",
+    "write": "kith/agents/echo/files/people/Émile/n.md",
     "text": "p\n"
    },
    {
-    "write": "kith/state/people/\u00c9mile.md",
+    "write": "kith/state/people/Émile.md",
     "text": "P\n"
    },
    {
@@ -8213,6 +8581,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -8390,6 +8766,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -8558,6 +8942,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -8735,6 +9127,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -8903,6 +9303,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -9080,6 +9488,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -9248,6 +9664,14 @@
    "new": "settings"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -9422,6 +9846,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -9594,6 +10026,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -9757,6 +10197,14 @@
    "new": "permission_mode"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -9925,6 +10373,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -10092,6 +10548,14 @@
    "new": "mcp_servers"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -10265,6 +10729,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -10436,6 +10908,14 @@
    "new": "mcp_servers"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -10610,6 +11090,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -10778,6 +11266,14 @@
    "new": "mcp_servers"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -10954,6 +11450,14 @@
    "new": "mcp_servers"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -11135,6 +11639,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -11315,6 +11827,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -11490,6 +12010,14 @@
    "new": "mcp_servers"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
@@ -11667,6 +12195,14 @@
    "new": "mcp_servers"
   },
   "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""

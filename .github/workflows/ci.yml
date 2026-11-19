@@ -330,7 +330,7 @@ jobs:
             host_core:
               # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
               # memory and summary), and the libs those programs load on every call.
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/kith-room-ledger,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-load-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -434,7 +434,6 @@ jobs:
               Schedule person check|kernel/tests/kith-sched-person-check
               Terminal flags check|kernel/tests/kith-terminal-flags-check
               Recall check|kernel/tests/kith-recall-check
-              Load check|kernel/tests/kith-load-check
               Guest helper check|kernel/tests/kith-guest-helper-check
               Wake check|kernel/tests/kith-wake-check
               Sessions core check (the kernel claim takers in Files and Writer mode, a fake core)|kernel/tests/kith-sessions-core-check
@@ -840,6 +839,9 @@ jobs:
           KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-memory-check
           KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-summary-check
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-settings-switch-check
+          # The load filter, with the room-note ledger written by the real hook: bin/kith-room-ledger is a stub for `kith kernel room-ledger`, and
+          # most of its rows are negative greps that a hook doing nothing would pass, so the check fails without a program.
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-load-check
       # Its own step so a slow run shows which check it is (the router check and the stepped props took most of the old single step's time).
       - name: Authority router check (kith-auth on the tombstone)
         # The authority router (M2-23): on the tombstone kith-auth answers its read verbs from the core, the same as the file, and refuses the rest.

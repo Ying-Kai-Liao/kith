@@ -309,8 +309,11 @@ escapes), ledgers as they are found (missing, empty, corrupt, not an object, ent
 `ledger.lock` or the ledger itself being a folder, the ledger folder being a file), the state folder (a file, or derived from the
 home), homes and agents (missing home, `.`, `""`, trailing slash, ids), and eight hooks at once on one ledger (the lock).
 The cases are `needs: rust` with `program` set (`sh w.sh py KERNEL` against `sh w.sh rs BIN KERNEL`, which runs the Python or
-`kith kernel room-ledger --kernel KERNEL`), not `unswitched`: the Rust side exists, only the switch (a `room-ledger` line in
-`lib/core-switched.txt`; the hook is registered in `launch/settings.rs`) is not made. `w.sh`: the second word of a run line is a file
+`kith kernel room-ledger --kernel KERNEL`). Switched since R2: the launch registers the Rust call as the hook when the
+`room-ledger` line is there and the program lists the module (`launch/settings.rs`, `kith_core_bin` in the bash launch), and
+`kernel/bin/kith-room-ledger` is a stub. The Python is gone, so `corpus/room-ledger.json`'s old side (`py`) is that stub forwarding to the
+same program (a re-record proves nothing); `golden/room-ledger.json` and its facets are the Python's record, replayed on the Rust side only
+(`--golden ... --rust`). The `room-ledger` line no longer rolls anything back: it only picks the program hook over the stub. `w.sh`: the second word of a run line is a file
 in `e/` of `KEY=VALUE` lines exported first (`-` for none) and the third a file in `in/` for stdin (`par`: eight runs at once on
 `in/p1..p8`). Every run exits 0 and prints nothing, so the facts are the files: the ledger (parsed, so key order and spacing are not
 compared; the unit tests of `core/kernel/src/room_ledger` hold the exact bytes), its `.lock`, and the leftovers (`.tmpPID`, ignored).
