@@ -734,18 +734,19 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
             }
         };
         account::note_stderr(id, &said);
-        if !revoke {
+        if revoke {
+            crate::remote::core_revokes::set_aside_held(hub, id).await;
+        } else {
             // In the undo's own locked section: a cut still owed from a revoke without the core must not land after it.
             crate::remote::core_revokes::clear_owed(hub, id).await;
+            // The give-back in the same hold as the unrevoke: after it, a re-revoke could land first and be undone.
+            crate::remote::core_revokes::restore_held(hub, id).await;
         }
         let pending = said.lines().find(|l| l.contains("part of the revoke is pending")).map(str::to_owned);
         (!account::core_missed(&said), pending)
     };
     if revoke {
         cut_off_held(hub, id).await;
-    } else {
-        // an undo gives back what the host set aside under every id it may hold them under
-        crate::remote::core_revokes::restore_held(hub, id).await;
     }
     Ok((core_updated, pending))
 }

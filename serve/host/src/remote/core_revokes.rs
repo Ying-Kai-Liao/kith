@@ -222,6 +222,18 @@ pub(crate) async fn restore_held(hub: &Hub, person: &str) {
     }
 }
 
+/// A revoke's set-aside: what the host keeps for the undo (devices, memberships, open invites) is set aside under every id
+/// the person may be held under. The caller holds `AUTH_WRITES` from the flip of the revoked flag to here, as the give-back
+/// ([`restore_held`]) does, so a late give-back cannot land after a re-revoke.
+pub(crate) async fn set_aside_held(hub: &Hub, person: &str) {
+    for id in held_under(person).await {
+        match hub.store.suspend_person(&id) {
+            Ok(m) => tracing::info!(person = id, ?m, "a revoke set the person's devices aside here"),
+            Err(e) => tracing::warn!(error = format!("{e:#}"), person = id, "couldn't set aside a revoked person"),
+        }
+    }
+}
+
 /// An undo of `person`: no cut is owed any more under any id the host may hold them under. The caller holds
 /// `AUTH_WRITES` for the section that writes the undo, so a tick paying the row can't land between the two.
 pub(crate) async fn clear_owed(hub: &Hub, person: &str) {

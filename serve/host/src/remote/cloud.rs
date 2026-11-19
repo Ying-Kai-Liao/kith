@@ -538,10 +538,7 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     for person in changed.cut {
         crate::api::people::cut_off_held(hub, &person).await;
     }
-    for person in changed.restored {
-        // under every id the host may hold them under, as the cut and the app's undo (a rename keeps the old rows)
-        crate::remote::core_revokes::restore_held(hub, &person).await;
-    }
+    // The give-back was done inside `apply_revoked`, in the undo's own locked section.
     // Before the grants: a member's device is kept only while its account is bound to its person.
     super::members::sync(hub, state.memberships.as_deref(), owner_uid.as_deref()).await;
     super::botsync::sync(hub, state.bot_devices.as_deref()).await;
