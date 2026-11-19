@@ -308,10 +308,10 @@ impl Sweep<'_> {
         // claude can itself exit 75, 126 or 127, so the exit code alone cannot tell.
         let mut status = None;
         if !stub.is_empty() {
-            let (r, w) = proc::pipe_low().map_err(|x| x.to_string())?;
+            let (r, w) = proc::pipe().map_err(|x| x.to_string())?;
             stub.pop();
             stub.push("--status-fd".into());
-            stub.push(w.to_string().into());
+            stub.push(proc::STATUS_FD.to_string().into());
             stub.push("--".into());
             status = Some((r, w));
         }

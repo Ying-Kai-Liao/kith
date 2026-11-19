@@ -93,20 +93,21 @@ pub fn pipe() -> std::io::Result<(RawFd, RawFd)> {
     Ok((fds[0], fds[1]))
 }
 
-/// [`pipe`] with both ends moved to the lowest free descriptors from 3 up: the stub's status pipe is named on its command line, and a
-/// POSIX shell (dash) cannot redirect to a descriptor above 9, which a process with many open files would otherwise hand out.
-pub fn pipe_low() -> std::io::Result<(RawFd, RawFd)> {
-    let (r, w) = pipe()?;
-    let low = |fd: RawFd| {
-        // SAFETY: F_DUPFD_CLOEXEC on a descriptor this module owns.
-        let dup = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
-        if dup < 0 {
-            return fd;
-        }
-        close(fd);
-        dup
-    };
-    Ok((low(r), low(w)))
+/// The descriptor the stub finds its status pipe on: [`parked`] puts `keep` here in the child, whatever number it has in this process.
+/// It is named on the stub's command line, and a POSIX shell (dash, the stub's `/bin/sh` in the tests) cannot redirect to a descriptor
+/// above 9, which a process with many open files would otherwise hand out.
+pub const STATUS_FD: RawFd = 9;
+
+/// `fd` moved to the lowest free descriptor from 10 up, so that the descriptors of the child's own plumbing never take a number the
+/// stub is told about (`F_DUPFD_CLOEXEC`; the original is closed).
+fn high(fd: RawFd) -> RawFd {
+    // SAFETY: F_DUPFD_CLOEXEC on a descriptor this module owns.
+    let dup = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 10) };
+    if dup < 0 {
+        return fd;
+    }
+    close(fd);
+    dup
 }
 
 pub fn close(fd: RawFd) {
@@ -182,7 +183,7 @@ fn errno() -> i32 {
 /// Forks the process that will be claude: it execs `argv` (in `cwd`, with `env`, stdio on /dev/null) when `1` is written to
 /// `go`, and exits without running anything when `go` closes unwritten (also when this process dies). Its pid is claude's
 /// (or the kith-stub's that runs claude). `group`: it leads a process group of its own, which [`reap`] kills as a whole.
-/// `keep`: a descriptor that survives the exec (kith-stub's status pipe).
+/// `keep`: a descriptor that survives the exec as [`STATUS_FD`] (kith-stub's status pipe).
 pub fn parked(
     argv: &[OsString],
     cwd: &Path,
@@ -191,7 +192,9 @@ pub fn parked(
     keep: Option<RawFd>,
 ) -> std::io::Result<Parked> {
     let (go_r, go_w) = pipe()?;
+    let (go_r, go_w) = (high(go_r), high(go_w));
     let (err_r, err_w) = pipe()?;
+    let (err_r, err_w) = (high(err_r), high(err_w));
     let cargs: Vec<CString> = argv.iter().map(|a| cstr(a)).collect();
     let mut argv_ptrs: Vec<*const libc::c_char> = cargs.iter().map(|a| a.as_ptr()).collect();
     argv_ptrs.push(std::ptr::null());
@@ -215,6 +218,7 @@ pub fn parked(
     // Everything the child needs is made here: it may not allocate (the host is multi-threaded) or look anything up.
     // SAFETY: open(2) of a constant path.
     let null = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
+    let null = if null < 0 { null } else { high(null) };
     if null < 0 {
         let e = std::io::Error::last_os_error();
         for fd in [go_r, go_w, err_r, err_w] {
@@ -239,10 +243,6 @@ pub fn parked(
             if group {
                 libc::setpgid(0, 0);
             }
-            if let Some(fd) = keep {
-                let f = libc::fcntl(fd, libc::F_GETFD);
-                libc::fcntl(fd, libc::F_SETFD, f & !libc::FD_CLOEXEC);
-            }
             let mut byte = [0u8; 1];
             if libc::read(go_r, byte.as_mut_ptr().cast(), 1) == 1 && byte[0] == b'1' {
                 // (errno, index of the name tried; MAX for the chdir)
@@ -253,6 +253,14 @@ pub fn parked(
                 } else {
                     for fd in 0..3 {
                         libc::dup2(null, fd);
+                    }
+                    if let Some(src) = keep {
+                        if src == STATUS_FD {
+                            let f = libc::fcntl(src, libc::F_GETFD);
+                            libc::fcntl(src, libc::F_SETFD, f & !libc::FD_CLOEXEC);
+                        } else {
+                            libc::dup2(src, STATUS_FD);
+                        }
                     }
                     for (i, (full, _)) in tries.iter().enumerate() {
                         libc::execve(full.as_ptr(), argv_ptrs.as_ptr(), envp.as_ptr());
