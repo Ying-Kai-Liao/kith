@@ -9,13 +9,12 @@ const USAGE: &str = include_str!("usage.txt");
 /// With `--json`, a failure is one `{"ok": false, "error": ...}` object on stdout (`JSON_ERRORS`), the exit code the same.
 fn json_errors(as_json: bool, v: Result<Verb, Verb>) -> Verb {
     match v {
-        Ok(v) => v,
         Err(v) if as_json && v.stderr.starts_with("kith: ") => {
             let msg = v.stderr["kith: ".len()..].trim_end_matches('\n');
             let out = J::Obj(vec![("ok", J::Bool(false)), ("error", J::Str(msg.to_owned()))]);
             Verb { stdout: out.dumps() + "\n", stderr: String::new(), code: v.code }
         }
-        Err(v) => v,
+        Ok(v) | Err(v) => v,
     }
 }
 
@@ -44,7 +43,7 @@ pub fn run_account(ctx: &Ctx<'_>, mut args: Vec<String>, stdin: &dyn Fn() -> Str
         "order" => json_errors(false, set_verbs::order(ctx, args)),
         "move" => json_errors(false, set_verbs::move_(ctx, args)),
         "set" => json_errors(false, set_verbs::set(ctx, args)),
-        "policy" => json_errors(false, set_verbs::policy(ctx, args)),
+        "policy" => json_errors(false, set_verbs::policy(ctx, &args)),
         "cross-harness" => json_errors(false, set_verbs::cross_harness(ctx, args)),
         "migrate" => json_errors(false, set_verbs::migrate_verb(ctx)),
         "pin" => json_errors(false, set_verbs::pin(ctx, args)),

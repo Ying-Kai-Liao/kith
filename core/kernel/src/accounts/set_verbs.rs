@@ -162,7 +162,7 @@ pub(super) fn set(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> {
     )))
 }
 
-pub(super) fn policy(ctx: &Ctx<'_>, args: Vec<String>) -> Result<Verb, Verb> {
+pub(super) fn policy(ctx: &Ctx<'_>, args: &[String]) -> Result<Verb, Verb> {
     if args.is_empty() {
         return Ok(Verb::out(format!("{}\n", settings::policy(&settings::read(ctx)))));
     }

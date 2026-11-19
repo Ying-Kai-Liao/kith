@@ -89,16 +89,13 @@ fn harness_login(h: &str, d: Option<&Path>) -> Result<i32, Verb> {
         say("This logs Codex in separately from your usual Codex login (device code; the browser step is yours).\n");
     }
     let mut cmd;
-    match d {
-        Some(d) => {
-            let (argv, (k, v)) = login_command(h, d);
-            cmd = std::process::Command::new(argv[0]);
-            cmd.args(&argv[1..]).env(k, v);
-        }
-        None => {
-            cmd = std::process::Command::new(h);
-            cmd.args(if h == "claude" { &["auth", "login"][..] } else { &["login"][..] });
-        }
+    if let Some(d) = d {
+        let (argv, (k, v)) = login_command(h, d);
+        cmd = std::process::Command::new(argv[0]);
+        cmd.args(&argv[1..]).env(k, v);
+    } else {
+        cmd = std::process::Command::new(h);
+        cmd.args(if h == "claude" { &["auth", "login"][..] } else { &["login"][..] });
     }
     cmd.status()
         .map(exit_code)
@@ -136,6 +133,7 @@ fn join_set(ctx: &Ctx<'_>, entry: &str) -> Result<usize, Verb> {
     })
 }
 
+#[allow(clippy::many_single_char_names, clippy::similar_names)] // h/n/d/k/v are the verb's own names
 pub(super) fn add(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> {
     let as_json = flag(&mut args, "--json");
     let yes = flag(&mut args, "--yes");
@@ -355,7 +353,7 @@ pub(super) fn remove(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb>
             Ok(())
         })?;
     }
-    let mut out = String::new();
+    let mut out;
     match (folder, &d) {
         (true, Some(d)) => {
             std::fs::remove_dir_all(d)

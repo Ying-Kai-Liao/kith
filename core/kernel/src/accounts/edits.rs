@@ -182,7 +182,8 @@ mod tests {
         drop_entry(&mut s, "claude:w");
         assert_eq!(
             Value::Object(s),
-            json!({"accounts": ["claude"], "agents": {"b": {"pin": {"id": "claude", "only": false}}}})
+            // `a` keeps its now-empty list (kith-account only drops an agent whose whole entry is `{}`).
+            json!({"accounts": ["claude"], "agents": {"a": {"accounts": []}, "b": {"pin": {"id": "claude", "only": false}}}})
         );
     }
 

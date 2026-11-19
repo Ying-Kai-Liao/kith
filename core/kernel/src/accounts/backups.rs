@@ -213,7 +213,7 @@ fn change(ctx: &Ctx<'_>, sub: &str, mut args: Vec<String>, as_json: bool) -> Res
         if !done.changed {
             if as_json {
                 let mut f = base(false);
-                f.push(("position", J::Int(done.place as i64)));
+                f.push(("position", J::Int(i64::try_from(done.place).unwrap_or(i64::MAX))));
                 f.push(("backups", strs(&done.ids)));
                 return Ok(Verb::out(J::Obj(f).dumps() + "\n"));
             }
@@ -222,7 +222,7 @@ fn change(ctx: &Ctx<'_>, sub: &str, mut args: Vec<String>, as_json: bool) -> Res
         let (ready, why) = super::check(ctx, &entry, &agent).map_err(|e| Verb::die(&e, 2))?;
         if as_json {
             let mut f = base(true);
-            f.push(("position", J::Int(done.place as i64)));
+            f.push(("position", J::Int(i64::try_from(done.place).unwrap_or(i64::MAX))));
             f.push(("backups", strs(&done.ids)));
             f.push(("ready", J::Bool(ready)));
             if !ready {
