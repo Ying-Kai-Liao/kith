@@ -137,11 +137,11 @@ pub(super) fn reread(env: &Env, core: &mut Core) -> Result<()> {
     if !marker_of(state).exists() {
         return Err(e);
     }
-    Err(with_note(e, &take_tombstone_away(env)))
+    Err(with_note(&e, &take_tombstone_away(env)))
 }
 
 /// The error with `note` added to its text, in its own kind: `kith restore` still follows a `Corrupt`.
-pub(super) fn with_note(e: Error, note: &str) -> Error {
+pub(super) fn with_note(e: &Error, note: &str) -> Error {
     let m = format!("{e} ({note})");
     match e {
         Error::Permissions(_) => Error::Permissions(m),

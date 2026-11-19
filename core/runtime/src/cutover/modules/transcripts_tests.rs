@@ -353,13 +353,13 @@ fn a_reread_that_fails_takes_the_tombstone_away_too() {
 #[test]
 fn a_note_keeps_the_kind_of_the_error_it_is_added_to() {
     use crate::error::Error;
-    let e = super::transcripts_answer::with_note(Error::Corrupt("bad page".into()), "note here");
+    let e = super::transcripts_answer::with_note(&Error::Corrupt("bad page".into()), "note here");
     assert!(
         matches!(&e, Error::Corrupt(m) if m == "bad page (note here)"),
         "{e:?}"
     );
     assert_eq!(e.recovery(), "kith restore");
-    let e = super::transcripts_answer::with_note(Error::StaleGeneration("old".into()), "n");
+    let e = super::transcripts_answer::with_note(&Error::StaleGeneration("old".into()), "n");
     assert!(matches!(e, Error::StaleGeneration(_)), "{e:?}");
 }
 
