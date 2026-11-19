@@ -417,7 +417,10 @@ fn pausing_or_resuming_one_trigger_of_a_routine_warns_that_a_rollback_loses_it()
     assert!(out.get("warning").is_none(), "{out}");
     // Resuming one of two paused ones is as lost: the routine would be enabled whole.
     let out = set_paused(&mut r, "mel", "t1", false);
-    assert!(out["warning"].as_str().unwrap().contains("paused: t2"), "{out}");
+    assert!(
+        out["warning"].as_str().unwrap().contains("paused: t2"),
+        "{out}"
+    );
     // Everything back on agrees again.
     let out = set_paused(&mut r, "mel", "t2", false);
     assert!(out.get("warning").is_none(), "{out}");
@@ -441,9 +444,17 @@ fn only_true_counts_as_paused_when_comparing_triggers() {
 fn a_one_trigger_routine_or_a_plain_job_pauses_without_a_warning() {
     let mut r = Rig::new();
     routine_jobs(&r, &["only"]);
-    assert!(set_paused(&mut r, "mel", "only", true).get("warning").is_none());
+    assert!(
+        set_paused(&mut r, "mel", "only", true)
+            .get("warning")
+            .is_none()
+    );
     r.put(&json!({"agent": "ops", "id": "p", "cron": "0 8 * * *", "task": "x"}));
-    assert!(set_paused(&mut r, "ops", "p", true).get("warning").is_none());
+    assert!(
+        set_paused(&mut r, "ops", "p", true)
+            .get("warning")
+            .is_none()
+    );
 }
 
 #[test]
