@@ -29,6 +29,8 @@ import {
   type CrewFace,
 } from '../components/kith'
 import { sessionOutcome } from '../views/thread/permission-outcome.ts'
+import { PermissionCard } from '../views/thread/PermissionCard'
+import type { Entry } from '@shared/models'
 
 const face = (name: string, color: string): CrewFace => ({ face: { kind: 'crew', name }, color: `kith:${color}`, id: name })
 const coder = face('coder', 'sky')
@@ -138,12 +140,14 @@ function Gallery() {
 
       <GrantCardStates />
 
+      <IntentCards />
+
       <Section title="DecisionCard" note="Tinted in the agent's pair while it waits, grey once answered; 1 to 4 options; permission (Allow once / Always allow in folder / red Deny); guest prompt; answered.">
         <Row gap={24}>
           <div style={col(340)}><DecisionCard kind="question" pair={designerPair} title="Which direction for the app?" options={[{ id: 'a', label: 'Sky and glass' }, { id: 'b', label: 'Flat panels' }]} onChoose={() => {}} /></div>
           <div style={col(340)}><DecisionCard kind="question" pair={coderPair} title="Open a PR now, or batch it with the sleep notice fix?" options={[{ id: 'a', label: 'Open a PR now' }, { id: 'b', label: 'Batch it' }, { id: 'c', label: 'A very long option label that wraps onto a second line' }, { id: 'd', label: 'Ask me later' }]} onChoose={() => {}} pending="b" /></div>
           <div style={col(260)}><DecisionCard kind="question" pair={coderPair} title="Keep going?" options={[{ id: 'a', label: 'Yes' }]} onChoose={() => {}} /></div>
-          <div style={col(340)}><DecisionCard kind="permission" pair={coderPair} title="Wants to run a command" subject="npm run typecheck && git push origin flow/kith-redesign" place="Runs on Mac mini · kith" allowLabel="Allow once" alwaysLabel="Always allow in kith" onAllow={() => {}} onDeny={() => {}} onAlways={() => {}} /></div>
+          <div style={col(340)}><DecisionCard kind="permission" pair={coderPair} title="Wants to run a command" subject="npm run typecheck && git push origin flow/kith-redesign" place="Runs on Mac mini · kith" allowLabel="Allow" alwaysLabel="Always allow in kith" onAllow={() => {}} onDeny={() => {}} onAlways={() => {}} /></div>
           <div style={col(340)}><DecisionCard kind="permission" pair={coderPair} title="Wants to run a command" subject="rm -rf build" place="Runs on Mac mini · kith" waiting="Kai" onAllow={() => {}} onDeny={() => {}} /></div>
           <div style={col(340)}><DecisionCard kind="permission" pair={coderPair} title="Wants to change files" subject="relay/socket.ts" outcome="Allowed once" onAllow={() => {}} onDeny={() => {}} /></div>
         </Row>
@@ -236,6 +240,88 @@ function Gallery() {
 }
 
 /** The auto-mode card's This session grant, its four states (designer's grant-card drawing). `?grant` shows only these. */
+const autoOptions = [
+  { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+  { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+  { optionId: 'kith-auto-session', name: 'This session', kind: 'allow_session' },
+  { optionId: 'kith-auto-always', name: 'Always allow', kind: 'allow_always' },
+]
+
+/** An auto-mode permission entry as the host builds it (`cards/intent.rs` fills intent, facts and check). */
+const intentEntry = (agent: string, data: object): Entry =>
+  ({ id: `intent-${agent}-${Math.random()}`, seq: 1, botId: agent, rev: 1, kind: 'permission', turn: 1, createdAt: 1, updatedAt: 1, data: { toolKind: 'execute', status: 'pending', options: autoOptions, agent, ...data } }) as unknown as Entry
+
+function IntentCards() {
+  const videoFace = face('video', 'orchid')
+  const architectFace = face('architect', 'green')
+  const says = (f: CrewFace, name: string) => ({ name, avatar: <BotAvatar face={f.face} color={f.color} id={f.id} size={24} animated={false} /> })
+  const cards: { who: CrewFace; name: string; entry: Entry }[] = [
+    {
+      who: videoFace,
+      name: 'video',
+      entry: intentEntry('video', {
+        title: 'Run cd ~/Workspace/design/_drafts/event-reel/video; uv run -q --with faster-whisper python -I - …',
+        command: "cd ~/Workspace/design/_drafts/event-reel/video; uv run -q --with faster-whisper python -I - <<'EOF'\nimport sys\nprint(sys.argv)\nEOF\nffmpeg -v error -i a.wav b.wav",
+        intent: 'Transcribing the three interview clips so I can find where each answer starts.',
+        facts: [
+          { icon: 'terminal', text: 'Runs a Python script written into the command, and ffmpeg', strong: ['Python script', 'ffmpeg'] },
+          { icon: 'down', text: 'Fetches the faster-whisper package for this run', strong: ['faster-whisper'] },
+          { icon: 'folder', text: 'In event-reel/video', strong: ['event-reel/video'], place: true },
+        ],
+        check: 'Safety check stopped it: runs code it downloaded',
+      }),
+    },
+    {
+      who: videoFace,
+      name: 'video',
+      entry: intentEntry('video', {
+        title: 'Run cd ~/Workspace/design/kith/video/music-candidates && UA="Mozilla/5.0 …"; for h in …',
+        command: 'cd ~/Workspace/design/kith/video/music-candidates && for h in chill-upbeat-summer-vlog summer-tropical-house back-to-the-sea-1 maalhos mirihi waves-8; do\n  curl -sL -A "$UA" -e "https://freemusicarchive.org/" "https://freemusicarchive.org/track/$h/stream/" -o "dl/$h.mp3"\ndone',
+        intent: 'Downloading the six summer tracks we shortlisted, to try them against the cut.',
+        facts: [
+          { icon: 'terminal', text: 'A shell command: curl, six times', strong: ['A shell command'] },
+          { icon: 'globe', text: 'Reaches freemusicarchive.org', strong: ['freemusicarchive.org'] },
+          { icon: 'pencil', text: 'Saves into music-candidates/dl', strong: ['music-candidates/dl'] },
+          { icon: 'folder', text: 'In video/music-candidates', strong: ['video/music-candidates'], place: true },
+        ],
+        check: "Safety check stopped it: it presents itself as a web browser to get past the site's bot check",
+      }),
+    },
+    {
+      who: architectFace,
+      name: 'architect',
+      entry: intentEntry('architect', {
+        title: 'Run grep -n tick-lock /Users/Kath/.kith/cli/0.1.4/share/kith/kernel/bin/kith-sched',
+        command: "grep -n 'tick-lock' /Users/Kath/.kith/cli/0.1.4/share/kith/kernel/bin/kith-sched",
+        intent: 'Checking the installed kith-sched carries the tick-lock marker before I approve #1043.',
+        facts: [
+          { icon: 'terminal', text: 'A shell command: grep, reads only', strong: ['A shell command'] },
+          { icon: 'eye', text: 'Reads ~/.kith/cli', strong: ['~/.kith/cli'], muted: "Kith's installed program" },
+        ],
+        check: "Safety check stopped it: it reads a place it wasn't given",
+      }),
+    },
+  ]
+  const unread = intentEntry('coder', { title: 'Run eval "$x"', command: 'eval "$x"', facts: [{ icon: 'terminal', text: "A shell command Kith can't read in full" }], detailsOpen: true })
+  return (
+    <Section title="PermissionCard, intent first" note="The host's intent, facts and check (cards/intent.rs): the agent's words in a quote, what Kith sees, the safety check, Details, then Allow / Deny. The last one: a call the host can't read opens Details. An older host sends no facts and gets the plain card.">
+      <Row gap={24}>
+        {cards.map((c, i) => (
+          <div key={i} style={col(380)}>
+            <PermissionCard entry={c.entry} hostName="Mac mini" answering={null} respond={() => {}} pair={pairOf(c.who.color)} agent={says(c.who, c.name)} />
+          </div>
+        ))}
+        <div style={col(380)}>
+          <PermissionCard entry={unread} hostName="Mac mini" answering={null} respond={() => {}} pair={coderPair} agent={says(coder, 'coder')} />
+        </div>
+        <div style={col(380)}>
+          <PermissionCard entry={intentEntry('coder', { title: 'Run ls', command: 'ls' })} hostName="Mac mini" answering={null} respond={() => {}} pair={coderPair} agent={says(coder, 'coder')} />
+        </div>
+      </Row>
+    </Section>
+  )
+}
+
 function GrantCardStates() {
   const card = { kind: 'permission' as const, pair: coderPair, title: 'Wants to run a command', subject: 'git push origin flow/grant-card', onAllow: () => {}, onDeny: () => {} }
   const removedAt = new Date(2026, 10, 2, 19, 5).getTime()
@@ -247,7 +333,7 @@ function GrantCardStates() {
         <Row gap={24}>
           <div style={col(560)}>
             <div className="kith-text-label" style={h}>1 · ASKING</div>
-            <DecisionCard {...card} place="Runs on Mac mini · kith" allowLabel="Allow once" onSession={() => {}} alwaysLabel="Always allow in kith" onAlways={() => {}} />
+            <DecisionCard {...card} place="Runs on Mac mini · kith" allowLabel="Allow" onSession={() => {}} alwaysLabel="Always allow in kith" onAlways={() => {}} />
           </div>
           <div style={{ ...col(400), display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div className="kith-text-label" style={{ ...h, marginBottom: 4 }}>2 · ALLOWED THIS SESSION</div>

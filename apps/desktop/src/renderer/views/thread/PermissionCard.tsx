@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Entry, FileDiff } from '@shared/models'
 import type { HeldRowModel } from '@shared/held-run'
 import { Disclosure } from '../../components/Controls'
@@ -11,6 +11,8 @@ import { Text } from '../../components/Text'
 import { alwaysAllowLabel } from './permission-labels.ts'
 import { permissionOutcome } from './permission-outcome.ts'
 import { permissionChoices, sortedOptions } from './permission-options.ts'
+import { cardFacts } from './permission-facts.ts'
+import { PermissionIntro } from './PermissionIntro'
 import './permission-card.css'
 
 /** What the agent wants, from the tool's kind (also the notch island's headline). */
@@ -36,15 +38,16 @@ export const permissionHeadline = (toolKind?: string) => {
  * Approval card (the kith DecisionCard): what the agent wants, where it runs, the answers, tinted in the agent's pair.
  * `waiting`: the owner's name when this card is for them to answer (a guest's run); the buttons are theirs, not this person's.
  */
-export function PermissionCard({ entry, hostName, answering, respond, waiting = null, pair = FALLBACK_PAIR, held = null, removeGrant }: { entry: Entry; hostName: string; answering: string | null; respond: (option: string | null) => void; waiting?: string | null; pair?: Pair; held?: HeldCardProps | null; /** The owner's Remove on a live This session grant (absent for anyone else). */ removeGrant?: (id: string) => void }) {
-  const [expanded, setExpanded] = useState(false)
+export function PermissionCard({ entry, hostName, answering, respond, waiting = null, pair = FALLBACK_PAIR, held = null, removeGrant, agent }: { entry: Entry; hostName: string; answering: string | null; respond: (option: string | null) => void; waiting?: string | null; pair?: Pair; held?: HeldCardProps | null; /** The owner's Remove on a live This session grant (absent for anyone else). */ removeGrant?: (id: string) => void; /** Who "says" the intent: the agent's name and avatar. */ agent?: { name: string; avatar?: ReactNode } }) {
+  const d = entry.data
+  // A call the host could not read in full opens Details.
+  const [expanded, setExpanded] = useState(!!d.detailsOpen)
   const [confirming, setConfirming] = useState(false)
   // The old run ended by itself (or another device stopped it): the open confirm has nothing left to ask.
   const gone = !held?.model
   useEffect(() => {
     if (gone) setConfirming(false)
   }, [gone])
-  const d = entry.data
   const pending = d.status === 'pending'
   const hasDetail = !!d.command || !!d.detail || !!d.diffs?.length
   const options = sortedOptions(d.options ?? [])
@@ -52,12 +55,16 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
   const byKind = (kind: string) => options.find((o) => o.kind === kind)
   const choices = permissionChoices(d)
   const grant = d.sessionGrant
+  // The host read the call: what the agent says, then what Kith sees. An older host sends no facts: today's card.
+  const facts = cardFacts(d)
   const common = {
     outcomeAction: !pending && grant?.state === 'live' && removeGrant ? { label: 'Remove', run: () => removeGrant(grant.id) } : undefined,
     pair,
     title: permissionHeadline(d.toolKind),
     subject: d.title ?? '',
     place: `Runs on ${hostName}${cwd}${d.chain ? ` · ${d.chain}` : ''}`,
+    heading: facts ? d.chain : undefined,
+    body: facts ? <PermissionIntro agent={agent?.name ?? d.agent ?? 'The agent'} avatar={agent?.avatar} intent={d.intent} facts={facts} check={d.check} hostName={hostName} /> : undefined,
     waiting,
     outcome: pending ? undefined : permissionOutcome(entry),
     held: held?.model ? <HeldRow model={held.model} onStop={() => setConfirming(true)} /> : undefined,
@@ -83,7 +90,7 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
           onAllow={() => respond(byKind('allow_once')!.optionId)}
           onDeny={() => respond(byKind('reject_once')!.optionId)}
           onSession={byKind('allow_session') ? () => respond(byKind('allow_session')!.optionId) : undefined}
-          allowLabel="Allow once"
+          allowLabel="Allow"
           alwaysLabel={alwaysAllowLabel(d.cwd)}
           onAlways={byKind('allow_always') ? () => respond(byKind('allow_always')!.optionId) : undefined}
         />

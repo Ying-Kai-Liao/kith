@@ -59,7 +59,7 @@ public struct GuestPrompt: Identifiable, Hashable, Sendable {
 
     public static func label(_ option: PermissionOption) -> String {
         switch option.kind {
-        case "allow_once": "Allow once"
+        case "allow_once": "Allow"
         case "allow_always": "Always allow"
         case "reject_once": "Deny"
         case "reject_always": "Never"

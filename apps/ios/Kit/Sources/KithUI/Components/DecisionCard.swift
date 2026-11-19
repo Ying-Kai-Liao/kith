@@ -81,12 +81,28 @@ public struct DecisionCard: View {
     let tint: AgentTint
     let answering: String?
     let onChoose: (String) -> Void
+    private var introView: AnyView?
+    private var detailsView: AnyView?
 
     public init(_ model: DecisionCardModel, tint: AgentTint = .neutral, answering: String? = nil, onChoose: @escaping (String) -> Void) {
         self.model = model
         self.tint = tint
         self.answering = answering
         self.onChoose = onChoose
+    }
+
+    /// In place of the question and its mono line: a card that says what it is another way (the intent-first permission card).
+    public func intro(_ view: some View) -> DecisionCard {
+        var copy = self
+        copy.introView = AnyView(view)
+        return copy
+    }
+
+    /// Room between what the card says and its buttons, for a Details disclosure the caller owns.
+    public func details(_ view: some View) -> DecisionCard {
+        var copy = self
+        copy.detailsView = AnyView(view)
+        return copy
     }
 
     public var body: some View {
@@ -97,10 +113,15 @@ public struct DecisionCard: View {
                     if let heading = model.heading { Text(heading).kithText(.label).foregroundStyle(Palette.muted) }
                 }
             } else if let heading = model.heading { Text(heading).kithText(.label).foregroundStyle(Palette.muted) }
-            Text(model.question).kithText(.body).fontWeight(.semibold).foregroundStyle(Palette.ink)
-            if let detail = model.detail, !detail.isEmpty {
-                Text(detail).kithText(.code).foregroundStyle(Palette.muted).lineLimit(4)
+            if let introView {
+                introView
+            } else {
+                Text(model.question).kithText(.body).fontWeight(.semibold).foregroundStyle(Palette.ink)
+                if let detail = model.detail, !detail.isEmpty {
+                    Text(detail).kithText(.code).foregroundStyle(Palette.muted).lineLimit(4)
+                }
             }
+            if let detailsView { detailsView }
             if model.fitsInRow {
                 // One row when every label fits on one line; otherwise stacked, never wrapped mid-label.
                 ViewThatFits(in: .horizontal) {

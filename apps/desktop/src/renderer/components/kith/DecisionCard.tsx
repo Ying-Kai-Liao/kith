@@ -22,6 +22,8 @@ interface Common {
   subject?: string
   /** Small grey line, e.g. "Runs on Mac mini · kith". */
   place?: string
+  /** In place of the title, subject and place lines: a card that says what it is another way (the intent-first permission card). */
+  body?: ReactNode
   /** Room for a details disclosure or a diff; the host owns it. */
   details?: ReactNode
   /** The card was answered or expired: the outcome replaces the buttons. */
@@ -42,7 +44,7 @@ export type DecisionCardProps =
 
 /** A question waiting on you, or a permission prompt. While it waits the card is tinted in the agent's pair (grey once answered); no amber. */
 export function DecisionCard(props: DecisionCardProps) {
-  const { pair, heading, leading, title, subject, place, details, outcome, outcomeAction, held, waiting, pending = null } = props
+  const { pair, heading, leading, title, subject, place, body, details, outcome, outcomeAction, held, waiting, pending = null } = props
   const busy = pending !== null && pending !== false
   const buttons =
     props.kind === 'question'
@@ -61,14 +63,18 @@ export function DecisionCard(props: DecisionCardProps) {
           {heading}
         </div>
       ) : null}
-      <div className="kc-decision-title kith-text-body">{title}</div>
-      {subject ? <div className="kc-decision-subject kith-text-code">{subject}</div> : null}
-      {place ? (
-        <div className="kc-decision-place kith-text-secondary">
-          <Icon name="desktopcomputer" size={10} />
-          <span>{place}</span>
-        </div>
-      ) : null}
+      {body ?? (
+        <>
+          <div className="kc-decision-title kith-text-body">{title}</div>
+          {subject ? <div className="kc-decision-subject kith-text-code">{subject}</div> : null}
+          {place ? (
+            <div className="kc-decision-place kith-text-secondary">
+              <Icon name="desktopcomputer" size={10} />
+              <span>{place}</span>
+            </div>
+          ) : null}
+        </>
+      )}
       {details}
       {outcome ? (
         <>

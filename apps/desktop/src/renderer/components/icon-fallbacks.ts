@@ -52,6 +52,7 @@ const map: Record<string, IconNode> = {
   'checkmark.circle': L.CircleCheck,
   'checkmark.circle.fill': L.CircleCheck,
   'checkmark.seal': L.BadgeCheck,
+  'checkmark.shield': L.ShieldCheck,
   'chevron.down': L.ChevronDown,
   'chevron.left': L.ChevronLeft,
   'chevron.left.2': L.ChevronsLeft,

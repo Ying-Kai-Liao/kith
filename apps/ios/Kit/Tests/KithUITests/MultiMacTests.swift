@@ -146,7 +146,7 @@ private func card(_ id: String, chat: String, status: String = "pending", approv
     #expect(pending[1].chatId == "chat-sam")
     // Only what the card offered, allow first.
     #expect(pending[1].options.map(\.optionId) == ["allow", "reject"])
-    #expect(pending[1].options.map(GuestPrompt.label) == ["Allow once", "Deny"])
+    #expect(pending[1].options.map(GuestPrompt.label) == ["Allow", "Deny"])
     // The same card inside one of the owner's own bots is that bot's, not a guest's.
     #expect(GuestPrompt.pending(in: entries, known: ["chat-sam", "chat-ann", "mine"], isOwner: true).isEmpty)
 }
@@ -193,7 +193,7 @@ private func card(_ id: String, chat: String, status: String = "pending", approv
     }
     // An agent's own card goes by kind.
     entry.data.edge = nil
-    #expect(PermissionCard(entry: entry, hostName: "Mac", respond: { _ in }).cardModel.options.map(\.title) == ["Allow once", "Always allow", "Always allow", "Deny"])
+    #expect(PermissionCard(entry: entry, hostName: "Mac", respond: { _ in }).cardModel.options.map(\.title) == ["Allow", "Always allow", "Always allow", "Deny"])
 }
 
 @Test func theInviteesChatShowsWaitingTextInPlaceOfButtons() {

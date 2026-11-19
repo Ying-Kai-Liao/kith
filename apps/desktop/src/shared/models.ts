@@ -279,6 +279,19 @@ export interface HeldRun {
   since: string
 }
 
+/** One line of a permission card's "Kith sees" (host `cards/intent.rs`). */
+export interface CardFact {
+  /** terminal, down, globe, pencil, trash, stop, folder, eye or doc. */
+  icon: string
+  text: string
+  /** Parts of `text` drawn in 600, in order. */
+  strong?: string[]
+  /** Muted words after the text: whose folder it is. */
+  muted?: string
+  /** The app adds this Mac's name after the muted words. */
+  place?: boolean
+}
+
 export interface EntryData {
   /** Structured conversation data added to the existing team-tool notice. */
   botMessage?: BotMessage
@@ -331,6 +344,14 @@ export interface EntryData {
   chain?: string
   /** permission, the owner's card for a guest's run reaching a host or helper: what its options grant (host `cards/edge.rs`). Its options are labelled by name. */
   edge?: { kind: string; value: string; job?: string }
+  /** permission: the agent's own description of the call, one plain line (host `cards/intent.rs`). A label, never what is granted. */
+  intent?: string
+  /** permission: what the host itself read from the call, at most four lines. Absent on older hosts: the plain card shows. */
+  facts?: CardFact[]
+  /** permission, auto mode: the classifier's tag as a sentence ("Safety check stopped it: ..."). */
+  check?: string
+  /** permission: the host could not read the call in full, so Details starts open. */
+  detailsOpen?: boolean
   /** permission, answered: an old run still holds the session this approval resumes in (null/absent otherwise; an older host never sends it). */
   held?: HeldRun | null
   /** permission, answered with This session; or tool, a call that grant let through. */
