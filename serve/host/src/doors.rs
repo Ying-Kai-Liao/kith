@@ -5,7 +5,7 @@
 //!
 //! On a switched Mac the person's own doors are rows in the core (`doors.*`, `kernel/lib/kith_door_core.py`): the sweep's
 //! python asks the core, stops the boxes of the rows it answers, and confirms them. The kill stays in python (it needs the
-//! libproc, sandbox_check and process-environment scan of `kith_door.py`), so this module still runs `kith door sweep`.
+//! `libproc`, `sandbox_check` and process-environment scan of `kith_door.py`), so this module still runs `kith door sweep`.
 //! What it adds is the answer's `unknown`: the core (or kith-auth) did not answer in time, so no door was judged. That is
 //! not "revoked": the running doors are left alone and the pass is asked again after [`RETRY`], not after [`EVERY`].
 

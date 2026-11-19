@@ -874,7 +874,7 @@ mod tests {
         }
     }
 
-    /// A guest door's row (kernel/lib/kith_door_core.py) is the daemon's: with no daemon the call is exit 3, which the caller
+    /// A guest door's row (`kernel/lib/kith_door_core.py`) is the daemon's: with no daemon the call is exit 3, which the caller
     /// reads as "no answer", never as a start or a sweep that ran in an embedded core.
     #[test]
     fn the_door_calls_are_on_core_call_and_never_embedded() {
