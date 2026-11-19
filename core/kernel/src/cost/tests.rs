@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use super::{Env, Out, Paths, pyfmt, run};
+use super::{Env, Now, Out, Paths, pyfmt, run};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -53,7 +53,7 @@ fn world(name: &str) -> (Paths, PathBuf) {
 fn fixed_clock() -> Env {
     Env {
         now: Some("2026-11-05T12:00:00+00:00".to_owned()),
-        person_was: String::new(),
+        ..Env::default()
     }
 }
 
@@ -202,8 +202,173 @@ fn a_line_the_core_does_not_know_is_usage_or_not_ported() {
     let help = run(&p, &fixed_clock(), &args(&["--help"]));
     assert_eq!(help.code, 0);
     assert_eq!(help.stdout, bad.stderr);
-    assert_eq!(run(&p, &fixed_clock(), &args(&["agents"])).code, 2);
-    assert_eq!(run(&p, &fixed_clock(), &args(&["tag"])).code, 2);
+    // `session` alone, and `agent` alone, are no line either
+    assert_eq!(run(&p, &fixed_clock(), &args(&["session"])).code, 1);
+    assert_eq!(run(&p, &fixed_clock(), &args(&["agent"])).code, 1);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+fn hook_env(pairs: &[(&str, &str)], stdin: &str) -> Env {
+    Env {
+        vars: pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
+        stdin: Some(stdin.to_owned()),
+        ..Env::default()
+    }
+}
+
+/// A `runs` row: session, agent, version, via, person.
+type Run = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+fn runs(p: &Paths) -> Vec<Run> {
+    let c = super::ledger::open(p).unwrap();
+    let mut st = c
+        .prepare("select session, agent, version, via, person from runs order by session")
+        .unwrap();
+    st.query_map([], |r| {
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+    })
+    .unwrap()
+    .map(Result::unwrap)
+    .collect()
+}
+
+#[test]
+fn tag_writes_the_run_and_never_fails_the_session() {
+    let (p, root) = world("tag");
+    let env = hook_env(
+        &[
+            ("KITH_AGENT", "alpha"),
+            ("KITH_VIA", ""),
+            ("KITH_PERSON", "sam"),
+            ("KITH_COST_PERSON", "owner"),
+        ],
+        r#"{"session_id": "s-new"}"#,
+    );
+    let out = run(&p, &env, &args(&["tag"]));
+    assert_eq!(
+        (out.code, out.stdout.as_str(), out.stderr.as_str()),
+        (0, "", "")
+    );
+    // unset version is NULL, an empty KITH_VIA stays empty, `owner` in KITH_COST_PERSON is nobody
+    assert_eq!(
+        runs(&p),
+        [(
+            "s-new".into(),
+            Some("alpha".into()),
+            None,
+            Some(String::new()),
+            None
+        )]
+    );
+    // twice is one row
+    run(&p, &env, &args(&["tag"]));
+    assert_eq!(runs(&p).len(), 1);
+    // no agent, no session, empty or odd stdin: nothing written, exit 0, one line at most
+    for (vars, stdin) in [
+        (vec![], r#"{"session_id": "s-x"}"#),
+        (vec![("KITH_AGENT", "alpha")], "{}"),
+        (vec![("KITH_AGENT", "alpha")], r#"{"session_id": ""}"#),
+        (vec![("KITH_AGENT", "alpha")], ""),
+        (vec![("KITH_AGENT", "alpha")], "[1]"),
+        (vec![("KITH_AGENT", "alpha")], r#"{"session_id": [1]}"#),
+    ] {
+        let out = run(&p, &hook_env(&vars, stdin), &args(&["tag"]));
+        assert_eq!(out.code, 0, "{stdin}");
+        assert_eq!(runs(&p).len(), 1, "{stdin}");
+    }
+    let bad = run(
+        &p,
+        &hook_env(&[("KITH_AGENT", "a")], "{nope"),
+        &args(&["tag"]),
+    );
+    assert_eq!(
+        bad.stderr,
+        "kith-cost tag: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)\n"
+    );
+    let list = run(
+        &p,
+        &hook_env(&[("KITH_AGENT", "a")], "[1]"),
+        &args(&["tag"]),
+    );
+    assert_eq!(
+        list.stderr,
+        "kith-cost tag: 'list' object has no attribute 'get'\n"
+    );
+    // a malformed clock does not stop the hook
+    let mut clock = hook_env(&[("KITH_AGENT", "a")], r#"{"session_id": "s-2"}"#);
+    clock.now = Some("garbage".to_owned());
+    assert_eq!(run(&p, &clock, &args(&["tag"])).code, 0);
+    assert_eq!(runs(&p).len(), 2);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn record_writes_one_request_and_keeps_the_first_run_row() {
+    let (p, root) = world("record");
+    let row = r#"{"id": "r1", "session": "s-r", "model": "gpt-5", "input": 1.5, "cost": null}"#;
+    let env = hook_env(&[("KITH_AGENT", "codex-agent")], row);
+    assert_eq!(run(&p, &env, &args(&["record"])).code, 0);
+    let again = hook_env(&[("KITH_AGENT", "other")], row);
+    assert_eq!(run(&p, &again, &args(&["record"])).code, 0);
+    let c = super::ledger::open(&p).unwrap();
+    let (n, input, cost): (i64, f64, Option<f64>) = c
+        .query_row("select count(*), max(input), max(cost) from req", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
+        .unwrap();
+    assert_eq!((n, input, cost), (1, 1.5, None));
+    // insert or ignore: the session keeps its first agent
+    assert_eq!(runs(&p)[0].1.as_deref(), Some("codex-agent"));
+    // an object value is no SQL value: the whole record is refused, nothing is written
+    let bad = hook_env(&[], r#"{"id": "r2", "session": "s-q", "model": {"a": 1}}"#);
+    let out = run(&p, &bad, &args(&["record"]));
+    assert_eq!(out.code, 0);
+    assert!(out.stderr.starts_with("kith-cost record: "));
+    let n: i64 = c
+        .query_row("select count(*) from req", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 1);
+    // a missing id is a KeyError's text
+    let none = run(
+        &p,
+        &hook_env(&[], r#"{"session": "s"}"#),
+        &args(&["record"]),
+    );
+    assert_eq!(none.stderr, "kith-cost record: 'id'\n");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn periods_start_where_since_of_starts_them() {
+    use chrono::DateTime;
+    // Sydney, daylight saving (+11:00): today starts at local midnight, a week and a month are plain 7 and 30 days back
+    let now = Now::at(DateTime::parse_from_rfc3339("2026-11-19T01:30:00+11:00").unwrap());
+    let at = |p| super::reports::since_at(&now, p);
+    assert_eq!(at("today"), "2026-11-18T13:00:00");
+    assert_eq!(at("week"), "2026-11-11T14:30:00");
+    assert_eq!(at("month"), "2026-10-19T14:30:00");
+    // any other word is everything
+    assert_eq!(at("all"), "0");
+    assert_eq!(at("yesterday"), "0");
+}
+
+#[test]
+fn csv_quotes_like_python_and_ends_lines_with_crlf() {
+    let (p, root) = world("csv");
+    let row = r#"{"id": "r1", "session": "s-r", "turn": "a,b \"c\"", "cost": 2}"#;
+    run(&p, &hook_env(&[], row), &args(&["record"]));
+    let out = run(&p, &Env::default(), &args(&["csv"]));
+    assert!(out.stdout.starts_with("id,session,ts,project,model,agent,turn,input,output,cache_read,cache_write,cost,hq_agent,version,via,effort,person\r\n"));
+    assert!(out.stdout.contains(",\"a,b \"\"c\"\"\",0,0,0,0,2.0,"));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -237,7 +402,7 @@ fn the_same_message_in_two_files_ends_as_the_later_path() {
 fn a_tiny_pace_never_reaches_the_limit() {
     // The Python raises OverflowError here (days out of range); the core answers "stays under".
     let at = chrono::DateTime::parse_from_rfc3339("2026-11-01T10:30:00+00:00").unwrap();
-    let now = super::Now::at(at);
+    let now = Now::at(at);
     let days = [(at.date_naive(), 0.00012)];
     let limit = serde_json::Number::from(100);
     let f = super::views::forecast(&now, &days, 0.00012, Some(&limit));
@@ -251,13 +416,13 @@ fn a_tiny_pace_never_reaches_the_limit() {
 
 #[test]
 fn the_clock_takes_epoch_seconds_and_iso_text() {
-    let epoch = super::Now::from_env(Some("1793880000")).unwrap();
+    let epoch = Now::from_env(Some("1793880000")).unwrap();
     assert_eq!(epoch.0.timestamp(), 1_793_880_000);
-    let iso = super::Now::from_env(Some(" 2026-11-05T12:00:00+10:00 ")).unwrap();
+    let iso = Now::from_env(Some(" 2026-11-05T12:00:00+10:00 ")).unwrap();
     assert_eq!(iso.0.timestamp(), 1_793_844_000);
-    assert!(super::Now::from_env(Some("not a time")).is_err());
+    assert!(Now::from_env(Some("not a time")).is_err());
     // blank is the real clock
-    assert!(super::Now::from_env(Some("  ")).is_ok());
+    assert!(Now::from_env(Some("  ")).is_ok());
 }
 
 /// A kernel folder whose `bin/kith-auth` prints `body` and exits `code`, whatever it is asked.
