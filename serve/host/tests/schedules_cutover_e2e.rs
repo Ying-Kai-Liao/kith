@@ -406,9 +406,25 @@ async fn seed_routine(host: &Host, minute: u32) -> String {
 
 // --- (a) -------------------------------------------------------------------------------------------------------------------
 
+/// A loaded machine can set up past the minute edge the case waits for. The whole case is then run again in a fresh lab
+/// at a later minute (never moved in place: the step has copied the schedules into the core by then, and a host that was
+/// up at the edge has already run the routine itself), at most this many times.
+const EDGE_TRIES: u32 = 3;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_slot_due_while_the_host_is_down_fires_exactly_once_when_the_host_starts() {
-    let lab = Lab::new("a", None);
+    for try_no in 1..=EDGE_TRIES {
+        if slot_due_while_the_host_is_down(try_no).await {
+            return;
+        }
+        eprintln!("try {try_no}: setup missed the minute edge; starting the case again at a later minute");
+    }
+    panic!("setup missed the minute edge {EDGE_TRIES} times: the machine is too slow, run it again");
+}
+
+/// One try of case (a): `false` when setup was not done before the edge (nothing was asserted), else the case's asserts.
+async fn slot_due_while_the_host_is_down(try_no: u32) -> bool {
+    let lab = Lab::new(&format!("a{try_no}"), None);
     lab.step_before_schedules();
     // Early in a minute, so the whole setup is done before the next one begins: that edge is the slot.
     wait_for_second(2, 12);
@@ -425,7 +441,9 @@ async fn a_slot_due_while_the_host_is_down_fires_exactly_once_when_the_host_star
     std::fs::write(lab.kith_home.join("agents/mel/jobs.json"), jobs).unwrap();
 
     lab.step_ok("schedules");
-    assert!(Utc::now() < edge, "the step was not done before the minute edge: a slow machine, run it again");
+    if Utc::now() >= edge {
+        return false;
+    }
     // The host stays down past the edge.
     std::thread::sleep((edge + chrono::Duration::seconds(2) - Utc::now()).to_std().unwrap());
     // `kith-sched` (launchd is not running ticks here) stands down at the tombstone and starts nothing.
@@ -457,6 +475,7 @@ async fn a_slot_due_while_the_host_is_down_fires_exactly_once_when_the_host_star
     assert_eq!(lab.fires(), rows, "a host restart wrote a fire row");
     assert_eq!((lab.runs_log().len(), lab.prompts()), (1, 1), "a host restart ran a job again");
     lab.stop_host(host);
+    true
 }
 
 // --- (b) -------------------------------------------------------------------------------------------------------------------

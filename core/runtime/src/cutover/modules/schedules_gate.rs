@@ -1,7 +1,7 @@
 //! Whether this build may step `schedules` (the refusal rule of the architect, 2026-11-16). Stepping tombstones
 //! `sched/state.json`, so `kith-sched` stands down and the core's fire becomes the only scheduler: a build whose core
 //! cannot run the turns a fire makes would stop every routine and cron job. The step holds the core lock, so there is no
-//! daemon to ask; this binary answers for itself, from five facts that must all hold. A sixth, which only a running system can
+//! daemon to ask; this binary answers for itself, from six facts that must all hold (1 to 5 and 7). One more, condition 6, which only a running system can
 //! answer (an old `kith-sched tick` still in flight), is waited out by `schedules_switch` once the step holds `tick.lock`.
 
 use std::path::{Path, PathBuf};
@@ -36,6 +36,8 @@ pub(super) struct Facts {
     pub launchd: Result<(), String>,
     /// `Err` with why launchd's `kith-sched` does not take `sched/tick.lock`.
     pub sched_locks: Result<(), String>,
+    /// `Err` with why the core could not start a `kith-holder`.
+    pub holder: Result<(), String>,
 }
 
 /// `MESSAGE`, then which conditions failed.
@@ -59,6 +61,9 @@ pub(super) fn refusal(f: &Facts) -> Option<String> {
     if let Err(why) = &f.sched_locks {
         failed.push(format!("5: {why}"));
     }
+    if let Err(why) = &f.holder {
+        failed.push(format!("7: {why}"));
+    }
     (!failed.is_empty()).then(|| format!("{MESSAGE} Failed: {}.", failed.join("; ")))
 }
 
@@ -68,6 +73,45 @@ pub(super) fn serves_rows() -> bool {
         kith_api::method(name).is_some_and(|m| m.served == Served::Core)
             && crate::schedules::serves_write(name)
     })
+}
+
+/// Condition 7: the host launchd starts has a `kith-holder` to start. A cron job's turn is a `kith-sched run-turn` the
+/// core runs in the holder, so without one the fired turns stay queued and every job stops. It answers for that host
+/// (the program condition 4 reads and the plist's `KITH_HOLDER_BIN`), never this process or the shell's environment.
+/// Only the program is checked, not a connected holder or its version (`kith doctor` shows those): the step holds the
+/// core lock, so there is no daemon to ask.
+pub(super) fn launchd_has_holder(home: &Path) -> Result<(), String> {
+    let plist = home.join("Library/LaunchAgents/dev.kith.serve.plist");
+    let text = std::fs::read_to_string(&plist).ok();
+    let kith = text.as_deref().and_then(program_of);
+    let over = text.as_deref().and_then(plist_env_holder);
+    holder_for(kith.as_deref().map(Path::new), over)
+}
+
+/// [`launchd_has_holder`] for a host that runs `kith` with `KITH_HOLDER_BIN` = `over`.
+pub(super) fn holder_for(kith: Option<&Path>, over: Option<String>) -> Result<(), String> {
+    if crate::holder_link::holder_exe(over.map(Into::into), kith).is_some() {
+        return Ok(());
+    }
+    Err(format!(
+        "there is no kith-holder for launchd's host ({}; looked for KITH_HOLDER_BIN in its plist, then beside kith), so cron turns would stay queued; update kith first",
+        kith.map_or_else(|| "no program found in dev.kith.serve.plist".to_owned(), |k| k.display().to_string())
+    ))
+}
+
+/// `KITH_HOLDER_BIN` in the plist's `EnvironmentVariables`, unescaped.
+fn plist_env_holder(xml: &str) -> Option<String> {
+    let env = xml.split_once("<key>EnvironmentVariables</key>")?.1;
+    let rest = env.split_once("<key>KITH_HOLDER_BIN</key>")?.1;
+    let value = rest.split_once("<string>")?.1.split_once("</string>")?.0;
+    Some(unescape(value))
+}
+
+fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
 }
 
 /// Condition 4: the program launchd's `dev.kith.serve` starts is this binary, or has the same build id (the hash of its
@@ -124,12 +168,7 @@ fn plist_words(xml: &str) -> Option<Vec<String>> {
         .split("<string>")
         .skip(1)
         .filter_map(|s| s.split_once("</string>"))
-        .map(|(s, _)| {
-            s.replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace("&quot;", "\"")
-                .replace("&amp;", "&")
-        })
+        .map(|(s, _)| unescape(s))
         .collect();
     Some(words)
 }
