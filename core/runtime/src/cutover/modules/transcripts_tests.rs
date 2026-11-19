@@ -351,6 +351,19 @@ fn a_reread_that_fails_takes_the_tombstone_away_too() {
 }
 
 #[test]
+fn a_note_keeps_the_kind_of_the_error_it_is_added_to() {
+    use crate::error::Error;
+    let e = super::transcripts_answer::with_note(Error::Corrupt("bad page".into()), "note here");
+    assert!(
+        matches!(&e, Error::Corrupt(m) if m == "bad page (note here)"),
+        "{e:?}"
+    );
+    assert_eq!(e.recovery(), "kith restore");
+    let e = super::transcripts_answer::with_note(Error::StaleGeneration("old".into()), "n");
+    assert!(matches!(e, Error::StaleGeneration(_)), "{e:?}");
+}
+
+#[test]
 fn a_tombstone_that_cannot_be_removed_is_named_with_its_path() {
     use fs2::FileExt as _;
     let r = rig();
@@ -373,6 +386,31 @@ fn a_tombstone_that_cannot_be_removed_is_named_with_its_path() {
         e.contains("could NOT be removed") && e.contains(&r.tombstone().display().to_string()),
         "{e}"
     );
+}
+
+#[test]
+fn a_refused_reread_that_cannot_remove_the_tombstone_says_so_once() {
+    let r = rig();
+    r.write("s-one", &rec("s-one", 10, "/work"));
+    let mut core = r.core();
+    Transcripts.import(&r.env, Some(&mut core), opts()).unwrap();
+    // A directory where the tombstone should be, and a row newer than its file: the refusal branch cannot remove it.
+    std::fs::create_dir_all(r.tombstone()).unwrap();
+    let ctx = super::transcripts::ctx(&r.env);
+    record::commit(
+        &mut core,
+        &ctx,
+        "s-one",
+        rec("s-one", 99, "/newer").as_object().unwrap().clone(),
+        -1,
+    )
+    .unwrap();
+    let e = Transcripts
+        .reread(&r.env, &mut core)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("NOT switched"), "{e}");
+    assert_eq!(e.matches("could NOT be removed").count(), 1, "{e}");
 }
 
 #[test]

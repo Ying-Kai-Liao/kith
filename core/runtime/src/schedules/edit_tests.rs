@@ -424,6 +424,20 @@ fn pausing_or_resuming_one_trigger_of_a_routine_warns_that_a_rollback_loses_it()
 }
 
 #[test]
+fn only_true_counts_as_paused_when_comparing_triggers() {
+    let mut r = Rig::new();
+    routine_jobs(&r, &["t1", "t2"]);
+    // A hand-edited flag that is not a boolean: the rollback does not read it as paused, so neither does the warning.
+    let mut jobs: Vec<Value> =
+        serde_json::from_str(&std::fs::read_to_string(r.file("mel")).unwrap()).unwrap();
+    jobs[1]["paused"] = json!("yes");
+    std::fs::write(r.file("mel"), Value::Array(jobs).to_string()).unwrap();
+    let out = set_paused(&mut r, "mel", "t1", true);
+    let w = out["warning"].as_str().unwrap();
+    assert!(w.contains("paused: t1") && w.contains("on: t2"), "{w}");
+}
+
+#[test]
 fn a_one_trigger_routine_or_a_plain_job_pauses_without_a_warning() {
     let mut r = Rig::new();
     routine_jobs(&r, &["only"]);

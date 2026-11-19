@@ -201,8 +201,8 @@ fn mixed_triggers(jobs: &[Value], at: usize) -> Option<String> {
             .is_some_and(|r| r.get("id") == routine.get("id") && r.get("bot") == routine.get("bot"))
     };
     let paused = |j: &Value| {
-        j.get("paused")
-            .is_some_and(|p| !matches!(p, Value::Null | Value::Bool(false)))
+        // Only `true` is paused, as the rollback reads it.
+        j.get("paused") == Some(&Value::Bool(true))
     };
     let all: Vec<&Value> = jobs.iter().filter(|j| same(j)).collect();
     let (off, on): (Vec<&Value>, Vec<&Value>) = all.iter().copied().partition(|j| paused(j));

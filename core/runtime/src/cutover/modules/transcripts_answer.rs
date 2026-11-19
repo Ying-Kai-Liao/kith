@@ -127,19 +127,39 @@ pub(super) fn reread(env: &Env, core: &mut Core) -> Result<()> {
     // Any failure, not only a refusal (a session lock held past its wait, a database error), takes the tombstone away: left
     // in place it would leave hooks in Writer mode with nothing serving `session.record` (architect MUST 1 on #1049). Work
     // already done is safe: each drained entry committed with its file, and the import transaction is all-or-nothing.
-    let Err(e) = reread_inner(env, core) else {
-        return Ok(());
+    let e = match reread_inner(env, core) {
+        Ok(None) => return Ok(()),
+        // The refusal has taken the tombstone away itself and said so, also when it could not.
+        Ok(Some(refusal)) => return Err(refusal),
+        Err(e) => e,
     };
-    // The refusal below has taken it away itself (and said so); any other failure says it here.
     let Ok(state) = state(env) else { return Err(e) };
     if !marker_of(state).exists() {
         return Err(e);
     }
-    let note = take_tombstone_away(env);
-    Err(match e {
-        Error::Refused(m) => Error::Refused(format!("{m} ({note})")),
-        other => Error::Io(format!("{other} ({note})")),
-    })
+    Err(with_note(e, &take_tombstone_away(env)))
+}
+
+/// The error with `note` added to its text, in its own kind: `kith restore` still follows a `Corrupt`.
+pub(super) fn with_note(e: Error, note: &str) -> Error {
+    let m = format!("{e} ({note})");
+    match e {
+        Error::Permissions(_) => Error::Permissions(m),
+        Error::DatabaseMissing(_) => Error::DatabaseMissing(m),
+        Error::DatabaseSwapped(_) => Error::DatabaseSwapped(m),
+        Error::Corrupt(_) => Error::Corrupt(m),
+        Error::NeedsMigration(_) => Error::NeedsMigration(m),
+        Error::BinaryOlder(_) => Error::BinaryOlder(m),
+        Error::AlreadyRunning(_) => Error::AlreadyRunning(m),
+        Error::StaleGeneration(_) => Error::StaleGeneration(m),
+        Error::Io(_) => Error::Io(m),
+        Error::Refused(_) => Error::Refused(m),
+        Error::Stopped(_) => Error::Stopped(m),
+        Error::NoSuchMethod(_) => Error::NoSuchMethod(m),
+        Error::NotAllowed(_) => Error::NotAllowed(m),
+        Error::BadParams(_) => Error::BadParams(m),
+        Error::NotServed(_) => Error::NotServed(m),
+    }
 }
 
 const TOMBSTONE_GONE: &str = "the tombstone is removed and hooks write their files again";
@@ -161,7 +181,7 @@ fn take_tombstone_away(env: &Env) -> String {
     }
 }
 
-fn reread_inner(env: &Env, core: &mut Core) -> Result<()> {
+fn reread_inner(env: &Env, core: &mut Core) -> Result<Option<Error>> {
     let state = state(env)?;
     let c = ctx(env);
     let dir = kith_kernel::threads::registry_dir(state);
@@ -177,11 +197,11 @@ fn reread_inner(env: &Env, core: &mut Core) -> Result<()> {
     }
     let left = record_diffs(&dir, core.conn(), false)?;
     if left.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let gone = take_tombstone_away(env);
-    Err(Error::Refused(format!(
+    Ok(Some(Error::Refused(format!(
         "cutover: transcripts: the registry changed while the step ran ({}); NOT switched, {gone}. Run `kith migrate step transcripts` again, or `kith rollback transcripts`",
         left.join(" | ")
-    )))
+    ))))
 }
