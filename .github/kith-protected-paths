@@ -113,8 +113,13 @@ serve/host/src/terminal/core_holders.rs
 serve/host/src/threads_cmd.rs
 # the Rust core's gates and the files the verify skills name there (kith-protected-paths-check)
 core/kernel/src/permit/
-core/kernel/src/launch/guard.rs
-core/kernel/src/launch/settings.rs
+core/kernel/src/launch/
+core/kernel/src/readfence.rs
+core/kernel/src/paths.rs
+core/kernel/src/paths/
+core/kernel/src/settings/
+core/kernel/src/pkg/
+core/kernel/src/project/
 core/runtime/src/authority/
 core/runtime/src/cards/
 core/runtime/src/doors/

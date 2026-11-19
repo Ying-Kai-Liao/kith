@@ -339,6 +339,11 @@ if s is not None:
         c = isinstance(rule, str) and kith_guard.must_ask_rule(rule, fill, places)
         if c:
             out.append(f'settings.json: allow {rule} is must-ask ({c}); the run asks for it whatever allows it')
+    for key in ('allow', 'ask', 'deny'):
+        for rule in perms.get(key) or []:
+            if isinstance(rule, str) and re.match(r'Bash\(.*\*.*:\*\)$', rule):
+                out.append(f'settings.json: {rule}: a * before the trailing :* makes Claude Code read it as a literal '
+                           'prefix, so it never matches; end it in * instead')
     auto = s.get('autoMode') if isinstance(s.get('autoMode'), dict) else {}
     for line in auto.get('allow') or []:
         c = isinstance(line, str) and line != '$defaults' and kith_guard.sentence_class(line)
@@ -347,7 +352,7 @@ if s is not None:
 print(json.dumps(out))
 ";
 
-/// Whether `settings.json` has anything for the must-ask judge: a truthy `permissions.allow` or `autoMode.allow`.
+/// Whether `settings.json` has anything for the must-ask judge: a truthy `permissions.allow`, `ask` or `deny`, or `autoMode.allow`.
 fn has_rules(v: &Value) -> bool {
     let allow = |key: &str| {
         v.get(key)
@@ -355,7 +360,13 @@ fn has_rules(v: &Value) -> bool {
             .and_then(|x| x.get("allow"))
             .is_some_and(truthy)
     };
-    allow("permissions") || allow("autoMode")
+    let rules = |key: &str| {
+        v.get("permissions")
+            .filter(|x| x.is_object())
+            .and_then(|x| x.get(key))
+            .is_some_and(truthy)
+    };
+    allow("permissions") || allow("autoMode") || rules("ask") || rules("deny")
 }
 
 /// `must_ask_problems(home)`: rules a package declares that a must-ask class covers.
@@ -391,5 +402,22 @@ fn must_ask_problems(ctx: &Ctx, home: &Path) -> R<Vec<String>> {
     match serde_json::from_str::<Vec<String>>(&ran.stdout) {
         Ok(v) => Ok(v),
         Err(e) => Err(PyErr::new(Kind::Other, format!("must-ask judge: {e}"))),
+    }
+}
+
+#[cfg(test)]
+mod must_ask_tests {
+    use super::*;
+
+    /// A package whose only bad rule is an `ask` or `deny` one (a `*` before the trailing `:*`) still goes to the judge.
+    #[test]
+    fn an_ask_or_deny_list_alone_is_judged() {
+        for key in ["ask", "deny"] {
+            let v: Value =
+                serde_json::from_str(&format!(r#"{{"permissions": {{"{key}": ["Bash(git -C * fetch:*)"]}}}}"#)).unwrap();
+            assert!(has_rules(&v), "{key}");
+        }
+        let none: Value = serde_json::from_str(r#"{"permissions": {"ask": []}}"#).unwrap();
+        assert!(!has_rules(&none));
     }
 }
