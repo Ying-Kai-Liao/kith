@@ -360,7 +360,7 @@ async fn run_bound(
     }
     let mut child = command.spawn().with_context(|| format!("starting {}", bin.display()))?;
     if let (Some(grant), Some(pid)) = (grant, child.id()) {
-        grant.bind_pid(pid);
+        grant.bind_pid(pid).await;
     }
     let (mut out, mut err) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
     let work = async {

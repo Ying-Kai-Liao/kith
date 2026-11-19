@@ -178,6 +178,11 @@ fn a_room_persons_basis_decides_and_a_revoked_member_ends_the_token() {
         allowed(&rig, &room("room-grp2-9", "grp1", &["sam"])).is_err(),
         "another room's person"
     );
+    // The id is the host's slug of the room, compared by its parts: room `a` is not room `a-b`, and punctuation works.
+    assert!(allowed(&rig, &room("room-a-b-1", "a", &["sam"])).is_err());
+    assert!(allowed(&rig, &room("room-a-1", "a-b", &["sam"])).is_err());
+    assert!(allowed(&rig, &room("room-g-1-x-3", "G-1:x", &["sam"])).is_ok());
+    assert!(allowed(&rig, &room("room-grp1-x", "grp1", &["sam"])).is_err());
     assert!(
         allowed(&rig, &room("sam", "grp1", &["sam"])).is_err(),
         "a basis is a room person's only"

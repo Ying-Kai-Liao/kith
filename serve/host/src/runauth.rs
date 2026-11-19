@@ -326,11 +326,20 @@ impl RunGrant {
         }
     }
 
-    /// Binds the token to the process the run was started as. Until then no request resolves.
-    pub fn bind_pid(&self, pid: u32) {
+    /// Binds a table-held token (the host's own) to a process, for the tests that stand in for the core's.
+    #[cfg(test)]
+    pub(crate) fn bind_local(&self, pid: u32) {
+        self.table.bind(&self.key, pid);
+    }
+
+    /// Binds the token to the process the run was started as. Until then no request resolves. The call to the core runs on a
+    /// blocking thread, so a busy core holds this task and not a worker; the run is not resolvable before it lands (host.sock
+    /// waits a moment for that, see `guest_identity`).
+    pub async fn bind_pid(&self, pid: u32) {
         match &self.core {
             Some(run) => {
-                if !run.bind(pid) {
+                let bind = run.bind_job();
+                if !tokio::task::spawn_blocking(move || bind(pid)).await.unwrap_or(false) {
                     tracing::warn!(run = %self.run_id, "the core did not bind this run's token");
                 }
             }
@@ -368,7 +377,7 @@ impl Drop for RunGrant {
     fn drop(&mut self) {
         match &self.core {
             Some(run) => {
-                run.end();
+                run.end_detached();
                 // The core holds no "allow once" yeses; the host's table does, under the run's id.
                 self.table.drop_onces(&self.run_id);
             }
@@ -414,6 +423,22 @@ pub fn grant_for(
     project: Option<&str>,
 ) -> Option<(RunGrant, Vec<(String, String)>)> {
     grant_via_core(person, agent, room, &[], session, project)
+}
+
+/// [`grant_for`] for async code: minting asks the core and may wait for it, so it runs on a blocking thread.
+pub async fn grant_for_async(
+    person: &str,
+    agent: &str,
+    room: Option<&str>,
+    session: &str,
+    project: Option<&str>,
+) -> Option<(RunGrant, Vec<(String, String)>)> {
+    let (person, agent, room) = (person.to_owned(), agent.to_owned(), room.map(str::to_owned));
+    let (session, project) = (session.to_owned(), project.map(str::to_owned));
+    tokio::task::spawn_blocking(move || grant_for(&person, &agent, room.as_deref(), &session, project.as_deref()))
+        .await
+        .ok()
+        .flatten()
 }
 
 /// [`grant_for`] with a room turn's basis: `person` is a room person's id and `members` the people the turn is for.
@@ -499,6 +524,29 @@ pub fn grant_for_env(
     };
     env.extend(vars.into_iter().map(|(k, v)| (k.into(), v.into())));
     Some(grant)
+}
+
+/// [`grant_for_env`] for async code: it asks the core (which may take a moment), so it runs on a blocking thread.
+pub async fn grant_for_env_async(
+    env: &mut Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    agent: &str,
+    session: &str,
+    reply: Option<AskReply>,
+) -> Option<RunGrant> {
+    let (mut own, agent, session) = (std::mem::take(env), agent.to_owned(), session.to_owned());
+    let done = tokio::task::spawn_blocking(move || {
+        let grant = grant_for_env(&mut own, &agent, &session, reply);
+        (grant, own)
+    })
+    .await;
+    match done {
+        Ok((grant, own)) => {
+            *env = own;
+            grant
+        }
+        // The task panicked: the env went with it, and the run starts with none of the token's names.
+        Err(_) => None,
+    }
 }
 
 /// `$KITH_MACHINE/run/host.sock`: outside the serve data folder, which a guest's sandbox denies.
@@ -719,7 +767,9 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
     // tokens) has it. The core being down is "not authorized", never a guess.
     let token = serde_json::from_slice::<Value>(line).ok().and_then(|v| v["token"].as_str().map(str::to_owned));
     let guest = match &token {
-        Some(t) if line.len() <= MAX_REQUEST && table.resolve(t, peer).is_none() => guest_identity(t, peer).await,
+        Some(t) if line.len() <= MAX_REQUEST && table.resolve(t, peer).is_none() => {
+            guest_identity(t, peer, true, crate::core_front::resolve_run).await
+        }
         _ => None,
     };
     match authorize_with(table, line, peer, |_| guest) {
@@ -743,7 +793,9 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
                 // still stands behind the run.
                 if d.allow && identity.scope == TokenScope::Guest {
                     let still = match &token {
-                        Some(t) => guest_identity(t, peer).await.is_some_and(|now| now.run_id == identity.run_id),
+                        Some(t) => guest_identity(t, peer, false, crate::core_front::resolve_run)
+                            .await
+                            .is_some_and(|now| now.run_id == identity.run_id),
                         None => false,
                     };
                     if !still {
@@ -794,11 +846,29 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
 }
 
 /// The identity the core gives a guest's token for a connection from `peer`, `None` for anything it does not stand behind
-/// (no answer, a revoked person, a stranger's process). One short, blocking question to the core's owner socket.
-async fn guest_identity(token: &str, peer: PeerInfo) -> Option<RunIdentity> {
+/// (no answer, a revoked person, a stranger's process). One short, blocking question to the core's owner socket, asked on a
+/// blocking thread. `patient` asks again twice (after 100 and 300 ms) when the answer is no: the host binds a run to its
+/// process with a call to the core after the process started, and the run's first card call (`consumeAccess`, at its own
+/// launch) can arrive before that bind lands. A no that stays a no stays one, and a re-check (`patient` off) never waits.
+pub(crate) async fn guest_identity(
+    token: &str,
+    peer: PeerInfo,
+    patient: bool,
+    ask: impl Fn(&str, u32) -> Option<RunIdentity> + Clone + Send + 'static,
+) -> Option<RunIdentity> {
     let (token, pid) = (token.to_owned(), peer.pid?);
-    let asked = tokio::task::spawn_blocking(move || crate::core_front::resolve_run(&token, pid));
-    tokio::time::timeout(READ_BUDGET, asked).await.ok()?.ok()?
+    let waits: &[u64] = if patient { &[0, 100, 300] } else { &[0] };
+    for wait in waits {
+        if *wait > 0 {
+            tokio::time::sleep(Duration::from_millis(*wait)).await;
+        }
+        let (t, ask) = (token.clone(), ask.clone());
+        let asked = tokio::task::spawn_blocking(move || ask(&t, pid));
+        if let Ok(Ok(Some(identity))) = tokio::time::timeout(READ_BUDGET, asked).await {
+            return Some(identity);
+        }
+    }
+    None
 }
 
 // ---- the socket
@@ -925,7 +995,7 @@ mod tests {
         assert_eq!(token.len(), 64, "256 bits as hex");
         assert!(token.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_eq!(t.resolve(&token, peer(7)), None, "unbound: nobody matches");
-        g.bind_pid(7);
+        g.bind_local(7);
         assert_eq!(t.resolve(&token, peer(7)), Some(id("sam")));
         assert_eq!(t.resolve(&token, peer(8)), None, "another process");
         assert_eq!(t.resolve(&token, PeerInfo::default()), None, "no peer pid");
@@ -939,8 +1009,8 @@ mod tests {
         let t = open_table();
         let (a, b) = (RunGrant::issue(&t, id("sam")).unwrap(), RunGrant::issue(&t, id("eve")).unwrap());
         assert_ne!(a.token, b.token);
-        a.bind_pid(1);
-        b.bind_pid(2);
+        a.bind_local(1);
+        b.bind_local(2);
         assert_eq!(t.resolve(&a.token, peer(1)).unwrap().person, "sam");
         assert_eq!(t.resolve(&b.token, peer(2)).unwrap().person, "eve");
         assert_eq!(t.resolve(&a.token, peer(2)), None, "one run's token from another run's process");
@@ -951,7 +1021,7 @@ mod tests {
     fn unknown_revoked_and_malformed_requests_are_refused() {
         let t = open_table();
         let g = RunGrant::issue(&t, id("sam")).unwrap();
-        g.bind_pid(5);
+        g.bind_local(5);
         let ok = req(&g.token, "consumeAccess", &json!([]));
         assert!(authorize(&t, &ok, peer(5)).is_ok());
         assert!(authorize(&t, &req("nope", "consumeAccess", &json!([])), peer(5)).is_err());
@@ -978,6 +1048,37 @@ mod tests {
         let r = handle_request(&t, &req("nope", "consumeAccess", &json!([])), peer(1)).await;
         assert_eq!(r, Response::refused("not authorized"));
         assert!(r.to_line().contains("\"ok\":false"));
+    }
+
+    #[tokio::test]
+    async fn a_run_whose_bind_lands_late_is_let_in_and_a_recheck_never_waits() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        // The host binds a run to its process after the process started: the run's first card call can arrive before the
+        // core knows the process, and the second asking, a moment later, finds it.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let late = {
+            let calls = calls.clone();
+            move |_: &str, _: u32| (calls.fetch_add(1, Ordering::SeqCst) >= 1).then(|| id("sam"))
+        };
+        let got = guest_identity("t", peer(5), true, late).await;
+        assert_eq!(got.map(|g| g.person), Some("sam".to_owned()));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        // A no that stays a no is three askings, a re-check after a card's yes is one and never waits.
+        let never = {
+            let calls = calls.clone();
+            move |_: &str, _: u32| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                None
+            }
+        };
+        calls.store(0, Ordering::SeqCst);
+        assert!(guest_identity("t", peer(5), true, never.clone()).await.is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        calls.store(0, Ordering::SeqCst);
+        assert!(guest_identity("t", peer(5), false, never).await.is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // No peer pid: nothing to ask about.
+        assert!(guest_identity("t", PeerInfo { pid: None }, true, |_: &str, _: u32| Some(id("sam"))).await.is_none());
     }
 
     #[test]
@@ -1029,7 +1130,7 @@ mod tests {
         let t = open_table();
         let g = RunGrant::issue(&t, id("guest")).unwrap();
         let line = consume_line(&g.token, "ls");
-        g.bind_pid(5);
+        g.bind_local(5);
         assert_eq!(handle_request(&t, &line, peer(5)).await, Response::refused("not authorized"));
         let owner = ask_identity("echo", "s1", None);
         let token = t.insert_ask(owner.clone(), 5, Duration::from_secs(60)).unwrap();
@@ -1147,7 +1248,7 @@ mod tests {
         assert_eq!(job.access, Some(AccessCall::History(500)), "the limit is capped");
         assert_eq!(job.identity.agent, "echo", "the agent is the token's");
         let g = RunGrant::issue(&t, id("sam")).unwrap();
-        g.bind_pid(6);
+        g.bind_local(6);
         let guest = json!({"token": g.token, "method": "cardsHistory"});
         assert_eq!(authorize(&t, guest.to_string().as_bytes(), peer(6)), Err(Response::refused("not authorized")));
     }
@@ -1180,7 +1281,7 @@ mod tests {
         // A guest's token (an invited person's or a bot guest's) never opens one, and gets the same refusal as any other
         // token failure.
         let g = RunGrant::issue(&t, id("sam")).unwrap();
-        g.bind_pid(6);
+        g.bind_local(6);
         let guest = json!({"token": g.token, "method": "requestPermission", "tool": "Bash", "input": {"command": "ls"},
                            "autoMode": {"reason": "[Data Exfiltration]"}});
         assert_eq!(authorize(&t, guest.to_string().as_bytes(), peer(6)), Err(Response::refused("not authorized")));
@@ -1204,7 +1305,7 @@ mod tests {
         assert!(authorize(&t, long.to_string().as_bytes(), peer(5)).is_err());
         // A guest's run (an invited person's or a bot guest's) is not authorized, whatever it sends.
         let g = RunGrant::issue(&t, id("sam")).unwrap();
-        g.bind_pid(6);
+        g.bind_local(6);
         let guest = json!({"token": g.token, "method": "requestSecret", "service": "github", "purpose": "x"});
         assert_eq!(authorize(&t, guest.to_string().as_bytes(), peer(6)), Err(Response::refused("not authorized")));
     }

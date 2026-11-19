@@ -473,16 +473,29 @@ pub fn resolve_run_in(paths: &Paths, token: &str, pid: u32) -> Option<crate::run
 }
 
 impl CoreRun {
-    /// Binds the run to the process it was started as. False when the core did not bind it (the token then resolves
-    /// for nobody).
-    pub fn bind(&self, pid: u32) -> bool {
-        let answer = kith_core::reach(&self.paths, "run.bind", &json!({"runId": self.run_id, "pid": pid}), false);
-        matches!(answer, kith_core::Reached::Answered(a) if a["bound"] == true)
+    /// Binds the run to the process it was started as: the call to make (it asks the core, so on a blocking thread). False
+    /// when the core did not bind it (the token then resolves for nobody).
+    pub fn bind_job(&self) -> impl FnOnce(u32) -> bool + Send + 'static {
+        let (paths, run_id) = (self.paths.clone(), self.run_id.clone());
+        move |pid| {
+            let answer = kith_core::reach(&paths, "run.bind", &json!({"runId": run_id, "pid": pid}), false);
+            matches!(answer, kith_core::Reached::Answered(a) if a["bound"] == true)
+        }
     }
 
-    /// Ends the run's token. Nothing to do when the core is gone: a restart ended it already.
-    pub fn end(&self) {
-        let _ = kith_core::reach(&self.paths, "run.end", &json!({"runId": self.run_id}), false);
+    /// Ends the run's token on a thread of its own and does not wait for it: a grant ends where a run's task ends, and a
+    /// busy core must not hold that task (or an async worker) for the length of its answer. Nothing to do when the core is
+    /// gone: a restart ended it already.
+    pub fn end_detached(&self) {
+        let (paths, run_id) = (self.paths.clone(), self.run_id.clone());
+        let end = move || {
+            let _ = kith_core::reach(&paths, "run.end", &json!({"runId": run_id}), false);
+        };
+        // No thread to spawn is a process in trouble: end it here rather than leave a token behind.
+        if let Err(e) = std::thread::Builder::new().name("kith-run-end".into()).spawn(end.clone()) {
+            drop(e);
+            end();
+        }
     }
 }
 
@@ -992,13 +1005,18 @@ mod tests {
         );
         // The host asks the core who the token is: from the run's own process only, with the identity it was minted with.
         let token = env[0].1.clone();
-        grant.bind_pid(std::process::id());
+        assert_eq!(owner("run.bind", json!({"runId": run_id, "pid": std::process::id()}))["bound"], true);
         let me = resolve_run_in(&paths, &token, std::process::id()).expect("the core knows the token");
         assert_eq!((me.person.as_str(), me.agent.as_str(), me.room.as_deref()), ("sam", "echo", Some("g1")));
         assert_eq!(me.session, "run:g:3:sam:t1");
         assert!(resolve_run_in(&paths, "not-a-token", std::process::id()).is_none());
         assert!(resolve_run_in(&paths, &token, 1).is_none(), "init is not below the run");
         drop(grant);
+        // The end is detached: it lands a moment after the drop.
+        let begun = std::time::Instant::now();
+        while resolve_run_in(&paths, &token, std::process::id()).is_some() && begun.elapsed().as_secs() < 10 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         assert!(resolve_run_in(&paths, &token, std::process::id()).is_none(), "an ended run is nobody");
         assert_eq!(owner("run.end", json!({"runId": run_id}))["ended"], false, "the grant ended it on drop");
 

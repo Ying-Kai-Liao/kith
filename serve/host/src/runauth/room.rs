@@ -26,6 +26,23 @@ pub fn grant_for_room(
     grant_via_core(person, agent, Some(room), basis, session, project)
 }
 
+/// [`grant_for_room`] for async code (it asks the core, which may take a moment): on a blocking thread.
+pub async fn grant_for_room_async(
+    person: &str,
+    agent: &str,
+    room: &str,
+    basis: &[String],
+    session: &str,
+    project: Option<&str>,
+) -> Option<(RunGrant, Vec<(String, String)>)> {
+    let (person, agent, room, basis) = (person.to_owned(), agent.to_owned(), room.to_owned(), basis.to_vec());
+    let (session, project) = (session.to_owned(), project.map(str::to_owned));
+    tokio::task::spawn_blocking(move || grant_for_room(&person, &agent, &room, &basis, &session, project.as_deref()))
+        .await
+        .ok()
+        .flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

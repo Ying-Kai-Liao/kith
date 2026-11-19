@@ -178,15 +178,19 @@ pub(crate) fn run(tool: Tool, who: &RunIdentity, args: &[String]) -> Result<Valu
     let mut child = command
         .spawn()
         .map_err(|_| Error::Refused("could not run that".into()))?;
+    // The readers hand their bytes over a channel, so the wait for them can have an end of its own: a descendant that left the
+    // process group may hold a pipe open after the tool is gone, and the call must not outlive its budget for that.
     let read = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut out = Vec::new();
             if let Some(p) = pipe {
                 // Output past the cap is left unread: a child blocked on its full pipe is cut off by the budget.
                 let _ = p.take(MAX_OUTPUT as u64).read_to_end(&mut out);
             }
-            out
-        })
+            let _ = tx.send(out);
+        });
+        rx
     };
     let out = read(child.stdout.take().map(|p| Box::new(p) as _));
     let err = read(child.stderr.take().map(|p| Box::new(p) as _));
@@ -203,10 +207,10 @@ pub(crate) fn run(tool: Tool, who: &RunIdentity, args: &[String]) -> Result<Valu
     };
     // The tool is gone; anything it left behind in its group goes too, and the readers end at the pipes' close.
     end_group_of(child.id());
-    let (stdout, stderr) = (
-        out.join().unwrap_or_default(),
-        err.join().unwrap_or_default(),
-    );
+    let left = BUDGET.saturating_sub(started.elapsed());
+    let (Ok(stdout), Ok(stderr)) = (out.recv_timeout(left), err.recv_timeout(left)) else {
+        return Err(Error::Refused("timed out".into()));
+    };
     Ok(json!({
         "stdout": String::from_utf8_lossy(&stdout),
         "stderr": String::from_utf8_lossy(&stderr),

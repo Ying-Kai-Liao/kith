@@ -77,7 +77,7 @@ fn build(specs: &[(usize, usize, usize)], bind: bool) -> (Arc<TokenTable>, Vec<L
             let grant = RunGrant::issue(&table, identity.clone()).unwrap();
             let pid = BASE + u32::try_from(i).unwrap() * SPACING;
             if bind {
-                grant.bind_pid(pid);
+                grant.bind_local(pid);
             }
             let token = grant.env(Path::new("/s"))[0].1.clone();
             Live { identity, token, pid, grant: Some(grant) }
@@ -240,7 +240,7 @@ pub fn prop_pid_reuse_and_sibling_runs() -> Result<(), String> {
         let (old_token, old_pid) = (old.token.clone(), old.pid);
         drop(old);
         let fresh = RunGrant::issue(&t, RunIdentity { run_id: "fresh".into(), ..runs[0].identity.clone() }).unwrap();
-        fresh.bind_pid(old_pid);
+        fresh.bind_local(old_pid);
         let fresh_token = fresh.env(Path::new("/s"))[0].1.clone();
         let reused = PeerInfo { pid: Some(old_pid) };
         prop_assert_eq!(authorize(&t, &card_line(&old_token, &[]), reused), Err(refused()));

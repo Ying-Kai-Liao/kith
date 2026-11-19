@@ -114,6 +114,8 @@ A revoke: `people.suspend` / `removePerson` / `removeBot` end the tokens inside 
 
 The sandbox opens exactly one file of `<machine>/core`: `run.sock` (`allowUnixSockets` in `bin/kith` and `core/kernel/src/launch/settings.rs`); the folder stays on `denyRead` (`kith-guest-sandbox-check`).
 
+Before the switch a bot added after the import is not in core.db and bots are never retired, so the core accepts a bot whose owner was removed, or revoked after the bot was added; the host's `may_use` check at launch is what limits that until the authority step (then known and not cut off, which follows the owner, is required). The host binds a run to its process with a call to the core after the process started, so the run's first card call can reach host.sock before the bind lands: host.sock asks `run.resolve` again at 100 and 300 ms when the answer is no (`guest_identity`, `patient`), and the re-check after a card's yes never waits. Mint, bind and end are blocking calls to the core: the async callers run them on blocking threads (`grant_for_async`, `grant_for_env_async`, `bind_pid`, and `RunGrant::drop` starts the end on a thread and does not wait).
+
 Gates still open for the next step: `people.revoke` (one agent taken from one person) does not end tokens, and `run.mint` does not record the host generation or follow a renamed person.
 
 ## Room persons (2026-11-14, rooms with people, PR C)

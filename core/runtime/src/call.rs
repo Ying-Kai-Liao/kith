@@ -159,7 +159,7 @@ pub(crate) fn run_identity_allowed(
             let own_room = who
                 .room
                 .as_deref()
-                .is_some_and(|r| who.person.starts_with(&format!("room-{r}-")));
+                .is_some_and(|r| is_room_person_of(&who.person, r));
             if !own_room || who.members.is_empty() {
                 return Err(refused(&who.person));
             }
@@ -186,6 +186,30 @@ pub(crate) fn run_identity_allowed(
             "kith-core: {method}: run tokens are not served on this platform yet"
         )))
     }
+}
+
+/// Whether `person` is a room person of `room`: `room-<slug>-<join gen>`, the id the host gives a room's people
+/// (`chat::room_turn::room_person_id`: the room lowercased with every character that is not a letter or digit as a dash,
+/// at most 32 of them, then the join gen). The parts are compared, not a prefix: room `a` is not room `a-b`.
+pub(crate) fn is_room_person_of(person: &str, room: &str) -> bool {
+    let slug: String = room
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .take(32)
+        .collect();
+    person
+        .strip_prefix("room-")
+        .and_then(|rest| rest.strip_prefix(slug.as_str()))
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|generation| {
+            !generation.is_empty() && generation.bytes().all(|b| b.is_ascii_digit())
+        })
 }
 
 /// The shared door check: the method exists, is open to `who` and takes these params.
