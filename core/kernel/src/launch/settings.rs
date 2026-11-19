@@ -1391,7 +1391,7 @@ fn guest_sandbox(
             3,
             format!(
                 "kith: no kith program with `kernel readfence`; not running {} for {}",
-                i.agent, m.id
+                i.agent, i.member.id
             ),
         );
     };
