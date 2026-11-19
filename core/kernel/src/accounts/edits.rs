@@ -141,6 +141,7 @@ pub fn drop_entry(s: &mut Map, entry: &str) {
 mod tests {
     use super::*;
 
+    #[allow(clippy::needless_pass_by_value)] // call sites build the json! inline
     fn map(v: Value) -> Map {
         v.as_object().cloned().unwrap_or_default()
     }
