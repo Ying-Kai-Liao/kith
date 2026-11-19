@@ -278,7 +278,7 @@ pub fn native_allowed_for_tests(id: &str) -> bool {
 
 /// Whether this is a debug build that was told to let the old suites make and run host-native bots.
 pub fn native_env_for_tests() -> bool {
-    cfg!(debug_assertions) && std::env::var_os("KITH_SERVE_NATIVE_FOR_TESTS").is_some()
+    cfg!(debug_assertions) && std::env::var_os("KITH_SERVE_NATIVE_FOR_TESTS").is_some_and(|v| !v.is_empty())
 }
 
 /// Unit tests: the host refuses this bot as a release build would.

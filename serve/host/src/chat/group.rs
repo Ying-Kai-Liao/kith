@@ -31,7 +31,7 @@ use crate::store::{
 };
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -428,6 +428,14 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
                 // An outside bot whose own post is the room's latest line has nothing new to read: waking it
                 // again would only spend its owner's Grok runs.
                 speakers.retain(|id| !spoke_last(hub, &lane, id));
+                // C5: a host-native member is left out of the queue, so no turn is charged for it.
+                speakers.retain(|id| {
+                    let native = members
+                        .iter()
+                        .find(|m| m.id == *id)
+                        .filter(|m| m.refused_native() && guest_member(hub, &m.id).is_none());
+                    native.inspect(|m| skip_native(hub, &lane, &conv.id, m)).is_none()
+                });
                 // Each round starts one member later, so the same bot doesn't always speak first.
                 if !speakers.is_empty() {
                     let offset = conv.queue.round as usize % speakers.len();
@@ -474,7 +482,7 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         } else if member.refused_native() {
             // C5: the host no longer runs a host-native bot. It passes, and the room is told why; the rest of the
             // turn goes on.
-            skip_native(hub, &lane, member);
+            skip_native(hub, &lane, &conv.id, member);
             None
         } else {
             let prompt = member_prompt(hub, &group, &members, member, &lane, &basis, &stays)?;
@@ -663,7 +671,16 @@ async fn bot_turn(
 }
 
 /// A quiet line in the room: this member is a host-native bot, which the host no longer runs.
-fn skip_native(hub: &Hub, lane: &Lane, member: &BotConfig) {
+/// It is said once per conversation for each such member, not once per round.
+fn skip_native(hub: &Hub, lane: &Lane, conversation: &str, member: &BotConfig) {
+    static TOLD: Mutex<BTreeSet<(String, String)>> = Mutex::new(BTreeSet::new());
+    let first = TOLD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert((conversation.to_owned(), member.id.clone()));
+    if !first {
+        return;
+    }
     let data = json!({"notice": "nativeSkipped", "style": "info", "text": crate::store::native_refusal(&member.name)});
     hub.add_entry(lane, EntryKind::Notice, hub.store.max_turn(&lane.chat), &data);
 }

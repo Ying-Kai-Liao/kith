@@ -1113,7 +1113,7 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
     if let Some(row) = chat.as_deref().and_then(|id| hub.store.bot(id).ok().flatten()).filter(|r| !r.deleted)
         && let Err(e) = row.config.refuse_native()
     {
-        return Err(BotError::err(409, Code::BadRequest, format!("{e:#}")));
+        return Err(BotError::err(400, Code::BadRequest, format!("{e:#}")));
     }
     if let Some(e) = hub.store.find_bot_guest_nonce(&bot.bot_id, nonce) {
         if !is_retry(hub, &e, text, &agent, known.as_ref(), external.as_deref()) {
@@ -1254,7 +1254,7 @@ async fn ask_room(
     };
     // C5: a host-native member is never asked.
     if let Err(e) = agent.refuse_native() {
-        return Err(BotError::err(409, Code::BadRequest, format!("{e:#}")));
+        return Err(BotError::err(400, Code::BadRequest, format!("{e:#}")));
     }
     // Like any ask: at most what its owner holds of the agent.
     if let Some(hq) = &agent.hq_agent

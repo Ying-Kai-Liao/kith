@@ -56,6 +56,16 @@ impl Host {
         self.base = base;
     }
 
+    /// Stops the host and starts it again on the same data with `env` added to what it had (a later value wins).
+    pub async fn restart_env(&mut self, env: &[(&str, &str)]) {
+        super::stop(&mut self.child);
+        self.env.extend(env.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())));
+        let all: Vec<(&str, &str)> = self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let (child, base) = super::serve_env(&self.home, &all).await;
+        self.child = child;
+        self.base = base;
+    }
+
     pub async fn post(&self, method: &str, body: &Value) -> (bool, Value) {
         let response = reqwest::Client::new()
             .post(format!("{}/api/{method}", self.base))

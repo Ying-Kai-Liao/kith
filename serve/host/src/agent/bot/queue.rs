@@ -569,7 +569,10 @@ impl Actor {
             self.notice(&format!("Couldn't start the agent: {e:#}"), NoticeStyle::Error);
         }
         // Any other start that failed gives its wake back too (M5); one the person stopped isn't offered again now.
-        crate::cards::resume::not_started(&self.hub, &self.start_entries, !stopped);
+        // A host-native bot's refusal is final, like a Stop: its wake is dropped and its cards withdrawn, not offered
+        // again (the retry would only post the same notice).
+        let final_refusal = self.cfg.refused_native();
+        crate::cards::resume::not_started(&self.hub, &self.start_entries, !(stopped || final_refusal));
         self.release_turn_claim();
         self.turn = None;
         if self.routine_completion.is_none() {

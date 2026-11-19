@@ -74,6 +74,10 @@ fn bookmark(store: &Store, bot: &str) -> i64 {
 /// stops when the bot actor drops the sender; what it hasn't read waits for the next one.
 pub fn spawn_tidier(hub: Arc<Hub>, bot_id: String) -> mpsc::UnboundedSender<TidyEvent> {
     let (tx, mut rx) = mpsc::unbounded_channel::<TidyEvent>();
+    // C5: its one-shot is refused for a host-native bot, so it would only back off for ever. Events sent to it are dropped.
+    if hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.refused_native()) {
+        return tx;
+    }
     let hq = hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.is_hq());
     if hq && kv_get_or_old(&hub.store, &bookmark_key(&bot_id)).is_none() {
         // An hq bot's months of earlier chat were never tidied over: the first run starts from now, not from them.

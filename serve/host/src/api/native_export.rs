@@ -7,8 +7,8 @@
 //! - `memory/`: a copy of its host chat-memory files (the folder `chat::memory::files::folder` names);
 //! - `routines.json`: each routine's name, prompt, triggers and whether it is paused. A webhook trigger is only the word
 //!   `webhook`: the key that authorizes it is never written;
-//! - `vault.json`: the vault env keys the bot used. Their NAMES would need the vault to be read, and nothing in
-//!   `market::vault` lists names without values, so none are exported and the file says so.
+//! - `vault.json`: the NAMES of the engine's saved env keys (`agent::auth::saved_env`), never a value. They stay where
+//!   they are and a kith agent on that engine already uses them; `null` when the vault could not be read.
 //!
 //! The owner's alone (on no member or bot list). Running it again rebuilds the bundle in place. It refuses a kith agent's
 //! row and a group.
@@ -40,8 +40,14 @@ async fn export(hub: &Arc<Hub>, bot_id: &str) -> Result<Value> {
         bail!("only a host-native bot can be exported; this one is a kith agent or a room");
     }
     let routines = routines_of(hub, bot_id);
-    let (cfg, id) = (row.config, bot_id.to_owned());
-    let path = tokio::task::spawn_blocking(move || write_bundle(&cfg, &routines, &bundle_dir(&id))).await??;
+    let cfg = row.config;
+    // Names only; a vault that cannot be read now (locked, no key store) exports none, and says so.
+    let slot = crate::agent::auth::env_slot(&cfg.backend);
+    let unlocked = crate::market::vault::unlock_if_sealed(hub, slot).await;
+    let names = unlocked.and_then(|()| crate::agent::auth::saved_env(&hub.store, &cfg.backend)).ok();
+    let id = bot_id.to_owned();
+    let path = tokio::task::spawn_blocking(move || write_bundle(&cfg, &routines, names.as_deref(), &bundle_dir(&id)))
+        .await??;
     Ok(json!({"path": path.to_string_lossy()}))
 }
 
@@ -62,7 +68,7 @@ fn routines_of(hub: &Hub, bot_id: &str) -> Vec<Value> {
 }
 
 /// Builds the bundle next to `dir` and swaps it in, so a failed export leaves the last good one.
-fn write_bundle(cfg: &BotConfig, routines: &[Value], dir: &Path) -> Result<PathBuf> {
+fn write_bundle(cfg: &BotConfig, routines: &[Value], key_names: Option<&[String]>, dir: &Path) -> Result<PathBuf> {
     let staging = dir.with_extension("tmp");
     if staging.exists() {
         std::fs::remove_dir_all(&staging).context("couldn't clear an earlier unfinished export")?;
@@ -76,8 +82,8 @@ fn write_bundle(cfg: &BotConfig, routines: &[Value], dir: &Path) -> Result<PathB
     put(
         "vault.json",
         &json!({
-            "keyNames": null,
-            "note": "The names of the vault keys this bot used are not exported: the vault has no way to list names without reading their values. Re-enter the engine's key for the new kith agent.",
+            "keyNames": key_names,
+            "note": "Names only, never values. The engine's keys stay where they are (saved per engine), and a kith agent on the same engine already uses them: nothing needs to be copied or entered again. keyNames is null when the vault could not be read just now.",
         }),
     )?;
     copy_memory(&crate::chat::memory::files::folder(Some(&cfg.id)), &staging.join("memory"))?;
@@ -101,6 +107,11 @@ fn settings_of(cfg: &BotConfig) -> Value {
         "folder": cfg.cwd,
         "connectors": cfg.connectors,
         "skills": cfg.skills,
+        // Where it kept things; the folders are not copied (memory/ holds the bot's own files).
+        "usedSharedMemory": crate::chat::memory::shared(cfg),
+        "memoryFolder": crate::chat::memory::files::folder(Some(&cfg.id)),
+        "sharedMemoryFolder": crate::chat::memory::files::folder(None),
+        "managedWorkspace": crate::agent::workspace::is_managed(cfg),
     })
 }
 

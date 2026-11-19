@@ -172,6 +172,10 @@ async fn a_room_turn_skips_a_native_member_with_a_notice_and_goes_on() {
         })
     })
     .await;
+    // Said once per conversation, however many rounds there are.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let all = r.hub.store.history(&room, i64::MAX, 100).unwrap();
+    assert_eq!(all.iter().filter(|e| e.data["notice"] == "nativeSkipped").count(), 2, "one per native member");
 }
 
 // MARK: export
@@ -213,6 +217,7 @@ async fn the_export_has_the_row_memory_and_routines_and_no_secret_or_webhook_key
     let key = r.hub.routines.credentials(&r.hub, &a, &id, false).unwrap()["key"].as_str().unwrap().to_owned();
     assert!(key.len() > 20);
     r.hub.routines.set_enabled(&r.hub.store, &a, &id, false).unwrap();
+    r.hub.store.vault.mark_open();
     let secret = "sk-ant-SECRETVALUE-1234";
     r.hub
         .store
@@ -237,7 +242,8 @@ async fn the_export_has_the_row_memory_and_routines_and_no_secret_or_webhook_key
         (Some("hook"), Some("react"), Some(true))
     );
     assert_eq!(first["triggers"][0]["type"], "webhook");
-    assert!(read("vault.json")["keyNames"].is_null(), "no names-only path exists, so none are exported");
+    assert_eq!(read("vault.json")["keyNames"], json!(["ANTHROPIC_API_KEY"]), "names only");
+    assert!(bot["usedSharedMemory"].is_boolean());
     // Nothing that authorizes anything.
     let everything = all_text(&dir);
     assert!(!everything.contains(secret), "a vault value leaked");

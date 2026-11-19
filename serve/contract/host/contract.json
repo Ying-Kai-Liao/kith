@@ -125,9 +125,10 @@
         "screen": "json?",
         "analytics": "json?",
         "urls": "json?",
-        "cli": "json?"
+        "cli": "json?",
+        "nativeBots": "int?"
       },
-      "mayOmit": ["grantedAgents", "cloud", "device", "home", "backends", "screen", "analytics", "urls", "cli"]
+      "mayOmit": ["grantedAgents", "cloud", "device", "home", "backends", "screen", "analytics", "urls", "cli", "nativeBots"]
     },
 
     "KithCard": {
