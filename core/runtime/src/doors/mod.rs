@@ -1,13 +1,14 @@
 //! Guest doors in the core (M2-14, lane G): the state of a door and its sweep over core.db, so a revoked person's door
 //! start and the sweep that ends their doors cannot both win.
 //!
-//! A door is a fixed command the kernel runs for a guest in a box of its own (`kernel/lib/kith_door.py`). Today its
-//! state is a claim file per door and the start and the sweep take kith-auth's flock; the host's sweep
-//! (`serve/host/src/doors.rs`) runs `kith door sweep` on a cut-off, at start and every minute. This module is the port
-//! of that onto one row, and it is NOT switched: `kith_door.py` and the host keep their own state until a later step
-//! (the host's callers move in lane H, the Python in M2-18). A door started before the switch has no row here, so a
-//! core sweep cannot see it; the old sweep still ends it. Nothing here kills a process: the sweep marks rows, says which,
-//! and the supervisor (or the one who sweeps) ends the box, then confirms with [`end`].
+//! A door is a fixed command the kernel runs for a guest in a box of its own (`kernel/lib/kith_door.py`). On an unswitched
+//! Mac its state is a claim file per door, and the start and the sweep take kith-auth's flock. On a switched Mac (M2(b),
+//! `kernel/lib/kith_door_core.py`) a person's own door is a row here: `kith_door.py` calls `doors.start`, `doors.markLive`
+//! and `doors.end`, and the host's sweep (`serve/host/src/doors.rs`, which runs `kith door sweep` on a cut-off, at start
+//! and every minute) calls `doors.sweep`. A door started before the switch, and a room door (its row has no basis of
+//! people), has no row here and keeps a claim file: the file's sweep still ends it. Nothing here kills a process: the
+//! sweep marks rows, says which, and the one who sweeps stops the box, then confirms with [`end`] once nothing can start
+//! the box again (its supervisor is gone).
 //!
 //! ```text
 //! start -> starting -> live          (mark_live: the box is up)

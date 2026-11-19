@@ -88,15 +88,27 @@ def minute(text):
         return str(text)
 
 
-def log_of(agent, jid):
-    """The newest log file of the job's runs (run-turn names them <job>-<stamp>.log), which the core does not record."""
+def log_name(jid):
+    """The pattern of a log run-turn names for the job, <job>-<stamp>.log (not another job's <jid>-x-<stamp>.log). The one
+    place it is written: kith-sched's own `log` uses it too."""
+    return re.compile(re.escape(jid) + r'-(\d{8}-\d{4})\.log')
+
+
+def log_of(agent, jid, at=None):
+    """The newest log file of the job's runs, which the core does not record. With `at` (the run's 'YYYY-MM-DDTHH:MM'), a log
+    stamped before that minute is an earlier run's: a run claimed but not yet logging has none of its own."""
     runs = os.path.join(str(kith_paths.paths()['KITH_LOGS']), 'sched', 'runs', agent)
-    mine = re.compile(re.escape(jid) + r'-\d{8}-\d{4}\.log')   # not another job's <jid>-x-<stamp>.log
+    mine = log_name(jid)
     try:
         names = sorted(n for n in os.listdir(runs) if mine.fullmatch(n))
     except OSError:
         return None
-    return os.path.join(runs, names[-1]) if names else None
+    if not names:
+        return None
+    digits = re.sub(r'\D', '', at or '')   # 202611040200: the minute, as run-turn stamps it (a same-minute log is the run's)
+    if len(digits) >= 12 and mine.fullmatch(names[-1]).group(1) < digits[:8] + '-' + digits[8:12]:
+        return None
+    return os.path.join(runs, names[-1])
 
 
 def runs_of(agent=None, jid=None, timeout=60, **kw):
@@ -109,7 +121,7 @@ def runs_of(agent=None, jid=None, timeout=60, **kw):
     out = {}
     for v in core('schedule.runs', params, timeout=timeout, **kw).get('runs', []):
         run = {'agent': v['agent'], 'id': v['id'], 'at': v.get('at'), 'why': v.get('why'), 'pid': v.get('pid'),
-               'log': v.get('log') or (None if v.get('state') in ('queued', 'cancelled') else log_of(v['agent'], v['id'])),
+               'log': v.get('log') or (None if v.get('state') in ('queued', 'cancelled') else log_of(v['agent'], v['id'], v.get('at'))),
                'running': bool(v.get('running')), '_state': v.get('state')}
         if v.get('state') == 'failed':
             run['error'] = v.get('outcome') or 'failed'
@@ -141,6 +153,8 @@ def note(ans):
     """The write is done; when the core could not bring its index up to it right away, the next fire does."""
     if ans.get('indexed') is False:
         print('(done; the core will pick it up at its next tick: %s)' % ans.get('indexNote', 'not indexed yet'))
+    if ans.get('warning'):
+        print('warning: %s' % ans['warning'])
 
 
 def cmd_ls(rest, as_json):
@@ -180,7 +194,8 @@ def cmd_log(rest, as_json):
     home = os.path.expanduser('~')
     for r, st in zip(runs, states[-len(runs):] if runs else []):
         state = 'failed' if r.get('error') else 'running' if r['running'] else st if st in ('queued', 'cancelled') else 'done'
-        print('%s  %-24s %-7s %s' % (r['at'], '%s/%s' % (r['agent'], r['id']), state, (r['log'] or '-').replace(home, '~', 1)))
+        none = 'started, no log yet' if state == 'running' else '-'
+        print('%s  %-24s %-7s %s' % (r['at'], '%s/%s' % (r['agent'], r['id']), state, (r['log'] or none).replace(home, '~', 1)))
     if agent and jid and runs and runs[-1]['log']:
         try:
             with open(runs[-1]['log']) as f:
@@ -258,7 +273,10 @@ def cmd_edit(verb, agent, jid, as_json):
         ans = core('schedule.setPaused', {'agent': agent, 'id': jid, 'paused': verb == 'pause'})
     tell_app(agent, jid, {'rm': 'removed', 'pause': 'paused', 'resume': 'resumed'}[verb])
     if as_json:
-        return {'ok': True, 'agent': agent, 'id': jid, 'changed': bool(ans.get('changed'))}
+        out = {'ok': True, 'agent': agent, 'id': jid, 'changed': bool(ans.get('changed'))}
+        if ans.get('warning'):
+            out['warning'] = ans['warning']
+        return out
     print('%s/%s %s' % (agent, jid, {'rm': 'removed', 'pause': 'paused', 'resume': 'resumed'}[verb]))
     note(ans)
     return None

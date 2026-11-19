@@ -53,6 +53,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "accounts",
         "acp",
         "cost",
+        "cost-ledger",
         "delegation",
         "engines",
         "launch",
@@ -87,7 +88,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","acp","cost","delegation","engines","launch","paths","pkg","project","readfence","settings","threads"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","acp","cost","cost-ledger","delegation","engines","launch","paths","pkg","project","readfence","settings","threads"]}"#
         );
     }
 }

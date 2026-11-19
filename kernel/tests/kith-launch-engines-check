@@ -74,6 +74,12 @@ for n, (x, y) in enumerate(zip(a, b), 1):
         print("line %d differs at char %d" % (n, i)); print("  got:    " + x[max(0, i - 150):i + 250]); print("  golden: " + y[max(0, i - 150):i + 250])
 if len(a) != len(b): print("line counts differ: %d vs %d" % (len(a), len(b)))' "$out" "$FIX/launch-$2.json"
 done
+# The cost hook is the Rust `kith kernel cost tag` when `cost` is switched and the program has it (the golden above); KITH_CORE=python
+# is the rollback and writes the Python's.
+if [ -n "$BIN" ]; then
+  check "KITH_CORE=python keeps the Python cost hook" "KITH_CORE=python launch cl | grep -q 'bin/kith-cost.* tag'"
+  check "the default launch tags with the core's cost verb" "launch cl | grep -q 'kernel cost --kernel .* tag'"
+fi
 
 # The Python fill (bin/kith, KITH_CORE=python) and the Rust fill (launch/guard.rs, settings.rs) write the same must-ask
 # rules and autoMode for an owner run; terminal and kith ask runs get the first, app and host turns the second. Only the
