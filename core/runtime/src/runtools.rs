@@ -137,6 +137,7 @@ fn program(bin: &Path, tool: Tool) -> Option<(PathBuf, Option<&'static str>)> {
 /// kernel's own `project::run` in this process, on the registry of the kernel the finder returned, the way
 /// `kith kernel project-id --kernel K` would answer it. Not a guest run (`guest: None`): this is the core's side of the
 /// socket. Never the sh stub at `bin/project-id`, which would have to find a kith program of its own.
+#[cfg(unix)]
 pub(crate) fn project_info(
     bin: &Path,
     home: PathBuf,
@@ -170,13 +171,19 @@ pub(crate) fn run(tool: Tool, who: &RunIdentity, args: &[String]) -> Result<Valu
     let unavailable = || Error::Refused("kith isn't available on this computer".into());
     let bin = kernel_bin().ok_or_else(unavailable)?;
     if tool == Tool::ProjectId {
-        let home = kith_kernel::paths::process_home();
-        return Ok(project_info(
-            &bin,
-            home,
-            &kith_kernel::paths::process_env,
-            args,
-        ));
+        // The kernel's project module is unix only, like the guest runs it answers.
+        #[cfg(unix)]
+        {
+            let home = kith_kernel::paths::process_home();
+            return Ok(project_info(
+                &bin,
+                home,
+                &kith_kernel::paths::process_env,
+                args,
+            ));
+        }
+        #[cfg(not(unix))]
+        return Err(Error::Refused("that isn't available here".into()));
     }
     let (path, sub) =
         program(&bin, tool).ok_or_else(|| Error::Refused("that isn't available here".into()))?;
