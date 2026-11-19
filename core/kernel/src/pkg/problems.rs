@@ -413,8 +413,10 @@ mod must_ask_tests {
     #[test]
     fn an_ask_or_deny_list_alone_is_judged() {
         for key in ["ask", "deny"] {
-            let v: Value =
-                serde_json::from_str(&format!(r#"{{"permissions": {{"{key}": ["Bash(git -C * fetch:*)"]}}}}"#)).unwrap();
+            let v: Value = serde_json::from_str(&format!(
+                r#"{{"permissions": {{"{key}": ["Bash(git -C * fetch:*)"]}}}}"#
+            ))
+            .unwrap();
             assert!(has_rules(&v), "{key}");
         }
         let none: Value = serde_json::from_str(r#"{"permissions": {"ask": []}}"#).unwrap();
