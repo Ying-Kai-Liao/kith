@@ -507,6 +507,14 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.secretShare",
     "people.secretBrowser",
     "people.agentAccess",
+    // `kith schedule` once the schedules are the core's (bin/kith, kernel/lib/kith_sched_core.py): the reads, the edits of a
+    // jobs.json and the run-now. Owner only like the rest; nothing here runs without a daemon.
+    "schedule.jobs",
+    "schedule.runs",
+    "schedule.put",
+    "schedule.drop",
+    "schedule.setPaused",
+    "schedule.runNow",
     // the probe before a Keychain write: only a daemon that is switched answers it, see `DAEMON_ONLY_READS`
     "people.revision",
 ];
@@ -683,7 +691,8 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
     }
     let folders = kernel::folders(&kith_kernel::paths::process_home());
     // Only a list (or a read) is repeated when the connection breaks: an open or a ticket may have run.
-    let repeatable = matches!(method, "terminal.list" | "claim.list" | "claim.epoch");
+    let repeatable =
+        matches!(method, "terminal.list" | "claim.list" | "claim.epoch" | "schedule.jobs" | "schedule.runs");
     match kith_core::reach(&folders, method, &params, repeatable) {
         kith_core::Reached::Answered(answer) => {
             println!("{answer}");

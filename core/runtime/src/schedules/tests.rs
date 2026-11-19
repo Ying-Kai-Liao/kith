@@ -292,7 +292,7 @@ fn an_unknown_agent_is_refused_as_kith_sched_refuses_it() {
             .unwrap_err()
             .to_string();
         assert!(
-            e.contains("no agent \"zed\"") && e.contains("kit mel ola"),
+            e.contains("no agent 'zed'") && e.contains("kit mel ola"),
             "{method}: {e}"
         );
     }

@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# kith-sched-core-check: once the schedules are switched to the Kith core on this Mac (<machine>/core/cutover/schedules.switch),
+# `kith-sched ls|add|rm|pause|resume|run|log` (so `kith schedule ...`, kith-chain, the skills) ask the core over
+# `kith kernel core-call` and answer in kith-sched's own words and --json shapes; never the Python editor, which would write
+# jobs.json beside the core. Unswitched, or with the switch still `stepping`, nothing changes and the core is not asked. The
+# program here is a stub that plays the core from a plain file; the real core is the host's schedules cutover e2e. Throwaway
+# folders; nothing real is touched.
+#
+#   kernel/tests/kith-sched-core-check
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sched-core-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_AUTH=$T/auth.json
+unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_MACHINE HQ_MACHINE KITH_RUN_OUTBOX HQ_RUN_OUTBOX
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/house/role" "$T/outbox"
+printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
+MACHINE=$(python3 -I -c "import sys; sys.path.insert(0, '$KERNEL/lib'); from kith_paths import paths; print(paths()['KITH_MACHINE'])")
+mkdir -p "$MACHINE/core/cutover" "$MACHINE/sched"
+SWITCH=$MACHINE/core/cutover/schedules.switch
+J=$KITH_HOME/agents/house/jobs.json
+export KITH_SCHED_NOW=2026-11-04T03:00
+
+# The stub program: `<bin> kernel core-call METHOD --params-stdin`. It keeps the jobs in $T/core.json, logs each call to
+# $T/calls, answers like the core (rows, `changed`, `replaced`, runs) and refuses an unknown agent or job in the core's words.
+cat > "$T/prog" <<'EOF'
+#!/usr/bin/env python3
+import json, os, sys
+T = os.path.dirname(os.path.realpath(__file__))
+method = sys.argv[3]
+p = json.loads(sys.stdin.read() or '{}')
+open(T + '/calls', 'a').write(method + ' ' + json.dumps(p, sort_keys=True) + '\n')
+if os.path.exists(T + '/down'):
+    sys.stderr.write('no core daemon answers\n'); sys.exit(3)
+db = json.load(open(T + '/core.json'))
+def bad(m): sys.stderr.write('kith-core: schedule: ' + m + '\n'); sys.exit(4)
+def row(j): return dict(j, agent='house', paused=bool(j.get('paused')), next=None if j.get('paused') else '2026-11-04T08:00', last=None)
+a = p.get('agent')
+if a not in (None, 'house'): bad("no agent '%s' (have: house)" % a)
+if method == 'schedule.jobs': out = {'jobs': [row(j) for j in db]}
+elif method == 'schedule.runs': out = {'runs': [dict(r, agent='house') for r in json.load(open(T + '/runs.json'))]}
+elif method == 'schedule.put':
+    if p["cron"] == "bogus": bad("cron needs 5 fields, got bogus")
+    job = {k: p[k] for k in ('cron', 'task', 'person', 'model', 'effort', 'harness') if k in p}
+    job = dict({'id': p.get('id') or 'slugged'}, **job)
+    had = any(j['id'] == job['id'] for j in db)
+    db = [j for j in db if j['id'] != job['id']] + [job]; json.dump(db, open(T + '/core.json', 'w'))
+    out = {'ok': True, 'replaced': had, 'job': row(job)}
+elif method in ('schedule.drop', 'schedule.setPaused'):
+    j = next((j for j in db if j['id'] == p['id']), None)
+    if j is None: bad("house has no job '%s' (have: %s)" % (p['id'], ' '.join(x['id'] for x in db) or 'none'))
+    if method == 'schedule.drop': db.remove(j); changed = True
+    else: changed = bool(j.get('paused')) != p['paused']; j.pop('paused', None); j.update({'paused': True} if p['paused'] else {})
+    json.dump(db, open(T + '/core.json', 'w')); out = {'ok': True, 'changed': changed}
+elif method == 'schedule.runNow': out = {'outcome': open(T + '/runnow').read().strip() if os.path.exists(T + '/runnow') else 'fired', 'turn': '7'}
+else: bad('unknown ' + method)
+print(json.dumps(out))
+EOF
+chmod +x "$T/prog"
+export KITH_BIN=$T/prog KITH_RUN_OUTBOX=$T/outbox
+printf '[{"id": "a", "cron": "0 8 * * *", "task": "do a"}]\n' > "$J"
+printf '[{"id": "a", "cron": "0 8 * * *", "task": "do a"}, {"id": "r1", "task": "routine", "trigger": {"type": "interval", "every": 60}}]\n' > "$T/core.json"
+printf '[{"id": "a", "at": "2026-11-04T02:00", "why": "due 02:00", "pid": null, "log": "/l/a.log", "running": false}]\n' > "$T/runs.json"
+
+K() { python3 "$KERNEL/bin/kith-sched" "$@"; }
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; sed 's/^/     | /' "$T/out" 2>/dev/null | tail -6; fails=$((fails + 1)); fi; }
+jq_() { python3 -I -c "import json,sys; d=json.load(open('$T/out')); print($1)"; }
+calls() { cat "$T/calls" 2>/dev/null | wc -l | tr -d ' '; }
+
+# Not switched: the Python answers and the core is not asked. `stepping` is not switched either.
+K ls house >"$T/out" 2>&1
+check "unswitched: kith-sched answers itself, the core is not asked" "[[ \$(calls) == 0 ]] && grep -q 'do a' '$T/out'"
+printf 'state=stepping\n' > "$SWITCH"
+K ls house >"$T/out" 2>&1
+check "stepping is not switched" "[[ \$(calls) == 0 ]] && grep -q 'do a' '$T/out'"
+
+printf 'state=switched\nat=1\n' > "$SWITCH"
+# The Python state is a tombstone after the switch; the core path never reads it.
+printf '{"kith_tombstone": 1, "module": "schedules", "message": "moved", "rollback": "kith rollback schedules"}\n' > "$MACHINE/sched/state.json"
+
+K ls --json >"$T/out" 2>&1
+check "ls --json: the cron jobs in kith-sched's keys and order, ticking, routines left out" \
+  "[[ \"\$(jq_ \"list(d)\")\" == \"['jobs', 'ticking']\" && \"\$(jq_ \"[j['id'] for j in d['jobs']]\")\" == \"['a']\" && \"\$(jq_ \"list(d['jobs'][0])\")\" == \"['agent', 'id', 'cron', 'task', 'paused', 'next', 'last']\" && \"\$(jq_ \"d['jobs'][0]['last']\")\" == \"{'at': '2026-11-04T02:00', 'why': 'due 02:00', 'pid': None, 'log': '/l/a.log', 'running': False}\" ]]"
+K ls house >"$T/out" 2>&1
+WANT=$(python3 -I -c "print('%-10s %-18s %-16s next %-18s last %s' % ('house', 'a', '0 8 * * *', 'Wed 04 Nov 08:00', '2026-11-04T02:00'))")
+check "ls text is kith-sched's line" "grep -qxF \"\$WANT\" '$T/out'"
+K ls nobody --json >"$T/out" 2>&1; rc=$?
+check "an unknown agent is the error object, exit 1" "[[ \$rc == 1 && \"\$(jq_ \"d\")\" == \"{'ok': False, 'error': \\\"no agent 'nobody' (have: house)\\\"}\" ]]"
+
+KITH_PERSON=sam K add house "0 9 * * *" "do b" --id b -m sonnet -e low --json >"$T/out" 2>&1
+check "add --json: ok, replaced false, the job row" "[[ \"\$(jq_ \"(d['ok'], d['replaced'], d['job']['id'])\")\" == \"(True, False, 'b')\" ]]"
+check "add sends the caller's person, model and effort to the core" "grep -q 'schedule.put {\"agent\": \"house\", \"cron\": \"0 9 \* \* \*\", \"effort\": \"low\", \"id\": \"b\", \"model\": \"sonnet\", \"person\": \"sam\", \"task\": \"do b\"}' '$T/calls'"
+check "add leaves the Schedule card in the run's outbox" "[[ \$(ls '$T/outbox' | grep -c json\$) == 1 ]] && python3 -I -c \"import json,glob; d=json.load(open(glob.glob('$T/outbox/*.json')[0])); assert d['as']=='house' and d['schedule']=={'id':'b','op':'added'}\""
+check "the Python editor did not touch jobs.json" "[[ \"\$(cat '$J')\" == '[{\"id\": \"a\", \"cron\": \"0 8 * * *\", \"task\": \"do a\"}]' ]]"
+K add house "0 9 * * *" "do b" --id b >"$T/out" 2>&1
+check "add (text) says when it runs next" "grep -q '^house/b: next run ' '$T/out'"
+K add house "bogus" "x" --json >"$T/out" 2>&1; rc=$?
+check "a core refusal is the error object with the core's words, exit 1" "[[ \$rc == 1 ]] && [[ \"\$(jq_ \"d['ok']\")\" == False ]]"
+
+K pause house a --json >"$T/out" 2>&1
+check "pause --json: ok, agent, id, changed" "[[ \"\$(jq_ \"d\")\" == \"{'ok': True, 'agent': 'house', 'id': 'a', 'changed': True}\" ]]"
+K pause house a >"$T/out" 2>&1
+check "pause (text)" "[[ \"\$(cat '$T/out')\" == 'house/a paused' ]]"
+K resume house a --json >"$T/out" 2>&1
+check "resume changed" "[[ \"\$(jq_ \"d['changed']\")\" == True ]]"
+K rm house a --json >"$T/out" 2>&1
+check "rm --json" "[[ \"\$(jq_ \"d\")\" == \"{'ok': True, 'agent': 'house', 'id': 'a', 'changed': True}\" ]]"
+K rm house a --json >"$T/out" 2>&1; rc=$?
+check "rm of a job that is gone names the jobs there are" "[[ \$rc == 1 && \"\$(jq_ \"d['error']\")\" == \"house has no job 'a' (have: r1 b)\" ]]"
+check "every change reached the outbox, in order, with kith-sched's op words" "python3 -I -c \"import json,glob; ops=[json.load(open(f))['schedule']['op'] for f in sorted(glob.glob('$T/outbox/*.json'))]; assert ops == ['added','updated','paused','paused','resumed','removed'], ops\" >'$T/out' 2>&1"
+
+K run house b --json >"$T/out" 2>&1
+check "run --json: queued, pid and log null, the turn" "[[ \"\$(jq_ \"d\")\" == \"{'ok': True, 'agent': 'house', 'id': 'b', 'pid': None, 'log': None, 'turn': '7', 'queued': True}\" ]]"
+echo busy > "$T/runnow"
+K run house b --json >"$T/out" 2>&1; rc=$?
+check "run on a busy job: ok false 'still running', exit 1" "[[ \$rc == 1 && \"\$(jq_ \"d['error']\")\" == 'house/b is still running' ]]"
+rm "$T/runnow"
+K run house nope --json >"$T/out" 2>&1; rc=$?
+check "run of an unknown job" "[[ \$rc == 1 && \"\$(jq_ \"d['error']\")\" == \"house has no job 'nope' (have: b)\" ]]"
+
+K log --json >"$T/out" 2>&1
+check "log --json: agent, id, runs" "[[ \"\$(jq_ \"list(d)\")\" == \"['agent', 'id', 'runs']\" && \"\$(jq_ \"d['runs'][0]['id']\")\" == a ]]"
+K log house/a 1 --json >"$T/out" 2>&1
+check "log AGENT/ID N" "[[ \"\$(jq_ \"(d['agent'], d['id'], len(d['runs']))\")\" == \"('house', 'a', 1)\" ]]"
+K log house a 0 --json >"$T/out" 2>&1; rc=$?
+check "log with n 0 is refused" "[[ \$rc == 1 ]] && grep -q 'positive number' '$T/out'"
+
+# No daemon: nothing was done, one line, exit 1; no fallback to the files.
+touch "$T/down"
+K add house "0 9 * * *" "do c" >"$T/out" 2>&1; rc=$?
+check "no daemon: one line, exit 1, nothing written" "[[ \$rc == 1 && \$(wc -l <'$T/out' | tr -d ' ') == 1 ]] && grep -q 'Kith core is not answering' '$T/out' && [[ \"\$(cat '$J')\" == '[{\"id\": \"a\", \"cron\": \"0 8 * * *\", \"task\": \"do a\"}]' ]]"
+rm "$T/down"
+
+# The verbs that are not the core's stay kith-sched's, switched or not.
+n=$(calls)
+K prune >"$T/out" 2>&1
+check "prune stays kith-sched's" "[[ \$(calls) == \$n ]]"
+
+[[ $fails -eq 0 ]] && echo "all ok" || echo "$fails failed"
+exit $((fails > 0))

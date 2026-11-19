@@ -53,6 +53,9 @@ pub(crate) mod modules;
 pub(crate) mod same_answer;
 pub(crate) mod secrets_back;
 pub(crate) mod state;
+pub(crate) mod status;
+#[cfg(test)]
+mod status_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod tombstone;
@@ -699,17 +702,63 @@ pub(crate) fn run(
     kernel: &std::path::Path,
     args: &[String],
 ) -> Result<Vec<String>> {
+    lines_of(run_outcome(paths, kernel, args)?)
+}
+
+/// Like [`run`], with the exit code and the stderr lines: the `status` variants answer by exit code (`status.rs`).
+pub(crate) fn run_outcome(
+    paths: &kith_kernel::paths::Paths,
+    kernel: &std::path::Path,
+    args: &[String],
+) -> Result<status::Outcome> {
     let env = Env::with_paths(paths).with_ctx(crate::authority::call::ctx_from(
         paths,
         kernel.to_path_buf(),
     ));
-    run_with(&registry(), &env, args)
+    run_outcome_with(&registry(), &env, args)
+}
+
+/// An outcome that says no, as the error the line-returning callers (the daemon's step, the tests) expect.
+fn lines_of(o: status::Outcome) -> Result<Vec<String>> {
+    if o.code == 0 {
+        Ok(o.out)
+    } else {
+        Err(Error::Refused(
+            o.err
+                .into_iter()
+                .chain(o.out)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ))
+    }
 }
 
 pub(crate) fn run_with(reg: &[Box<dyn Module>], env: &Env, args: &[String]) -> Result<Vec<String>> {
+    lines_of(run_outcome_with(reg, env, args)?)
+}
+
+pub(crate) fn run_outcome_with(
+    reg: &[Box<dyn Module>],
+    env: &Env,
+    args: &[String],
+) -> Result<status::Outcome> {
+    // `status` with arguments is the gate's question (MODULE, --json, --require); bare `status` stays as it was.
+    if let [verb, rest @ ..] = args
+        && verb == "status"
+        && !rest.is_empty()
+    {
+        return status::run(reg, env, rest);
+    }
+    Ok(status::Outcome {
+        out: run_lines(reg, env, args)?,
+        ..Default::default()
+    })
+}
+
+fn run_lines(reg: &[Box<dyn Module>], env: &Env, args: &[String]) -> Result<Vec<String>> {
     let usage = || {
         Error::BadParams(
-            "usage: cutover step MODULE [--dry-run] [--force] | rollback MODULE [--force] | status | check MODULE | modules"
+            "usage: cutover step MODULE [--dry-run] [--force] | rollback MODULE [--force] | status [MODULE] [--json] [--require FILE] | check MODULE | modules"
                 .into(),
         )
     };

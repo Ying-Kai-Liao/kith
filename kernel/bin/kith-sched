@@ -62,6 +62,7 @@ import kith_registry  # noqa: E402
 import kith_procstart  # noqa: E402
 import kith_runenv  # noqa: E402
 import kith_tombstone  # noqa: E402
+import kith_sched_core  # noqa: E402  the verbs once the schedules are the Kith core's
 from kith_paths import paths, launcher, job_installed, retire_old_job, stable_kernel  # noqa: E402  the one place that knows where kith's folders are
 KITH_SCHED_TICK_LOCK = 1  # honours sched/tick.lock (cutover gate reads this line)
 STATE = paths()['KITH_STATE']
@@ -992,6 +993,8 @@ def main(argv):
 
 if __name__ == '__main__':
     try:
+        if kith_sched_core.takes(sys.argv[1:], paths()['KITH_MACHINE']):   # switched: the core answers, in the same words
+            sys.exit(kith_sched_core.main(sys.argv[1:], tell_app))
         main(sys.argv[1:])
     except kith_tombstone.Tombstoned as e:   # the schedule state moved to the core (kith migrate step schedules)
         if sys.argv[1:] == ['tick']:

@@ -54,6 +54,7 @@ PUBLIC = {
     # the narrowing-only list those writes are held to; the host's core_front.rs reuses it (a list of names, no table)
     ("lib.rs", "EMBEDDED_WRITES"), ("lib.rs", "EMBEDDED_READS"), ("lib.rs", "embedded"),
     ("lib.rs", "cutover"),   # `kith kernel cutover ...` (M3-10a): argv in, lines out
+    ("lib.rs", "cutover_outcome"),   # the same with an exit code and stderr lines (`status MODULE | --json | --require`)
     ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),
     ("call.rs", "call"),
     ("daemon.rs", "Daemon"), ("daemon.rs", "spawn"), ("daemon.rs", "ready"), ("daemon.rs", "served"), ("daemon.rs", "stop"),
