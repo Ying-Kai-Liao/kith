@@ -261,23 +261,6 @@ fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-/// The python3 the read fence hook runs, by absolute path: the first executable `python3` in an absolute directory of the
-/// launching PATH, else `/usr/bin/python3`. A bare `python3` would be looked up on the PATH of the hook's run, which a
-/// guest's shell can change.
-fn python3_abs(env: &dyn Fn(&str) -> Option<String>) -> String {
-    use std::os::unix::fs::PermissionsExt as _;
-    env("PATH")
-        .into_iter()
-        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
-        .filter(|d| d.is_absolute())
-        .map(|d| d.join("python3"))
-        .find(|c| fs::metadata(c).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
-        .map_or_else(
-            || "/usr/bin/python3".to_owned(),
-            |c| c.to_string_lossy().into_owned(),
-        )
-}
-
 /// `shlex.quote`.
 fn shquote(x: &str) -> String {
     if !x.is_empty()
@@ -1383,7 +1366,7 @@ fn guest_sandbox(
             }
         }
     }
-    // The file tools stay inside the same folders through a PreToolUse hook (lib/kith_readfence.py), not through
+    // The file tools stay inside the same folders through a PreToolUse hook (`kith kernel readfence`), not through
     // permissions.blockReadsOutsideWorkingDirectories: that setting makes Claude Code ask for every Bash command it cannot
     // trace (a cd followed by an export), whatever a hook says, and each ask was a card to the owner. Bash is fenced by the
     // sandbox below.
@@ -1401,16 +1384,18 @@ fn guest_sandbox(
         .map(|r| format!("--root {}", shquote(r)))
         .collect::<Vec<_>>()
         .join(" ");
-    // The Rust hook (`kith kernel readfence`) when the launch knows a kith binary, else the Python one. A hook that cannot
-    // run (a missing script) still prints the refusal through `|| out=`.
-    let program = match i.fence_bin.filter(|b| !b.is_empty()) {
-        Some(bin) => format!("{} kernel readfence", shquote(bin)),
-        None => format!(
-            "{} -I {}/lib/kith_readfence.py",
-            shquote(&python3_abs(i.env)),
-            shquote(g.kernel)
-        ),
+    // The program that answers `kernel readfence`: the launch picks one that has it (the running program at worst), so none
+    // here means a caller built the input by hand. A guest never starts without its read fence.
+    let Some(bin) = i.fence_bin.filter(|b| !b.is_empty()) else {
+        return refuse(
+            3,
+            format!(
+                "kith: no kith program with `kernel readfence`; not running {} for {}",
+                i.agent, i.member.id
+            ),
+        );
     };
+    let program = format!("{} kernel readfence", shquote(bin));
     let fence = format!(
         "out=$({program} {root_args}) || out={}; printf %s \"$out\"",
         shquote(refused)
