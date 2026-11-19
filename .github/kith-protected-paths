@@ -95,6 +95,22 @@ serve/host/src/calls.rs
 serve/host/src/store/botguests.rs
 serve/host/src/api/roles_props.rs
 serve/host/src/api/botguests_props.rs
+serve/host/src/api/peers_tests.rs
+serve/host/src/api/room_secrets_props.rs
+# named by the verify skills since this list was last checked (kith-protected-paths-check)
+kernel/bin/kith-cost
+kernel/lib/core-switched.txt
+kernel/lib/kith_registry.py
+kernel/tests/fixtures/access_requests_parity.json
+kernel/tests/kith-auth-router-check
+kernel/tests/kith-sessions-core-check
+kernel/tests/kith-threads-race
+serve/host/src/api/access_core_tests.rs
+serve/host/src/api/roles_props/rooms.rs
+serve/host/src/chat/room_people.rs
+serve/host/src/routines/core_runs.rs
+serve/host/src/terminal/core_holders.rs
+serve/host/src/threads_cmd.rs
 
 .github/workflows/
 packaging/

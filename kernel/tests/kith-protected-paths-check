@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# kith-protected-paths-check — .github/kith-protected-paths lists every who-may-do-what file, and every file a verify skill
+# (.claude/skills/*/SKILL.md) names. Dropping an entry fails here.
+#
+#   kernel/tests/kith-protected-paths-check     under a second; exits 1 when a check fails
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+LIST=$ROOT/.github/kith-protected-paths
+fails=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fails=$((fails + 1)); }
+
+[[ -f $LIST ]] || { echo "FAIL $LIST is missing"; exit 1; }
+
+listed() { python3 -I -c '
+import sys
+lst = [l.strip() for l in open(sys.argv[1]) if l.strip() and not l.startswith("#")]
+sys.exit(0 if any(sys.argv[2] == l or (l.endswith("/") and sys.argv[2].startswith(l)) for l in lst) else 1)' "$LIST" "$1"; }
+
+for p in kernel/bin/kith-allow kernel/lib/kith_allowed.py kernel/lib/kith_settings.py kernel/lib/kith_guard.py serve/host/src/agent/bot/hq.rs \
+         serve/host/src/access.rs serve/host/src/calls.rs serve/host/src/api/calls.rs kernel/tests/kith-allow-check kernel/tests/kith-must-ask-check \
+         kernel/tests/kith-auth-revoke-check kernel/tests/kith-guest-sandbox-check kernel/tests/kith-recall-check; do
+  listed "$p" && ok "protected: $p" || bad "protected: $p is missing from .github/kith-protected-paths"
+done
+
+missing=$(python3 -I -c '
+import glob, os, re, sys
+root = os.path.abspath(sys.argv[1])
+lst = [l.strip() for l in open(root + "/.github/kith-protected-paths") if l.strip() and not l.startswith("#")]
+for f in sorted(glob.glob(root + "/.claude/skills/*/SKILL.md")):
+    for m in re.finditer(r"(?<![\w/.-])((?:kernel|serve)/[A-Za-z0-9_./-]*[A-Za-z0-9_])", open(f).read()):
+        p = m.group(1)
+        if p.endswith("Cargo.toml") or not os.path.isfile(os.path.join(root, p)):
+            continue   # a manifest named as a cargo argument is not a file the skill covers
+        if not any(p == l or (l.endswith("/") and p.startswith(l)) for l in lst):
+            print(p)' "$ROOT" | sort -u)
+if [[ -z $missing ]]; then ok "every file a verify skill names is protected"
+else bad "every file a verify skill names is protected" "not in .github/kith-protected-paths: $(echo $missing)"; fi
+
+echo
+(( fails )) && { echo "$fails failed"; exit 1; }
+echo "all passed"
