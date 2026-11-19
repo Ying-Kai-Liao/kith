@@ -187,6 +187,13 @@ pub fn parked(
     // Everything the child needs is made here: it may not allocate (the host is multi-threaded) or look anything up.
     // SAFETY: open(2) of a constant path.
     let null = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
+    if null < 0 {
+        let e = std::io::Error::last_os_error();
+        for fd in [go_r, go_w, err_r, err_w] {
+            close(fd);
+        }
+        return Err(e);
+    }
     // SAFETY: the child below calls only async-signal-safe functions on data made above, then execs or `_exit`s.
     let pid = unsafe { libc::fork() };
     if pid < 0 {
@@ -268,7 +275,16 @@ pub fn write_byte(fd: RawFd, b: u8) {
     write_all(fd, &[b]);
 }
 
-fn wait(pid: i32, flags: i32) -> Option<i32> {
+/// How a wait ended.
+enum Waited {
+    /// Still running (a `WNOHANG` wait).
+    Running,
+    /// No such child (already reaped, or never ours): nothing to wait for.
+    Gone,
+    Exited(i32),
+}
+
+fn wait(pid: i32, flags: i32) -> Waited {
     let mut status = 0;
     loop {
         // SAFETY: waitpid(2) on our own child.
@@ -276,10 +292,13 @@ fn wait(pid: i32, flags: i32) -> Option<i32> {
         if got < 0 && errno() == libc::EINTR {
             continue;
         }
-        if got <= 0 {
-            return None;
+        if got < 0 {
+            return Waited::Gone;
         }
-        return Some(if libc::WIFEXITED(status) {
+        if got == 0 {
+            return Waited::Running;
+        }
+        return Waited::Exited(if libc::WIFEXITED(status) {
             libc::WEXITSTATUS(status)
         } else if libc::WIFSIGNALED(status) {
             -libc::WTERMSIG(status)
@@ -295,12 +314,14 @@ fn wait(pid: i32, flags: i32) -> Option<i32> {
 pub fn reap(pid: i32, timeout: Option<Duration>, group: bool) -> Option<i32> {
     let end = timeout.map(|t| Instant::now() + t);
     loop {
-        if let Some(rc) = wait(pid, if end.is_some() { libc::WNOHANG } else { 0 }) {
-            return Some(rc);
+        match wait(pid, if end.is_some() { libc::WNOHANG } else { 0 }) {
+            Waited::Exited(rc) => return Some(rc),
+            // a child that is not there cannot be waited for, and is not a success either
+            Waited::Gone => return Some(-1),
+            Waited::Running => {}
         }
         let Some(end) = end else {
-            // a blocking wait that found no child: nothing to wait for
-            return Some(0);
+            return Some(-1);
         };
         if Instant::now() >= end {
             // SAFETY: SIGKILL to our own child (or the group it leads).
@@ -311,7 +332,7 @@ pub fn reap(pid: i32, timeout: Option<Duration>, group: bool) -> Option<i32> {
                     libc::kill(pid, libc::SIGKILL);
                 }
             }
-            wait(pid, 0);
+            let _ = wait(pid, 0);
             if group {
                 for _ in 0..100 {
                     // SAFETY: signal 0 only asks whether the group has a member.

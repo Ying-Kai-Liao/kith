@@ -34,4 +34,4 @@ elif what == 'newturn':
     open(e['transcriptPath'], 'a').write(json.dumps({'type': 'user', 'timestamp': '2099-01-01T00:00:00.000Z', 'message': {'content': 'back'}}) + '\n')
 elif what == 'self':
     open(e['transcriptPath'], 'a').write(json.dumps({'type': 'system', 'subtype': 'compact_boundary', 'timestamp': '2099-01-01T00:00:00.000Z'}) + '\n')
-sys.exit(subprocess.run(base + ['compact', sid]).returncode)
+sys.exit(subprocess.run(base + ['compact', sid], env={**os.environ, 'KITH_LIFECYCLE_TEST_VERB': '1'}).returncode)

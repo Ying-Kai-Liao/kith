@@ -206,6 +206,8 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 | `agent/bot/queue.rs` `Queued::Group` (group rooms, `botguests.rs` `ask_room` -> `chat::group::ask_agent`) and `agent/bot/hq.rs` (an hq lane loads its session after `claim_for_turn`): both start through `start_turn` / `claim_for_turn`; not thread lanes | none (outside the thread, claimed like any turn) |
 | `kith-lifecycle` `end()` (and the Rust `Sweep::end`): `take_claim` for the sweep's own pid, `still`, writes the decision `ended`, `release_claims`. Starts no Claude and writes nothing to the session | none (not a writer) |
 
+The Rust rows for `kith-lifecycle` (`core/kernel/src/lifecycle/sweep.rs`, `proc.rs`) were read against this model at the head of #1086 (R5 ports 4/4: the claim is the one `Taker::take`, the child execs only after the checks under it); the sync commit in `drift.sh` still waits for the full re-sync, so `drift.sh` lists these two files as changed until then.
+
 **Core writer (`CoreWriter = TRUE`)**
 
 | Code | Model action |

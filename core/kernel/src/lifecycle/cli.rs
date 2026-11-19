@@ -24,6 +24,8 @@ use crate::threads::registry::live_pid;
 use crate::threads::writer::Taker;
 use crate::threads::{Ctx, Host, intent};
 
+/// The difftest sets this to reach the hidden `compact SID` (`lifecycle-new.py`); without it `compact` is no verb, as in the Python.
+const TEST_VERB: &str = "KITH_LIFECYCLE_TEST_VERB";
 const PROG: &str = "kith-lifecycle";
 const USAGE: &str = "usage: kith-lifecycle [-h] {sweep,status,intent} ...\n";
 const USAGE_SWEEP: &str = "usage: kith-lifecycle sweep [-h] [--session SESSION] [--at-sleep]\n";
@@ -266,9 +268,11 @@ fn parse(args: &[&str]) -> Result<Cmd, Out> {
                 pid: pid.unwrap_or(0),
             })
         }
-        "compact" if rest.len() == 1 => Ok(Cmd::Compact {
-            session: rest[0].to_owned(),
-        }),
+        "compact" if rest.len() == 1 && std::env::var_os(TEST_VERB).is_some_and(|v| v == "1") => {
+            Ok(Cmd::Compact {
+                session: rest[0].to_owned(),
+            })
+        }
         other => Err(top(&format!(
             "argument cmd: invalid choice: '{other}' (choose from 'sweep', 'status', 'intent')"
         ))),

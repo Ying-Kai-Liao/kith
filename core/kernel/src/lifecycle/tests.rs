@@ -436,6 +436,11 @@ fn the_command_line_is_argparses() {
         &["status"],
         "kith-lifecycle status: error: the following arguments are required: session\n",
     );
+    // the difftest's hidden verb is no verb of a normal run
+    err(
+        &["compact", "x"],
+        "argument cmd: invalid choice: 'compact' (choose from 'sweep', 'status', 'intent')\n",
+    );
     err(
         &["sweep", "--bogus"],
         "kith-lifecycle: error: unrecognized arguments: --bogus\n",

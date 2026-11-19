@@ -3495,5 +3495,67 @@
    }
   ],
   "needs": "rust"
+ },
+ {
+  "name": "lifecycle-cli-compact-is-no-verb",
+  "command": "lifecycle",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-old.py"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/lifecycle-new.py",
+    "{BIN}",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_MACHINE": "{HOME}/.kith",
+   "KITH_CLAUDE": "{HOME}/claude-fake",
+   "CLAUDE_CONFIG_DIR": "{HOME}/.claude",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_STUB_BIN": "{HOME}/no-stub"
+  },
+  "run": [
+   [
+    "compact",
+    "x"
+   ],
+   [
+    "compact",
+    "x",
+    "none",
+    "extra"
+   ]
+  ],
+  "mask_keys": [
+   "at",
+   "compactedAt",
+   "failedAt",
+   "endedAt",
+   "procStart"
+  ],
+  "normalize": [
+   [
+    "--status-fd \\d+",
+    "--status-fd <FD>"
+   ]
+  ],
+  "setup": [
+   {
+    "write": "home/claude-fake",
+    "text": "#!/bin/sh\n# claude -p --resume SID /compact: logs the call and whether the writer claim file is there, then compacts (or fails, or waits).\nsid=$3\nprintf 'claude %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/live/terminal/$sid.claim\" ] && echo \"claim held\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/fail\" ] && exit 1\nnow=2026-01-02T00:00:00.000Z\nf=$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"'$now'\"}' \\\n  '{\"type\":\"user\",\"isCompactSummary\":true,\"timestamp\":\"'$now'\",\"message\":{\"content\":\"This session is being continued...\"}}' \\\n  '{\"type\":\"user\",\"timestamp\":\"'$now'\",\"message\":{\"content\":\"<command-name>/compact</command-name>\"}}' >> \"$f\"\n",
+    "mode": "755"
+   },
+   {
+    "mkdir": "home/work"
+   }
+  ],
+  "needs": "rust"
  }
 ]
