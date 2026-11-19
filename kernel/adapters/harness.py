@@ -26,7 +26,7 @@ Claude id) starts a new session instead. Without a task: the harness's own inter
 What only Claude Code runs have: the agent's settings.json (permissions, hooks), kith-cost's per-request ledger (here
 one row per run, with the harness's own cost when it reports one), and for agy and hermes, per-run MCP servers.
 """
-import datetime as dt, json, os, shutil, subprocess, sys, uuid
+import datetime as dt, json, os, re, shutil, subprocess, sys, uuid
 from pathlib import Path
 
 KITH = Path(__file__).resolve().parent.parent
@@ -105,7 +105,9 @@ class Run:
             entry = {'url': s['url']} if s.get('url') else {'command': s['command'], 'args': s.get('args', [])}
             if s.get('env'):
                 entry['env'] = s['env']
-            cfg.append('mcp_servers.%s=%s' % (json.dumps(name), toml(entry)))
+            # A bare key: codex keeps the quotes of mcp_servers."name" in the server's name and the run gets no tools.
+            key = name if re.fullmatch(r'[A-Za-z0-9_-]+', name) else json.dumps(name)
+            cfg.append('mcp_servers.%s=%s' % (key, toml(entry)))
         flags = [x for c in cfg for x in ('-c', c)]
         if self.model:
             flags += ['-m', self.model]
