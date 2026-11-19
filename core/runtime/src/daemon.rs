@@ -129,7 +129,16 @@ impl Shared {
     /// alone (`authority::run_allowed_in`). Read from the switch file on each call; an unreadable one is "switched",
     /// which refuses more, never less.
     pub(crate) fn authority_switched(&self) -> bool {
-        crate::cutover::authority_switched(&self.layout)
+        // The cutover framework is Unix only for now, and so are run tokens (`call::run_identity_allowed` refuses elsewhere).
+        #[cfg(unix)]
+        {
+            crate::cutover::authority_switched(&self.layout)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = &self.layout;
+            true
+        }
     }
 
     /// A run-socket call. The checks run under the core lock a revoke commits under; the kernel tools do not (a recall

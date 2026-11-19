@@ -396,10 +396,11 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
   mkdir -p "$SLICE/clone/.git/hooks" "$SLICE/clone/.claude" "$T/proj/.git/hooks" "$T/proj/.claude"
   echo hello > "$T/proj/README.md"; echo hi > "$SLICE/readable.txt"
   MACH=$(python3 "$KERNEL/lib/kith_paths.py" --sh | sed -n "s/^export KITH_MACHINE=//p" | tr -d "'")
-  mkdir -p "$MACH/run"
+  mkdir -p "$MACH/run" "$MACH/core"
   # the two sockets: the host's (fixed place) and a run socket elsewhere; plain listeners that answer nothing
   printf 'import socket, sys, time\nkeep = []\nfor p in sys.argv[1:]:\n    s = socket.socket(socket.AF_UNIX); s.bind(p); s.listen(5); keep.append(s)\ntime.sleep(240)\n' > "$T/listen.py"
-  python3 "$T/listen.py" "$MACH/run/host.sock" "$T/run s.sock" "$T/other.sock" &
+  # the core's run socket (the one file of core/ a guest may reach) and a stand-in for the owner socket beside it (it may not)
+  python3 "$T/listen.py" "$MACH/run/host.sock" "$T/run s.sock" "$T/other.sock" "$MACH/core/run.sock" "$MACH/core/owner.sock" &
   LISTENER=$!
   trap 'kill $LISTENER 2>/dev/null; rm -rf "$T"' EXIT
   sleep 1
@@ -432,6 +433,9 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
     echo "r write-zshrc touch '$REAL_HOME/.zshrc-probe-should-not-exist'"
     echo "r sock-host python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$MACH/run/host.sock')\""
     echo "r sock-run python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$T/run s.sock')\""
+    echo "r sock-core-run python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$MACH/core/run.sock')\""
+    echo "r sock-core-owner python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$MACH/core/owner.sock')\""
+    echo "r read-core-folder ls '$MACH/core'"
     echo "r sock-other python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$T/other.sock')\""
     echo "r net-curl curl -sS -m 5 https://example.com"
     echo "r read-owner-uv-cache ls '$REAL_HOME/.cache/uv'"   # the owner's uv cache (uv's default place)
@@ -444,8 +448,8 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
   echo "probe output:"; cat "$SLICE/probe.out.err" | cut -c1-200 | grep -v "xcode\|xcrun\|developer\|^See\|^If dev\|^Use" ; cat "$SLICE/probe.out" 2>/dev/null || { echo "(no probe output)"; tail -5 "$T/real.err"; tail -5 "$T/real.out"; }
   rexpect() { local got; got=$(sed -n "s/^$1 //p" "$SLICE/probe.out" 2>/dev/null); expect "real: $1 $2" "${got:-none}" "$2"; }
   for n in read-ssh read-keychains read-home read-backup read-other-slice read-state-secrets \
-           write-hooks write-claude-dir write-claude-md write-envrc write-project write-project-hooks write-project-claude-md write-project-claude-dir write-zshrc net-curl sock-other read-owner-uv-cache; do rexpect $n denied; done
-  for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run uv-run uv-own-cache shell-workspace; do rexpect $n ok; done
+           write-hooks write-claude-dir write-claude-md write-envrc write-project write-project-hooks write-project-claude-md write-project-claude-dir write-zshrc net-curl sock-other sock-core-owner read-core-folder read-owner-uv-cache; do rexpect $n denied; done
+  for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run sock-core-run uv-run uv-own-cache shell-workspace; do rexpect $n ok; done
   rm -f "$REAL_HOME/.zshrc-probe-should-not-exist"
 
   # A compound with a cd and an export (what a guest's agent runs for uv) must not ask: Claude Code's own ask for a command it
