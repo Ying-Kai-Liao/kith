@@ -78,6 +78,7 @@ jobs:
       lease: ${{ steps.f.outputs.lease }}
       registry: ${{ steps.f.outputs.registry }}
       schedule_fire: ${{ steps.f.outputs.schedule_fire }}
+      procstart: ${{ steps.f.outputs.procstart }}
       ios: ${{ steps.h.outputs.ios }}
       desktop: ${{ steps.h.outputs.desktop }}
       relay: ${{ steps.h.outputs.relay }}
@@ -279,6 +280,13 @@ jobs:
               - 'core/holder/src/client.rs'
               - 'core/holder/src/clock.rs'
               - 'core/runtime/src/holder_link.rs'
+              - '.github/workflows/ci.yml'
+            # kith-procstart on macOS (the other jobs read the process table on Linux only).
+            procstart:
+              - 'core/procstart/**'
+              - 'core/kernel/src/procstart.rs'
+              - 'kernel/lib/kith_procstart.py'
+              - 'kernel/tests/kith-procstart-check'
               - '.github/workflows/ci.yml'
             # The TLA+ model of the transcripts registry cutover and the code it covers (the list in the registry-step skill).
             # Not ci.yml: the full table takes about a minute on CI (47 s on run 44039852733).
@@ -777,6 +785,32 @@ jobs:
         run: |
           cargo clippy --manifest-path host/Cargo.toml -p kith-attach --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-attach --locked
+
+  # kith-procstart reads the process table with `sysctl(KERN_PROCARGS2)` on macOS and `/proc` on Linux; only this job runs
+  # its tests (the Rust/Python stamp parity and the launcher-form arguments) on a Mac. Free: the repo is public.
+  procstart-macos:
+    needs: changes
+    if: needs.changes.outputs.procstart == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: serve/host
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: procstart-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Tests
+        run: cargo test --manifest-path Cargo.toml -p kith-procstart --locked
+      - name: Python side
+        run: bash "$GITHUB_WORKSPACE/kernel/tests/kith-procstart-check"
 
   # Builds every test binary once and ships them as a nextest archive, so the shards below only run tests.
   host-build:
@@ -1356,7 +1390,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
-    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, registry-step, schedule-fire, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, registry-step, schedule-fire, procstart-macos, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
