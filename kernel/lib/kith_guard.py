@@ -637,6 +637,9 @@ def _judge_code(body, roots, places, depth):
     secret file it names. What it does without spelling a command (shutil.rmtree, a socket) is the classifier's."""
     found = set()
     lits = [a or b for a, b in LITERAL.findall(body)]
+    # A quoted string that is a path as a whole is read whole: a folder with a space in it (/Volumes/Macos 1TB/kith) has
+    # no path of PATHISH's shape.
+    spaced = [s.strip() for s in lits if " " in s.strip() and re.match(r"(?:~|\$HOME|\$\{HOME\})?/", s.strip())]
     for m in re.finditer(r"\[([^\[\]]*)\]", body):
         items = [a or b for a, b in LITERAL.findall(m.group(1))]
         if len(items) > 1:
@@ -644,7 +647,7 @@ def _judge_code(body, roots, places, depth):
     for lit in lits:
         if " " in lit.strip():
             found |= _bash(lit, roots, places, depth + 1)
-    paths = PATHISH.findall(body)
+    paths = PATHISH.findall(body) + spaced
     if any(places.is_secret(p) for p in paths):
         found.add("secret")
     if SENTENCE["trust"].search(body) or any(places.is_trust(p) for p in paths):

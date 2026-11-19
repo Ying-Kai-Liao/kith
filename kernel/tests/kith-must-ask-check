@@ -107,6 +107,9 @@ cases = [
     ("trust", "Bash", {"command": "node -e \"require('fs').writeFileSync('.claude/settings.local.json','{}')\""}),
     ("trust", "Bash", {"command": "find . -name x -exec sh -c 'echo y >> ~/.zshrc' \\;"}),
     ("secret", "Bash", {"command": "python3 -c \"print(open('" + H + "/.ssh/id_ed25519').read())\""}),
+    # a path with a space in it ("kith home") is still read as a path
+    ("trust", "Bash", {"command": "python3 -c 'open(\"" + P + "/agent.md\",\"w\").write(\"x\")'"}),
+    ("trust", "Bash", {"command": "node -e \"require('fs').writeFileSync('" + P + "/skills/tool/SKILL.md', 'x')\""}),
     # ...also when the text comes down a pipe or a here-string into the interpreter
     ("destroy", "Bash", {"command": "cat <<'EOF' | python3 -\nimport os; os.system('rm -rf ~/Documents')\nEOF"}),
     ("destroy", "Bash", {"command": "printf 'rm -rf ~/x' | sh"}),
