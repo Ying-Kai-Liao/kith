@@ -80,6 +80,10 @@ impl Lab {
         for b in ["kith-people", "kith-auth", "kith-serve"] {
             std::fs::copy(real.join("bin").join(b), kernel.join("bin").join(b)).unwrap();
         }
+        // The host's entry point (`KITH_KERNEL_BIN`): it finds kith-auth beside it. Nothing here runs it.
+        let entry = kernel.join("bin/kith");
+        std::fs::write(&entry, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&entry, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         std::os::unix::fs::symlink(&kernel, machine.join("cli/current")).unwrap();
         let plists = home.join("Library/LaunchAgents");
         std::fs::create_dir_all(&plists).unwrap();
@@ -105,6 +109,7 @@ impl Lab {
             ("KITH_SERVE_HOME", p(&self.serve)),
             ("KITH_KERNEL", p(&self.kernel)),
             ("KITH_BIN", KITH.to_owned()),
+            ("KITH_KERNEL_BIN", p(&self.kernel.join("bin/kith"))),
             ("KITH_AUTH", p(&self.machine.join("auth.json"))),
             ("PATH", "/usr/bin:/bin".to_owned()),
             ("TZ", "UTC".to_owned()),
