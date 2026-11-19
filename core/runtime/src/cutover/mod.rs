@@ -782,3 +782,9 @@ fn run_lines(reg: &[Box<dyn Module>], env: &Env, args: &[String]) -> Result<Vec<
         _ => Err(usage()),
     }
 }
+
+/// Whether the authority switch is taken. A switch file that cannot be read counts as taken: the caller uses this to
+/// refuse more, never less (a run token's person unknown to core.db is let through only before the authority switch).
+pub(crate) fn authority_switched(layout: &Layout) -> bool {
+    state::read(layout, "authority").map_or(true, |s| s.is_some_and(|s| s.phase == Phase::Switched))
+}

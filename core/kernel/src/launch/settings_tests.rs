@@ -93,6 +93,16 @@ impl Tree {
         caller_mode: &str,
         claude_version: Option<&str>,
     ) -> Result<settings::Output, settings::Refusal> {
+        self.settings_bin(member, caller_mode, claude_version, "/usr/local/bin/kith")
+    }
+
+    fn settings_bin(
+        &self,
+        member: &Member,
+        caller_mode: &str,
+        claude_version: Option<&str>,
+        kith_bin: &str,
+    ) -> Result<settings::Output, settings::Refusal> {
         let p = self.paths();
         let kernel = self.root.join("kernel");
         let src_pkg = self.root.join("kith/agents/echo/role");
@@ -118,7 +128,7 @@ impl Tree {
             project_dirs: &[],
             cwd: &cwd,
             user_home: &home,
-            kith_bin: Some("/usr/local/bin/kith"),
+            kith_bin: Some(kith_bin),
             fence_bin: Some("/usr/local/bin/kith"),
             ledger_bin: self.ledger_bin,
             cost_bin: self.cost_bin,
@@ -246,6 +256,44 @@ fn guest_sandbox_is_closed_and_fails_closed() {
         .as_str()
         .unwrap();
     assert!(hook.starts_with("out=$(") && hook.contains("permissionDecision"));
+}
+
+#[cfg(unix)]
+#[test]
+fn guest_may_read_the_kith_program_and_every_link_on_the_way_to_it() {
+    // ~/.local/bin/kith -> ~/.kith/cli/current/bin/kith, cli/current -> 0.1: a guest's stub starts `kith kernel project-id`,
+    // and the sandbox reads each link as a link before it follows it. `link_chain` follows the file's own links; the link in the
+    // middle of a path (cli/current) is added by the walk up from each allowed path, which the last assertion below pins.
+    let t = Tree::new();
+    let root = t.root.clone();
+    t.put("home/.kith/cli/0.1/bin/kith", "#!/bin/sh\n");
+    std::os::unix::fs::symlink("0.1", root.join("home/.kith/cli/current")).unwrap();
+    fs::create_dir_all(root.join("home/.local/bin")).unwrap();
+    let via = root.join("home/.local/bin/kith");
+    std::os::unix::fs::symlink(root.join("home/.kith/cli/current/bin/kith"), &via).unwrap();
+    let s = t
+        .settings_bin(
+            &t.guest("sam", "default"),
+            "",
+            Some("2.1.309"),
+            via.to_str().unwrap(),
+        )
+        .unwrap()
+        .settings
+        .unwrap();
+    let allow = strs(&s["sandbox"]["filesystem"]["allowRead"]);
+    let r = root.to_string_lossy().into_owned();
+    for want in [
+        format!("{r}/home/.local/bin/kith"),
+        format!("{r}/home/.kith/cli/current/bin/kith"),
+        format!("{r}/home/.kith/cli/0.1/bin/kith"),
+        // the link on the way to the allowed file is allowed as a link
+        format!("{r}/home/.kith/cli/current"),
+    ] {
+        assert!(allow.contains(&want), "{want} missing from {allow:?}");
+    }
+    // and nothing else of the Kith folder: the folder itself stays denied whole
+    assert!(!allow.contains(&format!("{r}/home/.kith")));
 }
 
 #[test]

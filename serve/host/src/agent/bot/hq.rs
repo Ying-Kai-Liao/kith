@@ -452,19 +452,31 @@ impl Actor {
             // A person's launch carries what their conversation was given beyond the box (a yes on an escape card, an
             // "always"), asked for with a token of its own: one per launch, since a run takes its access once. Its once
             // grants are reserved, and taken when the session started or loaded with them.
-            let access = person.as_deref().and_then(|p| {
-                let project = target.project.as_deref();
-                if crate::chat::room_turn::is_room_person(p) {
-                    // A room person's token holds the turn's basis, which only a room turn has (see `runauth::room`).
-                    return match &members {
-                        hq::Members::Room { people, .. } => {
-                            crate::runauth::room::grant_for_room(p, &agent, &room, people, &conversation, project)
+            let access = match person.as_deref() {
+                None => None,
+                Some(p) => {
+                    let project = target.project.as_deref();
+                    if crate::chat::room_turn::is_room_person(p) {
+                        // A room person's token holds the turn's basis, which only a room turn has (see `runauth::room`).
+                        match &members {
+                            hq::Members::Room { people, .. } => {
+                                crate::runauth::room::grant_for_room_async(
+                                    p,
+                                    &agent,
+                                    &room,
+                                    people,
+                                    &conversation,
+                                    project,
+                                )
+                                .await
+                            }
+                            _ => None,
                         }
-                        _ => None,
-                    };
+                    } else {
+                        crate::runauth::grant_for_async(p, &agent, Some(room.as_str()), &conversation, project).await
+                    }
                 }
-                crate::runauth::grant_for(p, &agent, Some(room.as_str()), &conversation, project)
-            });
+            };
             let reservation = access.as_ref().map(|(grant, _)| Reservation::open(grant.run_id(), carried));
             // A quick chat's thread keeps the engine and model it was started with, on every launch.
             let engine = slot
@@ -591,11 +603,14 @@ impl Actor {
             let mut env = process_env(crate::agent::auth::env(&self.hub.store, provider)?, &launch, backup.is_some());
             // Anyone but the owner asks the host who they are (`kith recall` over the run socket), with a token that
             // is theirs alone; the owner's process gets none.
-            let mut grant = person.as_deref().and_then(|p| {
-                let room = launch.env.get("KITH_ROOM").map(String::as_str);
-                let project = launch.env.get("KITH_PROJECT").map(String::as_str);
-                crate::runauth::grant_for(p, &agent, room, &conversation, project)
-            });
+            let mut grant = match person.as_deref() {
+                None => None,
+                Some(p) => {
+                    let room = launch.env.get("KITH_ROOM").map(String::as_str);
+                    let project = launch.env.get("KITH_PROJECT").map(String::as_str);
+                    crate::runauth::grant_for_async(p, &agent, room, &conversation, project).await
+                }
+            };
             // The owner's own 1:1 with the agent can raise approval cards (`card.py`): a cards-only token, under
             // its own env names. Not a group room, not a guest's, and not another engine's process, which has no use for it.
             if grant.is_none()
@@ -642,7 +657,7 @@ impl Actor {
                     Ok(mut conn) => {
                         if let Some((grant, _)) = grant.take() {
                             if let Some(pid) = conn.acp.pid() {
-                                grant.bind_pid(pid);
+                                grant.bind_pid(pid).await;
                             }
                             conn.run_grant = Some(grant);
                         }

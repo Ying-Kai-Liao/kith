@@ -55,6 +55,7 @@ elif method in ('schedule.drop', 'schedule.setPaused'):
     if method == 'schedule.drop': db.remove(j); changed = True
     else: changed = bool(j.get('paused')) != p['paused']; j.pop('paused', None); j.update({'paused': True} if p['paused'] else {})
     json.dump(db, open(T + '/core.json', 'w')); out = {'ok': True, 'changed': changed}
+    if method == 'schedule.setPaused' and os.path.exists(T + '/warn'): out['warning'] = 'trigger mix'
 elif method == 'schedule.runNow': out = {'outcome': open(T + '/runnow').read().strip() if os.path.exists(T + '/runnow') else 'fired', 'turn': '7'}
 else: bad('unknown ' + method)
 print(json.dumps(out))
@@ -77,6 +78,15 @@ check "unswitched: kith-sched answers itself, the core is not asked" "[[ \$(call
 printf 'state=stepping\n' > "$SWITCH"
 K ls house >"$T/out" 2>&1
 check "stepping is not switched" "[[ \$(calls) == 0 ]] && grep -q 'do a' '$T/out'"
+
+# kith-sched's own `log JOB` reads the job's logs by exact name: `do-b` is not `do-b-c`'s newer log.
+LOGS=$(python3 -I -c "import sys; sys.path.insert(0, '$KERNEL/lib'); from kith_paths import paths; print(paths()['KITH_LOGS'])")/sched/runs/house
+mkdir -p "$LOGS"
+echo "THE-DO-B-LOG" > "$LOGS/do-b-20261104-0100.log"
+echo "THE-DO-B-C-LOG" > "$LOGS/do-b-c-20261104-0200.log"
+printf '{"last": {"house/do-b": {"at": "2026-11-04T01:00", "why": "due 01:00", "log": "%s"}}}\n' "$LOGS/do-b-20261104-0100.log" > "$MACHINE/sched/state.json"
+K log house do-b >"$T/out" 2>&1
+check "kith-sched log: do-b does not prefix-match do-b-c" "grep -q THE-DO-B-LOG '$T/out' && ! grep -q THE-DO-B-C-LOG '$T/out'"
 
 printf 'state=switched\nat=1\n' > "$SWITCH"
 # The Python state is a tombstone after the switch; the core path never reads it.
@@ -128,6 +138,30 @@ K log house/a 1 --json >"$T/out" 2>&1
 check "log AGENT/ID N" "[[ \"\$(jq_ \"(d['agent'], d['id'], len(d['runs']))\")\" == \"('house', 'a', 1)\" ]]"
 K log house a 0 --json >"$T/out" 2>&1; rc=$?
 check "log with n 0 is refused" "[[ \$rc == 1 ]] && grep -q 'positive number' '$T/out'"
+
+# A run the core has claimed that has no log yet is not shown with the previous run's log (the core records none; the newest
+# file by name is the guess). Same minute or later is this run's; do-b-c's logs are never do-b's.
+printf '[{"id": "do-b", "at": "2026-11-04T03:00", "why": "due 03:00", "pid": 9, "log": null, "running": true, "state": "running"}]\n' > "$T/runs.json"
+K log house do-b --json >"$T/out" 2>&1
+check "running, only an earlier run's log: log null" "[[ \"\$(jq_ \"d['runs'][0]['log']\")\" == None ]]"
+K log house do-b >"$T/out" 2>&1
+check "running without a log says so" "grep -q 'running *started, no log yet' '$T/out'"
+echo x > "$LOGS/do-b-20261104-0300.log"
+K log house do-b --json >"$T/out" 2>&1
+check "a log stamped in the run's minute is its log" "[[ \"\$(jq_ \"d['runs'][0]['log'].endswith('do-b-20261104-0300.log')\")\" == True ]]"
+rm "$LOGS/do-b-20261104-0300.log"
+printf '[{"id": "do-b", "at": "2026-11-04T03:00", "why": "due 03:00", "pid": null, "log": null, "running": false, "state": "failed", "outcome": "refused"}]\n' > "$T/runs.json"
+K log house do-b >"$T/out" 2>&1
+check "a failed run with no log of its own shows -, not the previous run's" "grep -q 'failed *-\$' '$T/out'"
+printf '[{"id": "a", "at": "2026-11-04T02:00", "why": "due 02:00", "pid": null, "log": "/l/a.log", "running": false}]\n' > "$T/runs.json"
+
+# Pausing one trigger of a routine: the core's warning is printed, and kept in --json.
+touch "$T/warn"
+K pause house b >"$T/out" 2>&1
+check "pause warning is printed" "grep -q '^warning: trigger mix' '$T/out'"
+K pause house b --json >"$T/out" 2>&1
+check "pause --json carries the warning" "[[ \"\$(jq_ \"d['warning']\")\" == 'trigger mix' ]]"
+rm "$T/warn"
 
 # No daemon: nothing was done, one line, exit 1; no fallback to the files.
 touch "$T/down"
