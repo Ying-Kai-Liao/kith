@@ -412,9 +412,9 @@ async fn a_ringing_call_is_pushed_to_its_persons_devices_only_and_not_while_the_
     assert_eq!(kept.voip_ticket.as_deref(), Some("owner-voip"));
 
     // The phone app is open: nothing goes out.
-    r.hub.phone_clients.fetch_add(1, Ordering::Relaxed);
+    r.hub.phone_joined(None);
     let open = ring_for(&r, &mine, "app open");
-    r.hub.phone_clients.fetch_sub(1, Ordering::Relaxed);
+    r.hub.phone_left(None);
     let open_id = open["id"].as_str().unwrap().to_owned();
     assert_eq!(rung_for(&open_id), Vec::<(String, bool)>::new());
     decline_now(&r, &open_id);
@@ -433,4 +433,34 @@ async fn a_ringing_call_is_pushed_to_its_persons_devices_only_and_not_while_the_
     // Unregistering forgets the PushKit ticket with the rest.
     rpc(&r, &owner, "unregisterDevice", json!({})).await.unwrap();
     assert!(r.hub.store.push_tickets().iter().all(|t| t.device_key != "owner-phone"));
+}
+
+#[tokio::test]
+async fn another_persons_open_app_does_not_hold_back_a_call() {
+    let r = Rig::new().await;
+    let mine = r.owner_bot("house");
+    let (_, theirs) = sam(&r).await;
+    let owner = r.device("owner-phone", None);
+    rpc(&r, &owner, "registerDevice", json!({"ticket": "owner-alert", "voipTicket": "owner-voip"})).await.unwrap();
+    r.hub.store.add_push_ticket("sam-alert", "sam-phone", None, None, "Phone").unwrap();
+
+    // The owner's phone app is open; the call is Sam's: Sam's phone still gets its push.
+    r.hub.phone_joined(None);
+    let sid = ring_for(&r, &theirs, "for sam")["id"].as_str().unwrap().to_owned();
+    assert_eq!(rung_for(&sid), [("sam-phone".to_owned(), false)]);
+    decline_now(&r, &sid);
+    r.hub.phone_left(None);
+
+    // Sam's app is open; the owner's call still reaches the owner's VoIP ticket.
+    r.hub.calls.inner.locked().rung.clear();
+    r.hub.phone_joined(Some("sam"));
+    let id = ring_for(&r, &mine, "for the owner")["id"].as_str().unwrap().to_owned();
+    assert_eq!(rung_for(&id), [("owner-phone".to_owned(), true)]);
+    decline_now(&r, &id);
+
+    // ...and Sam's own open app does hold Sam's call.
+    r.hub.calls.inner.locked().rung.clear();
+    let held = ring_for(&r, &theirs, "app open")["id"].as_str().unwrap().to_owned();
+    assert_eq!(rung_for(&held), Vec::<(String, bool)>::new());
+    r.hub.phone_left(Some("sam"));
 }

@@ -218,12 +218,12 @@ pub static RINGS: Mutex<Vec<(String, String, bool)>> = Mutex::new(Vec::new());
 
 /// A call starts ringing: push it to the call's person's devices, for an app that isn't open. A device with a
 /// `PushKit` ticket gets a `VoIP` push (the phone shows its call screen at once); the others a time-sensitive alert.
-/// Not while the phone app is connected (it shows the call itself), and it ignores the chat's mute: a call is not
-/// a notification the person turned off. Nothing is sent when the call settles: the phone ends its own ring.
+/// Not while that person's own phone app is connected (it shows the call itself; another person's open app says
+/// nothing about this one), and it ignores the chat's mute: a call is not a notification the person turned off. Nothing is sent when the call settles: the phone ends its own ring.
 /// `deadline` is when the ring ends, in ms since the epoch.
 pub fn ring(hub: &Hub, call: &Call, deadline: i64) {
     purge_dead_tickets(hub);
-    if hub.phone_connected() {
+    if hub.phone_connected_for(call.person.as_deref()) {
         return;
     }
     let Some(bot) = hub.store.bot(&call.bot_id).ok().flatten().filter(|r| !r.deleted).map(|r| r.config) else {
