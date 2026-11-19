@@ -159,6 +159,10 @@ rm -f "$T/s.sock"
 printf 'not json' > "$KITH_STATE/projects.json"
 guest good
 check "a guest with an unreadable registry and no host: still unreachable, not a registry error" "[ $rc = 1 ] && [ \"\$(cat $T/err)\" = 'project-id: the Kith host could not be reached from this run' ]"
+printf '{"projects": {}}' > "$KITH_STATE/projects.json"; chmod 000 "$KITH_STATE/projects.json"
+guest good
+check "a guest with a registry it may not read and no host: unreachable, so the file was never opened" "[ $rc = 1 ] && [ \"\$(cat $T/err)\" = 'project-id: the Kith host could not be reached from this run' ]"
+chmod 600 "$KITH_STATE/projects.json"
 rm -rf "$KITH_STATE/projects.json"
 env KITH_STATE="$T/missing" KITH_RUN_TOKEN=good KITH_RUN_SOCKET="$T/s.sock" "$P" >"$T/out" 2>"$T/err"; rc=$?
 check "a guest with no state folder at all: unreachable, and nothing is created" "[ $rc = 1 ] && [ ! -e $T/missing ]"
@@ -175,6 +179,45 @@ check "an empty token: the owner path" "said owner-only-marker && [ $rc = 0 ] &&
 (cd "$T/w/mine" && env KITH_RUN_TOKEN=good KITH_RUN_SOCKET= "$P" >"$T/out" 2>"$T/err"); rc=$?
 check "an empty socket path: the owner path" "said owner-only-marker && [ $rc = 0 ] && [ ! -e $T/req.log ]"
 kill $FH 2>/dev/null; wait $FH 2>/dev/null
+
+# A guest's Bash runs in an OS sandbox that reads nothing but what its settings allow (macOS only, a stand-in profile built from the
+# generated allowRead/denyRead of a real guest launch). The stub must start the kith program from inside it: the program sits in
+# the Kith folder, which is denied whole, and the launch opens that one file and the links on the way to it. Needs a real program.
+if [ "$(uname)" = Darwin ] && command -v sandbox-exec >/dev/null && [ -n "${KITH_BIN:-}" ] && [ -x "$KITH_BIN" ] \
+   && "$KITH_BIN" memory hook --help 2>/dev/null | grep -qi phase; then
+  echo "-- inside a stand-in guest sandbox"
+  S=$T/sbx; mkdir -p "$S/home/.local/bin" "$S/kh/agents/echo/role" "$S/kh/cli/0.1/bin" "$S/bin"
+  cp "$KITH_BIN" "$S/kh/cli/0.1/bin/kith"; ln -s 0.1 "$S/kh/cli/current"
+  ln -s "$S/kh/cli/current/bin/kith" "$S/home/.local/bin/kith"
+  printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$S/kh/agents/echo/role/agent.md"
+  printf '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)"\n[ "$1 $2" = "plugin list" ] && echo "[]"\nexit 0\n' > "$S/bin/claude"; chmod +x "$S/bin/claude"
+  sbenv() { env HOME="$S/home" KITH_HOME="$S/kh" KITH_STATE="$S/kh/state" KITH_AUTH="$S/auth.json" PATH="$S/bin:$PATH" KITH_BIN="$S/home/.local/bin/kith" "$@"; }
+  sbenv "$KERNEL/bin/kith-auth" person guest name=Guest >/dev/null 2>&1
+  sbenv "$KERNEL/bin/kith-auth" member echo guest mode=default >/dev/null 2>&1
+  SOCK=$T/s.sock
+  (cd "$S/kh/agents/echo" && sbenv KITH_PERSON=guest KITH_RUN_SOCKET="$SOCK" KITH_RUN_TOKEN=good "$KERNEL/bin/kith" echo --launch-json 2>"$S/launch.err") > "$S/launch.json"
+  python3 - "$S/launch.json" "$S/guest.sb" <<'PY'
+import json, sys
+j = json.load(open(sys.argv[1]))
+fs = j["settings"]["sandbox"]["filesystem"]
+# file-read-data only: the real sandbox lets a process stat a path it cannot read, and "/" itself must stay open to start anything.
+out = ["(version 1)", "(allow default)", '(deny file-read-data (subpath "/"))', '(allow file-read-data (literal "/"))']
+out += ['(deny file-read-data (subpath "%s"))' % d for d in fs["denyRead"] if d != "/"]
+out += ['(allow file-read-data (subpath "%s"))' % a for a in fs["allowRead"]]
+open(sys.argv[2], "w").write("\n".join(out) + "\n")
+PY
+  GBIN=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["env"].get("KITH_BIN", ""))' "$S/launch.json" 2>/dev/null)
+  check "the guest's launch env names the kith program" "[ -n '$GBIN' ] && [ '$GBIN' = '$S/home/.local/bin/kith' ]"
+  check "the sandbox profile closes the Kith folder" "! sandbox-exec -f '$S/guest.sb' /bin/ls '$S/kh/agents' >/dev/null 2>&1"
+  fakehost 1
+  (cd "$T/w" && sandbox-exec -f "$S/guest.sb" env -i PATH=/usr/bin:/bin HOME="$S/home" KITH_BIN="$GBIN" KITH_RUN_TOKEN=good KITH_RUN_SOCKET="$SOCK" "$P" >"$T/out" 2>"$T/err"); rc=$?
+  kill $FH 2>/dev/null; wait $FH 2>/dev/null
+  check "sandboxed guest: the stub starts the kith program and the host answers" "said alpha && [ $rc = 0 ]"
+  # Without the opening the same run fails: this is what the launch's allowRead is for.
+  grep -v "$S/kh/cli" "$S/guest.sb" > "$S/closed.sb"
+  (cd "$T/w" && sandbox-exec -f "$S/closed.sb" env -i PATH=/usr/bin:/bin HOME="$S/home" KITH_BIN="$GBIN" KITH_RUN_TOKEN=good KITH_RUN_SOCKET="$SOCK" "$P" >"$T/out" 2>"$T/err"); rc=$?
+  check "the same run without the program's folder open: no answer (so the check proves something)" "[ $rc != 0 ] && ! said alpha"
+fi
 
 echo
 if [ $fails = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

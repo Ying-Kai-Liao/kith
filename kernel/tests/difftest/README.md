@@ -93,13 +93,9 @@ run with no stub. Added then: `under-stub` (the argv), `busy` (75: outcome `busy
 bare form (git and non-git folders, paths with spaces and non-ASCII names, symlinks to a folder and to a repo, a remote written five
 ways, a worktree and a detached HEAD, nested aliases with the longest winning, a remote beating a path), `--list`, `--info`,
 `--children [--all]`, `--where`, `--root`, `--register` (parent, home, bare `--home`, existing entries keeping their fields) and
-its usage errors, with loops and a missing parent in the seeded `projects.json`. They run the Python as `program.old` and
-`kith kernel project-id` as `program.new`, so the Rust side is compared directly, whatever `core-switched.txt` says. `project-id` is switched since
-M5-9 (`kernel/tests/kith-pkg-pid-switch-check` reads which side the launch asked); `pkg` the same.
+its usage errors, with loops and a missing parent in the seeded `projects.json`. They were run against the Python as `program.old` and `kith kernel project-id` as `program.new`; the Python is gone (R2), `program.old` is the stub `bin/project-id` (the same program, so a re-record proves nothing) and the frozen facets are the Python's. `kernel/tests/kith-pkg-pid-switch-check` reads which program the launch asked.
 A malformed `projects.json` (`pid-malformed-projects`) is `unswitched` too: Python tracebacks, Rust prints one stderr line, both exit 1; JSON that Python accepts and serde rejects (`NaN`, `Infinity`) falls under the same difference (an intended difference; the golden replay does not read intended.json).
-Not ported: the guest branch (`KITH_RUN_TOKEN` and `KITH_RUN_SOCKET` set: the host answers over the run socket). The core refuses there
-with exit 2, so `pid-guest-branch-stays-python` is `unswitched` (Python replay only). Whoever switches the verb keeps guest calls on
-Python (`runauth.rs` `project_args` and the run-tokens property tests ask the Python).
+The guest branch (`KITH_RUN_TOKEN` and `KITH_RUN_SOCKET` set: the host answers over the run socket) is ported (`core/kernel/src/project/guest.rs`); `pid-guest-branch` is the unreachable-socket case, byte for byte what the Python printed. A fake host cannot run in a difftest case, so the protocol itself (the request line, the relayed words and codes, every way the socket fails) is `kernel/tests/kith-project-id-guest-check`, recorded against the Python before the port.
 
 ### Package resolve (M5-3)
 

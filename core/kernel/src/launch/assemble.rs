@@ -4,7 +4,7 @@
 //! the prompt, the login (`accounts`), the settings, the MCP servers, then one JSON object on stdout.
 //!
 //! Programs it still asks, because their logic stays in Python until their step of the plan: `kith-pkg resolve` (the
-//! snapshot), `kith-cost limit|spent`, `project-id` (finding the project of the working folder), `kith-auth mcp-config`
+//! snapshot), `kith-cost limit|spent`, `kith-auth mcp-config`
 //! (A5), `kith-permit apply` (a guest's grants), `claude` and `xcode-select`.
 //!
 //! The environment is a map this module edits as the bash entry edits its exports; the launch object's `env` is read from it.
@@ -197,7 +197,7 @@ fn pyrepr(x: &str) -> String {
 ///
 /// Bash also runs `kith_cutover_refuse` under `KITH_CORE=python`, refusing the rollback of a module whose files the core
 /// owns after its cutover. It is left out here on purpose: that refusal only matters for a module that has a cutover step,
-/// and `pkg`, `project-id` and `cost` have none (the core does not own the cost ledger), so the rollback is always
+/// and `pkg` and `cost` have none (the core does not own the cost ledger), so the rollback is always
 /// allowed for these verbs. Add the refusal when one of them gets a cutover.
 fn switched(kernel: &Path, env: &Env, verb: &str) -> bool {
     match get(env, "KITH_CORE") {
@@ -943,28 +943,20 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         1
     })?;
     let mut project = a.project.clone();
-    let mut no_token = env.clone();
-    no_token.remove("KITH_RUN_TOKEN");
     if project.is_empty() {
-        // `project-id` in lib/core-switched.txt: the core answers. Never as a guest: the token is dropped above, and a guest's
-        // own calls stay with bin/project-id, which asks the host.
-        project = if switched(kernel, &env, "project-id") {
-            let ctx = crate::project::Ctx {
-                state: p.state.clone(),
-                home: home_dir.clone(),
-                cwd: std::env::current_dir().unwrap_or_default(),
-                guest: false,
-            };
-            let out = crate::project::run(&ctx, &[]);
-            if out.code == 0 {
-                out.stdout.trim_end_matches('\n').to_owned()
-            } else {
-                String::new()
-            }
+        // The core answers, in process. Never as a guest (`guest: None`): the launch's own lookup is the kernel's, whoever the run
+        // is for; a guest's own `project-id` calls go through the stub to `kith kernel project-id`, which asks the host.
+        let ctx = crate::project::Ctx {
+            state: p.state.clone(),
+            home: home_dir.clone(),
+            cwd: std::env::current_dir().unwrap_or_default(),
+            guest: None,
+        };
+        let out = crate::project::run(&ctx, &[]);
+        project = if out.code == 0 {
+            out.stdout.trim_end_matches('\n').to_owned()
         } else {
-            Sys { env: &no_token }
-                .out(kernel.join("bin/project-id"), &[], false)
-                .unwrap_or_default()
+            String::new()
         };
     } else if !reg.has(&project) {
         let known: String = reg.known().iter().map(|k| format!("{k} ")).collect();
@@ -1378,6 +1370,14 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         "KITH_OWNER".to_owned(),
         if p_owner { "1" } else { "0" }.to_owned(),
     );
+    // A guest's `project-id` is the stub at bin/project-id, which runs `kith kernel project-id`: it needs the program the launch
+    // checked, and the settings open it (and the links to it) to the sandbox's reads.
+    if claude
+        && !p_owner
+        && let Some(b) = &kith_bin
+    {
+        env.insert("KITH_BIN".to_owned(), b.clone());
+    }
     if claude
         && !p_owner
         && !get(&env, "KITH_RUN_TOKEN").is_empty()
@@ -1474,7 +1474,15 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     names.push(cfg_var);
     names.extend(p_env_names.split_whitespace().map(str::to_owned));
     if !p_owner {
-        names.extend(["CLAUDE_CODE_TMPDIR", "KITH_WORK", "CLAUDE_ENV_FILE"].map(str::to_owned));
+        names.extend(
+            [
+                "CLAUDE_CODE_TMPDIR",
+                "KITH_WORK",
+                "CLAUDE_ENV_FILE",
+                "KITH_BIN",
+            ]
+            .map(str::to_owned),
+        );
     }
     names.extend(
         "HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA"

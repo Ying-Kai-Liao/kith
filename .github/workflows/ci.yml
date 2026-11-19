@@ -330,7 +330,7 @@ jobs:
             host_core:
               # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
               # memory and summary), and the libs those programs load on every call.
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-project-id-*-check,kernel/tests/kith-project-check,kernel/tests/kith-contract-check,kernel/tests/kith-load-check,kernel/tests/kith-json-misc-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -380,8 +380,6 @@ jobs:
               Migrate check|kernel/tests/kith-migrate-check
               Guest sandbox check|kernel/tests/kith-guest-sandbox-check
               Launchd check|kernel/tests/kith-launchd-check
-              Project check|kernel/tests/kith-project-check
-              Contract check (what the host reads, serve/contract/kernel)|kernel/tests/kith-contract-check
               Serve check|kernel/tests/kith-serve-check
               Info check|kernel/tests/kith-info-check
               Harness check (kith <agent> set harness, no Claude model on another harness)|kernel/tests/kith-harness-check
@@ -434,7 +432,6 @@ jobs:
               Schedule person check|kernel/tests/kith-sched-person-check
               Terminal flags check|kernel/tests/kith-terminal-flags-check
               Recall check|kernel/tests/kith-recall-check
-              Load check|kernel/tests/kith-load-check
               Guest helper check|kernel/tests/kith-guest-helper-check
               Wake check|kernel/tests/kith-wake-check
               Sessions core check (the kernel claim takers in Files and Writer mode, a fake core)|kernel/tests/kith-sessions-core-check
@@ -452,7 +449,6 @@ jobs:
               Doctor services check (kith doctor: an ok grant outside needs is fine, a missing one is a failure)|kernel/tests/kith-doctor-services-check
               New check (kith new --json - the agent made, or the error object and no folder left)|kernel/tests/kith-new-check
               Pkg json check (kith versions, history, pin, unpin, restore, install, share, deps, update, push, commit --json)|kernel/tests/kith-pkg-json-check
-              JSON misc check (--json on doctor, remote, ask ls, bug, backup add/remove, update self --check, wake status, lifecycle, chain, project)|kernel/tests/kith-json-misc-check
               Scratch check (the built-in scratch agent: engine per chat, never backed up or shared, keep as an agent)|kernel/tests/kith-scratch-check
               Core boundary check (kith-core stays sealed)|kernel/tests/kith-core-boundary-check
               Core boundary self-test (each rule fails on a deliberate violation)|kernel/tests/kith-core-boundary-check --selftest
@@ -461,7 +457,6 @@ jobs:
               Group check|kernel/tests/kith-group-check
               Send to check|kernel/tests/kith-send-to-check
               Schedule prune check|kernel/tests/kith-sched-prune-check
-              Project id lock check|kernel/tests/kith-project-id-lock-check
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -830,8 +825,17 @@ jobs:
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
           # The retire-python gate: kernel/lib/requires-switched.txt is shipped and valid, and cutover status answers by exit code.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
-          # The pkg and project-id switches: the launch's two lookups are the core's, per verb, and a guest's project-id stays Python.
+          # The pkg switch and the project-id stub: the launch's pkg lookup is the core's, per verb, and project-id (a stub for the
+          # Rust verb) is the program's in the bash launch and in process in the Rust one.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
+          # project-id is `kith kernel project-id` behind the stub kernel/bin/project-id: its guest client (the run socket, a fake host),
+          # the lock of parallel registers, and the kernel checks that register or look up a project (they need the program).
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-project-id-guest-check
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-project-id-lock-check
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-project-check
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-contract-check
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-load-check
+          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-json-misc-check
           # The cost switch: the ported kith-cost verbs are the core's, tag/record stay Python, and the launch's budget checks hold on both paths.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
           # The revoke stopgap: kith-auth reaches the core with no daemon, through the embedded core-call.

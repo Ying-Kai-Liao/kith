@@ -5,5 +5,4 @@ launch	launch
 settings	settings
 account-state	account-state	accounts
 pkg	pkg
-project-id	project
 cost	cost

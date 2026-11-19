@@ -1,248 +1,57 @@
-#!/usr/bin/python3
-"""Resolve the kith project for a directory. Never registers anything on its own.
+#!/bin/sh
+# project-id: this script moved to the kith program (`kith kernel project-id`, core/kernel/src/project/). It stays at this
+# path for the callers that run the file: agents (bare `project-id` is on their PATH), hooks, older hosts, other kernel tools.
+# The usage text is `kith kernel project-id -h`. Same stdout, stderr and exit codes as the program.
+#
+# Finds the program without Python, the way the Python kernel's lookup did minus its `memory hook` probe: the first candidate
+# whose `kernel version` lists "project-guest" (a program without it refuses a guest run, and there is no Python to go back to):
+#   $KITH_BIN, the release this file sits in (<release>/share/kith/kernel/bin -> <release>/bin/kith), a kith on PATH that is
+#   not a kernel entry, the host kith serve installed, a build in the checkout (the builds come first with KITH_DEV_BIN=1).
+# None found: one line on stderr and exit 3 (the code of "this moved", as for a tombstone). Callers treat any non-zero as
+# "no project", and the line shows.
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self") || break
+  case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+done
+# The logical path, as bin/kith keeps it (it may be a link to a path with spaces).
+kernel=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd)
 
-  project-id [dir]                 print the ID whose remotes/paths match dir (default: cwd);
-                                   print nothing and exit 1 when no project matches
-  project-id --list                print every project ID with its parent, home and aliases
-  project-id --info ID             the project and its parents, closest first: one line each, ID<TAB>home (or -)
-  project-id --register ID [dir] [--in PARENT] [--home [DIR]]
-                                   add dir's git remote (or its path, without a remote) to project ID, creating
-                                   ID if new; --in sets its parent, --home its home folder: DIR, or without one
-                                   ID inside the closest parent's home, else <root>/ID, made when missing. Without dir, the home is the alias when one is
-                                   given, else the current directory. Only after the user has named the project.
-  project-id --root [DIR]          where new homes go (default ~/Documents); with DIR, change it
-  project-id --children ID [--all] the projects ID holds (--all: theirs too), one line each: ID<TAB>where it is on
-                                   this Mac (its home, else its first folder that exists), or - when it isn't here
-  project-id --where ID            the folder to work in for ID on this Mac: its first checkout or path that exists,
-                                   else its home; prints nothing and exits 1 when it isn't here
-
-In a run for someone other than the owner (KITH_RUN_TOKEN and KITH_RUN_SOCKET set) only the first and the --info form
-work, asked of the host over the run socket: the bare form prints the project the run was launched in (nothing and exit
-1 without one), and --info takes that same project only.
-
-A project is a named thing; remotes and paths are aliases that point to it. Add a remote or path to keep a
-project's memory after a rename, move or re-clone. A project may sit in a parent (a client, a company, a line of
-research holding several repos), and may have a home: a folder of the user's own, anywhere, for its files. kith only
-points at a home; it never lays one out. A path alias also matches the folders inside it, the longest alias winning.
-A repo is registered by its remote and by where it is checked out, so its parent knows where to find it on this Mac.
-"""
-import fcntl, json, os, re, subprocess, sys
-
-HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-# The registry is state: <home>/state (lib/kith_paths.py).
-sys.path.insert(0, os.path.join(HOME, "lib"))
-import kith_runsocket  # noqa: E402
-# A guest run asks the host, which answers about the project the run was launched in only (bare, or --info of it).
-if kith_runsocket.guest_run():
-    sys.exit(kith_runsocket.ask('project-id', 'projectId', sys.argv[1:]))
-from kith_paths import paths  # noqa: E402
-STATE = str(paths()["KITH_STATE"])
-REG = os.path.join(STATE, "projects.json")
-ROOT = "~/Documents"   # where a new project's home goes unless projects.json says "homes"
-
-
-def git(*args, cwd):
-    try:
-        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
-                              check=True).stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError):
-        return ""
-
-
-def normalize(url):
-    """git@github.com:Owner/Repo.git, https://github.com/Owner/Repo -> github.com/owner/repo"""
-    url = re.sub(r"^(\w+://)?([^@/]+@)?", "", url.strip())
-    url = url.replace(":", "/", 1) if re.match(r"^[^/]+:[^/]", url) else url
-    return re.sub(r"\.git$", "", url).rstrip("/").lower()
-
-
-def locate(cwd):
-    """(remote, root) for a directory; worktrees map to their main checkout."""
-    remote = git("remote", "get-url", "origin", cwd=cwd)
-    remote = normalize(remote) if remote else ""
-    common = git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=cwd)
-    root = os.path.dirname(common) if common.endswith("/.git") else (git("rev-parse", "--show-toplevel", cwd=cwd) or cwd)
-    return remote, root
-
-
-def load():
-    try:
-        with open(REG) as fh:
-            return json.load(fh)
-    except FileNotFoundError:
-        return {"projects": {}}
-
-
-def save(reg):
-    with open(REG, "w") as fh:
-        json.dump(reg, fh, indent=2)
-        fh.write("\n")
-
-
-def tilde(path):
-    """Store paths under the home directory as ~/..., so the registry still reads right on another Mac."""
-    home = os.path.expanduser("~")
-    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
-
-
-def real(path):
-    return os.path.realpath(os.path.expanduser(path))
-
-
-def chain(projects, pid):
-    """pid and its parents, closest first; stops at a missing parent or a loop."""
-    out = []
-    while pid in projects and pid not in out:
-        out.append(pid)
-        pid = projects[pid].get("parent")
-    return out
-
-
-def children(projects, pid, deep=False, seen=None):
-    """The projects pid holds, sorted; with deep, theirs too, each after its parent."""
-    seen = seen if seen is not None else {pid}
-    out = []
-    for c in sorted(q for q, p in projects.items() if p.get("parent") == pid and q not in seen):
-        seen.add(c)
-        out += [c] + (children(projects, c, True, seen) if deep else [])
-    return out
-
-
-def here(p):
-    """Where a project is on this Mac: its home, else the first of its folders that exists; None when neither."""
-    for d in [p.get("home")] + p.get("paths", []):
-        if d and os.path.isdir(real(d)):
-            return d
-    return None
-
-
-def match(projects, d):
-    """The project for directory d: its git remote, else the longest path alias that holds it."""
-    remote, root = locate(d)
-    for pid, p in projects.items():
-        if remote and remote in p.get("remotes", []):
-            return pid
-    best, size = None, -1
-    for pid, p in projects.items():
-        for a in p.get("paths", []):
-            a = real(a)
-            if (root == a or root.startswith(a.rstrip("/") + "/")) and len(a) > size:
-                best, size = pid, len(a)
-    return best
-
-
-def main(argv):
-    # The verbs that write hold projects.json.lock from reading the registry to writing it back, so two registers at
-    # once both land. The Rust project-id takes the same flock, so the two exclude each other. The lock is released when
-    # the process exits (the file closes). A state folder that cannot be locked falls through: the save fails there.
-    if argv[:1] == ["--register"] or (argv[:1] == ["--root"] and len(argv) > 1):
-        try:
-            fcntl.flock(os.open(REG + ".lock", os.O_RDWR | os.O_CREAT, 0o644), fcntl.LOCK_EX)
-        except OSError:
-            pass
-    reg = load()
-    projects = reg.setdefault("projects", {})
-
-    if argv[:1] == ["--list"]:
-        for pid, p in sorted(projects.items()):
-            was = f" (formerly {p['formerly']})" if p.get("formerly") else ""
-            more = (f" in:{p['parent']}" if p.get("parent") else "") + (f" home:{p['home']}" if p.get("home") else "")
-            aliases = p.get("remotes", []) + [a for a in p.get("paths", []) if a != p.get("home")]
-            print(f"{pid}{was}{more}\t" + " ".join(aliases))
-        return 0
-
-    if argv[:1] == ["--info"]:
-        if len(argv) < 2 or argv[1] not in projects:
-            print(f"project-id: no project {argv[1] if len(argv) > 1 else ''!r}", file=sys.stderr)
-            return 1
-        for pid in chain(projects, argv[1]):
-            print(f"{pid}\t{projects[pid].get('home') or '-'}")
-        return 0
-
-    if argv[:1] == ["--children"]:
-        if len(argv) < 2 or argv[1] not in projects:
-            print(f"project-id: no project {argv[1] if len(argv) > 1 else ''!r}", file=sys.stderr)
-            return 1
-        for pid in children(projects, argv[1], "--all" in argv[2:]):
-            print(f"{pid}\t{here(projects[pid]) or '-'}")
-        return 0
-
-    if argv[:1] == ["--where"]:
-        if len(argv) < 2 or argv[1] not in projects:
-            print(f"project-id: no project {argv[1] if len(argv) > 1 else ''!r}", file=sys.stderr)
-            return 1
-        p = projects[argv[1]]
-        d = next((real(d) for d in p.get("paths", []) + [p.get("home")] if d and os.path.isdir(real(d))), None)
-        if d:
-            print(d); return 0
-        return 1
-
-    if argv[:1] == ["--root"]:
-        if len(argv) > 1:
-            if not os.path.isdir(real(argv[1])):
-                print(f"project-id: no folder {argv[1]}", file=sys.stderr)
-                return 2
-            reg["homes"] = tilde(real(argv[1]))
-            save(reg)
-        print(reg.get("homes", ROOT))
-        return 0
-
-    if argv[:1] == ["--register"]:
-        args, opts, rest = [], {}, argv[1:]
-        while rest:
-            a, rest = rest[0], rest[1:]
-            if a == "--in":
-                opts[a], rest = (rest[0], rest[1:]) if rest else ("", rest)
-            elif a == "--home":   # a bare --home: the default folder for this project
-                opts[a], rest = (rest[0], rest[1:]) if rest and not rest[0].startswith("--") else (None, rest)
-            else:
-                args.append(a)
-        if not args or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", args[0]):
-            print("project-id: --register needs an ID of lowercase letters, digits, . _ -", file=sys.stderr)
-            return 2
-        pid, parent, home = args[0], opts.get("--in"), opts.get("--home", "")
-        made = False
-        if home is None:   # inside the closest parent's home, else under the root
-            near = next((projects[q]["home"] for q in chain(projects, parent or projects.get(pid, {}).get("parent"))
-                         if projects[q].get("home")), None)
-            home = os.path.join(real(near or reg.get("homes", ROOT)), pid)
-            made = not os.path.isdir(home)
-        elif home == "":
-            home = None
-        if parent is not None and (parent not in projects or pid in chain(projects, parent)):
-            why = "is not a project (register it first)" if parent not in projects else f"is {pid} or inside it"
-            print(f"project-id: {parent!r} {why}", file=sys.stderr)
-            return 2
-        if home is not None and not made and not os.path.isdir(real(home)):
-            print(f"project-id: no folder {home}", file=sys.stderr)
-            return 2
-        if len(args) > 1 and not os.path.isdir(real(args[1])):
-            print(f"project-id: no folder {args[1]}", file=sys.stderr)
-            return 2
-        if made:
-            os.makedirs(home)
-            print(f"made {tilde(home)}", file=sys.stderr)
-        p = projects.setdefault(pid, {"remotes": [], "paths": []})
-        if parent is not None:
-            p["parent"] = parent
-        if home is not None:
-            p["home"] = tilde(real(home))
-        if len(args) > 1 or home is None:
-            remote, root = locate(real(args[1] if len(args) > 1 else os.getcwd()))
-        else:
-            remote, root = "", real(home)   # a home is matched by its path, even when it sits inside a repo
-        if remote and remote not in p.setdefault("remotes", []):
-            p["remotes"].append(remote)
-        if tilde(root) not in p.setdefault("paths", []):   # a repo's checkout too: where it is on this Mac
-            p["paths"].append(tilde(root))
-        save(reg)
-        print(pid)
-        return 0
-
-    pid = match(projects, real(argv[0] if argv else os.getcwd()))
-    if pid:
-        print(pid); return 0
-    return 1
-
-
-sys.exit(main(sys.argv[1:]))
+# A kith program: executable, not a kernel bash entry (the last three parts of its real path are kernel/bin/kith), and its
+# `kernel version` lists project-guest.
+usable() {
+  [ -n "$1" ] && [ -f "$1" ] && [ -x "$1" ] || return 1
+  f=$1
+  while [ -L "$f" ]; do
+    l=$(readlink "$f") || return 1
+    case $l in /*) f=$l ;; *) f=$(dirname "$f")/$l ;; esac
+  done
+  case $(cd "$(dirname "$f")" 2>/dev/null && pwd -P)/$(basename "$f") in */kernel/bin/kith) return 1 ;; esac
+  "$1" kernel version 2>/dev/null | grep -q '"project-guest"'
+}
+# Each try sets bin and succeeds on a usable program (a path may have a space: nothing here is split).
+try() { usable "$1" && bin=$1; }
+try_built() {
+  target=${CARGO_TARGET_DIR:-$kernel/../serve/host/target}
+  try "$target/dev-app/kith" || try "$target/release/kith" || try "$target/debug/kith"
+}
+try_path() {
+  oldifs=$IFS; IFS=:
+  for d in $PATH; do
+    if [ -n "$d" ] && try "$d/kith"; then IFS=$oldifs; return 0; fi
+  done
+  IFS=$oldifs
+  return 1
+}
+try_release() { case $kernel in */share/kith/kernel) try "$kernel/../../../bin/kith" ;; *) return 1 ;; esac; }
+bin=
+if [ "${KITH_DEV_BIN:-}" = 1 ]; then
+  try "${KITH_BIN:-}" || try_built || try_path || try "$HOME/.kith/serve/bin/kith-serve" || try_release
+else
+  try "${KITH_BIN:-}" || try_release || try_path || try "$HOME/.kith/serve/bin/kith-serve" || try_built
+fi
+if [ -z "$bin" ]; then
+  echo "project-id: this script moved to the kith program, which was not found (kith update)" >&2
+  exit 3
+fi
+exec "$bin" kernel project-id --kernel "$kernel" "$@"
