@@ -561,7 +561,9 @@ fn room_ledger_hook_names_the_stub_until_the_program_has_the_module() {
     let root = t.root.to_string_lossy().into_owned();
     let pre = ledger_hook(&out, "PreToolUse");
     assert!(
-        pre.starts_with(&format!("{root}/kernel/bin/kith-room-ledger pre --agent echo --home ")),
+        pre.starts_with(&format!(
+            "{root}/kernel/bin/kith-room-ledger pre --agent echo --home "
+        )),
         "{pre}"
     );
     assert!(pre.ends_with(" || true"));
