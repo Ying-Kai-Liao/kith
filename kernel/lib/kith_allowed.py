@@ -180,7 +180,8 @@ def _globs_trust(words):
     for w in words:
         if not re.search(r'[*?\[{]', w):
             continue
-        w = re.sub(r'\{[^}]*\}', '*', w.lower())
+        # a bracket set matches one character whatever it holds ([^x], [[:alpha:]]): a ? stands for it
+        w = re.sub(r'\[[^\]]*\]+', '?', re.sub(r'\{[^}]*\}', '*', w.lower()))
         parts = [p for p in re.split(r'[/=<>|;&(),:]', w) if p and p != '.']
         if any(fnmatch.fnmatchcase(n.lower(), p) for p in parts for n in TRUST_NAMES):
             return True

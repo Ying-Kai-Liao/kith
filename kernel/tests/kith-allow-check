@@ -59,7 +59,7 @@ for c in 'echo {} > settings.json' 'cp x.json role/settings.json' 'cp x.json /so
          'cp x settings".json"' 'cp x allowed".json"' "cp x role/settings'.json'" 'cp x /w/run"/once/"j' 'echo {} > settings".json"' \
          'cp x role/settings.j?on' 'cp x /w/allowed.jso[n]' 'cp x settings.js{o,}n' 'cp x /w/r?n/once/j' 'cp x /w/*/once/j' \
          'cp x --out=Settings.J*' "cp x settings\$'.json'" 'cp x settings$".json"' "cp x settings\$'\\x2ejson'" \
-         'cp x /w/run//once/j' 'cp x /w/run/./once/j' 'cp x /w/run/.//./once/j' 'cp x /w/r?n/./once/j'; do
+         'cp x role/settings.js[^x]n' 'cp x role/settings.js[[:alpha:]]n' 'cp x /w/run//once/j' 'cp x /w/run/./once/j' 'cp x /w/run/.//./once/j' 'cp x /w/r?n/./once/j'; do
   r=$(printf '%s' "$(bash_in "$c")" | "$ALLOW" echo --derive)
   is "a command naming a trust file anywhere is never offered: $c" "$(js "d['ok']" <<< "$r")" "False"
 done
