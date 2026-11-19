@@ -61,7 +61,7 @@ PRELOAD, WRAPPER = 'door-preload.mjs', 'door-chrome'
 LISTENERS = 4          # hyperframes render starts one file server; spares cost nothing
 SERVE_PORTS = (19224,)
 RUN_LIMIT_S = 3600
-CHECK_SECS, SWEEP_BUDGET_S = 8, 35   # a sweep's checks of old-style claims (the host's own limit is 60 s)
+CHECK_SECS, SWEEP_BUDGET_S = 8, 45   # a sweep's checks and kills (the host's own limit is 60 s)
 SANDBOX_EXEC = '/usr/bin/sandbox-exec'
 
 SYSTEM_READ = ('/System', '/usr/lib', '/usr/share', '/Library/Fonts', '/Library/Preferences/Logging', '/private/etc',
@@ -563,7 +563,7 @@ def run(agent, person, decl, folder, env=os.environ, on_line=None, basis=(), gen
             # No auth lock: the core is the one lock here, and a core call may take seconds.
             record = mine
             (d / f'{claim}.json').write_text(json.dumps(record))
-            a = kith_door_core.start(agent, piece(decl), person, real, claim, os.getpid())
+            a = kith_door_core.start(agent, piece(decl), person, real, claim, os.getpid(), env)
             if a.kind != 'ok':
                 if a.kind == 'unknown':
                     kith_door_core.end(claim)
@@ -654,8 +654,8 @@ def sweep(persons=(), recheck=True):
 
 def _supervisor_up(c):
     """Whether the supervisor of a claim (or of a core row we have no file for) still runs."""
-    if c.get('row_only'):
-        return bool(c.get('pid')) and proc_info(int(c['pid'])) is not None
+    if c.get('row_only'):   # a pid alone can be reused: the core's own "its supervisor is gone" settles it
+        return not c.get('gone') and bool(c.get('pid')) and proc_info(int(c['pid'])) is not None
     return _alive(c)
 
 
@@ -673,12 +673,12 @@ def sweep_report(persons=(), recheck=True):
     if not os.path.exists(SANDBOX_EXEC):
         return [], False
     ended, unknown = [], False
+    budget = time.monotonic() + SWEEP_BUDGET_S   # from the start of the pass: the host stops a sweep at 60 s
     on_core = kith_door_core.switched()
     rows = kith_door_core.sweep(persons, recheck) if on_core else []   # first: it has the longest wait, and holds no lock
     if rows is None:
         rows, unknown = [], True
     by_row = {r['id']: r for r in rows}
-    budget = time.monotonic() + SWEEP_BUDGET_S
     with auth_lock() as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)    # no start is half done while the claims are read
         doomed, seen = [], set()
@@ -699,9 +699,12 @@ def sweep_report(persons=(), recheck=True):
                     doomed.append(c)
     for r in rows:   # a row whose claim file is gone or not yet written
         if r['id'] not in seen:
-            doomed.append({'claim': r['id'], 'since': r['since'], 'pid': r['pid'], 'core': True, 'row_only': True})
+            doomed.append({'claim': r['id'], 'since': r['since'], 'pid': r['pid'], 'gone': r['gone'], 'core': True, 'row_only': True})
     for c in doomed:
-        if kill(c['claim'], float(c.get('since') or 0)):
+        if time.monotonic() > budget:
+            unknown = True         # out of time: the rest wait for the next pass (the host would stop this one at 60 s)
+            break
+        if kill(c['claim'], float(c.get('since') or 0), limit=max(1, min(10, budget - time.monotonic()))):
             continue               # one would not die: the claim stays, and the next sweep tries again
         if not _supervisor_up(c) or c.get('left'):
             if not c.get('row_only'):

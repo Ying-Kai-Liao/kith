@@ -25,6 +25,8 @@ unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_MACHINE HQ
 mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME"
 
 # The stub program. $T/mode: ok | hang | down (exit 3) | refuse (exit 4) | old (exit 2). $T/calls logs `METHOD params`.
+# Like the daemon, it checks the params against the method's row (core/api/openrpc.json, the generated copy of the rows):
+# a param the row does not declare, or a missing required one, is exit 4 (the real core refuses it before it routes).
 cat > "$T/prog" <<'EOF'
 #!/usr/bin/env python3
 import json, os, sys, time
@@ -33,6 +35,11 @@ method = sys.argv[3]
 p = json.loads(sys.stdin.read() or '{}')
 open(T + '/calls', 'a').write(method + ' ' + json.dumps(p, sort_keys=True) + '\n')
 mode = open(T + '/mode').read().strip() if os.path.exists(T + '/mode') else 'ok'
+rows = {m['name']: m['params'] for m in json.load(open(os.environ['ROWS']))['methods'] if m['name'].startswith('doors.')}
+declared = {q['name'] for q in rows[method]}
+bad = sorted(set(p) - declared) + sorted(q['name'] for q in rows[method] if q.get('required') and q['name'] not in p)
+if bad:
+    sys.stderr.write('kith-core: bad params: ' + ' '.join(bad) + '\n'); sys.exit(4)
 if mode == 'hang':
     time.sleep(8)
 if mode == 'down':
@@ -145,6 +152,9 @@ ok(r.kind == 'ok' and r.body['version'] == 3, 'doors.start answers the row')
 p = json.loads(open(T + '/calls').read().split(' ', 1)[1])
 ok(p['agent'] == 'video' and p['door'] == 'render@abc' and p['person'] == 'kim' and p['id'] == A and p['pid'] == 77
    and 'kernel' in p and 'home' in p and 'KITH_PERSON' not in p.get('env', {}), 'the start carries the door, the person, the id, the supervisor and the caller view')
+ok(kith_door_core.mark_live(A, 3) is True and kith_door_core.end(A) is True,
+   'markLive and end carry only the params their rows declare (the stub refuses any other, as the daemon does)')
+ok(kith_door_core.sweep([], True) == [], 'doors.sweep carries the caller view its row declares')
 mode('refuse')
 r = kith_door_core.start('video', 'render@abc', 'kim', '/f', A, 77)
 ok(r.kind == 'refused' and 'cut off' in r.why, 'a start the core refused (exit 4) is a refusal, with its words')
@@ -309,4 +319,4 @@ ok(code == 0 and calls() == [], 'a room door never asks the core for a row')
 print('\n%d failed' % len(fails) if fails else '\nall passed')
 sys.exit(1 if fails else 0)
 EOF
-KERNEL=$KERNEL T=$T python3 "$T/t.py"
+ROWS=$KERNEL/../core/api/openrpc.json KERNEL=$KERNEL T=$T python3 "$T/t.py"

@@ -40,6 +40,9 @@ fn wait_after(swept: &Swept) -> Duration {
 }
 
 /// `kith door sweep [--person P]...`: `persons` lose every door; the rest are checked again against the core or kith-auth.
+/// A named sweep that comes back unknown is not repeated: the python ends the named people's boxes by their claim files
+/// without asking the core (and a revoke's own transaction swept their rows), and a repeat after an undo would end a door
+/// the restored person started since. The loop's next pass confirms the rows.
 pub async fn sweep(persons: &[String]) -> Swept {
     let Some(bin) = crate::remote::account::bin().await.map(|b| b.with_file_name("kith-door")) else {
         return Swept::default();

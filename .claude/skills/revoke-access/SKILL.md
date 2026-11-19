@@ -514,7 +514,7 @@ started before the switch has a claim file and no row, and the file's sweep (nam
 The rule for a call with no answer, in the code's words: a start with no answer starts nothing and ends the id it may have written; a sweep's
 recheck with no answer leaves running doors alone (`{"unknown": true}`, the host asks again in 10 s); a named person, a gone supervisor and a
 definite `revoked` end a door with no answer from the core; the sweeper calls `doors.end` on a swept row only when its supervisor is gone.
-`kith-auth door` with no answer (a timeout, a core that did not answer) is state `unknown` and ends no running door (it ended it before).
+`kith-auth door` with no answer (a timeout, a core that did not answer, a kith-auth that crashed or printed no state) is state `unknown` and ends no running door (it ended it before), on an unswitched Mac too: that door runs on, at most until `RUN_LIMIT_S`, and a named revoke or a gone supervisor still ends it.
 Bound left: an untick that `kith-auth` cannot judge leaves a door up to `RUN_LIMIT_S` (3600 s). Tests: `kernel/tests/kith-door-core-check`
 (a stub core: answers, refuses, down, hung; scratch edits of each rule were run and fail it). SYNC is not moved (the other covered changes since it
 have not been read).

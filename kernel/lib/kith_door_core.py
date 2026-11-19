@@ -54,9 +54,11 @@ def _secs(default):
         return default
 
 
-def call(method, params, secs, refuses=False):
+def call(method, params, secs, refuses=False, caller=None, env=os.environ):
     """One call of the core. An Answer; never raises. core-call's exit 4 is "the core refused" for a start (`refuses`), but also
-    "no such method" and a bad call, so for every other call it is just no answer."""
+    "no such method" and a bad call (a param the row does not declare), so for every other call it is just no answer.
+    `caller`: this call reads the agent folders, so it carries the caller's view (`kernel`, `home`, `env`); markLive and end
+    declare only their own params and the core refuses any other."""
     if guest_sandbox():
         return Answer('unknown', None, 'a guest run does not reach the core')
     if not _bin:
@@ -67,8 +69,9 @@ def call(method, params, secs, refuses=False):
     if not _bin[0]:
         _bin.clear()   # look again next time: the program may be installed by then
         return Answer('unknown', None, 'no kith program to ask')
-    body = {**params, 'kernel': str(KERNEL), 'home': str(Path.home()),
-            'env': {k: os.environ[k] for k in ENV_NAMES if os.environ.get(k)}}
+    body = dict(params)
+    if caller:
+        body.update({'kernel': str(KERNEL), 'home': str(Path.home()), 'env': {k: env[k] for k in ENV_NAMES if env.get(k)}})
     try:
         r = subprocess.run([_bin[0], 'kernel', 'core-call', method, '--params-stdin'], input=json.dumps(body),
                            capture_output=True, text=True, timeout=_secs(secs))
@@ -92,10 +95,10 @@ def call(method, params, secs, refuses=False):
     return Answer('ok', ans, '')
 
 
-def start(agent, piece, person, folder, claim, pid):
+def start(agent, piece, person, folder, claim, pid, env=os.environ):
     """doors.start: the access check and the row, one step in the core. ok: body is the row (`version`, `state`)."""
     ans = call('doors.start', {'agent': agent, 'door': piece, 'person': person, 'folder': folder, 'id': claim, 'pid': pid},
-               START_SECS, refuses=True)
+               START_SECS, refuses=True, caller=True, env=env)
     if ans.kind == 'ok' and not (isinstance(ans.body.get('version'), int) and ans.body.get('id') == claim):
         return Answer('unknown', None, 'the core answered a door that is not this one')
     return ans
@@ -114,10 +117,11 @@ def end(claim):
     return call('doors.end', {'id': claim}, QUICK_SECS).kind == 'ok'
 
 
-def sweep(persons, recheck):
-    """doors.sweep: the rows to stop, each `{id, since (s), pid}`: swept by this call, and swept before with the box not yet
+def sweep(persons, recheck, env=os.environ):
+    """doors.sweep: the rows to stop, each `{id, since (s), pid, gone}` (`gone`: the core swept it because its supervisor is gone): swept by this call, and swept before with the box not yet
     confirmed gone. None when the core gave no answer (unknown: nothing was decided)."""
-    ans = call('doors.sweep', {'persons': list(persons), 'noRecheck': not recheck}, SWEEP_SECS)
+    ans = call('doors.sweep', {'persons': list(persons), 'noRecheck': not recheck}, SWEEP_SECS,
+               caller=True, env=env)
     if ans.kind != 'ok':
         return None
     out = []
@@ -125,5 +129,6 @@ def sweep(persons, recheck):
         if isinstance(d, dict) and isinstance(d.get('id'), str) and d['id'] not in [o['id'] for o in out]:
             started = d.get('startedAt')
             out.append({'id': d['id'], 'pid': d.get('pid') if isinstance(d.get('pid'), int) else 0,
-                        'since': started / 1000 if isinstance(started, (int, float)) else 0})
+                        'since': started / 1000 if isinstance(started, (int, float)) else 0,
+                        'gone': 'supervisor is gone' in str(d.get('why') or '')})
     return out
