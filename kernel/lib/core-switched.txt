@@ -3,6 +3,7 @@ paths	paths
 engines	engines
 launch	launch
 settings	settings
+account	account
 account-state	account-state	accounts
 pkg	pkg
 cost	cost

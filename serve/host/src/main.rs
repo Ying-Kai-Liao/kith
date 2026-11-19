@@ -507,6 +507,18 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
+    /// `kith account ...`, every verb of `kernel/bin/kith-account`: the state ones (`list|pick|out|clear|usage`) and the ones that
+    /// write the set (`add|login|remove|order|move|set|policy|pin|unpin|cross-harness|migrate|use|backup`). `add` and `remove`
+    /// with `--json` return the login command and run nothing; without it the harness's own login runs.
+    // -h/--help belong to the usage text of the Python this is routed for.
+    #[command(disable_help_flag = true)]
+    Account {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
     /// What Claude Code usage costs, the verbs the launch and the apps call (`kernel/bin/kith-cost`): `limit AGENT [--json|--sh]`,
     /// `spent PERSON [AGENT]`, `usage [PERIOD] --json`, `agent NAME [PERIOD] --json`, `members AGENT`, `bots --json` and `sync`.
     /// Prints what `kith-cost` prints, with its exit codes (2: a verb the core does not have yet). Not routed from `kith` yet.
@@ -864,6 +876,32 @@ fn print_account_state(kernel: Option<std::path::PathBuf>, mut args: Vec<String>
         text
     };
     let out = accounts::run_verb(&ctx, &verb, args, &stdin);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    out.code
+}
+
+/// `kith kernel account <verb> ...`: `kernel/bin/kith-account`'s words and exit codes.
+fn print_account(kernel: Option<std::path::PathBuf>, args: Vec<String>) -> i32 {
+    use kith_kernel::accounts::{self, Ctx, System};
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let p = kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env);
+    let system = System { kernel: kernel.clone() };
+    let ctx = Ctx {
+        machine: p.machine.clone(),
+        agents: p.agents.clone(),
+        kernel,
+        home,
+        claude_config_dir: std::env::var("CLAUDE_CONFIG_DIR").ok(),
+        out: &system,
+    };
+    let stdin = || {
+        let mut text = String::new();
+        let _ = std::io::stdin().read_to_string(&mut text);
+        text
+    };
+    let out = accounts::run_account(&ctx, args, &stdin);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
     out.code
@@ -1594,6 +1632,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::AccountState { kernel, args } = cmd {
                 std::process::exit(print_account_state(kernel, args));
             }
+            if let KernelCmd::Account { kernel, args } = cmd {
+                std::process::exit(print_account(kernel, args));
+            }
             if let KernelCmd::Secrets { kernel, args } = cmd {
                 std::process::exit(print_secrets(kernel, &args));
             }
@@ -1704,6 +1745,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Readfence { .. }
                     | KernelCmd::Permit { .. }
                     | KernelCmd::AccountState { .. }
+                    | KernelCmd::Account { .. }
                     | KernelCmd::Secrets { .. }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }

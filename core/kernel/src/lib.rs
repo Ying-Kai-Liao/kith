@@ -48,6 +48,7 @@ pub const ABI: u32 = 1;
 /// the core only when its module is here (`acp`: the `run-once` verb, whose code lives in the kith-acp crate; `launch`: `kith AGENT --launch-json`).
 pub const MODULES: &[&str] = if cfg!(unix) {
     &[
+        "account",
         "account-state",
         "accounts",
         "acp",
@@ -88,7 +89,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account-state","accounts","acp","cost","delegation","engines","launch","paths","pkg","project","project-guest","readfence","settings","threads"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","acp","cost","delegation","engines","launch","paths","pkg","project","project-guest","readfence","settings","threads"]}"#
         );
     }
 }

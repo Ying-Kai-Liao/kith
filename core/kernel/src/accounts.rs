@@ -3,7 +3,8 @@
 //! and the account part of `kernel/lib/kith_settings.py`, which stay the source of truth; `kernel/tests/difftest` fails
 //! when the two differ. What it writes is what a run writes: `last_started` in the state file (and a legacy file's marks
 //! imported into it), a Claude account's folder made to mirror the main login, and `kith account list` migrating an old
-//! settings file. `kith account add|use|remove|pin|out|clear|usage ...` and `kith backup ...` stay Python.
+//! settings file. The verbs that write the set (`add|login|remove|order|move|set|policy|pin|unpin|cross-harness|migrate|use|
+//! backup ...`) are `cli::run_account`, with `kith account` as `kith kernel account`; `bin/kith-account` stays until R3's deletion.
 //!
 //! Everything outside the file system goes through [`Outside`] (a harness's status command, the `kith-auth granted`
 //! lookup, a program on PATH), so each rule is tested in a tempdir with fakes. No token, credential file or Keychain
@@ -17,15 +18,25 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+mod backups;
 mod change;
 #[cfg(test)]
 mod change_tests;
+#[cfg(unix)]
+mod cli;
 mod clock;
+#[cfg(unix)]
+mod edits;
 mod listing;
+#[cfg(unix)]
+mod logins;
 mod mirror;
 pub use mirror::main_claude_paths;
 mod pick;
 mod pyjson;
+#[cfg(unix)]
+mod set_verbs;
 pub mod settings;
 mod state;
 
@@ -36,6 +47,8 @@ pub use change::{
 };
 pub use listing::rows_from;
 mod verbs;
+#[cfg(unix)]
+pub use cli::run_account;
 pub use pick::{Pick, Skipped, Status, pick_from};
 pub use settings::read_settings;
 pub use state::{
@@ -386,7 +399,7 @@ pub fn agent_harness(agent_md: Option<&Path>) -> String {
 // --- the managed set ------------------------------------------------------------------------------------------------------
 
 /// Whether account id `entry` is of `harness`'s family (the model is not part of it: `claude@sonnet` is a Claude account).
-fn in_family(entry: &str, harness: &str) -> bool {
+pub(crate) fn in_family(entry: &str, harness: &str) -> bool {
     family(harness).contains(&split(entry).0.split(':').next().unwrap_or_default())
 }
 

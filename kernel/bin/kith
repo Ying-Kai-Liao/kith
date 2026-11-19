@@ -162,7 +162,8 @@ case $1 in
   cards)              shift; exec "$KITH/bin/kith-cards" "${@:---help}" ;;
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
   doctor)             shift; exec "$KITH/bin/kith-doctor" "$@" ;;
-  backup)             case ${2:-} in list|add|remove) shift; exec "$KITH/bin/kith-account" backup "$@" ;; esac
+  backup)             case ${2:-} in list|add|remove) shift; . "$KITH/lib/kith-core.sh"; kith_core_exec account --kernel "$KITH" backup "$@" || true
+                                                      exec "$KITH/bin/kith-account" backup "$@" ;; esac
                       [[ $# -eq 1 ]] && { echo "usage: kith backup run [--yes|--check|--nightly [off]]   everything to private GitHub repos
        kith backup list|add|remove ...                the backup chain (kith account)" >&2; exit 2; }
                       [[ $2 == run ]] && shift
@@ -173,6 +174,9 @@ case $1 in
                       # same exit codes (golden/account-state.json). Otherwise the Python answers.
                       case ${1:-} in
                         list|ls|pick|out|clear|usage) . "$KITH/lib/kith-core.sh"; kith_core_exec account-state --kernel "$KITH" "$@" || true ;;
+                        # The verbs that write the set are the core's when `account` is switched and a program lists it
+                        # (golden/account-writes.json); otherwise the Python answers. No cutover module: they write settings.json.
+                        add|login|remove|rm|order|move|set|policy|pin|unpin|cross-harness|migrate|use|backup) . "$KITH/lib/kith-core.sh"; kith_core_exec account --kernel "$KITH" "$@" || true ;;
                       esac
                       exec "$KITH/bin/kith-account" "${@:---help}" ;;
   new)                shift; exec "$KITH/bin/kith-new" "$@" ;;
