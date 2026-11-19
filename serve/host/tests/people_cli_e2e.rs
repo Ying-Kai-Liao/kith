@@ -290,6 +290,12 @@ fn the_people_verbs_on_a_switched_mac_write_the_core_and_ask_the_host() {
     drop(host);
     std::thread::sleep(Duration::from_secs(2));
     let (rc, down) = lab.people(Some(port), &["grant", "sam", "mel"]);
-    assert_ne!(rc, 0, "{down}");
-    assert_eq!(down["ok"], false);
+    assert_eq!((rc, down["ok"].clone()), (3, json!(false)), "no core daemon: nothing ran: {down}");
+    // A revoke is written by the embedded core with no daemon, and then the host cannot be asked: it says the rows changed
+    // and to run the same line again (fail closed), and the row is gone all the same.
+    let (rc, partial) = lab.people(Some(port), &["revoke", "sam", "house"]);
+    assert_eq!(rc, 1, "{partial}");
+    assert!(partial["error"].as_str().unwrap().contains("the rows were changed"), "{partial}");
+    let row = lab.people_rows(Some(port)).unwrap().into_iter().find(|r| r["id"] == "sam").unwrap();
+    assert!(agents_of(&row).is_empty(), "{row}");
 }

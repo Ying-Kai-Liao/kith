@@ -40,16 +40,21 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
         // `kith people grant|revoke` write the core, then ask the host to end what the rows no longer allow.
         "enforcePersonAccess" => {
             let id = str_arg(&b, "personId")?;
-            // The CLI wrote the core outside this lock: bring the People list's copy of their agents up to date first.
-            // It gates nothing (the guard reads the core), so a read that fails only leaves the list for the next poll.
+            // First what must stop: it needs no kith-auth, so a missing one never leaves a turn running.
+            enforce_person_access(hub, id, b["lost"].as_bool().unwrap_or(false)).await;
+            // The CLI wrote the core outside this lock: bring the People list's copy of their agents up to date. It gates
+            // nothing (the guard reads the core), so a read that fails only leaves the list for the next poll.
             {
                 let _w = AUTH_WRITES.lock().await;
-                match crate::remote::members::auth_people(&auth_bin().await?).await {
+                let auth = match auth_bin().await {
+                    Ok(bin) => crate::remote::members::auth_people(&bin).await,
+                    Err(e) => Err(e),
+                };
+                match auth {
                     Ok(auth) => crate::remote::members::mirror_agents(&hub.store, &auth),
                     Err(e) => tracing::warn!(error = format!("{e:#}"), person = id, "couldn't refresh the people copy"),
                 }
             }
-            enforce_person_access(hub, id, b["lost"].as_bool().unwrap_or(false)).await;
             hub.auth_changed();
             json!({})
         }

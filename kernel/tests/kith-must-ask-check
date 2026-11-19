@@ -165,6 +165,9 @@ is "owner: a delete under home asks nothing" "$(asked "rm -rf ~/Workspace/x/buil
 is "owner: rm -rf / asks" "$(asked "rm -rf /")" "Bash(rm -* /)"
 is "owner: rm -rf ~ asks" "$(asked "rm -rf ~")" "Bash(rm -* ~)"
 is "owner: rm -rf \$HOME/ asks" "$(asked 'rm -rf $HOME/')" 'Bash(rm -* $HOME/)'
+is "owner: hq people grant asks (hq is kith)" "$(asked "hq people grant sam echo --trusted")" "Bash(hq people grant:*)"
+is "owner: kith people suspend asks" "$(asked "kith people suspend sam")" "Bash(kith people suspend:*)"
+is "owner: kith people ls asks nothing" "$(asked "kith people ls --json")" "-"
 is "owner: bash -lc asks" "$(asked "bash -lc 'echo x'")" "Bash(bash -lc *)"
 is "owner: bash -e on a script with a later word ending in c asks nothing" "$(asked "bash -e tools/run.sh --sync now --sync-c")" "-"
 "$KERNEL/bin/kith-auth" person guest name=Guest >/dev/null 2>&1

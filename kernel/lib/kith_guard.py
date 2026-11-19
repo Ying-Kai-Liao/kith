@@ -661,6 +661,11 @@ def _bash_rules(cmds, kernel=()):
             names += ["%s/bin/%s" % (k, w[0]) for k in kernel] + ['"%s/bin/%s"' % (k, w[0]) for k in kernel]
         if w[0] == "kith" and w[1:2] == ["allow"]:
             out.append("Bash(hq allow:*)")
+        if w[0] == "kith" and w[1:2] == ["people"]:   # `hq` is the same program
+            tail = " ".join(w[1:])
+            out.append("Bash(hq %s:*)" % tail)
+            for k in kernel:
+                out += ["Bash(%s/bin/hq %s:*)" % (k, tail), 'Bash("%s/bin/hq" %s:*)' % (k, tail)]
         for n in names:
             out.append("Bash(%s:*)" % " ".join([n] + w[1:]))
         if w[0] == "git":

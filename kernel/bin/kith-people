@@ -7,7 +7,7 @@
   kith people show <id> [--json]             one person in full
   kith people grant <person> <agent[,agent]> [--preset P] [--mode M] [--budget N] [--deny T] [--model X] [--helpers H]
                      [--trusted] [--json]
-                                             let a person use an agent (`*` is everyone). Where authority is the core's: the core
+                                             let one invited person use an agent. Where authority is the core's: the core
                                              writes the row, then the host ends what the rows no longer allow.
   kith people revoke <person> <agent[,agent]> [--json]   take their use of an agent away (then ends their turns on it)
   kith people suspend <person> [--json]      cut them off from everything, bots included, until `undo` (the cloud is told

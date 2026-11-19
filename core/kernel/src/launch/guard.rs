@@ -428,6 +428,14 @@ fn bash_rules(cmds: &[&str], kernel: &[String]) -> Vec<String> {
         if w[0] == "kith" && w.get(1) == Some(&"allow") {
             out.push("Bash(hq allow:*)".to_owned());
         }
+        if w[0] == "kith" && w.get(1) == Some(&"people") {
+            // `hq` is the same program
+            out.push(format!("Bash(hq {tail}:*)"));
+            for k in kernel {
+                out.push(format!("Bash({k}/bin/hq {tail}:*)"));
+                out.push(format!("Bash(\"{k}/bin/hq\" {tail}:*)"));
+            }
+        }
         for n in &names {
             let full = std::iter::once(n.as_str())
                 .chain(w[1..].iter().copied())
