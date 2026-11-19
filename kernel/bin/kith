@@ -898,6 +898,10 @@ else
   echo "kith: no kith binary found, so memory writes by $agent are not checked or versioned (kith serve start builds it)" >&2
   [[ $p_owner == 0 ]] && { echo "kith: runs for anyone but the owner need the memory check; not running $agent for ${KITH_PERSON}" >&2; exit 3; }
 fi
+# The ledger's SessionStart hook: the Rust `kith kernel cost tag` when `cost` is switched and the program has it (the module
+# `cost-ledger`), else the Python. Quoted with %q as the memory hook above is, so both launch paths write the same bytes.
+cost_hook="\"$KITH/bin/kith-cost\" tag"
+if cbin=$(kith_core_bin cost); then cost_hook=$(printf '%q kernel cost --kernel %q tag' "$cbin" "$KITH"); fi
 # A built-in (scratch) keeps no long-term memory: its memory folder is not pre-approved for writes.
 [[ $p_owner == 1 ]] && { [[ $builtin == 1 ]] && writable="" || writable="$home/memory"$'\n'"$home_real/memory"; } \
   || writable=$(printf '%s\n' "$mem" "$(real "$mem")" "$shared" "$(real "$shared")" "$files" "$(real "$files")")
@@ -909,7 +913,7 @@ if [[ $p_owner == 0 && -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX && -d $KIT
   [[ $(dirname "$ob") == "$(cd "$KITH_MACHINE/outbox" && pwd -P)" && $(basename "$ob") != .* ]] && run_outbox=$ob
 fi
 [[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
-fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
+fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK=$cost_hook SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
 $learned
 $state_projects" python3 -I -c '
 import json, os, re, sys
