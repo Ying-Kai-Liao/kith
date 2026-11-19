@@ -95,7 +95,10 @@ pub(super) fn holder_for(kith: Option<&Path>, over: Option<String>) -> Result<()
     }
     Err(format!(
         "there is no kith-holder for launchd's host ({}; looked for KITH_HOLDER_BIN in its plist, then beside kith), so cron turns would stay queued; update kith first",
-        kith.map_or_else(|| "no program found in dev.kith.serve.plist".to_owned(), |k| k.display().to_string())
+        kith.map_or_else(
+            || "no program found in dev.kith.serve.plist".to_owned(),
+            |k| k.display().to_string()
+        )
     ))
 }
 

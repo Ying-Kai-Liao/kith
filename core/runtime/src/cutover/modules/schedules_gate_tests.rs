@@ -6,7 +6,7 @@ use std::path::Path;
 
 use super::schedules::{RUNS_FIRED_TURNS, Schedules};
 use super::schedules_gate::{
-    Facts, MESSAGE, launchd_runs, launchd_has_holder, launchd_sched_locks, refusal, serves_rows,
+    Facts, MESSAGE, launchd_has_holder, launchd_runs, launchd_sched_locks, refusal, serves_rows,
 };
 use crate::cutover::Module;
 
@@ -307,13 +307,20 @@ fn the_holder_is_the_one_launchds_host_would_start() {
     let home = t.path();
     // No plist: nothing says which host starts, so the gate refuses.
     let why = launchd_has_holder(home).unwrap_err();
-    assert!(why.contains("kith-holder") && why.contains("dev.kith.serve.plist"), "{why}");
+    assert!(
+        why.contains("kith-holder") && why.contains("dev.kith.serve.plist"),
+        "{why}"
+    );
 
     // A kith with no holder beside it, and one with it.
     let bare = home.join("cli/a/bin/kith");
     executable(&bare);
     write_serve_plist(home, &bare, None);
-    assert!(launchd_has_holder(home).unwrap_err().contains("kith-holder"));
+    assert!(
+        launchd_has_holder(home)
+            .unwrap_err()
+            .contains("kith-holder")
+    );
     let full = home.join("cli/b/bin/kith");
     executable(&full);
     executable(&home.join("cli/b/bin/kith-holder"));

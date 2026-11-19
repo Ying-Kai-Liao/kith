@@ -266,7 +266,10 @@ fn shows_own_argv(pid: u32, verb: &str) {
         .iter()
         .any(|(p, args)| *p == pid && args.iter().any(|a| a == verb))
     {
-        assert!(std::time::Instant::now() < until, "pid {pid} never showed `{verb}`");
+        assert!(
+            std::time::Instant::now() < until,
+            "pid {pid} never showed `{verb}`"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
 }
