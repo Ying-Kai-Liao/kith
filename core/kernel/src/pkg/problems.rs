@@ -406,6 +406,7 @@ fn must_ask_problems(ctx: &Ctx, home: &Path) -> R<Vec<String>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod must_ask_tests {
     use super::*;
 
