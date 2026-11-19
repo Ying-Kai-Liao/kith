@@ -507,6 +507,8 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.secretShare",
     "people.secretBrowser",
     "people.agentAccess",
+    // `kith people grant`, see `ROUTED_WRITES`; `people.revoke` above is the mirror's and takes the same call
+    "people.grant",
     // `kith schedule` once the schedules are the core's (bin/kith, kernel/lib/kith_sched_core.py): the reads, the edits of a
     // jobs.json and the run-now. Owner only like the rest; nothing here runs without a daemon.
     "schedule.jobs",
@@ -551,6 +553,8 @@ const ROUTED_WRITES: &[&str] = &[
     "people.secretShare",
     "people.secretBrowser",
     "people.agentAccess",
+    // `kith people grant` (kernel/lib/kith_people_access.py): a write that widens access, so it needs `viaSwitch`
+    "people.grant",
 ];
 
 /// A read that only a switched daemon answers: `kith-auth set` asks it before it writes a Keychain item, so that no daemon,

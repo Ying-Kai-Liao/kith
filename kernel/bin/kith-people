@@ -5,6 +5,16 @@
                                              agents they have and as what, and their bots. Read from kith-auth, the one
                                              place that says who a person is.
   kith people show <id> [--json]             one person in full
+  kith people grant <person> <agent[,agent]> [--preset P] [--mode M] [--budget N] [--deny T] [--model X] [--helpers H]
+                     [--trusted] [--json]
+                                             let a person use an agent (`*` is everyone). Where authority is the core's: the core
+                                             writes the row, then the host ends what the rows no longer allow.
+  kith people revoke <person> <agent[,agent]> [--json]   take their use of an agent away (then ends their turns on it)
+  kith people suspend <person> [--json]      cut them off from everything, bots included, until `undo` (the cloud is told
+                                             first: refused when it cannot be reached)
+  kith people undo <person> [--json]         give back exactly what a suspend took
+  kith people requests [--json]              devices asking to pair with this computer
+  kith people approve|deny <requestId|code> [--json]   answer one
   kith invite add <name> --agent A[=member|guest] ... [--person ID] [--json]
                                              invite someone to the app: prints the link to send them. --agent is repeated,
                                              one per agent, the role after = (default guest, the narrower one). With
@@ -14,7 +24,7 @@
   kith invite revoke <inviteId> [--json]     take one back before it is used (already gone: changed false)
 
 Not this: `kith auth invite <id>` makes a one-time /link code for a chat channel. A bot's invite: `kith bot invite`.
-Exit: 0 done, 1 refused / host unreachable / not found, 2 usage. --json: one object {"ok": true, ...} on stdout, or
+Exit: 0 done, 1 refused / host unreachable / not found, 2 usage, 3 no core daemon (grant, revoke: nothing ran). --json: one object {"ok": true, ...} on stdout, or
 {"ok": false, "error": "..."} with the same exit codes."""
 import json
 import os
@@ -27,6 +37,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..
 from kith_host import host_call  # noqa: E402
 
 ROLES = ('member', 'guest')
+ACCESS_VERBS = ('grant', 'revoke', 'suspend', 'undo', 'requests', 'approve', 'deny')
 SECRET_KEYS = {'tokenHash', 'token_hash', 'token', 'proof'}
 
 
@@ -106,9 +117,28 @@ def describe(v):
     return line
 
 
+def cmd_access(verb, rest):
+    """The owner's access verbs (kernel/lib/kith_people_access.py): grant and revoke through the core and the host,
+    suspend, undo and the device requests through the host."""
+    import kith_people_access as acc
+    valued = tuple(acc.GRANT_FLAGS) if verb == 'grant' else ()
+    # --trusted is a switch, not a valued flag: taken out before the generic parse.
+    trusted = verb == 'grant' and '--trusted' in rest
+    pos, one, _, js = split_flags([a for a in rest if a != '--trusted'], valued=valued)
+    one = {acc.GRANT_FLAGS[k]: v for k, v in one.items()}
+    if trusted:
+        one['trusted'] = True
+    try:
+        acc.run(verb, pos, one, js, out)
+    except acc.Fail as e:
+        raise Fail(str(e), e.code) from None
+
+
 def cmd_people(args):
     verb = args[0] if args and not args[0].startswith('--') else 'ls'
     rest = args[1:] if args and not args[0].startswith('--') else args
+    if verb in ACCESS_VERBS:
+        return cmd_access(verb, rest)
     pos, _, _, js = split_flags(rest)
     if verb == 'ls' and not pos:
         people = invitees()

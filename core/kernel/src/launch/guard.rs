@@ -200,7 +200,7 @@ const SECRET_CMDS: [&str; 22] = [
     "kith-auth get",
 ];
 const SECRET_CMDS_LAST: &str = "kith-auth once";
-const TRUST_CMDS: [&str; 11] = [
+const TRUST_CMDS: [&str; 23] = [
     "kith allow",
     "kith-allow",
     "kith-auth grant",
@@ -212,6 +212,19 @@ const TRUST_CMDS: [&str; 11] = [
     "kith-auth access",
     "launchctl load",
     "launchctl bootstrap",
+    // the owner's access verbs of `kith people` (kith-auth member/person on a switched Mac), by both names
+    "kith people grant",
+    "kith-people grant",
+    "kith people revoke",
+    "kith-people revoke",
+    "kith people suspend",
+    "kith-people suspend",
+    "kith people undo",
+    "kith-people undo",
+    "kith people approve",
+    "kith-people approve",
+    "kith people deny",
+    "kith-people deny",
 ];
 const DESTROY_CMDS: [&str; 10] = [
     "shred",
@@ -408,7 +421,7 @@ fn bash_rules(cmds: &[&str], kernel: &[String]) -> Vec<String> {
             out.push(format!("Bash(kith auth {tail}:*)"));
             out.push(format!("Bash(hq auth {tail}:*)"));
         }
-        if matches!(w[0], "kith-auth" | "kith-allow" | "kith") {
+        if matches!(w[0], "kith-auth" | "kith-allow" | "kith" | "kith-people") {
             names.extend(kernel.iter().map(|k| format!("{k}/bin/{}", w[0])));
             names.extend(kernel.iter().map(|k| format!("\"{k}/bin/{}\"", w[0])));
         }
