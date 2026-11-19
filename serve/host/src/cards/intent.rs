@@ -138,7 +138,7 @@ impl Places {
                 };
             }
         }
-        if let Ok(rest) = abs.strip_prefix(&self.agents).or_else(|_| abs.strip_prefix(&self.kith.join("agents"))) {
+        if let Ok(rest) = abs.strip_prefix(&self.agents).or_else(|_| abs.strip_prefix(self.kith.join("agents"))) {
             let who = rest.components().next()?.as_os_str().to_string_lossy().into_owned();
             return if who == self.agent {
                 plain("its folder")
@@ -637,6 +637,7 @@ struct Run {
 }
 
 #[derive(Debug, Default)]
+#[allow(clippy::struct_excessive_bools, reason = "independent facts the reader notes about one command line")]
 struct Folder {
     runs: Vec<Run>,
     noise: Vec<String>,
@@ -679,14 +680,14 @@ impl Folder {
             return;
         };
         for st in stages {
-            self.stage(st, depth, places);
+            self.stage(&st, depth, places);
             if self.unreadable {
                 return;
             }
         }
     }
 
-    fn stage(&mut self, st: Stage, depth: u8, places: &Places) {
+    fn stage(&mut self, st: &Stage, depth: u8, places: &Places) {
         if st.writes.iter().any(|w| !w.is_empty()) {
             self.all_read_only = false;
             for w in &st.writes {
@@ -700,8 +701,7 @@ impl Folder {
         }
         let mut words: &[String] = &st.words;
         // Control words: loops are counted, the rest is furniture.
-        loop {
-            let Some(first) = words.first().map(String::as_str) else { break };
+        while let Some(first) = words.first().map(String::as_str) {
             match first {
                 "for" => {
                     let n = match words.iter().position(|w| w == "in") {
@@ -743,9 +743,7 @@ impl Folder {
             }
         }
         // Assignments and wrappers in front of the program.
-        let mut words = words;
-        loop {
-            let Some(first) = words.first() else { break };
+        while let Some(first) = words.first() {
             let is_assign = first.split_once('=').is_some_and(|(n, _)| {
                 !n.is_empty()
                     && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
@@ -797,7 +795,7 @@ impl Folder {
             Some(n) => self.times = self.times.max(n),
             None => self.unknown_loop = true,
         }
-        let ro = self.program(&prog, args, &st, depth, places);
+        let ro = self.program(&prog, args, st, depth, places);
         if !ro {
             self.all_read_only = false;
         }
@@ -872,11 +870,7 @@ impl Folder {
                 self.uv(args, st);
                 false
             }
-            "uvx" => {
-                self.launcher(args);
-                false
-            }
-            "npx" | "pnpx" | "bunx" => {
+            "uvx" | "npx" | "pnpx" | "bunx" => {
                 self.launcher(args);
                 false
             }
@@ -1095,7 +1089,7 @@ impl Folder {
                         None => self.unreadable = true,
                     }
                     self.tool(prog, false);
-                } else if args.iter().all(|a| flag(a)) && (st.piped_in || st.text_in) {
+                } else if args.iter().all(flag) && (st.piped_in || st.text_in) {
                     self.run(&format!("whatever is piped into {prog}"), prog, true, false);
                 } else {
                     self.tool(prog, false);
@@ -1213,7 +1207,7 @@ impl Folder {
                             let name = first.rsplit('/').next().unwrap_or(first);
                             if name.starts_with("python") {
                                 self.python(&rest, st);
-                            } else if name.ends_with(".py") {
+                            } else if Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("py")) {
                                 self.run("a Python script", "Python script", true, false);
                             } else {
                                 self.tool(name, false);
@@ -1360,22 +1354,15 @@ fn bash(command: &str, places: &Places) -> Option<Reading> {
     };
     if interp {
         let items: Vec<String> = listed.iter().map(|r| r.text.clone()).collect();
-        let mut text = format!("Runs {}", list_and(&items));
-        if let Some(r) = &repeat {
-            text.push_str(&format!(", {r}"));
-        }
+        let text = format!("Runs {}{}", list_and(&items), repeat.as_ref().map_or(String::new(), |r| format!(", {r}")));
         let strong = listed.iter().map(|r| r.strong.clone()).collect();
         facts.push(Fact { icon: "terminal", text, strong, muted: None, place: false });
     } else if !listed.is_empty() || !f.noise.is_empty() {
         let names: Vec<String> =
             if listed.is_empty() { f.noise.clone() } else { listed.iter().map(|r| r.strong.clone()).collect() };
-        let mut text = format!("A shell command: {}", names.join(", "));
-        if let Some(r) = &repeat {
-            text.push_str(&format!(", {r}"));
-        }
-        if f.all_read_only && !f.runs.is_empty() {
-            text.push_str(", reads only");
-        }
+        let times = repeat.as_ref().map_or(String::new(), |r| format!(", {r}"));
+        let reads_only = if f.all_read_only && !f.runs.is_empty() { ", reads only" } else { "" };
+        let text = format!("A shell command: {}{times}{reads_only}", names.join(", "));
         facts.push(Fact { icon: "terminal", text, strong: vec!["A shell command".into()], muted: None, place: false });
     }
 
