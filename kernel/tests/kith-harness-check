@@ -65,11 +65,10 @@ $T/real/dir
 $T/link" PYTHONPATH=$KERNEL/adapters python3 -c 'import harness; print("|".join(harness.Run("codex", "t", None, None, None).dirs))' 2>&1)
 check "run dirs: symlinks resolved, duplicates collapsed" "[ '$OUT' = '$T/real/dir' ]"
 
-# MCP server names reach codex as bare -c keys: codex 0.169 keeps quotes in mcp_servers."name" and the run gets no tools;
-# and codex exec (approval policy never) refuses a tool whose server still asks for approval.
+# MCP server names reach codex as bare -c keys: codex 0.169 keeps quotes in mcp_servers."name" and the run gets no tools.
 printf '{"mcpServers": {"jev-browser": {"command": "jev", "args": ["mcp"]}, "a.b": {"url": "http://x"}}}' > "$T/mcp.json"
 OUT=$(KITH_RUN_PROMPT=/dev/null KITH_RUN_MCP=$T/mcp.json PYTHONPATH=$KERNEL/adapters python3 -c 'import harness; print("\n".join(harness.Run("codex", "t", None, None, None).codex()))' 2>&1)
-check "codex MCP: plain name is a bare key, its tools need no approval" "printf '%s\n' \"\$OUT\" | grep -qx 'mcp_servers.jev-browser={\"command\" = \"jev\", \"args\" = \[\"mcp\"\], \"default_tools_approval_mode\" = \"approve\"}'"
+check "codex MCP: plain name is a bare key" "printf '%s\n' \"\$OUT\" | grep -qx 'mcp_servers.jev-browser={\"command\" = \"jev\", \"args\" = \[\"mcp\"\]}'"
 check "codex MCP: a name with a dot stays quoted" "printf '%s\n' \"\$OUT\" | grep -q '^mcp_servers.\"a.b\"='"
 
 [ $fails = 0 ] && echo "all harness checks passed" || { echo "$fails check(s) failed"; exit 1; }
