@@ -542,7 +542,7 @@ fn mcp_merges_granted_with_the_agents_own_and_gives_a_guest_the_permit_server_on
     assert_eq!(none["mcpServers"].as_object().unwrap().len(), 2);
 }
 
-/// The command of the PreToolUse or PostToolUse hook that records who was in the room.
+/// The command of the `PreToolUse` or `PostToolUse` hook that records who was in the room.
 fn ledger_hook(out: &settings::Output, event: &str) -> String {
     let s = out.settings.as_ref().unwrap();
     s["hooks"][event]
