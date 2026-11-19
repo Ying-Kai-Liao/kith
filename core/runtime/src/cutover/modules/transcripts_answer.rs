@@ -127,13 +127,38 @@ pub(super) fn reread(env: &Env, core: &mut Core) -> Result<()> {
     // Any failure, not only a refusal (a session lock held past its wait, a database error), takes the tombstone away: left
     // in place it would leave hooks in Writer mode with nothing serving `session.record` (architect MUST 1 on #1049). Work
     // already done is safe: each drained entry committed with its file, and the import transaction is all-or-nothing.
-    let result = reread_inner(env, core);
-    if result.is_err()
-        && let Ok(state) = state(env)
-    {
-        let _ = std::fs::remove_file(marker_of(state));
+    let Err(e) = reread_inner(env, core) else {
+        return Ok(());
+    };
+    // The refusal below has taken it away itself (and said so); any other failure says it here.
+    let Ok(state) = state(env) else { return Err(e) };
+    if !marker_of(state).exists() {
+        return Err(e);
     }
-    result
+    let note = take_tombstone_away(env);
+    Err(match e {
+        Error::Refused(m) => Error::Refused(format!("{m} ({note})")),
+        other => Error::Io(format!("{other} ({note})")),
+    })
+}
+
+const TOMBSTONE_GONE: &str = "the tombstone is removed and hooks write their files again";
+
+/// Removes the tombstone and says how it went. One that cannot be removed names its path: hooks stay in Writer mode until
+/// someone deletes it.
+fn take_tombstone_away(env: &Env) -> String {
+    let m = match state(env) {
+        Ok(state) => marker_of(state),
+        Err(e) => return format!("the tombstone could not be located to remove it: {e}"),
+    };
+    match std::fs::remove_file(&m) {
+        Ok(()) => TOMBSTONE_GONE.into(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => TOMBSTONE_GONE.into(),
+        Err(e) => format!(
+            "the tombstone {} could NOT be removed ({e}); hooks stay in Writer mode until it is deleted",
+            m.display()
+        ),
+    }
 }
 
 fn reread_inner(env: &Env, core: &mut Core) -> Result<()> {
@@ -154,9 +179,9 @@ fn reread_inner(env: &Env, core: &mut Core) -> Result<()> {
     if left.is_empty() {
         return Ok(());
     }
-    let _ = std::fs::remove_file(marker_of(state));
+    let gone = take_tombstone_away(env);
     Err(Error::Refused(format!(
-        "cutover: transcripts: the registry changed while the step ran ({}); NOT switched, the tombstone is removed and hooks write their files again. Run `kith migrate step transcripts` again, or `kith rollback transcripts`",
+        "cutover: transcripts: the registry changed while the step ran ({}); NOT switched, {gone}. Run `kith migrate step transcripts` again, or `kith rollback transcripts`",
         left.join(" | ")
     )))
 }

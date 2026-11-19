@@ -345,8 +345,34 @@ fn a_reread_that_fails_takes_the_tombstone_away_too() {
         .unwrap_err()
         .to_string();
     assert!(e.contains("held by another writer"), "{e}");
+    assert!(e.contains("tombstone is removed"), "the error says so: {e}");
     assert!(!r.tombstone().exists(), "hooks write files again");
     assert_eq!(r.inbox_len(), 1, "the entry waits");
+}
+
+#[test]
+fn a_tombstone_that_cannot_be_removed_is_named_with_its_path() {
+    use fs2::FileExt as _;
+    let r = rig();
+    r.write("s-one", &rec("s-one", 10, "/work"));
+    let mut core = r.core();
+    Transcripts.import(&r.env, Some(&mut core), opts()).unwrap();
+    // A directory where the tombstone should be: remove_file refuses it.
+    std::fs::create_dir_all(r.tombstone()).unwrap();
+    r.spool("s-one", &rec("s-one", 20, "/spooled"));
+    let locks = r.terminal().join("locks");
+    std::fs::create_dir_all(&locks).unwrap();
+    let held = std::fs::File::create(locks.join("s-one.lock")).unwrap();
+    held.lock_exclusive().unwrap();
+    let e = Transcripts
+        .reread(&r.env, &mut core)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("held by another writer"), "{e}");
+    assert!(
+        e.contains("could NOT be removed") && e.contains(&r.tombstone().display().to_string()),
+        "{e}"
+    );
 }
 
 #[test]
