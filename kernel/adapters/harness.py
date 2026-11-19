@@ -105,6 +105,9 @@ class Run:
             entry = {'url': s['url']} if s.get('url') else {'command': s['command'], 'args': s.get('args', [])}
             if s.get('env'):
                 entry['env'] = s['env']
+            # codex exec has no one to approve a call (approval policy never), so its default "prompt" refuses every tool
+            # of a server the owner granted; only owner runs reach codex (engines.rs serves_guests).
+            entry['default_tools_approval_mode'] = 'approve'
             # A bare key: codex keeps the quotes of mcp_servers."name" in the server's name and the run gets no tools.
             key = name if re.fullmatch(r'[A-Za-z0-9_-]+', name) else json.dumps(name)
             cfg.append('mcp_servers.%s=%s' % (key, toml(entry)))
