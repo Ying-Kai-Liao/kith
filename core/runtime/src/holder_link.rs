@@ -126,7 +126,7 @@ pub(crate) struct HolderState {
 /// gate (the program and environment launchd's plist gives the host), so they cannot disagree.
 pub(crate) fn holder_exe(
     override_bin: Option<std::ffi::OsString>,
-    kith: Option<&std::path::Path>,
+    kith: Option<&Path>,
 ) -> Option<PathBuf> {
     if let Some(e) = override_bin.filter(|v| !v.is_empty()) {
         let e = PathBuf::from(e);
