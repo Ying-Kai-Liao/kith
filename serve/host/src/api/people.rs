@@ -665,11 +665,13 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
             )
         })?;
     }
-    let (core_updated, pending) = local_revoke(hub, &bin, id, revoke).await.map_err(|e| unfinished(id, revoke, &e))?;
-    if who.kith.is_empty() {
+    let (core_updated, pending) = if who.kith.is_empty() {
         // Known only by a chat handle: the cloud knows nothing of them, so the owner's other computers hear it over Mac link.
-        crate::remote::handle_revokes::changed(hub, &who, revoke);
+        crate::remote::handle_revokes::owner_change(hub, &bin, &who, revoke).await
+    } else {
+        local_revoke(hub, &bin, id, revoke).await
     }
+    .map_err(|e| unfinished(id, revoke, &e))?;
     // false: auth.json has it but the core's copy missed it (or may have); the owner runs it again once the core is up.
     let mut out = json!({"revoked": revoke, "everywhere": everywhere, "coreUpdated": core_updated});
     // The core took the revoke but could not finish stopping their runs: said to the owner, not only logged.
