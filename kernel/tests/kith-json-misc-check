@@ -146,6 +146,7 @@ if [ -n "${KITH_DIFFTEST_BIN:-}" ]; then
   check "backup remove --json without an id: usage error object, exit 2" "[ $rc = 2 ] && errobj"
   check "backup add text is unchanged" "[ \"\$(\"$KITH\" backup add codex)\" = 'codex is backup 1 for every agent' ]"
   "$KITH" backup remove codex >/dev/null
+  unset KITH_BIN   # the rest of the script runs the same way with and without a program
 else
   echo "skip the backup rows: kith backup is the Rust program's since R3 (KITH_DIFFTEST_BIN=/path/to/kith runs them; CI's host-build does)"
 fi
