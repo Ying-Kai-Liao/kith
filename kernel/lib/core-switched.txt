@@ -6,7 +6,6 @@ settings	settings
 account	account
 account-state	account-state	accounts
 pkg	pkg
-project-id	project
 cost	cost-ledger	cost
 threads	threads-writer
 lifecycle	lifecycle

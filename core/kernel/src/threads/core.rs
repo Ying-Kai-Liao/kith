@@ -62,8 +62,9 @@ fn switch_says_more(c: &Ctx, module: &str) -> bool {
         .join("core")
         .join("cutover")
         .join(format!("{module}.switch"));
-    if std::fs::symlink_metadata(&f).is_err() {
-        return false;
+    // Only a file that is not there is no second source; one we cannot even look for is no reason to fall back (as the marker).
+    if let Err(e) = std::fs::symlink_metadata(&f) {
+        return e.kind() != std::io::ErrorKind::NotFound;
     }
     match std::fs::read_to_string(&f) {
         Ok(text) => !text.lines().any(|l| l == "state=stepping"),

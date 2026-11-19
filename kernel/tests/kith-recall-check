@@ -219,7 +219,7 @@ check "a missing index is built on first recall, private" "env KITH_AGENT=echo \
 check "settings deny Read and Edit of the index" "python3 -c 'import json,sys; d=json.load(open(\"$T/launch.json\"))[\"settings\"][\"permissions\"][\"deny\"]; sys.exit(0 if any(r.startswith(\"Read(\") and r.endswith(\"/index/**)\") for r in d) and any(r.startswith(\"Edit(\") and r.endswith(\"/index/**)\") for r in d) else 1)'"
 check "settings deny Read and Edit of memory.db (the approval proof)" "python3 -c 'import json,sys; d=json.load(open(\"$T/launch.json\"))[\"settings\"][\"permissions\"][\"deny\"]; sys.exit(0 if any(r.startswith(\"Read(\") and r.endswith(\"/memory.db*)\") for r in d) and any(r.startswith(\"Edit(\") and r.endswith(\"/memory.db*)\") for r in d) else 1)'"
 
-# a guest run asks the host (KITH_RUN_TOKEN + KITH_RUN_SOCKET): the transport never reads the index
+# a guest run asks the core (KITH_RUN_TOKEN + KITH_CORE_RUN_SOCKET): the transport never reads the index
 cat > "$T/fake-host.py" <<'PY'
 import json, os, socket, sys
 path, log, mode = sys.argv[1:4]
@@ -248,26 +248,27 @@ fakehost() { # mode count -> starts the fake host, waits until it listens
   for _ in $(seq 50); do [ -e "$T/req.log.ready" ] && break; sleep 0.1; done
 }
 fakehost ok 1
-OUT=$(env KITH_RUN_TOKEN=tok123 KITH_RUN_SOCKET="$T/s.sock" KITH_PERSON=kai KITH_AGENT=echo "$R" zebra --json -n 3); wait $FH
+OUT=$(env KITH_RUN_TOKEN=tok123 KITH_CORE_RUN_SOCKET="$T/s.sock" KITH_PERSON=kai KITH_AGENT=echo "$R" zebra --json -n 3); wait $FH
 check "run token: the answer is the host's" "[ \"\$OUT\" = 'host says hi' ]"
 check "run token: the request carries the token, the method and the arguments, and no identity" "python3 -c 'import json; d=json.loads(open(\"$T/req.log\").read()); import sys; sys.exit(0 if d == {\"token\":\"tok123\",\"method\":\"recall\",\"args\":[\"zebra\",\"--json\",\"-n\",\"3\"]} else 1)'"
 check "run token: the index is never opened or built" "[ ! -e $KITH_STATE/index ]"
 fakehost code 1
-env KITH_RUN_TOKEN=tok123 KITH_RUN_SOCKET="$T/s.sock" "$R" zebra >"$T/o" 2>"$T/e"; RC=$?; wait $FH
+env KITH_RUN_TOKEN=tok123 KITH_CORE_RUN_SOCKET="$T/s.sock" "$R" zebra >"$T/o" 2>"$T/e"; RC=$?; wait $FH
 check "run token: the host's exit code and stderr are passed on" "[ $RC = 2 ] && grep -q usage $T/e"
 fakehost refuse 2
-O1=$(env KITH_RUN_TOKEN=bad KITH_RUN_SOCKET="$T/s.sock" "$R" zebra); R1=$?
-O2=$(env KITH_RUN_TOKEN=bad KITH_RUN_SOCKET="$T/s.sock" "$R" zebra --json); wait $FH
+O1=$(env KITH_RUN_TOKEN=bad KITH_CORE_RUN_SOCKET="$T/s.sock" "$R" zebra); R1=$?
+O2=$(env KITH_RUN_TOKEN=bad KITH_CORE_RUN_SOCKET="$T/s.sock" "$R" zebra --json); wait $FH
 check "run token: a refusal is an empty answer, not an error" "[ \"\$O1\" = 'nothing recalled' ] && [ \"\$O2\" = '[]' ] && [ $R1 = 0 ]"
-O3=$(env KITH_RUN_TOKEN=tok KITH_RUN_SOCKET="$T/gone.sock" "$R" zebra --json 2>"$T/e"); R3=$?
+O3=$(env KITH_RUN_TOKEN=tok KITH_CORE_RUN_SOCKET="$T/gone.sock" "$R" zebra --json 2>"$T/e"); R3=$?
 check "run token: no host listening is an empty answer without a traceback" "[ \"\$O3\" = '[]' ] && [ $R3 = 0 ] && ! grep -q Traceback $T/e"
-check "run token: the index subcommands are not reachable" "! env KITH_RUN_TOKEN=tok KITH_RUN_SOCKET=\"$T/s.sock\" \"$R\" index rebuild 2>/dev/null && [ ! -e $KITH_STATE/index ]"
-check "run token: a token without a socket is the owner path" "env KITH_RUN_TOKEN=tok KITH_AGENT=echo \"$R\" 'shared craft' | grep -q 'shared craft'"
+check "run token: the index subcommands are not reachable" "! env KITH_RUN_TOKEN=tok KITH_CORE_RUN_SOCKET=\"$T/s.sock\" \"$R\" index rebuild 2>/dev/null && [ ! -e $KITH_STATE/index ]"
+check "run token: a token without a core socket is an empty answer, never the owner path" "[ \"\$(env KITH_RUN_TOKEN=tok KITH_AGENT=echo \"$R\" 'shared craft')\" = 'nothing recalled' ]"
 
-# the other two tools a guest gets through the host: kith-memory search and project-id. With a token they ask the host and
-# touch no Kith folder (the folders are pointed at nothing, so reading one would fail or print something else).
-MS=$KERNEL/bin/kith-memory PI=$KERNEL/bin/project-id
-nodisk() { env KITH_RUN_TOKEN=tok123 KITH_RUN_SOCKET="$T/s.sock" KITH_HOME="$T/none" KITH_STATE="$T/none" KITH_AGENT=echo KITH_PERSON=kai "$@"; }
+# the other tool a guest gets through the core in Python: kith-memory search. With a token it asks the core and touches no
+# Kith folder (the folders are pointed at nothing, so reading one would fail or print something else). project-id is the Rust
+# program's now (kernel/tests/kith-project-id-guest-check has its protocol).
+MS=$KERNEL/bin/kith-memory
+nodisk() { env KITH_RUN_TOKEN=tok123 KITH_CORE_RUN_SOCKET="$T/s.sock" KITH_HOME="$T/none" KITH_STATE="$T/none" KITH_AGENT=echo KITH_PERSON=kai "$@"; }
 reqis() { python3 -c "import json,sys; d=json.loads(open('$T/req.log').read()); sys.exit(0 if d == json.loads(sys.argv[1]) else 1)" "$1"; }
 fakehost ok 1
 OUT=$(nodisk "$MS" search zebra -n 3 --json); wait $FH
@@ -276,16 +277,9 @@ check "guest kith-memory: the request is the token, memorySearch and the argumen
 fakehost refuse 1
 OUT=$(nodisk "$MS" search zebra --all 2>"$T/e"); RC=$?; wait $FH
 check "guest kith-memory: a refusal is a message and a non-zero exit" "[ $RC = 2 ] && [ -z \"\$OUT\" ] && grep -q 'kith-memory:' $T/e && ! grep -q Traceback $T/e"
-OUT=$(nodisk env KITH_RUN_SOCKET="$T/gone.sock" "$MS" search zebra 2>"$T/e"); RC=$?
+OUT=$(nodisk env KITH_CORE_RUN_SOCKET="$T/gone.sock" "$MS" search zebra 2>"$T/e"); RC=$?
 check "guest kith-memory: no host is a clear error, not a traceback" "[ $RC = 1 ] && grep -q 'could not be reached' $T/e && ! grep -q Traceback $T/e"
-fakehost ok 1
-OUT=$(nodisk "$PI"); wait $FH
-check "guest project-id: the answer is the host's, from no folder" "[ \"\$OUT\" = 'host says hi' ]"
-check "guest project-id: the request is the token and projectId, no directory" "reqis '{\"token\":\"tok123\",\"method\":\"projectId\",\"args\":[]}'"
-fakehost ok 1
-nodisk "$PI" --info alpha >/dev/null; wait $FH
-check "guest project-id --info is asked of the host as is" "reqis '{\"token\":\"tok123\",\"method\":\"projectId\",\"args\":[\"--info\",\"alpha\"]}'"
-check "owner: no token, kith-memory and project-id read the folders as before" "env KITH_AGENT=echo \"$MS\" search 'shared craft' | grep -q 'zebra tip' && env \"$PI\" --list >/dev/null"
+check "owner: no token, kith-memory reads the folders as before" "env KITH_AGENT=echo \"$MS\" search 'shared craft' | grep -q 'zebra tip'"
 
 # a sandboxed guest without a token cannot read the index (simulated by an unreadable copy): nothing, whoever it claims to be
 "$R" index rebuild >/dev/null

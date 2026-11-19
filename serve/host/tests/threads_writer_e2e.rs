@@ -50,17 +50,17 @@ impl Drop for StateDir {
     }
 }
 
-/// Marks the `claims` module switched in the core of `paths`: the switch file and the marker row in core.db that must match it
+/// Marks the module switched in the core of `paths`: the switch file and the marker row in core.db that must match it
 /// (`cutover::may_serve`). Only ever in a throwaway folder.
-fn mark_switched(paths: &Paths) {
+fn mark_switched(paths: &Paths, module: &str) {
     assert!(paths.machine.to_string_lossy().starts_with("/tmp/ktw-"), "never mark a real Mac's modules");
     let at = 1_800_000_000_i64;
     let core = paths.machine.join("core");
     std::fs::create_dir_all(core.join("cutover")).unwrap();
-    std::fs::write(core.join("cutover/claims.switch"), format!("state=switched\nat={at}\n")).unwrap();
+    std::fs::write(core.join(format!("cutover/{module}.switch")), format!("state=switched\nat={at}\n")).unwrap();
     rusqlite::Connection::open(core.join("core.db"))
         .unwrap()
-        .execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('cutover:claims', ?1)", [format!("at={at};digest=")])
+        .execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)", [format!("cutover:{module}"), format!("at={at};digest=")])
         .unwrap();
 }
 
@@ -106,7 +106,7 @@ impl Rig {
         let env = |k: &str| (k == "KITH_STATE").then(|| given.clone());
         let paths = kith_kernel::paths::paths(&state, &state.join("kernel"), &env);
         drop(kith_core::start(&paths).expect("the core starts"));
-        mark_switched(&paths);
+        mark_switched(&paths, "claims");
         let holder = holder_bin().display().to_string();
         let host = Host::start_env(&[("KITH_STATE", &given), ("KITH_HOLDER_BIN", &holder)]).await;
         let end = Instant::now() + WAIT;
@@ -319,4 +319,20 @@ async fn a_record_the_core_does_not_take_stays_in_the_spool() {
     if !spooled.is_empty() {
         assert!(o.stderr.contains("kept for the core"), "{}", o.stderr);
     }
+}
+
+/// R3 with the registry switched: the core takes the record, so the hook's spool entry is settled and gone, and nothing says
+/// it was kept.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_record_the_core_takes_leaves_the_spool_empty() {
+    let rig = Rig::start().await;
+    mark_switched(&rig.paths, "transcripts");
+    std::fs::create_dir_all(rig.state.join("live/terminal")).unwrap();
+    std::fs::write(rig.state.join("live/terminal/registry.tombstone"), "").unwrap();
+    let hook = r#"{"session_id":"s-2","cwd":"/w"}"#;
+    let o = rig.threads(&[("KITH_AGENT", "coder"), ("KITH_RUN_KIND", "schedule")], &["record"], hook);
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    assert!(!o.stderr.contains("kept for the core"), "{}", o.stderr);
+    let left = std::fs::read_dir(rig.state.join("live/terminal/inbox")).map_or(0, |d| d.flatten().count());
+    assert_eq!(left, 0, "the core took the record, so the spool is empty");
 }

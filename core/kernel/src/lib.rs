@@ -64,6 +64,8 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "paths",
         "pkg",
         "project",
+        // `kernel project-id` answers a guest run (the run-socket client, project/guest.rs); the stub bin/project-id needs it.
+        "project-guest",
         "readfence",
         "settings",
         "threads",
@@ -93,7 +95,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","acp","cost","cost-ledger","delegation","engines","launch","lifecycle","paths","pkg","project","readfence","settings","threads","threads-writer"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","acp","cost","cost-ledger","delegation","engines","launch","lifecycle","paths","pkg","project","project-guest","readfence","settings","threads","threads-writer"]}"#
         );
     }
 }

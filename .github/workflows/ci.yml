@@ -267,6 +267,10 @@ jobs:
               - 'serve/host/src/hub/room_turns.rs'
               - 'serve/host/src/agent/bot/room_turn.rs'
               - 'serve/host/src/runauth/room.rs'
+              # a room person's token is the core's now: the basis rules, the revoke of a member and the tool run
+              - 'core/runtime/src/runs.rs'
+              - 'core/runtime/src/runtools.rs'
+              - 'core/runtime/src/call.rs'
               - 'core/kernel/src/launch/room.rs'
               # RoomsRename.tla: a join, a removal and a leave over every id held_under returns (R-rename)
               - 'serve/host/src/chat/room_people.rs'
@@ -341,7 +345,7 @@ jobs:
             host_core:
               # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
               # memory and summary), and the libs those programs load on every call.
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/bin/kith-lifecycle,kernel/lib/kith_lifecycle.py,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-lifecycle-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-lifecycle,kernel/lib/kith_lifecycle.py,kernel/tests/kith-lifecycle-check,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -391,8 +395,6 @@ jobs:
               Migrate check|kernel/tests/kith-migrate-check
               Guest sandbox check|kernel/tests/kith-guest-sandbox-check
               Launchd check|kernel/tests/kith-launchd-check
-              Project check|kernel/tests/kith-project-check
-              Contract check (what the host reads, serve/contract/kernel)|kernel/tests/kith-contract-check
               Serve check|kernel/tests/kith-serve-check
               Info check|kernel/tests/kith-info-check
               Harness check (kith <agent> set harness, no Claude model on another harness)|kernel/tests/kith-harness-check
@@ -445,7 +447,6 @@ jobs:
               Schedule person check|kernel/tests/kith-sched-person-check
               Terminal flags check|kernel/tests/kith-terminal-flags-check
               Recall check|kernel/tests/kith-recall-check
-              Load check|kernel/tests/kith-load-check
               Guest helper check|kernel/tests/kith-guest-helper-check
               Wake check|kernel/tests/kith-wake-check
               Sessions core check (the kernel claim takers in Files and Writer mode, a fake core)|kernel/tests/kith-sessions-core-check
@@ -464,7 +465,6 @@ jobs:
               Doctor services check (kith doctor: an ok grant outside needs is fine, a missing one is a failure)|kernel/tests/kith-doctor-services-check
               New check (kith new --json - the agent made, or the error object and no folder left)|kernel/tests/kith-new-check
               Pkg json check (kith versions, history, pin, unpin, restore, install, share, deps, update, push, commit --json)|kernel/tests/kith-pkg-json-check
-              JSON misc check (--json on doctor, remote, ask ls, bug, backup add/remove, update self --check, wake status, lifecycle, chain, project)|kernel/tests/kith-json-misc-check
               Scratch check (the built-in scratch agent: engine per chat, never backed up or shared, keep as an agent)|kernel/tests/kith-scratch-check
               Core boundary check (kith-core stays sealed)|kernel/tests/kith-core-boundary-check
               Core boundary self-test (each rule fails on a deliberate violation)|kernel/tests/kith-core-boundary-check --selftest
@@ -473,7 +473,6 @@ jobs:
               Group check|kernel/tests/kith-group-check
               Send to check|kernel/tests/kith-send-to-check
               Schedule prune check|kernel/tests/kith-sched-prune-check
-              Project id lock check|kernel/tests/kith-project-id-lock-check
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -815,6 +814,48 @@ jobs:
         run: cargo test --manifest-path Cargo.toml -p kith-procstart --locked
       - name: Python side
         run: bash "$GITHUB_WORKSPACE/kernel/tests/kith-procstart-check"
+  # The kernel checks that need the kith program: `bin/project-id` is a stub for `kith kernel project-id`, so a check that registers
+  # or looks up a project (kith project, a launch with -p) or the guest client itself runs against the built program. The shards
+  # above have none. Runs on any kernel change, like them, and on any change to the program; only the one `kith` binary is built
+  # (the host's cache is restored).
+  kernel-program:
+    name: kernel checks with the kith program
+    needs: changes
+    # Also on a change to the program itself (core/kernel/src/project, serve/host/src/main.rs): host-build does not run these.
+    if: needs.changes.outputs.kernel == 'true' || needs.changes.outputs.host_core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install pinned toolchain
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: host-linux-test
+          save-if: false
+      - name: Build the kith program
+        run: cargo build --manifest-path serve/host/Cargo.toml --bin kith
+      - name: Checks
+        run: |
+          failed=0
+          for c in kernel/tests/kith-project-id-guest-check kernel/tests/kith-project-id-lock-check kernel/tests/kith-project-check \
+                   kernel/tests/kith-contract-check kernel/tests/kith-load-check kernel/tests/kith-json-misc-check; do
+            echo "::group::$c"
+            # stdin from /dev/null: a check that reads stdin must not eat the rest of the list.
+            if KITH_BIN="$PWD/serve/host/target/debug/kith" "$c" </dev/null; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error title=kernel check failed::$c"
+              failed=$((failed + 1))
+            fi
+          done
+          [ "$failed" = 0 ] || { echo "$failed check(s) failed, see the ::error lines above"; exit 1; }
 
   # Builds every test binary once and ships them as a nextest archive, so the shards below only run tests.
   host-build:
@@ -868,7 +909,8 @@ jobs:
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
           # The retire-python gate: kernel/lib/requires-switched.txt is shipped and valid, and cutover status answers by exit code.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
-          # The pkg and project-id switches: the launch's two lookups are the core's, per verb, and a guest's project-id stays Python.
+          # The pkg switch and the project-id stub: the launch's pkg lookup is the core's, per verb, and project-id (a stub for the
+          # Rust verb) is the program's in the bash launch and in process in the Rust one.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
           # The cost switch: every kith-cost verb (tag and record too) is the core's, KITH_CORE=python the Python's, and the launch's budget checks hold on both paths.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
@@ -1396,7 +1438,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
-    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, registry-step, schedule-fire, procstart-macos, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, kernel-program, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, registry-step, schedule-fire, procstart-macos, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
