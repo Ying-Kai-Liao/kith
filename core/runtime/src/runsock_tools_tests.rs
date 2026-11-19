@@ -129,9 +129,11 @@ fn recall_memory_and_project_id_run_as_the_tokens_identity_through_run_sock() {
         got["stdout"], "memory:sam:echo:::alpha:unset:unset:search zebra\n",
         "{got}"
     );
+    // `--info` of the token's own project is answered in process (`project_info`, below), not by the stand-in tool: the
+    // stub's output never shows. The registry is the process's own, so this only checks the stand-in did not run.
     let got = r.ask(&run, "projectId", &["--info", "alpha"], || {});
-    assert_eq!(
-        got["stdout"], "project:sam:echo::::unset:unset:--info alpha\n",
+    assert!(
+        !got["stdout"].as_str().unwrap_or("").starts_with("project:"),
         "{got}"
     );
     // The project is the token's own: another one is refused before anything runs.
@@ -272,6 +274,35 @@ fn the_host_asks_the_core_who_a_token_is_and_a_revoke_or_a_stranger_gets_no() {
     let _ = sleeper.kill();
     let _ = sleeper.wait();
     drop(r.d);
+}
+
+/// A guest's `--info` is the kernel's own `project::run` on the registry of the kernel the finder gave (here the state is
+/// named by the env the core passes), never the stub that sits at bin/project-id.
+#[test]
+fn project_info_is_answered_in_process_from_the_registry() {
+    let t = tempfile::tempdir().unwrap();
+    let state = t.path().join("st");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(
+        state.join("projects.json"),
+        r#"{"projects": {"alpha": {"remotes": [], "paths": [], "home": "/h/alpha"}, "beta": {"parent": "alpha", "remotes": [], "paths": []}}}"#,
+    )
+    .unwrap();
+    let kernel = fake_kernel(t.path());
+    let state_name = state.to_string_lossy().into_owned();
+    let env = move |n: &str| (n == "KITH_STATE").then(|| state_name.clone());
+    let ask = |args: &[&str]| {
+        let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+        crate::runtools::project_info(&kernel, t.path().to_path_buf(), &env, &args)
+    };
+    let got = ask(&["--info", "beta"]);
+    assert_eq!(
+        (got["stdout"].as_str(), got["code"].as_i64()),
+        (Some("beta\t-\nalpha\t/h/alpha\n"), Some(0)),
+        "{got}"
+    );
+    let got = ask(&["--info", "nope"]);
+    assert_eq!(got["code"], 1, "{got}");
 }
 
 #[test]

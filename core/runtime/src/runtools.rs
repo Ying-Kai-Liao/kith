@@ -118,23 +118,46 @@ fn kernel_bin() -> Option<PathBuf> {
     }
 }
 
-/// The program to run for `tool` beside the `kith` entry point (`kith recall` is a subcommand of it, the other two are
-/// programs of the same `bin/`).
+/// The program to run for `tool` beside the `kith` entry point (`kith recall` is a subcommand of it, `kith-memory` is a
+/// program of the same `bin/`). `project-id` is not run at all: [`project_info`] answers it in this process.
 fn program(bin: &Path, tool: Tool) -> Option<(PathBuf, Option<&'static str>)> {
     match tool {
         Tool::Recall => Some((bin.to_path_buf(), Some("recall"))),
-        Tool::MemorySearch | Tool::ProjectId => {
-            let name = if tool == Tool::MemorySearch {
-                "kith-memory"
-            } else {
-                "project-id"
-            };
+        Tool::MemorySearch => {
             let real = bin.canonicalize().unwrap_or_else(|_| bin.to_path_buf());
-            Some(real.parent()?.join(name))
+            Some(real.parent()?.join("kith-memory"))
                 .filter(|p| p.is_file())
                 .map(|p| (p, None))
         }
+        Tool::ProjectId => None,
     }
+}
+
+/// `project-id --info ID` for a guest (the only form besides the bare one, which the core answers from the token): the
+/// kernel's own `project::run` in this process, on the registry of the kernel the finder returned, the way
+/// `kith kernel project-id --kernel K` would answer it. Not a guest run (`guest: None`): this is the core's side of the
+/// socket. Never the sh stub at `bin/project-id`, which would have to find a kith program of its own.
+pub(crate) fn project_info(
+    bin: &Path,
+    home: PathBuf,
+    env: kith_kernel::paths::Env<'_>,
+    args: &[String],
+) -> Value {
+    let real = bin.canonicalize().unwrap_or_else(|_| bin.to_path_buf());
+    let kernel = real
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    let state = kith_kernel::paths::paths(&home, &kernel, env).state;
+    let ctx = kith_kernel::project::Ctx {
+        state,
+        home,
+        cwd: std::env::current_dir().unwrap_or_default(),
+        guest: None,
+    };
+    let out = kith_kernel::project::run(&ctx, args);
+    json!({"stdout": out.stdout, "stderr": out.stderr, "code": out.code})
 }
 
 fn both(command: &mut Command, name: &str, value: &str) {
@@ -146,6 +169,15 @@ fn both(command: &mut Command, name: &str, value: &str) {
 pub(crate) fn run(tool: Tool, who: &RunIdentity, args: &[String]) -> Result<Value> {
     let unavailable = || Error::Refused("kith isn't available on this computer".into());
     let bin = kernel_bin().ok_or_else(unavailable)?;
+    if tool == Tool::ProjectId {
+        let home = kith_kernel::paths::process_home();
+        return Ok(project_info(
+            &bin,
+            home,
+            &kith_kernel::paths::process_env,
+            args,
+        ));
+    }
     let (path, sub) =
         program(&bin, tool).ok_or_else(|| Error::Refused("that isn't available here".into()))?;
     let mut command = Command::new(path);
