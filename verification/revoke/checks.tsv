@@ -256,3 +256,27 @@ owed-sweep	INVARIANT	TypeOK	pass
 owed-sweep	PROPERTY	RetryKeepsRestored	pass
 owed-sweep	PROPERTY	NoLiveProc	pass
 broken-owed-retry-revokes	PROPERTY	RetryKeepsRestored	fail
+# --- the switched guest doors (M2(b)): start = the core's one-step doors.start (the ROW), then the box with no check; the sweep stops the box of a swept
+# row and confirms it gone only when no box can start; a timed-out core call is UNKNOWN (no start, no sweep) ---
+switched-core-door	INVARIANT	TypeOK	pass
+switched-core-door	PROPERTY	DoorD2	pass
+switched-core-door	PROPERTY	DoorD2c	pass
+switched-core-door	PROPERTY	DoorD1	pass
+switched-core-door	PROPERTY	DoorNoResurrect	pass
+switched-core-door	INVARIANT	DoorsCutWithRevoke	pass
+switched-core-door	INVARIANT	DoorCutAtSweep	pass
+switched-core-door	INVARIANT	NoOrphanBox	pass
+switched-core-door	PROPERTY	BoxD1	pass
+# the box starts after the row without a check: a revoke can land between (bounded by BoxD1, the revoke's sweep and the pass after it)
+switched-core-door	PROPERTY	BoxD2	fail
+switched-core-door-slow	INVARIANT	TypeOK	pass
+switched-core-door-slow	PROPERTY	DoorD2	pass
+switched-core-door-slow	PROPERTY	DoorD2c	pass
+switched-core-door-slow	PROPERTY	DoorD1	pass
+switched-core-door-slow	PROPERTY	BoxD1	pass
+switched-core-door-slow	INVARIANT	NoOrphanBox	pass
+switched-core-door-slow	PROPERTY	LiveDoorKept	pass
+# a timeout read as "go" starts a box with no row; read as "revoked" it ends a live door of an allowed person; a row confirmed gone before its box started leaves the box unswept
+broken-door-timeout-open	INVARIANT	NoOrphanBox	fail
+broken-door-timeout-kills	PROPERTY	LiveDoorKept	fail
+broken-door-reap-live	INVARIANT	NoOrphanBox	fail

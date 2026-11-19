@@ -1,0 +1,312 @@
+#!/usr/bin/env bash
+# kith-door-core-check: a guest door's start and sweep on the core's `doors.*` rows (M2(b), kernel/lib/kith_door_core.py), on a
+# Mac whose auth.json is the authority tombstone. The program here is a stub that plays the core (`kith kernel core-call
+# METHOD --params-stdin`): it answers, refuses, is down, or hangs. What is checked is the rule for a call with no answer:
+#   - a start with no answer (a hung core, no daemon, an old kith) starts nothing and leaves no claim behind;
+#   - a sweep with no answer leaves running doors alone and says `unknown` (the host asks again soon), while a named person, a
+#     gone supervisor and a definite "revoked" still end a door;
+#   - the core's swept rows are stopped, and confirmed gone (doors.end) only when their supervisor is gone;
+#   - a row the sweep swept before the box was marked live stops the box (markLive says lost);
+#   - an unswitched Mac never calls the core, and its claim files are swept as before.
+# kill, the process scan and kith-auth's check are replaced (the real ones are macOS-only, kith-guest-door-check); the
+# program, the claim files and the calls are real. Throwaway folders; nothing real is touched.
+#
+#   kernel/tests/kith-door-core-check
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-door-core-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_AUTH=$T/auth.json KITH_BIN=$T/prog
+export KITH_DOOR_CORE_SECS=1
+unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_MACHINE HQ_MACHINE KITH_SERVE_DIR
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME"
+
+# The stub program. $T/mode: ok | hang | down (exit 3) | refuse (exit 4) | old (exit 2). $T/calls logs `METHOD params`.
+cat > "$T/prog" <<'EOF'
+#!/usr/bin/env python3
+import json, os, sys, time
+T = os.path.dirname(os.path.realpath(__file__))
+method = sys.argv[3]
+p = json.loads(sys.stdin.read() or '{}')
+open(T + '/calls', 'a').write(method + ' ' + json.dumps(p, sort_keys=True) + '\n')
+mode = open(T + '/mode').read().strip() if os.path.exists(T + '/mode') else 'ok'
+if mode == 'hang':
+    time.sleep(8)
+if mode == 'down':
+    sys.stderr.write('no core daemon answers\n'); sys.exit(3)
+if mode == 'refuse':
+    sys.stderr.write('kith-core: doors: someone is cut off\n'); sys.exit(4)
+if mode == 'old':
+    sys.stderr.write('core-call: not one of\n'); sys.exit(2)
+if method == 'doors.start':
+    out = {'id': p['id'], 'state': 'starting', 'version': 3, 'repeat': False}
+elif method == 'doors.markLive':
+    lost = os.path.exists(T + '/lost')
+    out = {'result': 'lost', 'state': 'swept'} if lost else {'result': 'live'}
+elif method == 'doors.end':
+    out = {'result': 'ended'}
+elif method == 'doors.sweep':
+    out = json.load(open(T + '/sweep.json')) if os.path.exists(T + '/sweep.json') else {'swept': [], 'pending': []}
+else:
+    sys.stderr.write('unknown ' + method + '\n'); sys.exit(4)
+print(json.dumps(out))
+EOF
+chmod +x "$T/prog"
+
+cat > "$T/t.py" <<'EOF'
+import json, os, sys, subprocess, time
+sys.path.insert(0, os.environ['KERNEL'] + '/lib')
+import kith_door, kith_door_core
+real_check = kith_door.check
+T = os.environ['T']
+fails = []
+
+
+def ok(cond, what):
+    print(('ok   ' if cond else 'FAIL ') + what)
+    if not cond:
+        fails.append(what)
+
+
+def mode(m):
+    open(T + '/mode', 'w').write(m)
+
+
+def calls():
+    return [l.split(' ', 1)[0] for l in open(T + '/calls').read().splitlines()] if os.path.exists(T + '/calls') else []
+
+
+def reset():
+    for f in ('calls', 'mode', 'lost', 'sweep.json'):
+        if os.path.exists(f'{T}/{f}'):
+            os.unlink(f'{T}/{f}')
+    for f in kith_door.run_dir().iterdir():
+        f.unlink() if f.is_file() else None
+    kith_door_core._bin.clear()
+
+
+def tombstone(on):
+    with open(os.environ['KITH_AUTH'], 'w') as f:
+        json.dump({'kith_tombstone': 1, 'module': 'authority', 'rollback': 'kith rollback authority'} if on else {'people': {}}, f)
+
+
+def claim(id_, person='kim', core=True, left=False):
+    c = {'claim': id_, 'pid': 4242, 'procStart': 1.0, 'person': person, 'basis': [person], 'gen': None, 'level': 'person',
+         'agent': 'video', 'door': 'render@abc', 'since': time.time() - 5, 'core': core}
+    if left:
+        c['left'] = True
+    (kith_door.run_dir() / f'{id_}.json').write_text(json.dumps(c))
+    return c
+
+
+A, B, C, D = 'a' * 16, 'b' * 16, 'c' * 16, 'd' * 16
+killed, checks, alive_claims, alive_pids = [], [], set(), set()
+
+
+def fake_kill(claim, since, parent=None, limit=10):
+    killed.append(claim)
+    return set()
+
+
+kith_door.SANDBOX_EXEC = '/bin/sh'   # the real sandbox is macOS-only; the claim and the calls are what is tested
+kith_door.kill = fake_kill
+kith_door._alive = lambda c: c['claim'] in alive_claims
+kith_door.proc_info = lambda pid: (1, 1.0) if pid in alive_pids else None
+
+
+def fake_check(agent, person, door, env=os.environ, basis=(), timeout=30):
+    checks.append(person)
+    return verdict.get(person, {'ok': True, 'state': 'ok', 'why': ''})
+
+
+verdict = {}
+kith_door.check = fake_check
+
+
+def sweep(persons=(), recheck=True):
+    killed.clear()
+    checks.clear()
+    return kith_door.sweep_report(persons, recheck)
+
+
+# -- switched() follows the tombstone
+tombstone(False)
+ok(not kith_door_core.switched(), 'a plain auth.json is not switched')
+tombstone(True)
+ok(kith_door_core.switched(), 'the tombstone is switched')
+
+# -- the call path: answers, refusal, no answer
+reset()
+r = kith_door_core.start('video', 'render@abc', 'kim', '/f', A, 77)
+ok(r.kind == 'ok' and r.body['version'] == 3, 'doors.start answers the row')
+p = json.loads(open(T + '/calls').read().split(' ', 1)[1])
+ok(p['agent'] == 'video' and p['door'] == 'render@abc' and p['person'] == 'kim' and p['id'] == A and p['pid'] == 77
+   and 'kernel' in p and 'home' in p and 'KITH_PERSON' not in p.get('env', {}), 'the start carries the door, the person, the id, the supervisor and the caller view')
+mode('refuse')
+r = kith_door_core.start('video', 'render@abc', 'kim', '/f', A, 77)
+ok(r.kind == 'refused' and 'cut off' in r.why, 'a start the core refused (exit 4) is a refusal, with its words')
+ok(kith_door_core.sweep([], True) is None and kith_door_core.mark_live(A, 3) is None, 'exit 4 of a sweep or a mark-live is no answer, not a refusal')
+mode('down')
+ok(kith_door_core.start('video', 'render@abc', 'kim', '/f', A, 77).kind == 'unknown', 'no daemon is unknown')
+mode('old')
+r = kith_door_core.start('video', 'render@abc', 'kim', '/f', A, 77)
+ok(r.kind == 'unknown' and 'kith update' in r.why, 'a kith program that does not know the call is unknown, and says to update')
+mode('hang')
+t0 = time.time()
+r = kith_door_core.start('video', 'render@abc', 'kim', '/f', A, 77)
+ok(r.kind == 'unknown' and time.time() - t0 < 6, 'a hung core is unknown after the wait, not a hang')
+ok(kith_door_core.sweep(['kim'], True) is None, 'a hung core: the sweep has no answer')
+
+# -- kith-auth's check: no answer is `unknown`, never a verdict
+class P:
+    stdout = json.dumps({'ok': False, 'error': 'authority moved to the core, and it gave no answer: x'})
+
+
+real_run = subprocess.run
+subprocess.run = lambda *a, **k: P()
+v = real_check('video', 'kim', 'render@abc')
+ok(v['state'] == 'unknown' and not v['ok'], "kith-auth's {ok:false,error} (a core that did not answer) is unknown")
+
+
+def boom(*a, **k):
+    raise subprocess.TimeoutExpired('kith-auth', 30)
+
+
+subprocess.run = boom
+ok(real_check('video', 'kim', 'render@abc')['state'] == 'unknown', 'a kith-auth that timed out is unknown')
+subprocess.run = real_run
+
+# -- the sweep with a hung core
+tombstone(True)
+reset()
+mode('hang')
+claim(A, 'kim', core=True)            # a door on the core, its supervisor running
+claim(B, 'lee', core=False)           # a door from before the switch, its supervisor running
+alive_claims.update({A, B})
+verdict.clear()
+ended, unknown = sweep()
+ok(ended == [] and unknown and killed == [], 'a hung core: no door is ended, the pass says unknown')
+ok(checks == ['lee'], "the core's door is not checked by kith-auth; the one from before the switch is (and is fine)")
+verdict['lee'] = {'ok': False, 'state': 'unknown', 'why': 'kith-auth could not say'}
+ended, unknown = sweep()
+ok(ended == [] and unknown and killed == [], 'a check with no answer leaves the old door running, unknown')
+verdict['lee'] = {'ok': False, 'state': 'held', 'why': 'not in sync'}
+ended, unknown = sweep()
+ok(ended == [] and killed == [], 'held leaves the door running (as before)')
+verdict['lee'] = {'ok': False, 'state': 'revoked', 'why': 'lee was removed'}
+ended, unknown = sweep()
+ok(ended == [B] and killed == [B], 'a definite no from kith-auth still ends an old door even when the core is hung')
+mode('hang')
+ended, unknown = sweep(['kim'])
+ok(A in ended and unknown, 'a named person still ends their door with a hung core (the revoke named them), and the pass says unknown')
+ok('doors.end' not in calls(), 'a live supervisor confirms its own row: the sweep does not')
+
+# -- a gone supervisor and a claim that gave up end without the core
+reset(); mode('down')
+claim(A, 'kim', core=True)
+claim(B, 'kim', core=True, left=True)
+alive_claims.clear(); alive_claims.add(B)
+ended, unknown = sweep()
+ok(sorted(ended) == [A, B] and unknown, 'a gone supervisor, and a claim that gave up, end with no core')
+
+# -- the core's rows
+reset(); mode('ok')
+claim(A, 'kim', core=True)            # swept by the revoke, its supervisor running
+claim(B, 'kim', core=True)            # swept, its supervisor gone
+alive_claims.clear(); alive_claims.add(A)
+alive_pids.clear(); alive_pids.update({5001})
+(open(T + '/sweep.json', 'w')).write(json.dumps({'swept': [{'id': A, 'pid': 4242, 'startedAt': 1000}, {'id': B, 'pid': 4242, 'startedAt': 1000}],
+                                                'pending': [{'id': C, 'pid': 5001, 'startedAt': 2000}, {'id': D, 'pid': 6001, 'startedAt': 2000}]}))
+ended, unknown = sweep(['kim'])
+ok(sorted(ended) == [A, B, C, D] and not unknown, "the core's swept and pending rows are all stopped")
+ended_calls = [json.loads(l.split(' ', 1)[1])['id'] for l in open(T + '/calls').read().splitlines() if l.startswith('doors.end')]
+ok(sorted(ended_calls) == [B, D], 'doors.end only for rows whose supervisor is gone (B: claim, supervisor gone; D: no claim file, pid gone)')
+ok(A not in ended_calls and C not in ended_calls, 'a live supervisor (a claim file, or only a row) is not confirmed: it may still start its box')
+ok(not (kith_door.run_dir() / f'{B}.json').exists() and (kith_door.run_dir() / f'{A}.json').exists(), "a gone supervisor's claim file is cleared, a live one's stays")
+sweepcall = [l for l in open(T + '/calls').read().splitlines() if l.startswith('doors.sweep')][0]
+ok(json.loads(sweepcall.split(' ', 1)[1])['persons'] == ['kim'], 'the named people go to the core')
+
+# -- an unswitched Mac never calls the core
+tombstone(False)
+reset(); mode('ok')
+claim(A, 'kim', core=False)
+alive_claims.clear(); alive_claims.add(A)
+verdict.clear(); verdict['kim'] = {'ok': False, 'state': 'revoked', 'why': 'x'}
+ended, unknown = sweep()
+ok(ended == [A] and checks == ['kim'] and calls() == [], 'unswitched: the file way (kith-auth check), the core is never asked')
+claim(B, 'kim', core=True)            # a claim from a switched time, the Mac rolled back
+alive_claims.add(B)
+ended, unknown = sweep()
+ok(B in ended and calls() == [], 'after a rollback a core claim is judged by the file rules')
+
+# -- run(): the start
+import tempfile
+tombstone(True)
+folder = tempfile.mkdtemp(dir=T)
+cache = tempfile.mkdtemp(dir=T)
+open(cache + '/.ready', 'w').write('')
+decl = {'name': 'render', 'digest': 'abc', 'tools': ['node'], 'writes': ['out'], 'bin': 'x.mjs', 'args': [], 'env': []}
+kith_door.tools = lambda d, env=os.environ: {'node': '/bin/sh'}
+kith_door.cache_dir = lambda a, d: __import__('pathlib').Path(cache)
+kith_door.in_slice = lambda path, agent, person: True
+kith_door.door_procs = lambda *a, **k: set()
+launched = []
+real_popen = subprocess.Popen
+
+
+def fake_popen(argv, **kw):
+    if argv[0] == os.environ['KITH_BIN']:   # the stub core, started by kith_door_core
+        return real_popen(argv, **kw)
+    launched.append(argv)
+    kw.pop('pass_fds', None)
+    return real_popen(['/bin/sh', '-c', 'echo hello'], **{k: v for k, v in kw.items() if k in ('stdout', 'stderr', 'stdin')})
+
+
+kith_door.subprocess.Popen = fake_popen
+kith_door.profile = lambda **k: 'x'
+kith_door._chrome = lambda c: ''
+
+
+def run():
+    launched.clear()
+    killed.clear()
+    return kith_door.run('video', 'kim', decl, folder, env=dict(os.environ))
+
+
+for m, what in (('hang', 'a hung core'), ('down', 'no daemon'), ('old', 'an old kith program')):
+    reset(); mode(m)
+    try:
+        run()
+        ok(False, f'{what}: the door must not start')
+    except kith_door.DoorError as e:
+        ok(launched == [] and 'did not answer' in str(e), f'{what}: the door is not started ({e})')
+    ok(list(kith_door.run_dir().glob('*.json')) == [] and calls().count('doors.start') == 1, f'{what}: no claim file is left')
+    ok('doors.end' in calls(), f'{what}: the row the start may have written is ended (best effort)')
+reset(); mode('refuse')
+try:
+    run()
+    ok(False, 'a refused start must not start')
+except kith_door.DoorError as e:
+    ok(launched == [] and 'cut off' in str(e) and 'doors.end' not in calls(), f'a refused start: no box, the core\'s words ({e}), no row to end')
+reset(); mode('ok')
+code, tail = run()
+ok(code == 0 and len(launched) == 1 and 'hello' in tail, 'an answered start runs the box')
+ok(calls() == ['doors.start', 'doors.markLive', 'doors.end'], f'the calls are start, mark live, end: {calls()}')
+ok(list(kith_door.run_dir().glob('*.json')) == [], 'the finished door left no claim file')
+reset(); mode('ok'); open(T + '/lost', 'w').write('')
+code, tail = run()
+ok(code is None and 'stopped' in tail and killed, 'a row swept before the box was marked live (lost) stops the box')
+
+# -- a room door keeps the file path (the core row has no basis)
+reset(); mode('down')
+kith_door.check = lambda *a, **k: {'ok': True, 'state': 'ok', 'why': ''}
+code, tail = kith_door.run('video', 'room-1', decl, folder, env=dict(os.environ), basis=['kim', 'lee'], gen=1)
+ok(code == 0 and calls() == [], 'a room door never asks the core for a row')
+
+print('\n%d failed' % len(fails) if fails else '\nall passed')
+sys.exit(1 if fails else 0)
+EOF
+KERNEL=$KERNEL T=$T python3 "$T/t.py"

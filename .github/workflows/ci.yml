@@ -218,6 +218,7 @@ jobs:
               - 'kernel/bin/kith'
               - 'kernel/bin/kith-permit'
               - 'kernel/lib/kith_door.py'
+              - 'kernel/lib/kith_door_core.py'
               - 'serve/host/src/doors.rs'
               - 'core/runtime/src/authority/**'
               - 'core/runtime/src/doors/**'
@@ -447,6 +448,7 @@ jobs:
               Trajectory check|kernel/tests/kith-trajectory-check
               Bug check|kernel/tests/kith-bug-check
               Guest door check|kernel/tests/kith-guest-door-check
+              Door core check (a switched Mac's guest doors on the core's rows: an unknown answer starts and sweeps nothing)|kernel/tests/kith-door-core-check
               Schedule json check (kith schedule ls/add/rm/pause/resume/run/log --json, the error object)|kernel/tests/kith-sched-json-check
               Auth json check (kith auth ls/granted/grant/revoke --json, no secret value in any output)|kernel/tests/kith-auth-json-check
               Doctor services check (kith doctor: an ok grant outside needs is fine, a missing one is a failure)|kernel/tests/kith-doctor-services-check

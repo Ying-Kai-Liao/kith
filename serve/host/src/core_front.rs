@@ -517,6 +517,13 @@ const CORE_CALL_METHODS: &[&str] = &[
     "schedule.runNow",
     // the probe before a Keychain write: only a daemon that is switched answers it, see `DAEMON_ONLY_READS`
     "people.revision",
+    // a guest door's row on a switched Mac (kernel/lib/kith_door_core.py): start, mark live, end and the sweep. Daemon only (not
+    // embedded: no daemon is exit 3, which the caller reads as "no answer"). Exit 4 also covers a bad call, so only `doors.start`
+    // reads it as a refusal.
+    "doors.start",
+    "doors.markLive",
+    "doors.end",
+    "doors.sweep",
 ];
 
 /// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core

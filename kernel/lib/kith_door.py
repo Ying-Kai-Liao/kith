@@ -52,6 +52,7 @@ import sys
 import time
 from pathlib import Path
 
+import kith_door_core
 import kith_jobs
 from kith_paths import HOME, guest_sandbox, guest_scrub, paths
 
@@ -60,6 +61,7 @@ PRELOAD, WRAPPER = 'door-preload.mjs', 'door-chrome'
 LISTENERS = 4          # hyperframes render starts one file server; spares cost nothing
 SERVE_PORTS = (19224,)
 RUN_LIMIT_S = 3600
+CHECK_SECS, SWEEP_BUDGET_S = 8, 35   # a sweep's checks of old-style claims (the host's own limit is 60 s)
 SANDBOX_EXEC = '/usr/bin/sandbox-exec'
 
 SYSTEM_READ = ('/System', '/usr/lib', '/usr/share', '/Library/Fonts', '/Library/Preferences/Logging', '/private/etc',
@@ -81,6 +83,10 @@ _kept = []    # the sockets of a door a process of which would not die: held whi
 
 class DoorError(Exception):
     """What the agent is told when a door can't run."""
+
+
+class _Lost(Exception):
+    """The core's row of this door was swept before its box was marked live: the box must not run."""
 
 
 # ---- the profile
@@ -411,17 +417,21 @@ def auth_lock():
     return open(f.with_name(f.name + '.lock'), 'a')
 
 
-def check(agent, person, door, env=os.environ, basis=()):
+def check(agent, person, door, env=os.environ, basis=(), timeout=30):
     """kith-auth door: {ok, state, why}. Read-only; the caller holds the lock when it is the start. A room person's door
-    (`room-<id>`) is checked over its basis, every person of it ANDed (rooms with people, rule 11)."""
+    (`room-<id>`) is checked over its basis, every person of it ANDed (rooms with people, rule 11). No answer (a timeout, a
+    kith-auth that died, a core that did not answer: it prints {ok: false, error} with no state) is state `unknown`, never a
+    verdict: a start refuses on it, a sweep leaves the running door alone."""
     try:
         extra = ['--basis', ','.join(basis)] if basis else []
         r = subprocess.run([str(LIB.parent / 'bin' / 'kith-auth'), 'door', agent, person, door, *extra, '--json'], env=env,
-                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
         v = json.loads(r.stdout)
-        return v if isinstance(v, dict) else {'ok': False, 'state': 'error', 'why': 'no answer'}
+        if isinstance(v, dict) and v.get('state') and 'ok' in v:
+            return v
+        return {'ok': False, 'state': 'unknown', 'why': (v.get('error') if isinstance(v, dict) else None) or 'no answer'}
     except (OSError, ValueError, subprocess.TimeoutExpired) as e:
-        return {'ok': False, 'state': 'error', 'why': f'kith-auth could not say ({type(e).__name__})'}
+        return {'ok': False, 'state': 'unknown', 'why': f'kith-auth could not say ({type(e).__name__})'}
 
 
 def _claims():
@@ -528,24 +538,57 @@ def run(agent, person, decl, folder, env=os.environ, on_line=None, basis=(), gen
     parent = os.getppid()
     since = time.time()
     p, tail, record = None, [], None
+    # A person's own door on a switched Mac is a row in the core (kith_door_core); a room door (a basis) keeps the file path.
+    on_core = not basis and kith_door_core.switched()
+    version = None
 
     def stop(*_):
         raise KeyboardInterrupt
 
     old = signal.signal(signal.SIGTERM, stop)
     try:
-        with auth_lock() as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            v = check(agent, person, piece(decl), env, basis)
-            if not v.get('ok'):
-                raise DoorError(v.get('why') or 'not allowed')
-            record = {'claim': claim, 'pid': os.getpid(), 'procStart': me[1] if me else 0, 'person': person,
-                      'basis': list(basis) or [person], 'gen': gen, 'level': 'room' if basis else 'person',
-                      'agent': agent, 'door': piece(decl), 'since': since,
-                      'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+        mine = {'claim': claim, 'pid': os.getpid(), 'procStart': me[1] if me else 0, 'person': person,
+                'basis': list(basis) or [person], 'gen': gen, 'level': 'room' if basis else 'person',
+                'agent': agent, 'door': piece(decl), 'since': since, 'core': on_core,
+                'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+
+        def launch():
+            return subprocess.Popen(argv, env=box_env, cwd=tmp, start_new_session=True, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, pass_fds=fds)
+
+        if on_core:
+            # D2 on the core: doors.start checks and writes the row in one step there, and a revoke's own step sweeps the row.
+            # The claim file goes first, so the file's rules (a named person, a gone supervisor) already cover this door. Only an
+            # answer starts the box; no answer (a slow or absent core) is no start, and the row it may have written is ended.
+            # No auth lock: the core is the one lock here, and a core call may take seconds.
+            record = mine
             (d / f'{claim}.json').write_text(json.dumps(record))
-            p = subprocess.Popen(argv, env=box_env, cwd=tmp, start_new_session=True, stdin=subprocess.DEVNULL,
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, pass_fds=fds)
+            a = kith_door_core.start(agent, piece(decl), person, real, claim, os.getpid())
+            if a.kind != 'ok':
+                if a.kind == 'unknown':
+                    kith_door_core.end(claim)
+                    raise DoorError(f"the Kith core did not answer ({a.why}); the door was not started, try again")
+                raise DoorError(a.why or 'not allowed')
+            version = a.body['version']
+            p = launch()
+        else:
+            with auth_lock() as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                v = check(agent, person, piece(decl), env, basis)
+                if not v.get('ok'):
+                    raise DoorError(v.get('why') or 'not allowed')
+                record = mine
+                (d / f'{claim}.json').write_text(json.dumps(record))
+                p = launch()
+        if on_core:
+            # the box is up: a sweep that got to the row first says so (lost) and the box stops. No answer leaves it running:
+            # the row is open under this process, so the next sweep pass sweeps it if it should go.
+            for _ in range(3):
+                live = kith_door_core.mark_live(claim, version)
+                if live is not None:
+                    break
+            if live is False:
+                raise _Lost
         sel = selectors.DefaultSelector()
         sel.register(p.stdout, selectors.EVENT_READ)
         buf, ended = b'', False
@@ -570,7 +613,7 @@ def run(agent, person, decl, folder, env=os.environ, on_line=None, basis=(), gen
         if code is not None and code < 0:    # a sweep killed it
             code = None
             tail.append('the door was stopped')
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, _Lost):
         code = None
         tail.append('the door was stopped')
     except subprocess.TimeoutExpired:
@@ -599,34 +642,74 @@ def run(agent, person, decl, folder, env=os.environ, on_line=None, basis=(), gen
             for s in socks:     # only now: no door process is left that could take the port by an implicit bind
                 s.close()
             _forget(claim)
+        if on_core and version is not None and not left:
+            kith_door_core.end(claim)   # a missed one is swept as "its supervisor is gone"
     return code, '\n'.join(tail)
 
 
 def sweep(persons=(), recheck=True):
-    """Kills the doors of `persons`, every door whose supervisor is gone, and (recheck) every door its person may no
-    longer run. Returns the claims it ended."""
+    """The claims it ended (sweep_report's first half)."""
+    return sweep_report(persons, recheck)[0]
+
+
+def _supervisor_up(c):
+    """Whether the supervisor of a claim (or of a core row we have no file for) still runs."""
+    if c.get('row_only'):
+        return bool(c.get('pid')) and proc_info(int(c['pid'])) is not None
+    return _alive(c)
+
+
+def sweep_report(persons=(), recheck=True):
+    """(claims ended, unknown): kills the doors of `persons`, every door whose supervisor is gone, and (recheck) every door its
+    person may no longer run. `unknown` is true when a check got no answer (the core timed out, kith-auth could not say): that
+    door is left running, not ended, and the caller asks again soon. What needs no answer still ends: a named person, a gone
+    supervisor, a claim that gave up on its box.
+
+    On a switched Mac a person's own door is a row in the core. Its doors.sweep decides the access (the revoke's own transaction
+    already swept the rows of a revoked person) and answers the rows to stop; this process stops their boxes. Every claim file is
+    also judged by the local rules, in both modes. A row is confirmed gone (doors.end) only once its supervisor is gone: while it
+    runs it may still start its box, and a reaped row is returned by no later sweep. Its own `run` ends it when the box is gone.
+    A claim file with no row (a door from before the switch, a room door) is judged on the file's way."""
     if not os.path.exists(SANDBOX_EXEC):
-        return []
-    ended = []
+        return [], False
+    ended, unknown = [], False
+    on_core = kith_door_core.switched()
+    rows = kith_door_core.sweep(persons, recheck) if on_core else []   # first: it has the longest wait, and holds no lock
+    if rows is None:
+        rows, unknown = [], True
+    by_row = {r['id']: r for r in rows}
+    budget = time.monotonic() + SWEEP_BUDGET_S
     with auth_lock() as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)    # no start is half done while the claims are read
-        doomed = []
+        doomed, seen = [], set()
         for c in _claims():
             basis = basis_of(c)
-            if basis is None or set(basis) & set(persons) or not _alive(c) or c.get('left'):
+            seen.add(c['claim'])
+            if basis is None or set(basis) & set(persons) or not _alive(c) or c.get('left') or c['claim'] in by_row:
                 doomed.append(c)
-            elif recheck:
+            elif recheck and not (on_core and c.get('core')):   # the core's rows were rechecked by the core
+                # each check is capped, and the pass as a whole: the host stops a sweep at 60 s, and a door whose check did not
+                # run is left running (unknown), not ended
                 v = check(str(c.get('agent')), str(c.get('person')), str(c.get('door')),
-                          basis=basis if str(c.get('person')).startswith('room-') else ())
-                if not v.get('ok') and v.get('state') != 'held':
+                          basis=basis if str(c.get('person')).startswith('room-') else (), timeout=CHECK_SECS) \
+                    if time.monotonic() < budget else {'ok': False, 'state': 'unknown'}
+                if v.get('state') == 'unknown':
+                    unknown = True
+                elif not v.get('ok') and v.get('state') != 'held':
                     doomed.append(c)
+    for r in rows:   # a row whose claim file is gone or not yet written
+        if r['id'] not in seen:
+            doomed.append({'claim': r['id'], 'since': r['since'], 'pid': r['pid'], 'core': True, 'row_only': True})
     for c in doomed:
         if kill(c['claim'], float(c.get('since') or 0)):
             continue               # one would not die: the claim stays, and the next sweep tries again
-        if not _alive(c) or c.get('left'):
-            _forget(c['claim'])    # a live supervisor cleans up its own when its box ends, unless it gave up on it
+        if not _supervisor_up(c) or c.get('left'):
+            if not c.get('row_only'):
+                _forget(c['claim'])    # a live supervisor cleans up its own when its box ends, unless it gave up on it
+            if c.get('core') or c['claim'] in by_row:
+                kith_door_core.end(c['claim'])   # nothing can start this box now: the row is confirmed gone
         ended.append(c['claim'])
-    return ended
+    return ended, unknown
 
 
 def package(agent):
@@ -652,7 +735,8 @@ def main(argv):
             rest = rest[2:]
         if rest not in ([], ['--no-recheck']):
             raise DoorError('sweep [--person ID]... [--no-recheck]')
-        print(json.dumps({'ended': sweep(persons, recheck=not rest)}))
+        ended, unknown = sweep_report(persons, recheck=not rest)
+        print(json.dumps({'ended': ended, 'unknown': unknown}))
         return 0
     if argv == ['ls']:
         print(json.dumps([{**c, 'running': _alive(c)} for c in _claims()]))
