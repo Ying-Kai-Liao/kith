@@ -1009,7 +1009,7 @@ if os.environ["P_OWNER"] == "0":
     if os.environ.get("KITH_RUN_SOCKET"):
         socks += both(os.environ["KITH_RUN_SOCKET"])
     # The core run socket (recall, memory search and project-id are answered there) is the one file of <machine>/core a guest
-    # may reach: the folder stays on the deny list above and nothing else in it is opened (owner.sock, owner.token, the core's database).
+    # may reach: the folder stays on the deny list above and nothing else in it is opened (owner.sock, owner.token, the core database).
     socks += [x for m in machine for x in both(m + "/core/run.sock")]
     if os.environ.get("KITH_CORE_RUN_SOCKET"):
         socks += both(os.environ["KITH_CORE_RUN_SOCKET"])
