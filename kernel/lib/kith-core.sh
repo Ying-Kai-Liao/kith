@@ -28,7 +28,8 @@ kith_cutover_refuse() {
 }
 
 # kith_core_prime   looks up the program and its module list once and keeps them in shell variables, so the launch's
-# several kith_core_exec calls (pkg, project-id x3) do not each spawn `kith_paths.py --bin` and `kith kernel version`.
+# several kith_core_exec calls (pkg) and the project_id calls (they pass the program as KITH_BIN to the stub) do not each spawn
+# `kith_paths.py --bin` and `kith kernel version`.
 # Subshells inherit the variables; nothing is exported. The decision is the same as without it, made earlier.
 kith_core_prime() {
   _kith_core_bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || _kith_core_bin=""

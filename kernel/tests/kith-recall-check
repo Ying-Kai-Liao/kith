@@ -264,9 +264,10 @@ check "run token: no host listening is an empty answer without a traceback" "[ \
 check "run token: the index subcommands are not reachable" "! env KITH_RUN_TOKEN=tok KITH_RUN_SOCKET=\"$T/s.sock\" \"$R\" index rebuild 2>/dev/null && [ ! -e $KITH_STATE/index ]"
 check "run token: a token without a socket is the owner path" "env KITH_RUN_TOKEN=tok KITH_AGENT=echo \"$R\" 'shared craft' | grep -q 'shared craft'"
 
-# the other two tools a guest gets through the host: kith-memory search and project-id. With a token they ask the host and
-# touch no Kith folder (the folders are pointed at nothing, so reading one would fail or print something else).
-MS=$KERNEL/bin/kith-memory PI=$KERNEL/bin/project-id
+# the other tool a guest gets through the host in Python: kith-memory search. With a token it asks the host and touches no
+# Kith folder (the folders are pointed at nothing, so reading one would fail or print something else). project-id is the Rust
+# program's now (kernel/tests/kith-project-id-guest-check has its protocol).
+MS=$KERNEL/bin/kith-memory
 nodisk() { env KITH_RUN_TOKEN=tok123 KITH_RUN_SOCKET="$T/s.sock" KITH_HOME="$T/none" KITH_STATE="$T/none" KITH_AGENT=echo KITH_PERSON=kai "$@"; }
 reqis() { python3 -c "import json,sys; d=json.loads(open('$T/req.log').read()); sys.exit(0 if d == json.loads(sys.argv[1]) else 1)" "$1"; }
 fakehost ok 1
@@ -278,14 +279,7 @@ OUT=$(nodisk "$MS" search zebra --all 2>"$T/e"); RC=$?; wait $FH
 check "guest kith-memory: a refusal is a message and a non-zero exit" "[ $RC = 2 ] && [ -z \"\$OUT\" ] && grep -q 'kith-memory:' $T/e && ! grep -q Traceback $T/e"
 OUT=$(nodisk env KITH_RUN_SOCKET="$T/gone.sock" "$MS" search zebra 2>"$T/e"); RC=$?
 check "guest kith-memory: no host is a clear error, not a traceback" "[ $RC = 1 ] && grep -q 'could not be reached' $T/e && ! grep -q Traceback $T/e"
-fakehost ok 1
-OUT=$(nodisk "$PI"); wait $FH
-check "guest project-id: the answer is the host's, from no folder" "[ \"\$OUT\" = 'host says hi' ]"
-check "guest project-id: the request is the token and projectId, no directory" "reqis '{\"token\":\"tok123\",\"method\":\"projectId\",\"args\":[]}'"
-fakehost ok 1
-nodisk "$PI" --info alpha >/dev/null; wait $FH
-check "guest project-id --info is asked of the host as is" "reqis '{\"token\":\"tok123\",\"method\":\"projectId\",\"args\":[\"--info\",\"alpha\"]}'"
-check "owner: no token, kith-memory and project-id read the folders as before" "env KITH_AGENT=echo \"$MS\" search 'shared craft' | grep -q 'zebra tip' && env \"$PI\" --list >/dev/null"
+check "owner: no token, kith-memory reads the folders as before" "env KITH_AGENT=echo \"$MS\" search 'shared craft' | grep -q 'zebra tip'"
 
 # a sandboxed guest without a token cannot read the index (simulated by an unreadable copy): nothing, whoever it claims to be
 "$R" index rebuild >/dev/null

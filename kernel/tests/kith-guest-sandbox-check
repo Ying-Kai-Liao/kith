@@ -77,6 +77,19 @@ expect "owner: no workspace env, no limits note" "$(lj "[k for k in $WORKVARS + 
 # Chrome planted in it. The launch env names the workspace once, as KITH_WORK, which only lib/guest-env.sh reads.
 expect "guest: the launch env points its shell at the workspace and sets none of it for the run" "$(KITH_PERSON=guest lj "[k for k in $WORKVARS if k in e], e.get('KITH_WORK','').endswith('/people/guest/.work'), e.get('CLAUDE_ENV_FILE','').endswith('/lib/guest-env.sh')")" "[] True True"
 expect "guest: nothing in the launch env but KITH_WORK is inside their folder" "$(KITH_PERSON=guest lj "sorted(k for k, v in e.items() if '/people/guest' in str(v))")" "['KITH_WORK']"
+# A guest's project-id is the stub bin/project-id, which runs `kith kernel project-id` on a program that lists project-guest: the run
+# gets the launch's program as KITH_BIN, and the sandbox may read it (and the links on the way to it), only when it lists the module.
+# Otherwise the run has no KITH_BIN (not even one inherited), so the stub looks for its own. The owner's env never has it.
+cat > "$T/bin/kith-fake-guest" <<'SH'
+#!/bin/sh
+[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"
+[ "$1 $2" = "kernel version" ] && echo '{"abi":1,"modules":["project-guest"]}'
+exit 0
+SH
+chmod +x "$T/bin/kith-fake-guest"
+expect "guest: a program without project-guest is not given to the run" "$(KITH_PERSON=guest lj "'KITH_BIN' in e")" "False"
+expect "guest: a program with project-guest is the run's KITH_BIN and the sandbox may read it" "$(KITH_BIN=$T/bin/kith-fake-guest KITH_PERSON=guest lj "e.get('KITH_BIN') == '$T/bin/kith-fake-guest', '$T/bin/kith-fake-guest' in j['settings']['sandbox']['filesystem']['allowRead']")" "True True"
+expect "owner: no KITH_BIN in the launch env" "$(KITH_BIN=$T/bin/kith-fake-guest lj "'KITH_BIN' in e")" "False"
 expect "guest: CLAUDE_ENV_FILE gives their shell the workspace" "$(KITH_WORK=/w sh -c '. "$1"; echo "$TMPDIR $XDG_CACHE_HOME $UV_CACHE_DIR $npm_config_cache $PUPPETEER_CACHE_DIR $NODE_USE_ENV_PROXY"' _ "$KERNEL/lib/guest-env.sh")" "/w/tmp /w/cache /w/cache/uv /w/cache/npm /w/cache/puppeteer 1"
 expect "owner: CLAUDE_ENV_FILE changes nothing without KITH_WORK" "$(env -u KITH_WORK TMPDIR=/t sh -c '. "$1"; echo "$TMPDIR ${npm_config_cache:-unset}"' _ "$KERNEL/lib/guest-env.sh")" "/t unset"
 expect "guest: guest-env.sh sets exactly the workspace vars kith_paths.py names" "$(env -i KITH_WORK=/w /bin/sh -c '. "$1"; env' _ "$KERNEL/lib/guest-env.sh" | python3 -c "
@@ -383,6 +396,7 @@ expect "no capabilities and nothing kept: no allowedDomains again" "$(doms guest
 # model turn (KITH_REAL_MODEL, default haiku).
 if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
   echo "-- real sandbox run"
+  [ -z "${KITH_DIFFTEST_BIN:-}" ] || export KITH_BIN=$KITH_DIFFTEST_BIN   # the stub bin/project-id needs a real kith program
   AH=$KITH_HOME/agents/echo; SLICE=$AH/files/people/guest; mkdir -p "$SLICE" "$AH/files/people/other" "$AH/memory/people/guest" "$AH/memory/shared"
   : > "$AH/files/people/other/private.txt"; mkdir -p "$KITH_STATE/secrets"
   mkdir -p "$SLICE/clone/.git/hooks" "$SLICE/clone/.claude" "$T/proj/.git/hooks" "$T/proj/.claude"
@@ -422,6 +436,9 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
     echo "r write-project-claude-md touch '$T/proj/CLAUDE.md'"
     echo "r write-project-claude-dir touch '$T/proj/.claude/settings.json'"
     echo "r write-zshrc touch '$REAL_HOME/.zshrc-probe-should-not-exist'"
+    # the stub starts `kith kernel project-id` from the Kith folder (KITH_BIN and its links are opened) and the client reaches the
+    # listener, which answers nothing: that is the guest client's "could not be reached" line, not a program that never started
+    [ -z "${KITH_DIFFTEST_BIN:-}" ] || echo "r project-id sh -c \"'$KERNEL/bin/project-id' 2>&1 | grep -q 'could not be reached'\""
     echo "r sock-host python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$MACH/run/host.sock')\""
     echo "r sock-run python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$T/run s.sock')\""
     echo "r sock-other python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$T/other.sock')\""
@@ -438,6 +455,7 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
   for n in read-ssh read-keychains read-home read-backup read-other-slice read-state-secrets \
            write-hooks write-claude-dir write-claude-md write-envrc write-project write-project-hooks write-project-claude-md write-project-claude-dir write-zshrc net-curl sock-other read-owner-uv-cache; do rexpect $n denied; done
   for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run uv-run uv-own-cache shell-workspace; do rexpect $n ok; done
+  [ -z "${KITH_DIFFTEST_BIN:-}" ] || rexpect project-id ok   # with a real program (KITH_DIFFTEST_BIN): the guest's project-id starts it
   rm -f "$REAL_HOME/.zshrc-probe-should-not-exist"
 
   # A compound with a cd and an export (what a guest's agent runs for uv) must not ask: Claude Code's own ask for a command it

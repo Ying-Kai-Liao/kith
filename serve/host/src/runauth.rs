@@ -32,7 +32,7 @@
 //!
 //! Two more read-only methods give a guest the kernel tools its sandbox keeps it from running itself: `memorySearch`
 //! (`kith-memory search`, as the token's person and agent) and `projectId` (`project-id`: the project the run was
-//! launched in, from the token, and `--info` of that one). Guest tokens only, same answer shape as `recall`.
+//! launched in, from the token, and `--info` of that one, answered in process by `kith_kernel::project`). Guest tokens only, same answer shape as `recall`.
 //!
 //! The token also has to come from the run it was issued to: on macOS a process of the same user can read another
 //! process's environment (`ps eww` shows a Python or Node child's), so a token alone could be lifted from a
@@ -915,9 +915,34 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
             Some(id) => Response::Ok { stdout: format!("{id}\n"), stderr: String::new(), code: 0 },
             None => Response::Ok { stdout: String::new(), stderr: String::new(), code: 1 },
         },
+        Ok(Authorized { run: Run::ProjectId, args, .. }) => project_info(args).await,
         Ok(job) => run_kernel(&job).await,
         Err(refused) => refused,
     }
+}
+
+/// `project-id --info ID` for a guest (the only other form `project_args` lets through): the kernel's own `project::run` in this
+/// process, on the registry of the kernel the host found, the way `kith kernel project-id --kernel K` would answer it. Not a guest
+/// run (`guest: None`): this is the host's side of the socket.
+async fn project_info(args: Vec<String>) -> Response {
+    let work = tokio::task::spawn_blocking(move || {
+        let bin = crate::agent::hq::bin()?;
+        let kernel = bin.canonicalize().unwrap_or(bin).parent()?.parent()?.to_path_buf();
+        let home = kith_kernel::paths::process_home();
+        let state = kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env).state;
+        Some(project_answer(state, home, &args))
+    });
+    match work.await {
+        Ok(Some(out)) => Response::Ok { stdout: out.stdout, stderr: out.stderr, code: out.code },
+        Ok(None) => Response::refused("kith isn't available on this computer"),
+        Err(_) => Response::refused("could not run that"),
+    }
+}
+
+/// The answer of `project-id ARGS` on the registry in `state`, for the host's side of the socket (not a guest run: `guest: None`).
+fn project_answer(state: PathBuf, home: PathBuf, args: &[String]) -> kith_kernel::project::Out {
+    let ctx = kith_kernel::project::Ctx { state, home, cwd: std::env::current_dir().unwrap_or_default(), guest: None };
+    kith_kernel::project::run(&ctx, args)
 }
 
 /// Env names the recall child must not inherit from the host: identity comes from the token only.
@@ -962,12 +987,14 @@ async fn run_kernel(job: &Authorized) -> Response {
             c.arg("recall");
             c
         }
-        Run::MemorySearch | Run::ProjectId => {
-            let tool = if job.run == Run::MemorySearch { "kith-memory" } else { "project-id" };
-            let Some(path) = tool_path(bin, tool).await else { return Response::refused("that isn't available here") };
+        Run::MemorySearch => {
+            let Some(path) = tool_path(bin, "kith-memory").await else {
+                return Response::refused("that isn't available here");
+            };
             tokio::process::Command::new(path)
         }
-        Run::None => return Response::refused("unknown method"),
+        // Answered in process (`project_info`), never by running the stub that is left at bin/project-id for old hosts.
+        Run::ProjectId | Run::None => return Response::refused("unknown method"),
     };
     command.args(&job.args);
     for name in SCRUB {
@@ -1306,11 +1333,31 @@ mod tests {
         let bin = dir.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let script = "#!/bin/sh\necho \"$0|$KITH_AGENT|$KITH_PERSON|$KITH_ROOM|$KITH_PROJECT|$KITH_VIA|$*\"\n";
-        for tool in ["kith", "kith-memory", "project-id"] {
+        for tool in ["kith", "kith-memory"] {
             std::fs::write(bin.join(tool), script).unwrap();
             std::fs::set_permissions(bin.join(tool), std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         bin.join("kith")
+    }
+
+    #[test]
+    fn the_host_answers_a_guests_info_from_the_registry_itself() {
+        let dir = std::env::temp_dir().join(format!("kr-reg-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("projects.json"),
+            r#"{"projects": {"alpha": {"remotes": [], "paths": [], "home": "/h/alpha"}, "beta": {"parent": "alpha", "remotes": [], "paths": []}}}"#,
+        )
+        .unwrap();
+        let ask = |args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+            project_answer(dir.clone(), dir.clone(), &args)
+        };
+        let got = ask(&["--info", "beta"]);
+        assert_eq!((got.stdout.as_str(), got.code), ("beta\t-\nalpha\t/h/alpha\n", 0), "{got:?}");
+        let got = ask(&["--info", "nope"]);
+        assert_eq!(got.code, 1, "{got:?}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]
@@ -1330,9 +1377,10 @@ mod tests {
         assert_eq!(code, 0);
         // The tool is the kernel's own `bin/kith-memory` (the path is canonical, /private/var for /var on a Mac).
         assert!(stdout.contains("/bin/kith-memory|echo|sam|1:1:echo:sam|alpha|serve|search -n 3 zebra\n"), "{stdout}");
+        // `--info` is the kernel's own project::run in this process: the stand-in kernel's tool is never run.
         let (stdout, _) =
             out(handle_request(&t, &req(&g.token, "projectId", &json!(["--info", "alpha"])), peer(5)).await);
-        assert!(stdout.ends_with("|--info alpha\n") && stdout.contains("/project-id|echo|sam|"), "{stdout}");
+        assert!(!stdout.contains("|--info alpha\n"), "{stdout}");
         // Bare: answered from the token, no process, and not from wherever the host happens to be.
         assert_eq!(
             out(handle_request(&t, &req(&g.token, "projectId", &json!([])), peer(5)).await),
