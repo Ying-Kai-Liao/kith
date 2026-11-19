@@ -1226,6 +1226,16 @@ fn guest_sandbox(
     if let Some(sock) = env("KITH_RUN_SOCKET") {
         socks.extend(both(&sock));
     }
+    // The core's run socket (recall, memory search and project-id are answered there): the one file of `<machine>/core` a guest
+    // may reach. The folder stays on the deny list and nothing else in it is opened (owner.sock, owner.token, core.db).
+    socks.extend(
+        machine_both
+            .iter()
+            .flat_map(|m| both(&format!("{m}/core/run.sock"))),
+    );
+    if let Some(sock) = env("KITH_CORE_RUN_SOCKET") {
+        socks.extend(both(&sock));
+    }
     let socks = dedup(socks);
     let allow_write = dedup(allow_write);
 

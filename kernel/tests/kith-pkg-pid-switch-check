@@ -130,10 +130,10 @@ reset
 printf '#!/bin/sh\necho "core $*" >> "%s"\nexec "%s" "$@"\n' "$T/corelog" "$REAL" > "$T/bin/kith-log"
 chmod +x "$T/bin/kith-log"
 : > "$T/corelog"
-(cd "$T/work/proj" && KITH_BIN=$T/bin/kith-log KITH_RUN_TOKEN=tok KITH_RUN_SOCKET=$T/none.sock "$T/k/bin/project-id" > "$T/g.out" 2> "$T/g.err"); grc=$?
+(cd "$T/work/proj" && KITH_BIN=$T/bin/kith-log KITH_RUN_TOKEN=tok KITH_CORE_RUN_SOCKET=$T/none.sock "$T/k/bin/project-id" > "$T/g.out" 2> "$T/g.err"); grc=$?
 check "guest: the Python program answers and the core is not called" "[ \"\$(calls project-id)\" = 1 ] && [ ! -s '$T/corelog' ] && ! grep -q 'the core does not take that branch' '$T/g.err'"
 check "guest: it went for the host's socket (not the registry)" "[ $grc != 0 ] && ! grep -q demo '$T/g.out'"
-(cd "$T/work/proj" && KITH_RUN_TOKEN=tok KITH_RUN_SOCKET=$T/none.sock "$REAL" kernel project-id > /dev/null 2> "$T/g2.err"); grc2=$?
+(cd "$T/work/proj" && KITH_RUN_TOKEN=tok KITH_CORE_RUN_SOCKET=$T/none.sock "$REAL" kernel project-id > /dev/null 2> "$T/g2.err"); grc2=$?
 check "guest: the core refuses with exit 2" "[ $grc2 = 2 ]"
 
 # 6. A launch with a guest token in the environment still works (the launch drops it for its own lookups).

@@ -167,7 +167,11 @@ pub(crate) fn run_identity_allowed(
             // A basis belongs to a room person only.
             return Err(refused(&who.person));
         }
-        let ids = if room_person { who.members.as_slice() } else { std::slice::from_ref(&who.person) };
+        let ids = if room_person {
+            who.members.as_slice()
+        } else {
+            std::slice::from_ref(&who.person)
+        };
         for id in ids {
             if !crate::authority::run_allowed_in(conn, id, switched)? {
                 return Err(refused(id));

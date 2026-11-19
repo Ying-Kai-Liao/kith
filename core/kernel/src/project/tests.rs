@@ -143,7 +143,10 @@ fn a_token_that_is_not_utf8_still_makes_a_guest() {
     assert!(is_guest(env(OsString::from_vec(vec![0xff, 0xfe]), "/s")));
     assert!(is_guest(env(OsString::from("t"), "/s")));
     assert!(!is_guest(env(OsString::from(""), "/s")));
-    assert!(!is_guest(env(OsString::from("t"), "")));
+    assert!(
+        is_guest(env(OsString::from("t"), "")),
+        "the token alone makes a guest"
+    );
 }
 
 #[test]

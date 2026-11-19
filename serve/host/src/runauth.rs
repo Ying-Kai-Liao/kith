@@ -63,11 +63,8 @@ pub const ASK_TOKEN_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// A request line longer than this is refused unread.
 const MAX_REQUEST: usize = 64 * 1024;
-const MAX_ARGS: usize = 64;
 const MAX_ARG_LEN: usize = 4096;
-const MAX_OUTPUT: usize = 256 * 1024;
 const READ_BUDGET: Duration = Duration::from_secs(5);
-const RECALL_BUDGET: Duration = Duration::from_secs(30);
 /// How far up the process tree a peer is followed before it counts as not descending.
 const MAX_HOPS: usize = 64;
 
@@ -599,6 +596,7 @@ pub struct Ask {
 }
 
 /// [`authorize_with`] for the host's own table alone (the owner's tokens): no guest is known.
+#[cfg(test)]
 pub fn authorize(table: &TokenTable, line: &[u8], peer: PeerInfo) -> Result<Authorized, Response> {
     authorize_with(table, line, peer, |_| None)
 }
@@ -701,11 +699,7 @@ pub fn authorize_with(
                 return Err(Response::refused("bad request"));
             }
             let key = kith_kernel::permit::host_once_key(tool, input);
-            Ok(Authorized {
-                identity,
-                ask: None,
-                access: Some(AccessCall::ConsumeOnce(key)),
-            })
+            Ok(Authorized { identity, ask: None, access: Some(AccessCall::ConsumeOnce(key)) })
         }
         "cardsHistory" => {
             // The owner's run only; whether its agent may read the history is the host's check (`cards::history`).
@@ -713,11 +707,7 @@ pub fn authorize_with(
                 return Err(Response::refused("not authorized"));
             }
             let limit = req["limit"].as_u64().unwrap_or(50).clamp(1, 500) as usize;
-            Ok(Authorized {
-                identity,
-                ask: None,
-                access: Some(AccessCall::History(limit)),
-            })
+            Ok(Authorized { identity, ask: None, access: Some(AccessCall::History(limit)) })
         }
         _ => Err(Response::refused("unknown method")),
     }
@@ -797,6 +787,8 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
             }
             (None, _) => Response::refused("Approvals aren't available right now."),
         },
+        // `authorize_with` makes no other kind of job: a method either asks for a card or makes an access call.
+        Ok(Authorized { ask: None, access: None, .. }) => Response::refused("unknown method"),
         Err(refused) => refused,
     }
 }
@@ -960,15 +952,21 @@ mod tests {
         let t = open_table();
         let g = RunGrant::issue(&t, id("sam")).unwrap();
         g.bind_pid(5);
-        let ok = req(&g.token, "recall", &json!(["zebra"]));
+        let ok = req(&g.token, "consumeAccess", &json!([]));
         assert!(authorize(&t, &ok, peer(5)).is_ok());
-        assert!(authorize(&t, &req("nope", "recall", &json!(["zebra"])), peer(5)).is_err());
+        assert!(authorize(&t, &req("nope", "consumeAccess", &json!([])), peer(5)).is_err());
         assert!(authorize(&t, &req(&g.token, "shell", &json!(["ls"])), peer(5)).is_err(), "unknown method");
         assert!(authorize(&t, &req(&g.token, "forget", &json!(["x"])), peer(5)).is_err(), "no write methods");
+        for moved in ["recall", "memorySearch", "projectId"] {
+            assert!(
+                authorize(&t, &req(&g.token, moved, &json!(["x"])), peer(5)).is_err(),
+                "{moved} is on the core's run socket"
+            );
+        }
         assert!(authorize(&t, b"not json", peer(5)).is_err());
-        assert!(authorize(&t, b"{\"method\":\"recall\"}", peer(5)).is_err(), "no token");
+        assert!(authorize(&t, b"{\"method\":\"consumeAccess\"}", peer(5)).is_err(), "no token");
         assert!(authorize(&t, b"[1,2]", peer(5)).is_err());
-        let big = req(&g.token, "recall", &json!(["x".repeat(MAX_REQUEST)]));
+        let big = req(&g.token, "consumeAccess", &json!(["x".repeat(MAX_REQUEST)]));
         assert_eq!(authorize(&t, &big, peer(5)), Err(Response::refused("request too large")));
         drop(g);
         assert!(authorize(&t, &ok, peer(5)).is_err(), "after the run is gone");
@@ -977,176 +975,9 @@ mod tests {
     #[tokio::test]
     async fn handle_request_refuses_without_running_anything() {
         let t = open_table();
-        let r = handle_request(&t, &req("nope", "recall", &json!(["zebra"])), peer(1)).await;
+        let r = handle_request(&t, &req("nope", "consumeAccess", &json!([])), peer(1)).await;
         assert_eq!(r, Response::refused("not authorized"));
         assert!(r.to_line().contains("\"ok\":false"));
-    }
-
-    #[test]
-    fn the_audience_is_the_tokens_whatever_the_arguments_say() {
-        let t = open_table();
-        let g = RunGrant::issue(&t, id("sam")).unwrap();
-        g.bind_pid(5);
-        let line = req(
-            &g.token,
-            "recall",
-            &json!(["zebra", "--project", "alpha", "--room", "1:1:echo:eve", "KITH_PERSON=kai", "--json"]),
-        );
-        let job = authorize(&t, &line, peer(5)).unwrap();
-        assert_eq!(job.identity, id("sam"), "person, agent and room are the token's");
-        // Narrowing flags pass as flags with their values; an env-looking word is just a query word.
-        assert_eq!(
-            job.args,
-            ["--tier", "2", "--project", "alpha", "--room", "1:1:echo:eve", "--json", "zebra", "KITH_PERSON=kai"]
-        );
-        for bad in [
-            json!(["zebra", "--person", "kai"]),
-            json!(["zebra", "--agent", "other"]),
-            json!(["--env", "KITH_PERSON=kai", "zebra"]),
-            json!(["zebra", "--project"]),
-            json!([]),
-            json!(["--json"]),
-            json!([1, 2]),
-        ] {
-            assert!(authorize(&t, &req(&g.token, "recall", &bad), peer(5)).is_err(), "{bad} should be refused");
-        }
-        for sub in ["index", "forget"] {
-            let job = authorize(&t, &req(&g.token, "recall", &json!([sub, "rebuild"])), peer(5)).unwrap();
-            assert_eq!(job.args[0], "--tier", "{sub} is a query word, never a subcommand");
-        }
-    }
-
-    #[test]
-    fn memory_search_args_are_a_fixed_search() {
-        assert_eq!(
-            memory_args(&[json!("zebra"), json!("-n"), json!("500"), json!("--json")]).unwrap(),
-            ["search", "-n", "50", "--json", "zebra"]
-        );
-        assert_eq!(memory_args(&[json!("ls"), json!("index")]).unwrap(), ["search", "ls", "index"]);
-        for bad in [
-            json!(["zebra", "--all"]),
-            json!(["zebra", "--agent", "other"]),
-            json!(["zebra", "--agent=other"]),
-            json!(["zebra", "-n"]),
-            json!(["zebra", "-n", "x"]),
-            json!(["zebra", "-n", "-1"]),
-            json!(["-x", "zebra"]),
-            json!([]),
-            json!(["--json"]),
-            json!([7]),
-        ] {
-            assert!(memory_args(bad.as_array().unwrap()).is_err(), "{bad} should be refused");
-        }
-    }
-
-    #[test]
-    fn project_id_is_the_runs_own_project_only() {
-        let own = Some("alpha");
-        assert_eq!(project_args(&[], own).unwrap(), Vec::<String>::new());
-        assert_eq!(project_args(&[json!("--info"), json!("alpha")], own).unwrap(), ["--info", "alpha"]);
-        for bad in [
-            json!(["--list"]),
-            json!(["--children", "alpha"]),
-            json!(["--where", "alpha"]),
-            json!(["--register", "alpha"]),
-            json!(["--root"]),
-            json!(["--info", "beta"]),
-            json!(["--info"]),
-            json!(["--info", "alpha", "x"]),
-            json!(["/Users/kai/secret"]),
-            json!(["."]),
-            json!([1]),
-        ] {
-            assert!(project_args(bad.as_array().unwrap(), own).is_err(), "{bad} should be refused");
-        }
-        // A run with no project has nothing to be told about.
-        assert!(project_args(&[json!("--info"), json!("alpha")], None).is_err());
-        assert!(project_args(&[json!("--info"), json!("")], None).is_err());
-    }
-
-    #[test]
-    fn an_owner_token_gets_neither_memory_search_nor_project_id() {
-        let t = open_table();
-        let token = t.insert_ask(ask_identity("echo", "s1", None), 5, Duration::from_secs(60)).unwrap();
-        for (method, args) in [("memorySearch", json!(["zebra"])), ("projectId", json!([]))] {
-            let got = authorize(&t, &req(&token, method, &args), peer(5));
-            assert!(matches!(got, Err(Response::Refused(ref why)) if why == "not authorized"), "{method}: {got:?}");
-        }
-    }
-
-    #[test]
-    fn memory_search_and_project_id_are_the_tokens_and_the_forged_fields_are_ignored() {
-        let t = open_table();
-        let g = RunGrant::issue(&t, id("sam")).unwrap();
-        g.bind_pid(5);
-        let line = |method: &str, args: &Value| {
-            let mut v: Value = serde_json::from_slice(&req(&g.token, method, args)).unwrap();
-            v["project"] = json!("beta");
-            v["person"] = json!("kai");
-            v["agent"] = json!("other");
-            serde_json::to_vec(&v).unwrap()
-        };
-        let job = authorize(&t, &line("memorySearch", &json!(["zebra"])), peer(5)).unwrap();
-        assert_eq!(
-            (job.run, job.args, job.identity),
-            (Run::MemorySearch, vec!["search".into(), "zebra".into()], id("sam"))
-        );
-        let job = authorize(&t, &line("projectId", &json!(["--info", "alpha"])), peer(5)).unwrap();
-        assert_eq!((job.run, job.identity.project.as_deref()), (Run::ProjectId, Some("alpha")));
-        assert!(authorize(&t, &line("projectId", &json!(["--info", "beta"])), peer(5)).is_err());
-    }
-
-    /// A stand-in kernel whose tools print who they were run as.
-    fn fake_kernel() -> PathBuf {
-        use std::os::unix::fs::PermissionsExt as _;
-        let dir = std::env::temp_dir().join(format!("kr-kernel-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
-        let bin = dir.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let script = "#!/bin/sh\necho \"$0|$KITH_AGENT|$KITH_PERSON|$KITH_ROOM|$KITH_PROJECT|$KITH_VIA|$*\"\n";
-        for tool in ["kith", "kith-memory", "project-id"] {
-            std::fs::write(bin.join(tool), script).unwrap();
-            std::fs::set_permissions(bin.join(tool), std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        bin.join("kith")
-    }
-
-    #[tokio::test]
-    async fn the_host_runs_the_kernel_tools_as_the_tokens_identity() {
-        let _one = crate::remote::account::ONE_AT_A_TIME.lock().await;
-        let kith = fake_kernel();
-        *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap() = Some(kith.clone());
-        let t = open_table();
-        let g = RunGrant::issue(&t, id("sam")).unwrap();
-        g.bind_pid(5);
-        let out = |r: Response| match r {
-            Response::Ok { stdout, code, .. } => (stdout, code),
-            other => panic!("{other:?}"),
-        };
-        let (stdout, code) =
-            out(handle_request(&t, &req(&g.token, "memorySearch", &json!(["zebra", "-n", "3"])), peer(5)).await);
-        assert_eq!(code, 0);
-        // The tool is the kernel's own `bin/kith-memory` (the path is canonical, /private/var for /var on a Mac).
-        assert!(stdout.contains("/bin/kith-memory|echo|sam|1:1:echo:sam|alpha|serve|search -n 3 zebra\n"), "{stdout}");
-        let (stdout, _) =
-            out(handle_request(&t, &req(&g.token, "projectId", &json!(["--info", "alpha"])), peer(5)).await);
-        assert!(stdout.ends_with("|--info alpha\n") && stdout.contains("/project-id|echo|sam|"), "{stdout}");
-        // Bare: answered from the token, no process, and not from wherever the host happens to be.
-        assert_eq!(
-            out(handle_request(&t, &req(&g.token, "projectId", &json!([])), peer(5)).await),
-            ("alpha\n".into(), 0)
-        );
-        let none = RunIdentity { project: None, run_id: "r2".into(), ..id("sam") };
-        let g2 = RunGrant::issue(&t, none).unwrap();
-        g2.bind_pid(6);
-        assert_eq!(
-            out(handle_request(&t, &req(&g2.token, "projectId", &json!([])), peer(6)).await),
-            (String::new(), 1)
-        );
-        // Refusals never run anything.
-        let r = handle_request(&t, &req(&g.token, "memorySearch", &json!(["zebra", "--all"])), peer(5)).await;
-        assert!(matches!(r, Response::Refused(_)));
-        *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap() = None;
-        let _ = std::fs::remove_dir_all(kith.parent().unwrap().parent().unwrap());
     }
 
     #[test]
@@ -1275,13 +1106,6 @@ mod tests {
     }
 
     #[test]
-    fn recall_args_caps() {
-        assert!(recall_args(&vec![json!("a"); MAX_ARGS + 1]).is_err());
-        assert!(recall_args(&[json!("x".repeat(MAX_ARG_LEN + 1))]).is_err());
-        assert_eq!(recall_args(&[json!("a"), json!("--limit"), json!("3")]).unwrap(), ["--tier", "2", "-n", "3", "a"]);
-    }
-
-    #[test]
     fn an_owner_token_can_ask_for_a_card_but_reads_nothing() {
         let t = open_table();
         let owner = ask_identity("echo", "s1", None);
@@ -1299,10 +1123,10 @@ mod tests {
             })
         );
         assert!(authorize(&t, &req(&token, "requestPermission", &json!([])), peer(5)).is_err(), "no tool, no ask");
-        // Recall is a guest's: an owner token is refused it, whatever it asks for (the audience is not widened).
+        // Recall is not a host.sock method at all (the core's run socket answers it, for a guest's token only).
         assert_eq!(
             authorize(&t, &req(&token, "recall", &json!(["zebra"])), peer(5)),
-            Err(Response::refused("not authorized"))
+            Err(Response::refused("unknown method"))
         );
         // Only from the process it was issued for, and not after it ends.
         assert!(authorize(&t, line.to_string().as_bytes(), peer(6)).is_err());

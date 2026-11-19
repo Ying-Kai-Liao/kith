@@ -445,7 +445,8 @@ pub fn resolve_run(token: &str, pid: u32) -> Option<crate::runauth::RunIdentity>
 }
 
 pub fn resolve_run_in(paths: &Paths, token: &str, pid: u32) -> Option<crate::runauth::RunIdentity> {
-    let kith_core::Reached::Answered(a) = kith_core::reach(paths, "run.resolve", &json!({"token": token, "pid": pid}), true)
+    let kith_core::Reached::Answered(a) =
+        kith_core::reach(paths, "run.resolve", &json!({"token": token, "pid": pid}), true)
     else {
         return None;
     };
@@ -786,9 +787,16 @@ pub fn account_call(folders: &Paths, method: &str, params: &Value, read: bool) -
     }
 }
 
+/// Where the core finds the kernel's `kith` for the tools a guest run reaches on run.sock (recall, memory search,
+/// project-id): the way the host finds it for its own launches, asked again on every call.
+fn tell_the_core_the_kernel() {
+    kith_core::set_kernel_finder(crate::agent::hq::bin);
+}
+
 /// `kith serve` has the daemon front start beside the host. It never waits for it and never fails on it: a core that
 /// will not start is a line in the core log and a status for `kith doctor`, and the host goes on.
 pub fn start_beside_host() -> kith_core::Daemon {
+    tell_the_core_the_kernel();
     // The one daemon that has a Host: it makes the host secret in this process's memory.
     kith_core::Daemon::spawn_as_host(&kernel::folders(&kith_kernel::paths::process_home()), crate::service::is_exiting)
 }
@@ -796,6 +804,7 @@ pub fn start_beside_host() -> kith_core::Daemon {
 /// `kith kernel core-daemon`: the daemon front alone, in the foreground. Prints `ready` once it serves and
 /// `served=N` when stdin closes, which is how it is stopped. The difftest and the end-to-end tests run it.
 pub fn run_foreground() -> i32 {
+    tell_the_core_the_kernel();
     let daemon = kith_core::Daemon::spawn(&kernel::folders(&kith_kernel::paths::process_home()));
     if let Err(e) = daemon.ready(std::time::Duration::from_secs(120)) {
         eprintln!("{e}\nrecovery: {}", e.recovery());
@@ -976,7 +985,11 @@ mod tests {
         let env = grant.env(Path::new("/the/host.sock"));
         assert_eq!(env[0].0, crate::runauth::TOKEN_ENV);
         assert_eq!(env[1], (crate::runauth::CORE_SOCKET_ENV.to_owned(), socket.to_string_lossy().into_owned()));
-        assert_eq!(env[2], (crate::runauth::SOCKET_ENV.to_owned(), "/the/host.sock".to_owned()), "cards stay on host.sock");
+        assert_eq!(
+            env[2],
+            (crate::runauth::SOCKET_ENV.to_owned(), "/the/host.sock".to_owned()),
+            "cards stay on host.sock"
+        );
         // The host asks the core who the token is: from the run's own process only, with the identity it was minted with.
         let token = env[0].1.clone();
         grant.bind_pid(std::process::id());

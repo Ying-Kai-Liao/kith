@@ -30,7 +30,8 @@ pub struct Out {
 }
 
 /// What a run needs from its process: the state folder (`KITH_STATE`), `$HOME`, the working directory and whether this
-/// is a guest run (`KITH_RUN_TOKEN` and `KITH_RUN_SOCKET` both set and not empty).
+/// is a guest run (`KITH_RUN_TOKEN` set and not empty: the token alone, so a run whose core socket is missing is still a
+/// guest, answered with nothing, never as the owner).
 pub struct Ctx {
     pub state: PathBuf,
     pub home: PathBuf,
@@ -42,7 +43,7 @@ pub struct Ctx {
 /// counts, as it does for the Python.
 pub fn is_guest(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
     let set = |n: &str| get(n).is_some_and(|v| !v.is_empty());
-    set("KITH_RUN_TOKEN") && set("KITH_RUN_SOCKET")
+    set("KITH_RUN_TOKEN")
 }
 
 /// Where a new project's home goes unless projects.json says "homes".

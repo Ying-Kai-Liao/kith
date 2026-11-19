@@ -199,9 +199,9 @@ impl RunTokens {
                     .get("pid")
                     .and_then(Value::as_u64)
                     .and_then(|p| u32::try_from(p).ok());
-                let who = self
-                    .resolve(&need("token")?, pid)
-                    .ok_or_else(|| Error::NotAllowed("kith-core: run.resolve: not authorized".into()))?;
+                let who = self.resolve(&need("token")?, pid).ok_or_else(|| {
+                    Error::NotAllowed("kith-core: run.resolve: not authorized".into())
+                })?;
                 Ok(who.to_json())
             }
             "run.bind" => {
@@ -240,7 +240,10 @@ impl RunTokens {
         // A room turn's token ends too when any of the people it is for is named.
         entries.retain(|_, e| {
             !(people.contains(&e.identity.person.as_str())
-                || e.identity.members.iter().any(|m| people.contains(&m.as_str())))
+                || e.identity
+                    .members
+                    .iter()
+                    .any(|m| people.contains(&m.as_str())))
         });
         before - entries.len()
     }

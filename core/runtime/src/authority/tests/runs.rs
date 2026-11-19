@@ -151,7 +151,10 @@ fn a_removed_person_is_refused_at_the_run_door_and_a_ghost_never_mints() {
     assert!(allowed(&rig, "sam", true).is_ok());
     // Before the switch core.db knows only the imported people: a person invited since is let through, a removed one
     // (retired) and a revoked one are not.
-    assert!(allowed(&rig, "ghost", false).is_ok(), "invited after the import");
+    assert!(
+        allowed(&rig, "ghost", false).is_ok(),
+        "invited after the import"
+    );
     assert!(allowed(&rig, "amy", false).is_err(), "removed: retired");
 }
 
@@ -167,14 +170,34 @@ fn a_room_persons_basis_decides_and_a_revoked_member_ends_the_token() {
         crate::call::run_identity_allowed(rig.core.conn(), r, true, "run.mint")
     };
     assert!(allowed(&rig, &room("room-grp1-9", "grp1", &["sam", "bot-a"])).is_ok());
-    assert!(allowed(&rig, &room("room-grp1-9", "grp1", &[])).is_err(), "a room person is for somebody");
-    assert!(allowed(&rig, &room("room-grp2-9", "grp1", &["sam"])).is_err(), "another room's person");
-    assert!(allowed(&rig, &room("sam", "grp1", &["sam"])).is_err(), "a basis is a room person's only");
-    assert!(allowed(&rig, &room("room-grp1-9", "grp1", &["sam", "ghost"])).is_err(), "every member counts");
+    assert!(
+        allowed(&rig, &room("room-grp1-9", "grp1", &[])).is_err(),
+        "a room person is for somebody"
+    );
+    assert!(
+        allowed(&rig, &room("room-grp2-9", "grp1", &["sam"])).is_err(),
+        "another room's person"
+    );
+    assert!(
+        allowed(&rig, &room("sam", "grp1", &["sam"])).is_err(),
+        "a basis is a room person's only"
+    );
+    assert!(
+        allowed(&rig, &room("room-grp1-9", "grp1", &["sam", "ghost"])).is_err(),
+        "every member counts"
+    );
     // A suspended member ends the room token (the tokens of a revoke are matched on the basis too).
     let t = RunTokens::with(yes, |_| Some("s".into()));
-    let (_, minted) = t.mint(room("room-grp1-9", "grp1", &["sam", "bot-a"])).unwrap();
-    call_with(&mut rig.core, &rig.c, "people.suspend", &json!({"id": "sam"})).unwrap();
+    let (_, minted) = t
+        .mint(room("room-grp1-9", "grp1", &["sam", "bot-a"]))
+        .unwrap();
+    call_with(
+        &mut rig.core,
+        &rig.c,
+        "people.suspend",
+        &json!({"id": "sam"}),
+    )
+    .unwrap();
     assert!(allowed(&rig, &minted).is_err());
     assert_eq!(t.end_people(&["sam"]), 1);
     assert!(!t.is_live(&minted.run_id));

@@ -236,7 +236,7 @@ import json, os, sys
 # (the core drops the token names too; kith_env_sync mirrors KITH_ names as HQ_ ones, so both spellings are listed here).
 drop = {"TERM_SESSION_ID", "ITERM_SESSION_ID", "TMUX", "TMUX_PANE", "SSH_TTY", "WINDOWID", "COLUMNS", "LINES", "SHLVL", "_"}
 for p in ("KITH_", "HQ_"):
-    drop |= {p + n for n in ("RUN_TOKEN", "RUN_SOCKET", "ASK_TOKEN", "ASK_SOCKET")}
+    drop |= {p + n for n in ("RUN_TOKEN", "RUN_SOCKET", "CORE_RUN_SOCKET", "ASK_TOKEN", "ASK_SOCKET")}
 env = {k: v for k, v in os.environ.items() if k not in drop and not k.startswith(("KITH_RUN_", "HQ_RUN_", "KITH_CALL_", "HQ_CALL_"))}
 size = None
 for fd in (2, 0, 1):

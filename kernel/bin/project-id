@@ -16,7 +16,7 @@
   project-id --where ID            the folder to work in for ID on this Mac: its first checkout or path that exists,
                                    else its home; prints nothing and exits 1 when it isn't here
 
-In a run for someone other than the owner (KITH_RUN_TOKEN and KITH_RUN_SOCKET set) only the first and the --info form
+In a run for someone other than the owner (KITH_RUN_TOKEN set; asked of the core over KITH_CORE_RUN_SOCKET) only the first and the --info form
 work, asked of the host over the run socket: the bare form prints the project the run was launched in (nothing and exit
 1 without one), and --info takes that same project only.
 

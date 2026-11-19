@@ -284,7 +284,12 @@ impl Shared {
         if method == "run.mint" {
             // Minting is a claim on authority too: refuse a revoked person (and a revoked member of a room turn's
             // basis), inside the lock a revoke commits under, so a mint cannot slip in beside a suspension.
-            let get = |k: &str| params.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+            let get = |k: &str| {
+                params
+                    .get(k)
+                    .and_then(Value::as_str)
+                    .filter(|v| !v.is_empty())
+            };
             let ask = RunIdentity {
                 run_id: String::new(),
                 agent: String::new(),
@@ -328,7 +333,9 @@ impl Shared {
                 let who = self
                     .runs
                     .identity_of(answer["runId"].as_str().unwrap_or_default())
-                    .ok_or_else(|| Error::NotAllowed("kith-core: run.resolve: not authorized".into()))?;
+                    .ok_or_else(|| {
+                        Error::NotAllowed("kith-core: run.resolve: not authorized".into())
+                    })?;
                 crate::call::run_identity_allowed(c.conn(), &who, switched, method)?;
                 Ok(answer)
             })?;
@@ -723,7 +730,8 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
     }
     // The run socket is not the owner's way in: a daemon that cannot open it still serves the owner, and says so.
     let for_runs = shared.clone();
-    let run_handler: Arc<RunHandler> = Arc::new(move |who, row, params| for_runs.run_call(who, row, params));
+    let run_handler: Arc<RunHandler> =
+        Arc::new(move |who, row, params| for_runs.run_call(who, row, params));
     match runsock::Server::bind(layout, shared.runs.clone(), run_handler) {
         Ok(server) => {
             *shared

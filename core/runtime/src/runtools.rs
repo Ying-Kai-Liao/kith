@@ -75,11 +75,17 @@ pub(crate) fn use_kernel(bin: Option<PathBuf>) -> impl Drop {
     struct Guard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
     impl Drop for Guard {
         fn drop(&mut self) {
-            *TEST_KERNEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            *TEST_KERNEL
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         }
     }
-    let held = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    *TEST_KERNEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = bin;
+    let held = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *TEST_KERNEL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = bin;
     Guard(held)
 }
 
@@ -118,9 +124,15 @@ fn program(bin: &Path, tool: Tool) -> Option<(PathBuf, Option<&'static str>)> {
     match tool {
         Tool::Recall => Some((bin.to_path_buf(), Some("recall"))),
         Tool::MemorySearch | Tool::ProjectId => {
-            let name = if tool == Tool::MemorySearch { "kith-memory" } else { "project-id" };
+            let name = if tool == Tool::MemorySearch {
+                "kith-memory"
+            } else {
+                "project-id"
+            };
             let real = bin.canonicalize().unwrap_or_else(|_| bin.to_path_buf());
-            Some(real.parent()?.join(name)).filter(|p| p.is_file()).map(|p| (p, None))
+            Some(real.parent()?.join(name))
+                .filter(|p| p.is_file())
+                .map(|p| (p, None))
         }
     }
 }
@@ -191,7 +203,10 @@ pub(crate) fn run(tool: Tool, who: &RunIdentity, args: &[String]) -> Result<Valu
     };
     // The tool is gone; anything it left behind in its group goes too, and the readers end at the pipes' close.
     end_group_of(child.id());
-    let (stdout, stderr) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
+    let (stdout, stderr) = (
+        out.join().unwrap_or_default(),
+        err.join().unwrap_or_default(),
+    );
     Ok(json!({
         "stdout": String::from_utf8_lossy(&stdout),
         "stderr": String::from_utf8_lossy(&stderr),
