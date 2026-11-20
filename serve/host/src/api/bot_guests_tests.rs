@@ -534,7 +534,7 @@ fn router_methods() -> BTreeSet<String> {
             open = !arm;
         }
     }
-    out.extend(crate::chat::memory::HQ_METHODS.iter().map(|m| (*m).to_owned()));
+    out.extend(crate::hqmem::HQ_METHODS.iter().map(|m| (*m).to_owned()));
     out.insert("readFile".into());
     out
 }

@@ -1,13 +1,12 @@
-//! Tidying for the hq agents' bots: the same triggers, evidence rules and audit as other bots (`tidy`), over the
+//! Tidying for the hq agents' bots: the same triggers, evidence rules and audit as other bots (`tidier`), over the
 //! agent's Markdown memory instead of kith-mem's entries. The mapping onto files is `hqmem::tidy`.
 //!
 //! It runs without the agent: one plain-Claude one-shot (`oneshot::one_shot_plain`), so no agent slot is taken and
 //! nothing of the agent is launched. Its writes go through `hqmem` as `Who::Tidy`, so they are checked, versioned
 //! and undoable like any other write to those files.
 
-use crate::chat::oneshot;
 use crate::hqmem::cost::{Tag, record_cost};
-use crate::hqmem::{self, Layout, tidy as files};
+use crate::hqmem::{self, Layout, oneshot, tidy as files};
 use crate::hub::Hub;
 use crate::store::BotConfig;
 use anyhow::{Result, anyhow};
@@ -25,12 +24,12 @@ pub(super) fn review_due(agent: &str) -> bool {
     if files::agent_dir(&layout, agent).is_none() {
         return false;
     }
-    // Only lines a run logged are the tidy-up's to rewrite, as in `tidy`.
+    // Only lines a run logged are the tidy-up's to rewrite, as in `tidier`.
     let Ok(written) = hqmem::open(&layout).and_then(|conn| files::written(&conn, agent)) else { return false };
     files::load(&layout, agent, "", Some(&written))
         .ok()
         .flatten()
-        .is_some_and(|m| m.tidy_lines().any(super::tidy::dated))
+        .is_some_and(|m| m.tidy_lines().any(super::tidier::dated))
 }
 
 /// One run over the agent's files for these conversations. True when it should be tried again later: the agent has

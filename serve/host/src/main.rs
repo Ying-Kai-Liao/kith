@@ -338,13 +338,6 @@ enum McpServer {
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
         port: u16,
     },
-    /// Search the bot's own chat history.
-    Memory {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
     /// Tools of the apps connected through Composio.
     Composio {
         #[arg(long)]
@@ -1777,7 +1770,6 @@ async fn main() -> Result<()> {
         Sub::Mcp { server: McpServer::Chat { bot, port } } => mcp::serve(bot, port, mcp::Server::Chat).await,
         Sub::Mcp { server: McpServer::Files { bot, port } } => mcp::serve(bot, port, mcp::Server::Files).await,
         Sub::Mcp { server: McpServer::Team { bot, port } } => mcp::serve(bot, port, mcp::Server::Team).await,
-        Sub::Mcp { server: McpServer::Memory { bot, port } } => mcp::serve(bot, port, mcp::Server::Memory).await,
         Sub::Mcp { server: McpServer::Composio { bot, port } } => mcp::serve(bot, port, mcp::Server::Composio).await,
         Sub::Mcp { server: McpServer::Local { connector, port } } => mcp::serve_local(connector, port).await,
         Sub::Mcp { server: McpServer::Remote { connector, port } } => mcp::serve_remote(connector, port).await,

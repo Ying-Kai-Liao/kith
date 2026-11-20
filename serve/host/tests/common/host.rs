@@ -102,18 +102,6 @@ impl Host {
         self.call("createBot", bot).await["bot"]["id"].as_str().unwrap().to_owned()
     }
 
-    pub async fn memory(&self, bot: &str) -> Value {
-        self.call("memory", json!({"botId": bot})).await
-    }
-
-    pub async fn tool(&self, bot: &str, name: &str, arguments: Value) -> Value {
-        self.call("memoryCall", json!({"botId": bot, "name": name, "arguments": arguments})).await
-    }
-
-    pub async fn tool_refused(&self, bot: &str, name: &str, arguments: Value) -> String {
-        self.refused("memoryCall", json!({"botId": bot, "name": name, "arguments": arguments})).await
-    }
-
     /// A bot running `tests/fixtures/<fixture>` with `args`.
     pub async fn fixture_bot(&self, name: &str, fixture: &str, args: &str) -> String {
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture);

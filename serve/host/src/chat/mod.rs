@@ -9,7 +9,6 @@ pub mod handoff;
 pub mod invite_rooms;
 pub mod memory;
 pub mod naming;
-pub mod oneshot;
 pub mod outbox;
 pub mod profile;
 pub mod prompt;

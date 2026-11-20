@@ -214,7 +214,6 @@ impl Hub {
         // Approval cards and queued sends from a previous run can't be honored anymore.
         self.store.expire_pending()?;
         crate::chat::room_pointer::sweep(self);
-        crate::chat::memory::import_old_memory(self);
         self.routines.restore(&self.store)?;
         crate::market::turn_on_installed_once(&self.store)?;
         let rows = self.store.bots()?;
@@ -376,9 +375,6 @@ impl Hub {
             crate::chat::group::members_changed(self, &id, &row.config.members, &cfg.members);
             self.close_group_places(&id, &cfg.members);
         } else {
-            if crate::chat::memory::shared(&cfg) != crate::chat::memory::shared(&row.config) {
-                crate::chat::memory::changed(self, Some(&id));
-            }
             self.send_cmd(&id, Cmd::Reconfigure(Box::new(cfg)))?;
         }
         self.emit_bot(&id);
@@ -402,9 +398,7 @@ impl Hub {
         }
         // Its shared files are unreachable once the bot is deleted.
         let files = crate::chat::files::root(id);
-        let bot = id.to_owned();
         tokio::task::spawn_blocking(move || {
-            crate::chat::memory::files::remove_bot(&bot);
             if let Err(error) = std::fs::remove_dir_all(&files)
                 && error.kind() != std::io::ErrorKind::NotFound
             {

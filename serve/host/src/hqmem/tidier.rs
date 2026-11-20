@@ -2,11 +2,11 @@
 //! What a run may change is the crate's decision (`kith_mem::tidy`).
 
 use crate::LockExt;
-use crate::chat::{naming, oneshot};
+use crate::chat::naming;
 use crate::hub::Hub;
 use crate::store::{BotConfig, Entry, EntryKind, Store};
-use anyhow::{Result, anyhow};
-use kith_mem::tidy::{self, Message, Outcome};
+use anyhow::Result;
+use kith_mem::tidy::Message;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -33,7 +33,8 @@ const HEADROOM_PERCENT: f64 = 75.0;
 const REVIEW_CHECK: Duration = Duration::from_secs(60 * 60);
 
 pub enum TidyEvent {
-    /// A turn the user started has finished.
+    /// A turn the user started has finished. Its words fed the automatic naming, which is gone; it only counts now.
+    #[allow(dead_code)]
     Turn(naming::Turn),
     /// Run soon: a new session started or the context was compacted.
     Flush,
@@ -61,7 +62,7 @@ fn kv_get_or_old(store: &Store, key: &str) -> Option<String> {
 }
 
 /// Tidying starts reading after `seq`.
-pub(super) fn set_bookmark(store: &Store, bot: &str, seq: i64) -> Result<()> {
+fn set_bookmark(store: &Store, bot: &str, seq: i64) -> Result<()> {
     store.kv_set(&bookmark_key(bot), &seq.to_string())
 }
 
@@ -70,16 +71,16 @@ fn bookmark(store: &Store, bot: &str) -> i64 {
 }
 
 /// Starts the bot's tidier. It runs once the bot has been quiet for [`quiet_time`] after the user's turns, or right
-/// away when [`BATCH`] of them are waiting, and once a day for the time review. It also names an unnamed bot. It
-/// stops when the bot actor drops the sender; what it hasn't read waits for the next one.
+/// away when [`BATCH`] of them are waiting, and once a day for the time review. It stops when the bot actor drops
+/// the sender; what it hasn't read waits for the next one.
 pub fn spawn_tidier(hub: Arc<Hub>, bot_id: String) -> mpsc::UnboundedSender<TidyEvent> {
     let (tx, mut rx) = mpsc::unbounded_channel::<TidyEvent>();
-    // C5: its one-shot is refused for a host-native bot, so it would only back off for ever. Events sent to it are dropped.
-    if hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.refused_native()) {
+    // Only an hq agent's memory is tidied by the host: a host-native row (C5) or a room has none, so events sent to
+    // it are dropped.
+    if !hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.is_hq()) {
         return tx;
     }
-    let hq = hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.is_hq());
-    if hq && kv_get_or_old(&hub.store, &bookmark_key(&bot_id)).is_none() {
+    if kv_get_or_old(&hub.store, &bookmark_key(&bot_id)).is_none() {
         // An hq bot's months of earlier chat were never tidied over: the first run starts from now, not from them.
         if let Err(e) = set_bookmark(&hub.store, &bot_id, hub.store.last_seq(&bot_id)) {
             tracing::warn!(bot = %bot_id, error = format!("{e:#}"), "couldn't start the tidy-up bookmark");
@@ -100,11 +101,7 @@ pub fn spawn_tidier(hub: Arc<Hub>, bot_id: String) -> mpsc::UnboundedSender<Tidy
             let run = tokio::select! {
                 event = rx.recv() => match event {
                     None => break,
-                    Some(TidyEvent::Turn(turn)) => {
-                        // An hq agent keeps its name.
-                        if !hq && let Err(e) = naming::observe(&hub, &bot_id, turn).await {
-                            tracing::warn!(bot = %bot_id, error = format!("{e:#}"), "naming the bot failed");
-                        }
+                    Some(TidyEvent::Turn(_)) => {
                         waiting += 1;
                         idle.as_mut().reset(quiet_until(retry_at));
                         waiting >= BATCH && retry_at.is_none()
@@ -159,14 +156,12 @@ fn review_due(store: &Store, bot: &str) -> bool {
     if kv_get_or_old(store, &reviewed_key(bot)).as_deref() == Some(today().as_str()) {
         return false;
     }
-    if let Some(agent) = store.bot(bot).ok().flatten().and_then(|b| b.config.hq_agent) {
-        return super::hq_tidy::review_due(&agent);
-    }
-    store.memory_read(|c| kith_mem::store::layer(c, Some(bot))).is_ok_and(|entries| {
-        entries.iter().any(|e| {
-            e.state == kith_mem::store::State::Active && e.author != kith_mem::store::Author::User && dated(&e.text)
-        })
-    })
+    store
+        .bot(bot)
+        .ok()
+        .flatten()
+        .and_then(|b| b.config.hq_agent)
+        .is_some_and(|agent| super::hq_tidy::review_due(&agent))
 }
 
 /// Whether a memory names a date the time review may have to turn into the past: a year, a month or day in
@@ -212,12 +207,7 @@ async fn run(hub: &Arc<Hub>, bot_id: &str) -> Result<Ran> {
         return Ok(Ran::Done { more });
     }
 
-    let later = if cfg.is_hq() {
-        super::hq_tidy::tidy(hub, &cfg, &messages, &today).await?
-    } else {
-        tidy_entries(hub, bot_id, &cfg, &messages, &today).await?
-    };
-    if later {
+    if super::hq_tidy::tidy(hub, &cfg, &messages, &today).await? {
         return Ok(Ran::Later);
     }
     set_bookmark(&hub.store, bot_id, last_seq)?;
@@ -225,41 +215,6 @@ async fn run(hub: &Arc<Hub>, bot_id: &str) -> Result<Ran> {
         hub.store.kv_set(&reviewed_key(bot_id), &today)?;
     }
     Ok(Ran::Done { more })
-}
-
-/// A run over the bot's entries (kith-mem's store). True when it should try again later: memory changed meanwhile.
-async fn tidy_entries(
-    hub: &Arc<Hub>,
-    bot_id: &str,
-    cfg: &BotConfig,
-    messages: &[Message],
-    today: &str,
-) -> Result<bool> {
-    let shared = super::shared(cfg);
-    let snapshot = hub.store.memory_read(|c| tidy::snapshot(c, bot_id, shared, today))?;
-    let (system, material) = tidy::prompt(&snapshot, messages);
-    let raw = oneshot::one_shot(hub, cfg, &system, &material).await?;
-    let plan = tidy::parse(&raw).ok_or_else(|| anyhow!("tidying answered without a plan"))?;
-    let (kept, rejected) = tidy::audit(&snapshot, messages, plan);
-    if !rejected.is_empty() {
-        tracing::info!(bot = %bot_id, dropped = rejected.len(), reasons = ?rejected, "tidying dropped changes");
-    }
-    let outcome = hub.store.memory_write(|c, now, rev| tidy::apply(c, &snapshot, &kept, messages, now, rev))?;
-    match outcome {
-        Outcome::Stale => return Ok(true),
-        Outcome::Changed(tidy) => {
-            let notes = tidy::notes(&snapshot, &kept);
-            tracing::info!(
-                bot = %bot_id, added = tidy.added.len(), archived = tidy.archived.len(), notes = notes.len(), "memory tidied"
-            );
-            let (h, c, id) = (hub.clone(), cfg.clone(), tidy.id);
-            tokio::task::spawn_blocking(move || super::files::write_notes(&h, &c, id, &notes)).await?;
-            let layer = if kept.add.iter().any(|a| a.shared) { None } else { Some(bot_id) };
-            super::changed(hub, layer);
-        }
-        Outcome::Unchanged => {}
-    }
-    Ok(false)
 }
 
 /// Usage of the bot's harness above [`HEADROOM_PERCENT`] in any window.
@@ -295,12 +250,24 @@ fn message(e: &Entry) -> Option<Message> {
         if e.data["from"] == "host" {
             return None;
         }
-        (true, super::notices::typed(&e.data).iter().map(|run| clip(run)).collect::<Vec<_>>())
+        (true, typed(&e.data).iter().map(|run| clip(run)).collect::<Vec<_>>())
     } else {
         (false, vec![clip(e.data["text"].as_str().unwrap_or_default())])
     };
     let text: Vec<String> = text.into_iter().filter(|run| !run.trim().is_empty()).collect();
-    (!text.is_empty()).then(|| Message { id: e.id.clone(), from_user, text, date: super::dates::ymd(e.created_at) })
+    (!text.is_empty()).then(|| Message {
+        id: e.id.clone(),
+        from_user,
+        text,
+        date: crate::chat::memory::ymd(e.created_at),
+    })
+}
+
+/// The runs of a user message the user typed themselves: not pasted, quoted or forwarded text.
+fn typed(data: &serde_json::Value) -> Vec<String> {
+    let pasted: Vec<String> =
+        data["pasted"].as_array().into_iter().flatten().filter_map(|p| p.as_str().map(str::to_owned)).collect();
+    kith_mem::evidence::typed(data["text"].as_str().unwrap_or_default(), &pasted)
 }
 
 #[cfg(test)]

@@ -257,7 +257,7 @@ Rules:
    `owner` (it becomes private, smaller); `person:<id>` to `room:<r>` only if the room's members are a subset of
    the person's visible set. Anything that widens (`owner` to `shared`, `person:<a>` to `shared`, room to `shared`)
    is not allowed by the tool.
-2. Tidy (`crates/memory/src/tidy/mod.rs`, `serve/host/src/chat/memory/tidy.rs`, `kith-memory tidy`) proposes
+2. Tidy (`crates/memory/src/tidy/mod.rs`, `serve/host/src/hqmem/tidier.rs`, `kith-memory tidy`) proposes
    promotions. A proposal that stays within the audience is applied as a tidy-up; the existing tidy undo covers it
    (`kith-memory tidy undo`).
 3. A proposal that widens is never applied by Tidy. It becomes a question to the person who owns the note (the
@@ -519,7 +519,7 @@ Built (2026-10-23), where it differs from the plan above:
 ### 5. Promotion with audience check in Tidy
 
 - Tidy proposes promotions; audience check before writing and again on apply; widening becomes an owner question.
-- Files: `serve/host/crates/memory/src/tidy/mod.rs`, `serve/host/src/chat/memory/tidy.rs`, `kernel/bin/kith-memory`
+- Files: `serve/host/crates/memory/src/tidy/mod.rs`, `serve/host/src/hqmem/tidier.rs`, `kernel/bin/kith-memory`
   (tidy undo), `serve/host/crates/memory/src/check.rs`.
 - Tests: a promotion within the audience applies; a widening becomes a question and is not applied; the second
   check catches a membership change between proposal and apply. Depends on 1a, 3.

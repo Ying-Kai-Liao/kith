@@ -129,20 +129,6 @@ pub fn refresh(store: &Store, bot_id: &str, session: &str) -> Result<()> {
     }
 }
 
-/// Every session of the bot renders its instructions again on its next turn (after the move from the old memory).
-pub fn invalidate(store: &Store, bot_id: &str) -> Result<()> {
-    for k in store.kv_prefix(&format!("context.{bot_id}.")) {
-        match store.kv_get(&k).and_then(|v| serde_json::from_str::<Snapshot>(&v).ok()) {
-            Some(mut s) => {
-                s.system.clear();
-                save(store, bot_id, &s)?;
-            }
-            None => store.kv_set(&k, "")?,
-        }
-    }
-    Ok(())
-}
-
 /// Records `system` (already handed to a new session), rendered at memory revision `memory`, as that session's
 /// snapshot.
 pub fn adopt(store: &Store, cfg: &BotConfig, session: &str, system: String, memory: String) -> Result<Snapshot> {
@@ -297,7 +283,7 @@ mod tests {
         let a = cfg("Fixer", "Fix bugs");
         adopt(&store, &a, "s1", "SYSTEM v1".into(), String::new()).expect("adopt");
         let b = cfg("Fixer", "Fix bugs and write tests");
-        invalidate(&store, &a.id).expect("invalidate");
+        refresh(&store, &a.id, "s1").expect("refresh");
         let snap = resolve(&store, &b, "s1", None).expect("resolve");
         assert!(snap.system.contains("Description: Fix bugs and write tests"), "re-rendered");
         assert!(profile_update(&store, &snap, &b).is_some(), "the agent never heard the new description");

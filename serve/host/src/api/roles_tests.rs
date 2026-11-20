@@ -138,7 +138,7 @@ pub(super) fn router_methods() -> BTreeSet<String> {
             open = !arm;
         }
     }
-    out.extend(crate::chat::memory::HQ_METHODS.iter().map(|m| (*m).to_owned()));
+    out.extend(crate::hqmem::HQ_METHODS.iter().map(|m| (*m).to_owned()));
     out.extend(crate::chat::topics::METHODS.iter().map(|m| (*m).to_owned()));
     out.insert("readFile".into());
     out
@@ -171,7 +171,6 @@ async fn every_router_method_is_denied_to_members_unless_listed() {
         "kernelStatus",
         "listDirs",
         "registerProject",
-        "memoryCall",
         "routines",
         "skills",
     ] {

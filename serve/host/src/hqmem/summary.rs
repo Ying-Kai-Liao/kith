@@ -9,7 +9,7 @@
 
 use super::cost::{Tag, record_cost};
 use crate::LockExt;
-use crate::chat::oneshot;
+use crate::hqmem::oneshot;
 use crate::hub::Hub;
 use crate::store::{BotConfig, Entry, EntryKind, Lane, Store, now_ms};
 use anyhow::{Result, anyhow};
@@ -304,10 +304,9 @@ async fn write_now(
     // Remembered before the run: a crash or a refused summary doesn't make the next sweep pay again.
     hub.store.kv_set(&tried_key(key), &last_seq.to_string())?;
     let user = format!("<conversation>\n{text}\n</conversation>");
-    let reply = match runner.hq_agent {
-        Some(_) => oneshot::one_shot_plain(hub, SYSTEM, &user).await?,
-        None => oneshot::one_shot_reply(hub, &runner, SYSTEM, &user).await?,
-    };
+    // A host-native row has no agent to write for (C5): refused with the one error every native path gives.
+    runner.refuse_native()?;
+    let reply = oneshot::one_shot_plain(hub, SYSTEM, &user).await?;
     let f = facets(&cfg, thread.and_then(|t| hub.store.entry(t)).as_ref());
     // Tagged to the person and project the thread was for (the room is the agent and person). A terminal thread is the
     // owner's whoever the chat belongs to, so it carries no person.

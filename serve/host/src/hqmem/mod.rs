@@ -11,12 +11,17 @@ mod browse;
 mod cli;
 pub(crate) mod cost;
 mod hook;
+mod hq_api;
+mod hq_tidy;
+pub mod oneshot;
 pub mod summary;
 mod summary_cli;
+pub mod tidier;
 pub mod tidy;
 
 pub use browse::{delete, diff, history, list_files, read_file, restore, save};
 pub use cli::{Cmd, run};
+pub use hq_api::{METHODS as HQ_METHODS, call as hq_call};
 
 use anyhow::{Context, Result};
 use kith_mem::check::{self, Refusal};

@@ -7,7 +7,6 @@
 use super::rig::Rig;
 use crate::agent::bot::Cmd;
 use crate::api::{devices::Caller, dispatch};
-use crate::chat::oneshot;
 use crate::store::{BotConfig, EntryKind, Lane, enforce_native_in_tests, native_ids};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -138,13 +137,11 @@ async fn a_routine_of_a_native_bot_fails_to_start_and_says_why() {
 }
 
 #[tokio::test]
-async fn a_one_shot_of_a_native_bot_is_refused_and_a_groups_is_not() {
+async fn a_native_bot_fails_the_guard_and_a_group_passes_it() {
     let r = Rig::new().await;
     let a = native(&r, "Old");
     let row = r.hub.store.bot(&a).unwrap().unwrap().config;
-    let e = oneshot::one_shot(&r.hub, &row, "s", "u").await.unwrap_err();
-    assert!(format!("{e:#}").contains(WORDS));
-    let e = oneshot::one_shot_reply(&r.hub, &row, "s", "u").await.map(|_| ()).unwrap_err();
+    let e = row.refuse_native().unwrap_err();
     assert!(format!("{e:#}").contains(WORDS));
     let room = cfg(json!({"id": "r", "name": "R", "kind": "group", "members": []}));
     assert!(room.refuse_native().is_ok(), "a room passes the guard");

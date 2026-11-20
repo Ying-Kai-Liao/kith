@@ -1,27 +1,16 @@
-//! Bot memory ([design](../../../../docs/design/bot-memory.md)): it records the person, not the work. The rules
-//! (store, checks, opening, tidying) live in the `kith_mem` crate; this module runs them in the host: the
-//! session opening, the bot's memory tools, the client API, the chat lines that show and undo a bot's writes,
-//! tidying, and the one-time move from the old Engram memory.
+//! What is left of the host's chat memory for bots. Kith agents use kith memory (`hqmem`, `kith memory`), and the
+//! host no longer runs host-native bots (C5), so the bot memory tools, their chat cards, the memory API, the file
+//! scan and the one-time move from Engram are gone. Native bots' memory files stay on disk and `exportHostBot`
+//! still copies them.
+//!
+//! This is only what `agent/bot`'s native arms and the context snapshot still call: the session opening, the
+//! change notices and the folder names. It goes with those arms.
 
-mod api;
 mod dates;
-mod file_api;
-mod file_notices;
-mod file_tools;
 pub mod files;
-mod hq_api;
-mod hq_tidy;
-mod import;
-mod notices;
-mod tidy;
-mod tools;
 
-pub use api::call;
+pub use crate::hqmem::tidier::{TidyEvent, spawn_tidier};
 pub use dates::ymd;
-pub use hq_api::{METHODS as HQ_METHODS, call as hq_call};
-pub use import::import_old_memory;
-pub use tidy::{TidyEvent, spawn_tidier};
-pub use tools::{INSTRUCTIONS, call as tool_call, tools};
 
 use crate::hub::Hub;
 use crate::store::{BotConfig, Store};
@@ -50,35 +39,6 @@ pub fn opening(store: &Store, cfg: &BotConfig, room: Option<&str>) -> String {
         }
     };
     format!("{entries}\n\n{}", files::index(store, cfg))
-}
-
-/// After memory changed in `bot`'s own layer, or in the shared one (`None`): the apps fetch it again, and every
-/// session of a bot that sees the layer hears it on its next message (see [`change_notice`]). The opening itself
-/// stays as it is, so the prompt cache does too.
-pub fn changed(hub: &Hub, bot: Option<&str>) {
-    let bots: Vec<(String, bool)> = match bot {
-        Some(bot) => vec![(bot.to_owned(), true)],
-        None => hub
-            .store
-            .bots()
-            .map(|rows| {
-                rows.into_iter()
-                    .filter(|r| !r.deleted && !r.config.is_group())
-                    .map(|r| {
-                        let sees = shared(&r.config);
-                        (r.config.id, sees)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-    };
-    let revision = hub.store.memory_rev().to_string();
-    for (id, sees) in &bots {
-        if *sees && let Err(error) = hub.store.kv_set(&revision_key(id), &revision) {
-            tracing::warn!(bot = %id, error = format!("{error:#}"), "couldn't flag the memory change");
-        }
-        hub.emit_bot(id);
-    }
 }
 
 /// What a bot's memory screen shows changed outside the store (Claude Code's notes came or went): moves
@@ -139,16 +99,6 @@ pub fn compacted(store: &Store, bot: &str, session: &str) -> anyhow::Result<()> 
     }
 }
 
-/// A bot wrote memory itself in `session`, which therefore knows the change: when it had heard everything up to
-/// `before`, it has heard this too.
-pub fn heard_own_write(store: &Store, bot: &str, session: &str, before: &str) -> anyhow::Result<()> {
-    if store.kv_get(&announced_key(bot, session)).unwrap_or_default() == before {
-        mark_announced(store, bot, session, &current_revision(store, bot))
-    } else {
-        Ok(())
-    }
-}
-
 /// The memory revision a bot's layers are at; an opening rendered now holds it.
 pub fn current_revision(store: &Store, bot: &str) -> String {
     store.kv_get(&revision_key(bot)).unwrap_or_default()
@@ -177,15 +127,5 @@ mod tests {
         assert!(change_notice(&store, &cfg, "s1", None).is_none(), "told once");
         compacted(&store, &cfg.id, "s1").unwrap();
         assert!(change_notice(&store, &cfg, "s1", None).is_some(), "the summary may have dropped the notice");
-
-        // What the session wrote itself, with nothing else new, needs no notice; unless it missed something before.
-        opened(&store, &cfg.id, "s1", "7").unwrap();
-        changes("8");
-        heard_own_write(&store, &cfg.id, "s1", "7").unwrap();
-        assert!(change_notice(&store, &cfg, "s1", None).is_none());
-        changes("9");
-        changes("10");
-        heard_own_write(&store, &cfg.id, "s1", "9").unwrap();
-        assert!(change_notice(&store, &cfg, "s1", None).is_some());
     }
 }
