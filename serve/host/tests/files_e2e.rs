@@ -175,6 +175,7 @@ async fn publishes_all_types_with_final_text_and_survives_restart_workspace_chan
     })
     .await;
     waited.unwrap();
+    std::fs::create_dir_all(host.dir("elsewhere")).unwrap();
     host.call("updateBot", json!({"id": bot, "cwd": host.dir("elsewhere")})).await;
     host.call("readFile", json!({"entryId":entry_id,"fileId":file_id,"offset":0})).await;
     host.call("deleteBot", json!({"botId":bot})).await;
@@ -198,7 +199,8 @@ async fn rejects_invalid_sources_without_a_file_entry() {
     let bot = bot.as_str();
     host.call("send", json!({"botId":bot,"text":"invalid-files"})).await;
     ready(&host, bot, 0).await;
-    let results: Value = serde_json::from_slice(&std::fs::read(host.dir("errors").join("file-results.json")).unwrap()).unwrap();
+    let results: Value =
+        serde_json::from_slice(&std::fs::read(host.dir("errors").join("file-results.json")).unwrap()).unwrap();
     assert!(results.as_array().unwrap().iter().all(|r| r["isError"] == true));
 }
 
@@ -269,11 +271,7 @@ async fn groups_routines_and_delegated_turns_cannot_publish_files() {
     rejected(&results_path).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     std::fs::remove_file(&results_path).unwrap();
-    // Another agent asks it (the team tool's call, as the host gets it; the caller's own agent never runs).
-    let caller = host.agent("caller", "file_agent.py").await;
-    let ask = json!({"botId": bot, "message": "share-files"});
-    host.call("teamCall", json!({"botId": caller, "name": "ask_bot", "arguments": ask})).await;
-    rejected(&results_path).await;
+    // (A delegated ask went through the team tool, which kith agents are never given: nothing delegates to them.)
     let history = host.call("history", json!({"botId":bot})).await;
     assert!(history["entries"].as_array().unwrap().iter().all(|entry| entry["data"]["files"].is_null()));
 }

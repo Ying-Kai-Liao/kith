@@ -115,7 +115,8 @@ impl Host {
     /// listed, flagged and refused. Its id.
     pub async fn native_row(&mut self, name: &str) -> String {
         let id = uuid::Uuid::new_v4().to_string();
-        let config = json!({"id": id, "name": name, "backend": "custom", "command": "unused", "cwd": "", "tasks": false});
+        let config =
+            json!({"id": id, "name": name, "backend": "custom", "command": "unused", "cwd": "", "tasks": false});
         self.restart(|home| {
             let db = rusqlite::Connection::open(home.join("serve.db")).unwrap();
             db.execute("INSERT INTO bots(id, rev, deleted, config) VALUES (?1, 1, 0, ?2)", (&id, config.to_string()))

@@ -416,7 +416,20 @@ async fn wire_shape_matches_the_snapshot() {
         eprintln!("skipping: Python not available");
         return;
     }
-    let host = start_host().await;
+    let mut host = start_host().await;
+    // A host-native row an old release left (nothing can make one now): it keeps `needsKithAgent` and `hello.nativeBots`
+    // on the wire, which older apps read.
+    common::stop(&mut host.child);
+    let db = rusqlite::Connection::open(host.home.join("serve.db")).unwrap();
+    let config =
+        json!({"id": "old-native", "name": "Old", "backend": "custom", "command": "unused", "cwd": "", "tasks": false});
+    db.execute("INSERT INTO bots(id, rev, deleted, config) VALUES ('old-native', 1, 0, ?1)", [config.to_string()])
+        .unwrap();
+    drop(db);
+    let agents = common::agents_env(&host.home);
+    let env: Vec<(&str, &str)> = agents.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    (host.child, host.base) = common::serve_env(&host.home, &env).await;
+    host.token = common::read_token(&host.home).trim().to_owned();
     let bot = tester(&host).await;
     host.call("send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
     let card = host.wait_for(&bot, |e| e["kind"] == "permission" && e["data"]["status"] == "pending").await;

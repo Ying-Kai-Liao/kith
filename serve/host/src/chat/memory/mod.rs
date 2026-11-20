@@ -17,6 +17,8 @@ mod tidy;
 mod tools;
 
 pub use api::call;
+#[allow(unused_imports)] // #1091's tidier uses it
+pub use dates::ymd;
 pub use hq_api::{METHODS as HQ_METHODS, call as hq_call};
 pub use import::import_old_memory;
 pub use tidy::{TidyEvent, spawn_tidier};

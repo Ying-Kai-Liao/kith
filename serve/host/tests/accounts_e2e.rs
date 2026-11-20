@@ -57,14 +57,6 @@ impl Drop for Setup {
 }
 
 impl Setup {
-    /// A second kith agent of the stub kernel (a folder under `made/`), once the host's sync made its bot: its id.
-    async fn made_agent(&self, name: &str) -> String {
-        std::fs::create_dir_all(self.home.join("made").join(name)).unwrap();
-        self.host.call("syncHqBots", json!({})).await;
-        let bot = self.host.roster().await.into_iter().find(|b| b["hqAgent"] == name).expect("the made agent's bot");
-        bot["id"].as_str().unwrap().to_owned()
-    }
-
     fn kernel(&self) -> Value {
         serde_json::from_str(&std::fs::read_to_string(self.home.join("kernel.json")).unwrap()).unwrap()
     }
@@ -123,27 +115,6 @@ fn account<'a>(got: &'a Value, id: &str) -> &'a Value {
 
 fn two() -> Value {
     json!({"set": ["claude", "claude:work"]})
-}
-
-#[tokio::test]
-async fn an_agent_asked_by_another_agent_runs_on_its_next_account_when_the_kernel_has_its_first_out() {
-    // Another run (a terminal, an `ask` from a third agent) hit the limit: the kernel has the account out, and this
-    // host has never read `house`'s accounts. The ask arrives through the same actor queue as a message.
-    let kernel = json!({"set": ["claude", "claude:work"], "out": {"claude": {"out_until": now() + 3600, "reason": "rate_limit"}}});
-    let s = start(&kernel).await;
-    let lead = s.made_agent("lead").await;
-
-    // The lead asks house (the team tool's call, as the host gets it): the lead's own agent never runs.
-    let args = json!({"botId": s.bot, "message": "REPORT"});
-    s.host.call("teamCall", json!({"botId": lead, "name": "ask_bot", "arguments": args})).await;
-
-    // The lead got house's answer; an asked agent's own chat keeps it as a trace, not as a final reply.
-    let trace = s.host.call("history", json!({"botId": s.bot})).await;
-    let said = trace["entries"].as_array().unwrap().iter().find(|e| e["kind"] == "agent").unwrap().clone();
-    assert_eq!(said["data"]["text"], "answered by claude:work");
-    assert_eq!(said["data"]["answeredBy"], json!("claude:work"), "house answered on its next account");
-    assert!(s.prompts("primary").is_empty(), "the account that is out was never started: {:?}", s.prompts("primary"));
-    assert_eq!(s.prompts("claude:work").len(), 1);
 }
 
 #[tokio::test]

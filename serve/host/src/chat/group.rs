@@ -1099,8 +1099,10 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    /// A host with agent bots `a` and `b` (the scripted fixture agent) and a group of both.
+    /// A host with kith agents `a` and `b` (a stand-in kernel, the scripted fixture agent) and a group of both.
     struct Room {
+        /// The stand-in kernel is the process's one (`hq::TEST_KERNEL_BIN`): held for the test, as the api rig does.
+        _one: tokio::sync::MutexGuard<'static, ()>,
         hub: Arc<Hub>,
         dir: PathBuf,
         group: String,
@@ -1111,15 +1113,34 @@ mod tests {
 
     impl Room {
         fn new() -> Self {
+            // Another test may hold the kernel (each test has its own runtime, so waiting on this thread is fine).
+            let one = loop {
+                match crate::remote::account::ONE_AT_A_TIME.try_lock() {
+                    Ok(guard) => break guard,
+                    Err(_) => std::thread::sleep(Duration::from_millis(20)),
+                }
+            };
+            *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap() =
+                Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/kernel_agents.py"));
             let dir = std::env::temp_dir().join(format!("kith-group-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
+            // A bot guest's ask is checked against its owner's grants (kith-auth); here it holds every agent.
+            let auth = dir.join("kith-auth");
+            std::fs::write(&auth, "#!/bin/sh\necho '{\"allowed\": true, \"owner\": false}'\n").unwrap();
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            *crate::remote::account::TEST_BIN.lock().unwrap() = Some(auth);
             let store = Store::open(&dir.join("test.db")).unwrap();
             let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/team_agent.py");
             for id in ["a", "b"] {
                 let cwd = dir.join(id);
                 std::fs::create_dir_all(&cwd).unwrap();
+                // The stand-in kernel puts an agent named `<test folder>.<id>` in `<tmp>/<test folder>/<id>`.
+                let name = format!("{}.{id}", dir.file_name().unwrap().to_string_lossy());
                 let cfg: BotConfig = serde_json::from_value(json!({
-                    "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false,
+                    "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false, "hqAgent": name,
                     "command": crate::shell::python(&agent), "notify": false,
                 }))
                 .unwrap();
@@ -1142,7 +1163,7 @@ mod tests {
                 )
                 .unwrap();
             let group = group["id"].as_str().unwrap().to_owned();
-            Self { hub, dir, group, bg: format!("bg-{}", uuid::Uuid::new_v4()) }
+            Self { _one: one, hub, dir, group, bg: format!("bg-{}", uuid::Uuid::new_v4()) }
         }
 
         async fn send(&self, text: &str, thread: Option<&str>) -> Entry {
@@ -1187,7 +1208,9 @@ mod tests {
 
         async fn shutdown(self) {
             self.hub.shutdown().await;
-            let _ = std::fs::remove_dir_all(self.dir);
+            let _ = std::fs::remove_dir_all(&self.dir);
+            *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            *crate::remote::account::TEST_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         }
     }
 
