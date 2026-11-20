@@ -521,7 +521,7 @@ enum KernelCmd {
     },
     /// What Claude Code usage costs, every verb of `kernel/bin/kith-cost`: the launch's and the apps' (`limit`, `spent`, `usage --json`,
     /// `agent NAME --json`, `members`, `bots --json`, `sync`), the ledger's writers (`tag`, `record`) and the text reports.
-    /// Prints what `kith-cost` prints, with its exit codes. `kith cost` routes here when `cost` is in core-switched.txt.
+    /// Prints what `kith-cost` prints, with its exit codes. `kith cost` and the stub `kernel/bin/kith-cost` route here.
     // -h/--help belong to kith-cost's own usage text, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Cost {

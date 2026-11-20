@@ -13,7 +13,7 @@ use crate::paths::{self, Paths};
 
 struct Tree {
     root: PathBuf,
-    /// The program the `SessionStart` hook of the cost ledger names (None: bin/kith-cost, the Python).
+    /// The program the `SessionStart` hook of the cost ledger names (None: bin/kith-cost, the stub).
     cost_bin: Option<&'static str>,
 }
 

@@ -140,8 +140,8 @@ pub struct Input<'a> {
     pub kith_bin: Option<&'a str>,
     /// `kith_bin` when it also knows `kernel readfence` (the Rust read fence), else None: the fence stays the Python hook.
     pub fence_bin: Option<&'a str>,
-    /// `kith_bin` when `cost` is switched and it has the `cost-ledger` module (see `assemble::cost_hook_bin`), else None: the
-    /// `SessionStart` hook then stays `bin/kith-cost tag`.
+    /// The program that has the `cost-ledger` module (see `assemble::cost_hook_bin`), else None: the `SessionStart` hook is then
+    /// the stub, `bin/kith-cost tag`, which forwards to a program and does nothing when it finds none.
     pub cost_bin: Option<&'a str>,
     /// `claude plugin list --json` (`[]` when it failed).
     pub plugins_json: &'a str,
@@ -757,7 +757,7 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     let sm = st.as_object_mut().ok_or_else(|| bad("settings"))?;
     {
         let hooks = obj(sm, "hooks")?;
-        // The ledger's writer: the Rust `kith kernel cost tag` when the program has it and `cost` is switched, else the Python.
+        // The ledger's writer: `kith kernel cost tag` on the program, else the stub (which forwards, or does nothing without one).
         let cost_hook = match i.cost_bin.filter(|b| !b.is_empty()) {
             Some(bin) => format!(
                 "{} kernel cost --kernel {} tag",

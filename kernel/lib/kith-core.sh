@@ -65,33 +65,27 @@ kith_core_exec() {
   KITH_BIN=$bin exec "$bin" kernel $verb "$@"
 }
 
-# kith_core_bin VERB   prints the program kith_core_exec VERB would run (and returns 0), or returns 1 when the Python answers:
-# the same rule without the exec, for a caller that has to name the program (the SessionStart hook of `kith AGENT`).
-kith_core_bin() {
-  local verb=$1 module bin ver
-  [[ ${KITH_CORE:-} == python ]] && return 1
-  read -r module _ < <(awk -F'\t' -v v="$verb" '$1 == v { print $2, ($3 != "" ? $3 : $2); exit }' "$KITH/lib/core-switched.txt" 2>/dev/null) || true
-  if [[ -z $module ]]; then
-    [[ ${KITH_CORE:-} == rust ]] || return 1
-    module=${verb%% *}
-    # the cost hook needs the ledger's writers, not just the read verbs an older program has under `cost`
-    [[ $module == cost ]] && module=cost-ledger
-  fi
+# kith_cost_bin   prints the kith program that has the cost ledger's writers (`cost-ledger` in `kith kernel version`) and returns 0, or
+# returns 1 when this Mac has none. KITH_CORE does not matter: there is no Python cost to go back to. The SessionStart hook of
+# `kith AGENT` names the program when there is one, else the stub (`bin/kith-cost tag`, which does nothing without a program).
+kith_cost_bin() {
+  local bin ver
   if [[ -n ${_kith_core_primed:-} ]]; then
     bin=$_kith_core_bin ver=$_kith_core_ver
   else
     bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
     ver=$("$bin" kernel version 2>/dev/null)
   fi
-  [[ -n $bin && $ver == *"\"$module\""* ]] || return 1
+  [[ -n $bin && $ver == *'"cost-ledger"'* ]] || return 1
   printf '%s' "$bin"
 }
 
-# kith_cost ARGS...   `kith-cost ARGS`: the core's when `cost` is switched and the program has the `cost-ledger` module (tag and
-# record write the ledger, so a program that only has the read verbs is not enough), else the Python, which stays the rollback.
-# A subshell, because kith_core_exec execs; `KITH_PERSON_WAS=.. kith_cost ..` reaches whichever answers.
+# kith_cost ARGS...   `kith-cost ARGS`: the stub, which runs `kith kernel cost ARGS` on a program that has `cost-ledger` and
+# otherwise says so on stderr and fails (exit 3). Given the program the launch already looked up, the stub does not look again.
+# A subshell, so `KITH_PERSON_WAS=.. kith_cost ..` reaches it.
 kith_cost() {
-  ( kith_core_exec cost --kernel "$KITH" "$@" || :; exec "$KITH/bin/kith-cost" "$@" )
+  ( [[ -z ${_kith_core_bin:-} || ${_kith_core_ver:-} != *'"cost-ledger"'* ]] || export KITH_BIN=$_kith_core_bin
+    exec "$KITH/bin/kith-cost" "$@" )
 }
 
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag

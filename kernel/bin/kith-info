@@ -369,14 +369,22 @@ def schedules(name, errors=None):
     return out + launchd_jobs(name, sched, now, errors)
 
 
+def since_of(period):
+    """The ledger's cut-off for today / week (7 days) / month (30 days), as `kith kernel cost` reads a period (core/kernel/src/cost):
+    a UTC timestamp in the ledger's own text. Held here because this only reads cost.db and has no use for the rest of the verb."""
+    now = dt.datetime.now(dt.timezone.utc).astimezone()
+    start = {'today': now.replace(hour=0, minute=0, second=0, microsecond=0),
+             'week': now - dt.timedelta(days=7), 'month': now - dt.timedelta(days=30)}.get(period)
+    return start.astimezone(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S') if start else '0'
+
+
 def cost(name):
     db = MACHINE / 'cost.db'
     if not db.is_file():
         raise FileNotFoundError('no cost ledger at %s' % db)
-    since = tool('kith-cost').since_of
     c = sqlite3.connect(db.as_uri() + '?mode=ro', uri=True, timeout=1)
     try:
-        t, w, m = since('today'), since('week'), since('month')
+        t, w, m = since_of('today'), since_of('week'), since_of('month')
         row = c.execute('''select coalesce(sum(case when ts >= ? then cost end), 0),
                                   coalesce(sum(case when ts >= ? then cost end), 0),
                                   coalesce(sum(case when ts >= ? then cost end), 0), coalesce(sum(cost), 0),
