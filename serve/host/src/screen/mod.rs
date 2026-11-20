@@ -130,16 +130,6 @@ impl Screen {
         }
         self.link.locked().clone().ok_or_else(|| anyhow!("The screen helper isn't running on this computer."))
     }
-
-    #[cfg(target_os = "linux")]
-    fn display(&self, id: Option<u32>) -> Result<protocol::Display> {
-        let st = self.status.locked();
-        let found = match id {
-            Some(id) => st.displays.iter().find(|d| d.id == id),
-            None => st.displays.iter().find(|d| d.main).or_else(|| st.displays.first()),
-        };
-        found.cloned().ok_or_else(|| anyhow!("no such display"))
-    }
 }
 
 #[cfg(all(test, unix))]
