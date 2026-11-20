@@ -142,15 +142,17 @@ pub fn track(hub: &Hub, b: &Value) -> Result<()> {
 pub fn observe(caller: &Caller, method: &str, b: &Value) -> Option<(Event, Map<String, Value>)> {
     let mut p = Map::new();
     let event = match method {
-        "createBot" => {
-            let group = b["kind"] == "group";
-            p.insert("kind".into(), (if group { "group" } else { "bot" }).into());
-            if group {
-                p.insert("members".into(), b["members"].as_array().map_or(0, Vec::len).into());
-            } else {
-                p.insert("agent".into(), b["backend"].clone());
-                p.insert("model".into(), b["model"].clone());
-            }
+        // Only a group is made by `createBot` now (a refused non-group call is not a new bot); agents come from
+        // `newKithAgent`.
+        "createBot" if b["kind"] == "group" => {
+            p.insert("kind".into(), "group".into());
+            p.insert("members".into(), b["members"].as_array().map_or(0, Vec::len).into());
+            Event::BotCreated
+        }
+        "newKithAgent" => {
+            p.insert("kind".into(), "bot".into());
+            p.insert("agent".into(), b["harness"].clone());
+            p.insert("model".into(), b["model"].clone());
             Event::BotCreated
         }
         "updateBot" => Event::BotUpdated,
@@ -209,7 +211,6 @@ pub enum TurnSource {
     User,
     Routine,
     Group,
-    Bot,
 }
 
 /// `turn_finished`: the agent, how the turn ended, why it failed and how long it ran;
@@ -240,7 +241,6 @@ pub fn turn_finished(
         TurnSource::User => "user",
         TurnSource::Routine => "routine",
         TurnSource::Group => "group",
-        TurnSource::Bot => "bot",
     };
     let mut p = json!({"agent": agent, "outcome": outcome, "stop_reason": stop_reason, "source": source, "seconds": ms.max(0) / 1000});
     if let Some(e) = failure {

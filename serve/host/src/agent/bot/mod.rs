@@ -96,20 +96,11 @@ pub enum Cmd {
         entry_id: String,
         reply: tokio::sync::oneshot::Sender<bool>,
     },
-    BotRequest(crate::chat::team::BotRequest),
-    /// `send_message` from the bot's `chat` MCP server: a message for the user, now.
-    SendToUser {
-        text: String,
-        reply: tokio::sync::oneshot::Sender<Result<()>>,
-    },
     SendFile {
         paths: Vec<String>,
         name: Option<String>,
         cancelled: Arc<std::sync::atomic::AtomicBool>,
         reply: tokio::sync::oneshot::Sender<Result<()>>,
-    },
-    CancelAsk {
-        id: String,
     },
     /// Its turn in a group's room turn.
     Group(GroupTurn),
@@ -158,7 +149,6 @@ enum Queued {
         alone: bool,
         acc: writer::Accept,
     },
-    BotRequest(crate::chat::team::BotRequest, writer::Accept),
     Group(GroupTurn, writer::Accept),
 }
 
@@ -214,7 +204,6 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         off_lane: None,
         off_turn: None,
         queue: VecDeque::new(),
-        active_request: None,
         seg: Seg::None,
         tools: HashMap::new(),
         plan_entry: None,
@@ -222,7 +211,6 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         last_text: None,
         last_agent: None,
         context_show: crate::channels::settings::Settings::load().context_show,
-        sent: Vec::new(),
         files: files::FileShares::default(),
         perms: HashMap::new(),
         parked_prompts: HashMap::new(),
@@ -427,7 +415,6 @@ struct Actor {
     /// The running turn is one the agent started by itself, and when it last did anything.
     off_turn: Option<Instant>,
     queue: VecDeque<Queued>,
-    active_request: Option<crate::chat::team::BotRequest>,
     seg: Seg,
     tools: HashMap<String, String>,
     plan_entry: Option<String>,
@@ -438,8 +425,6 @@ struct Actor {
     last_agent: Option<String>,
     /// `channels.context_show`: the session fullness (percent) from which a reply gets the hint; None: never.
     context_show: Option<f64>,
-    /// Messages the bot sent the user this turn (`send_message`); none: its last text is the reply.
-    sent: Vec<String>,
     files: files::FileShares,
     /// permission entry id -> JSON-RPC request ids (a repeat of the same ask joins its card and waits on it too)
     perms: HashMap<String, Vec<Value>>,
@@ -626,8 +611,6 @@ impl Actor {
             self.tend_room();
         }
         self.files.cancel();
-        self.hub.team.cancel_from(&self.rt);
-        self.complete_request(Err(anyhow!("recipient shut down")), true);
         self.complete_group(Err(anyhow!("bot shut down")));
         if let Some(c) = self.conn.take() {
             c.acp.kill().await;

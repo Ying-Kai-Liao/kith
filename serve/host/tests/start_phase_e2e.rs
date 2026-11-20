@@ -1,5 +1,5 @@
-//! A real host whose agent is slow to start a session: Stop still works meanwhile, and a `send_message` the host
-//! told the agent had failed never shows up afterwards.
+//! A real host whose agent is slow to start a session: Stop still works meanwhile, and a `send_file` the agent gave
+//! up on never shows up afterwards.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -60,20 +60,22 @@ async fn stop_ends_a_turn_that_is_still_starting_and_the_next_message_starts_afr
 }
 
 #[tokio::test]
-async fn a_message_the_host_reported_as_failed_is_not_posted_later() {
+async fn a_file_share_the_agent_gave_up_on_is_not_posted_later() {
     if python_missing() {
         return;
     }
     let host = Host::start().await;
-    // The session takes 13 s: longer than the 10 s the host waits for a `send_message` to be taken. The turn then
-    // runs 4 s more, so the late message would still find a turn to post into.
+    // The session takes 13 s, so the host's actor can't take the share until the turn has started. The turn then
+    // runs 4 s more, so a late share would still find a turn to post into.
     let bot = host.fixture_bot("Slow start", "stall_agent.py", "13 4").await;
+    let file = std::env::temp_dir().join(format!("kith-late-{}.txt", uuid::Uuid::new_v4()));
+    std::fs::write(&file, "late file").unwrap();
     host.call("send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
     wait_until("the turn to start", Duration::from_secs(10), async || status(&host, &bot).await == "working").await;
-    let (ok, body) = host
-        .post("chatCall", &json!({"botId": bot, "name": "send_message", "arguments": {"text": "late bubble"}}))
-        .await;
-    assert!(!ok, "the host should have reported the timeout: {body}");
+    // The agent's tool call is dropped (its own timeout): the host must not deliver the share afterwards.
+    let body = json!({"botId": bot, "name": "send_file", "arguments": {"path": file.to_string_lossy()}});
+    let call = tokio::time::timeout(Duration::from_secs(2), host.post("chatCall", &body)).await;
+    assert!(call.is_err(), "the share should still be waiting for the slow start");
 
     wait_until("the turn to finish", Duration::from_secs(30), async || {
         history(&host, &bot).await.iter().any(|e| e["data"]["text"].as_str().is_some_and(|t| t.starts_with("Echo: ")))
@@ -81,7 +83,8 @@ async fn a_message_the_host_reported_as_failed_is_not_posted_later() {
     .await;
     wait_until("the bot to be idle", Duration::from_secs(10), async || status(&host, &bot).await == "idle").await;
     assert!(
-        !history(&host, &bot).await.iter().any(|e| e["data"]["text"] == "late bubble"),
-        "the message the agent was told had failed was posted"
+        !history(&host, &bot).await.iter().any(|e| e["data"]["files"].is_array()),
+        "the share the agent gave up on was posted"
     );
+    let _ = std::fs::remove_file(file);
 }

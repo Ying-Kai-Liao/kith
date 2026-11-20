@@ -4,9 +4,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 
-use super::super::app::{
-    App, COLORS, Editor, FIELDS, Field, Form, GroupField, GroupForm, PERMISSION_MODES, SHAPES, tilde,
-};
+use super::super::app::{App, COLORS, Editor, Field, Form, GroupField, GroupForm, PERMISSION_MODES, SHAPES, tilde};
 use super::super::manage::Page;
 use super::super::md::{truncate, width as w};
 use super::super::sheets::page_tabs;
@@ -45,7 +43,7 @@ pub(super) fn form_view(buf: &mut Buffer, area: Rect, app: &App, f: &Form) {
         .and_then(|b| b["name"].as_str())
         .unwrap_or(&f.backend)
         .to_owned();
-    for (i, field) in FIELDS.iter().enumerate() {
+    for (i, field) in f.fields().iter().enumerate() {
         let active = i == f.field;
         let base = if active { t.sel } else { t.panel };
         let lab = match field {
@@ -54,7 +52,6 @@ pub(super) fn form_view(buf: &mut Buffer, area: Rect, app: &App, f: &Form) {
             Field::Agent => "Agent",
             Field::Model => "Model",
             Field::ModelOptions => "Options",
-            Field::Fast => "Fast mode",
             Field::Folder => "Workspace",
             Field::Approvals => "Permissions",
             Field::Notify => "Notify",
@@ -110,17 +107,6 @@ pub(super) fn form_view(buf: &mut Buffer, area: Rect, app: &App, f: &Form) {
                 if !hint.is_empty() && w(&f.model.text) + w(&hint) + 2 < usize::from(vw) {
                     rput(buf, inner.right(), y, &hint, t.dim.patch(base));
                 }
-            }
-            Field::Fast => {
-                let s = if f.fast { "◉ On   ○ Off" } else { "○ On   ◉ Off" };
-                // Known once the agent's model list loads, or once the bot's own sessions say.
-                let saved = f.bot_id.as_ref().and_then(|id| app.bots.get(id)).filter(|b| b.backend == f.backend);
-                let offered = match app.models.get(&f.backend) {
-                    _ if saved.is_some_and(super::super::app::Bot::fast_shown) => "",
-                    Some(Some(_)) if !app.fast_mode.contains(&f.backend) => "  · not offered by this agent",
-                    _ => "",
-                };
-                put(buf, vx, y, vw, &format!("{s}{offered}"), t.text.patch(base));
             }
             Field::ModelOptions => {
                 let offered = app.model_settings(&f.backend, f.model.text.trim());
@@ -211,13 +197,6 @@ pub(super) fn form_view(buf: &mut Buffer, area: Rect, app: &App, f: &Form) {
     let by = inner.bottom() - 1;
     if let Some(e) = &f.error {
         put(buf, inner.x, by - 1, inner.width, e, t.red.patch(t.panel));
-    } else if f.current() == Field::Fast {
-        let refusal = f.bot_id.as_ref().and_then(|id| app.bots.get(id)).and_then(super::super::app::Bot::fast_refusal);
-        let (line, style) = match refusal {
-            Some(why) => (why, t.amber),
-            None => ("Faster replies for more usage, on models that offer it (Claude Code, Codex)".to_owned(), t.dim),
-        };
-        put(buf, inner.x, by - 1, inner.width, &line, style.patch(t.panel));
     } else if f.current() == Field::Computer {
         put(
             buf,
@@ -244,7 +223,7 @@ pub(super) fn form_view(buf: &mut Buffer, area: Rect, app: &App, f: &Form) {
         Field::Skills => "←→ move · space toggle · i details · tab next",
         Field::Agent => "←→ change · ↵ install / sign in · tab next",
         Field::Model => "←→ pick a model · or type its id",
-        Field::Fast | Field::Color | Field::Shape | Field::Approvals | Field::Notify | Field::Computer => {
+        Field::Color | Field::Shape | Field::Approvals | Field::Notify | Field::Computer => {
             "←→ change · tab next field"
         }
         Field::Instructions => "⇧↵ new line · tab next field",

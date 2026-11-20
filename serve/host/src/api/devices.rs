@@ -53,8 +53,6 @@ pub(super) const LOCAL_ONLY: &[&str] = &[
     "chatCall",
     "callPerson",
     "runEnv",
-    "teamCall",
-    "routineCall",
     "composioCall",
     "connectorTarget",
     "connectorRuntime",

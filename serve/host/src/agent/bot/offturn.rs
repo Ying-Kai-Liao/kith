@@ -112,9 +112,7 @@ impl Actor {
         self.plan_card = None;
         self.last_text = None;
         self.last_agent = None;
-        self.sent.clear();
         self.files.summary = None;
-        self.hub.team.start_turn(&self.rt, None);
         self.hub.set_runtime(&self.rt, |r| {
             r.activity = "Working…".into();
             r.started_at = Some(now_ms());
