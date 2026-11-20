@@ -12,4 +12,3 @@ pub struct Turn {
 }
 
 pub const PLACEHOLDER: &str = "New Bot";
-pub const MAX_NAME_CHARS: usize = 40;

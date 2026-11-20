@@ -276,6 +276,47 @@ async fn deleting_a_native_row_removes_its_memory_files_and_export_bundle() {
 }
 
 #[tokio::test]
+async fn an_export_that_finds_the_row_deleted_removes_its_bundle() {
+    let r = Rig::new().await;
+    let a = native(&r, "Old");
+    let out = call(&r, "exportHostBot", json!({"botId": a})).await.unwrap();
+    let dir = bundle(out["path"].as_str().unwrap());
+    assert!(dir.exists());
+    // The row goes after the bundle was renamed in, before the export looks again (delete's folder removal not yet run).
+    r.hub.store.delete_bot(&a).unwrap();
+    assert!(super::native_export::settle(&r.hub, &a, &dir).is_err());
+    assert!(!dir.exists(), "no bundle for a deleted bot");
+    // Already gone (the delete's own removal got there first) is not a failure of the cleanup.
+    assert!(super::native_export::settle(&r.hub, &a, &dir).is_err());
+}
+
+#[tokio::test]
+async fn a_failed_export_leaves_no_staging_folder_and_delete_clears_one() {
+    use std::os::unix::fs::PermissionsExt;
+    let r = Rig::new().await;
+    let a = native(&r, "Old");
+    let dir = crate::api::native_export::bundle_dir(&a);
+    let staging = crate::api::native_export::staging_dir(&dir);
+    // A memory file nobody can read: the copy fails after the staging folder holds half a bundle.
+    let memory = crate::chat::memory::files::folder(Some(&a));
+    std::fs::create_dir_all(&memory).unwrap();
+    let locked = memory.join("locked.md");
+    std::fs::write(&locked, "x").unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let failed = call(&r, "exportHostBot", json!({"botId": a})).await;
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
+    // (Running as root reads it anyway; then there is nothing to clean up.)
+    if failed.is_err() {
+        assert!(!staging.exists(), "the half-written staging folder went with the failure");
+        assert!(!dir.exists());
+    }
+    // A leftover staging folder (a delete wiped the memory mid-copy) goes with the bot.
+    std::fs::create_dir_all(staging.join("memory")).unwrap();
+    r.hub.delete_bot(&a).unwrap();
+    until("the staging folder to go", || !staging.exists() && !dir.exists()).await;
+}
+
+#[tokio::test]
 async fn the_export_refuses_a_kith_agent_a_room_and_an_unknown_bot() {
     let r = Rig::new().await;
     let house = r.owner_bot("house");

@@ -303,12 +303,7 @@ impl Hub {
         while let Ok(cmd) = rx.try_recv() {
             if matches!(
                 cmd,
-                Cmd::Send { .. }
-                    | Cmd::Group(_)
-                    | Cmd::Routine(_)
-                    | Cmd::BotRequest(_)
-                    | Cmd::Routed { .. }
-                    | Cmd::Permission { .. }
+                Cmd::Send { .. } | Cmd::Group(_) | Cmd::Routine(_) | Cmd::Routed { .. } | Cmd::Permission { .. }
             ) && let Err(error) = self.send_to_actor(key, cmd)
             {
                 tracing::warn!(bot = bot_id, error = format!("{error:#}"), "a command to a retiring actor was lost");

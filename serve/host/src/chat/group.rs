@@ -36,6 +36,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
+/// How long a room member's turn may take before the room moves on without it.
+pub const ASK_TIMEOUT: Duration = Duration::from_secs(600);
 /// Agent turns one person message may cause, rounds included, unless the person sets another (`send` `budget`).
 pub const DEFAULT_BUDGET: i64 = 10;
 /// The most a person can grant in one message.
@@ -500,7 +502,7 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
                 None
             } else {
                 // A failed, cancelled or overdue member turn counts as a pass; its error shows in the room.
-                match tokio::time::timeout(crate::chat::team::ASK_TIMEOUT, answer).await {
+                match tokio::time::timeout(ASK_TIMEOUT, answer).await {
                     Ok(Ok(Ok(Some(text)))) => Some(text),
                     _ => None,
                 }
@@ -568,7 +570,7 @@ pub fn ask_agent(hub: &Arc<Hub>, room: &str, agent_id: &str) -> Result<()> {
     hub.send_cmd(agent_id, Cmd::Group(turn))?;
     // The turn is skipped once nobody holds its reply, so something has to.
     tokio::spawn(async move {
-        let _ = tokio::time::timeout(crate::chat::team::ASK_TIMEOUT, answer).await;
+        let _ = tokio::time::timeout(ASK_TIMEOUT, answer).await;
     });
     Ok(())
 }

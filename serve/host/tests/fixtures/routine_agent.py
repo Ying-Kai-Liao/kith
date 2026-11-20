@@ -3,7 +3,6 @@ import json
 import os
 import pathlib
 import re
-import subprocess
 import sys
 import threading
 import time
@@ -13,7 +12,6 @@ lock = threading.RLock()
 sessions_file = pathlib.Path("sessions.json")
 sessions = json.loads(sessions_file.read_text()) if sessions_file.exists() else {}
 cancel = threading.Event()
-servers = []
 
 
 def send(value):
@@ -40,14 +38,6 @@ def prompt(request, stop):
             temp.write_text(json.dumps(sessions))
             temp.replace(sessions_file)
     log("resumed" if resumed else "started", sid, text)
-    if "VERIFY_ROUTINE_TOOLS" in text and "Scheduled routine:" not in text:
-        try:
-            verify_routine_tools()
-            log("tools_verified", sid, "Routine MCP lifecycle")
-        except Exception as error:
-            log("tools_failed", sid, repr(error))
-            send({"id": request["id"], "error": {"code": -32000, "message": str(error)}})
-            return
     block = re.search(r"BLOCK\[([^]]+)\]", text)
     if block:
         while not pathlib.Path("release-" + block[1]).exists():
@@ -67,61 +57,6 @@ def prompt(request, stop):
     send({"id": request["id"], "result": {"stopReason": "end_turn"}})
 
 
-def verify_routine_tools():
-    server = next(s for s in servers if s["name"] == "routines")
-    with subprocess.Popen([server["command"], *server["args"]], stdin=subprocess.PIPE,
-                          stdout=subprocess.PIPE, text=True) as mcp:
-        identifier = 0
-
-        def rpc(method, params):
-            nonlocal identifier
-            identifier += 1
-            mcp.stdin.write(json.dumps({"jsonrpc": "2.0", "id": identifier,
-                                       "method": method, "params": params}) + "\n")
-            mcp.stdin.flush()
-            response = json.loads(mcp.stdout.readline())
-            assert "error" not in response, response
-            return response["result"]
-
-        def call(name, arguments):
-            result = rpc("tools/call", {"name": name, "arguments": arguments})
-            assert not result.get("isError"), result
-            return json.loads(result["content"][0]["text"])
-
-        init = rpc("initialize", {"protocolVersion": "2025-06-18"})
-        assert init["serverInfo"]["name"] == "kith-routines"
-        names = {t["name"] for t in rpc("tools/list", {})["tools"]}
-        assert names == {"list_routines", "save_routine", "set_routine_enabled",
-                         "delete_routine", "run_routine", "routine_webhook"}, names
-        assert not call("list_routines", {})["routines"]
-        invalid = rpc("tools/call", {"name": "save_routine", "arguments": {
-            "name": "Invalid", "instruction": "Check", "triggers": [{"type": "interval", "seconds": 0}]}})
-        assert invalid.get("isError"), invalid
-        body = {"name": "Created through MCP", "instruction": "MCP_TASK_RESULT",
-                "triggers": [{"type": "webhook"}], "enabled": False}
-        routine = call("save_routine", body)["routine"]
-        identifier_value = routine["id"]
-        assert routine["enabled"] is False
-        assert "webhookKey" not in routine
-        credentials = call("routine_webhook", {"id": identifier_value})
-        assert credentials["url"] is None  # the test host runs with the cloud off
-        assert credentials["localUrl"].endswith("/hooks/routines/" + identifier_value)
-        assert len(credentials["key"]) >= 32
-        rotated = call("routine_webhook", {"id": identifier_value, "rotate": True})
-        assert rotated["key"] != credentials["key"] and len(rotated["key"]) >= 32
-        body.update({"id": identifier_value, "name": "Edited through MCP"})
-        call("save_routine", body)
-        call("set_routine_enabled", {"id": identifier_value, "enabled": True})
-        call("set_routine_enabled", {"id": identifier_value, "enabled": False})
-        # A temporary second routine proves deletion is routed through MCP too.
-        extra = call("save_routine", {**body, "id": None, "name": "Temporary"})["routine"]
-        call("delete_routine", {"id": extra["id"]})
-        listed = call("list_routines", {})["routines"]
-        assert len(listed) == 1 and listed[0]["name"] == "Edited through MCP"
-        call("run_routine", {"id": identifier_value})
-        mcp.stdin.close()
-
-
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
@@ -130,7 +65,6 @@ for line in sys.stdin:
         capabilities = {"loadSession": not pathlib.Path("no-load").exists(), "sessionCapabilities": {"close": {}}}
         send({"id": request["id"], "result": {"agentCapabilities": capabilities}})
     elif method == "session/new":
-        servers = request["params"]["mcpServers"]
         send({"id": request["id"], "result": {"sessionId": str(uuid.uuid4())}})
     elif method == "session/load":
         sid = request["params"]["sessionId"]

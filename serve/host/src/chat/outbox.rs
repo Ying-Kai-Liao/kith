@@ -1,7 +1,4 @@
-//! How a bot talks to the user, Grok Bot's way: in its chat (and threads) the user sees
-//! only the messages the bot sends with the built-in `chat` MCP server's `send_message`,
-//! each one its own bubble. What the agent writes as its reply stays in the trace, unless
-//! it sent nothing in the turn: then its last text becomes the reply, as before.
+//! The kith-files MCP server's `send_file`: how an agent shares files with the user in its chat.
 
 use crate::agent::bot::Cmd;
 use crate::hub::Hub;
@@ -10,12 +7,6 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// How to talk to the user: part of every bot's instructions (`context`), and the `chat` server's.
-pub const INSTRUCTIONS: &str = "In your chat with the user and its threads, the user sees only what you send with send_message; \
-text you write as your reply never reaches them. Send a message whenever you have something worth telling them: \
-short and plain, one thought per message, in the user's language. Lead with the result, then what needs the user. \
-Use send_file(path, name?) to share a generated regular file (any type, up to 100 MiB); a local path in text is not a download. To share several files at once, pass them together in one call with send_file(paths) (up to 10): they show as one group. Don't send just to acknowledge, to say you started or are still working, or to repeat yourself.";
-
 /// An hq agent's: what it writes already reaches the user as its reply, so only files need a tool.
 pub const FILES_INSTRUCTIONS: &str = "Use send_file(path, name?) to give the user an image or any other regular file (up to 100 MiB) in this chat or thread: \
 images show inline, other files as a download card. To share several images or files at once, pass them together in one call with send_file(paths) (up to 10): they show as one group. A local path in your reply is not a download. \
@@ -23,24 +14,11 @@ Also use it on a call: the user sees the file in the chat, nothing is read aloud
 Use call_person(reason) only for something that truly needs the user's voice now: it rings their open Kith app, and the answer says ringing, busy, rate-limited or not-allowed. Don't call again to chase it. \
 Use request_secret(service, purpose) when you need a service's key: the user gets a private card, you never see the key, and you are told its name once it is saved. Ask once, then end your turn.";
 
-/// Longest message accepted, in bytes.
-const MAX_MESSAGE_BYTES: usize = 32 * 1024;
-/// How long the bot's actor has to take the message.
-const DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long a `send_file` call may take: up to ten copies. mcp.rs's chatCall timeout for it must stay above.
+/// How long a `send_file` call may take: up to ten copies. The kith-files server's chatCall timeout for it (mcp.rs) must stay above.
 pub const SEND_FILE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub fn tools() -> Value {
     json!([{
-        "name": "send_message",
-        "description": "Send the user one chat message (Markdown). It shows right away as its own bubble on their phone and computer; send several for several thoughts.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"text": {"type": "string", "description": "The message, as the user should read it."}},
-            "required": ["text"],
-        },
-        "annotations": {"readOnlyHint": false, "idempotentHint": false},
-    }, {
         "name": "send_file",
         "description": "Share regular files with the user in your own chat or thread. Any file type, including empty files, up to 100 MiB each. The host saves an immutable copy. Paths are absolute or relative to your working directory. Give one file as path, or several as paths (up to 10) in one call: they show as one group, and if any fails nothing is sent. A successful response means the file message was published; do not repeat it.",
         "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}, "paths": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 10, "description": "Several files to share together, instead of path."}, "name": {"type": "string", "description": "Optional display filename, without folders. Only with path."}}},
@@ -53,20 +31,7 @@ pub async fn call(hub: &Arc<Hub>, actor: &str, name: &str, args: &Value) -> Resu
     if name == "send_file" {
         return send_file(hub, actor, args).await;
     }
-    if name != "send_message" {
-        bail!("unknown chat tool: {name}");
-    }
-    let text = args["text"].as_str().unwrap_or_default().trim();
-    if text.is_empty() || text.len() > MAX_MESSAGE_BYTES {
-        bail!("text must be nonempty and at most {MAX_MESSAGE_BYTES} bytes");
-    }
-    let (reply, delivered) = tokio::sync::oneshot::channel();
-    hub.send_to_actor(actor, Cmd::SendToUser { text: text.to_owned(), reply })?;
-    tokio::time::timeout(DELIVERY_TIMEOUT, delivered)
-        .await
-        .map_err(|_| anyhow!("the bot didn't take the message in time"))?
-        .map_err(|_| anyhow!("the bot shut down"))??;
-    Ok(json!({"sent": true}))
+    bail!("unknown chat tool: {name}")
 }
 
 struct CancelCopy(Arc<std::sync::atomic::AtomicBool>);

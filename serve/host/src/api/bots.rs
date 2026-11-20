@@ -50,7 +50,6 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             str_arg(&b, "id")?,
             b["rotate"].as_bool().unwrap_or(false),
         )?,
-        "routineCall" => crate::routines::call(hub, str_arg(&b, "botId")?, str_arg(&b, "name")?, &b["arguments"])?,
         "chatCall" => {
             let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
             if name == "call_person" {
@@ -58,15 +57,9 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 crate::calls::ring_and_wait(hub, bot, reason, None, false).await?
             } else if name == crate::cards::secret::TOOL {
                 crate::cards::secret::chat_request(hub, bot, actor_arg(&b, bot), &b["arguments"]).await?
-            } else if crate::chat::profile::TOOLS.contains(&name) {
-                crate::chat::profile::call(hub, bot, name, &b["arguments"]).await?
             } else {
                 crate::chat::outbox::call(hub, actor_arg(&b, bot), name, &b["arguments"]).await?
             }
-        }
-        "teamCall" => {
-            let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
-            crate::chat::team::call(hub, actor_arg(&b, bot), name, &b["arguments"]).await?
         }
         "history" => {
             let bot = str_arg(&b, "botId")?;

@@ -1,5 +1,5 @@
 //! A turn the agent started by itself. Claude Code wakes an agent when a background task finishes, with no host turn
-//! running: the agent calls `send_file` or `send_message` and writes its reply, and all of it used to vanish ("no turn
+//! running: the agent calls `send_file` and writes its reply, and all of it used to vanish ("no turn
 //! is running"). The host now opens an off-turn turn in the lane of the session's last turn, so the work lands where
 //! the person was talking, and ends it after a quiet period through the normal finish path.
 
@@ -41,7 +41,7 @@ pub(super) fn wakes(actor: &Actor, u: &Value) -> bool {
 }
 
 impl Actor {
-    /// Makes sure a turn is running for `send_file` and `send_message`: the one that is, or an off-turn turn in the
+    /// Makes sure a turn is running for `send_file`: the one that is, or an off-turn turn in the
     /// lane of the session's last turn. Why not, when it can't.
     pub(super) async fn ensure_turn(&mut self) -> Result<()> {
         if self.turn.is_some() {
@@ -112,9 +112,7 @@ impl Actor {
         self.plan_card = None;
         self.last_text = None;
         self.last_agent = None;
-        self.sent.clear();
         self.files.summary = None;
-        self.hub.team.start_turn(&self.rt, None);
         self.hub.set_runtime(&self.rt, |r| {
             r.activity = "Working…".into();
             r.started_at = Some(now_ms());

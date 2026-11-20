@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 use super::{
-    After, AgentPicker, App, Bot, COLORS, Editor, FIELDS, Field, Form, GroupField, GroupForm, Overlay,
-    PERMISSION_MODES, SHAPES, Toggle, cycle, merge_toggles,
+    After, AgentPicker, App, Bot, COLORS, Editor, Field, Form, GroupField, GroupForm, Overlay, PERMISSION_MODES,
+    SHAPES, Toggle, cycle, merge_toggles,
 };
 use crate::tui::manage::Page;
 
@@ -130,7 +130,6 @@ impl App {
             backend: b.backend.clone(),
             model: Editor::with(b.model.as_deref().unwrap_or_default()),
             model_options: (b.model.clone().unwrap_or_default(), b.model_options.clone()),
-            fast: b.fast_mode,
             cwd: if b.managed_workspace { String::new() } else { b.cwd.clone() },
             mode: b.mode,
             notify: b.notify,
@@ -160,7 +159,8 @@ impl App {
             self.overlays.truncate(i);
         }
         let n = self.bots.len() + usize::try_from(crate::store::now_ms() % 97).unwrap_or(0);
-        let name = NAMES[n % NAMES.len()].to_owned();
+        // The kernel's names are lowercase.
+        let name = NAMES[n % NAMES.len()].to_lowercase();
         let f = Form {
             bot_id: None,
             name: Editor::with(&name),
@@ -168,7 +168,6 @@ impl App {
             backend,
             model: Editor::default(),
             model_options: (String::new(), BTreeMap::new()),
-            fast: false,
             cwd: String::new(),
             mode: PERMISSION_MODES.iter().position(|m| *m == "auto").unwrap_or(0),
             notify: true,
@@ -213,11 +212,11 @@ impl App {
                 self.save_form(&mut f);
             }
             KeyCode::Tab | KeyCode::Down => {
-                f.field = (f.field + 1) % FIELDS.len();
+                f.field = (f.field + 1) % f.fields().len();
                 f.sub = 0;
             }
             KeyCode::BackTab | KeyCode::Up => {
-                f.field = (f.field + FIELDS.len() - 1) % FIELDS.len();
+                f.field = (f.field + f.fields().len() - 1) % f.fields().len();
                 f.sub = 0;
             }
             KeyCode::Enter
@@ -260,7 +259,6 @@ impl App {
                 if matches!(
                     field,
                     Field::Agent
-                        | Field::Fast
                         | Field::Approvals
                         | Field::Notify
                         | Field::Computer
@@ -285,7 +283,6 @@ impl App {
                             self.want_models(&f.backend);
                         }
                     }
-                    Field::Fast => f.fast = !f.fast,
                     Field::Approvals => f.mode = cycle(f.mode, d, PERMISSION_MODES.len()),
                     Field::Notify => f.notify = !f.notify,
                     Field::Computer => f.computer = !f.computer,
@@ -348,15 +345,19 @@ impl App {
             f.error = Some("Give the bot a name.".into());
             return;
         }
-        let mut body = f.body();
+        if f.bot_id.is_none() && f.instructions.text.trim().is_empty() {
+            f.error = Some("Say what the agent is for (Instructions).".into());
+            return;
+        }
         f.saving = true;
         f.error = None;
         match &f.bot_id {
             Some(id) => {
+                let mut body = f.body();
                 body["id"] = id.clone().into();
                 self.call("updateBot", body, After::Saved);
             }
-            None => self.call("createBot", body, After::Saved),
+            None => self.call("newKithAgent", f.new_agent_body(), After::Saved),
         }
     }
 }
@@ -373,13 +374,27 @@ impl Form {
             "permission": PERMISSION_MODES[self.mode.min(PERMISSION_MODES.len() - 1)],
             "model": if model.is_empty() { Value::Null } else { model.into() },
             "modelOptions": self.model_options().cloned().unwrap_or_default(),
-            "fastMode": self.fast,
             "notify": self.notify,
             "computer": self.computer,
             "avatarColor": COLORS[self.color],
             "avatarShape": SHAPES[self.shape],
             "connectors": self.connectors.iter().filter(|t| t.on).map(|t| t.id.clone()).collect::<Vec<_>>(),
             "skills": self.skills.iter().filter(|t| t.on).map(|t| t.id.clone()).collect::<Vec<_>>(),
+        })
+    }
+
+    /// A new agent as `newKithAgent` takes it: the kernel makes the agent, so only what it asks for goes.
+    fn new_agent_body(&self) -> Value {
+        let word = |v: &str| if v.trim().is_empty() { Value::Null } else { v.trim().into() };
+        json!({
+            "name": self.name.text.trim().to_lowercase(),
+            "description": self.instructions.text.trim(),
+            "harness": word(&self.backend),
+            "model": word(self.model.text.trim()),
+            "effort": self.model_options().and_then(|o| o.get("effort")).map_or(Value::Null, |e| word(e)),
+            "notify": self.notify,
+            "avatarColor": COLORS[self.color],
+            "avatarShape": SHAPES[self.shape],
         })
     }
 
@@ -396,7 +411,7 @@ const NAMES: [&str; 24] = [
 
 #[cfg(test)]
 mod tests {
-    use super::super::{AgentModel, test_app};
+    use super::super::{AgentModel, FIELDS, test_app};
     use super::*;
 
     #[tokio::test]

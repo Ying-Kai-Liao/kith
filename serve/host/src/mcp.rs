@@ -1,4 +1,4 @@
-//! Built-in stdio MCP servers: `chat` sends the user messages and changes the bot's name and instructions; `team` discovers and asks other bots; `computer`
+//! Built-in stdio MCP servers: `files` shares files and rings the user; `computer`
 //! operates the desktop when enabled. Calls go through authenticated loopback
 //! HTTP to the running host, which owns delegation and screen control.
 
@@ -12,12 +12,9 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 
 #[derive(Clone, Copy)]
 pub enum Server {
-    Chat,
     Files,
     Connectors,
-    Routines,
     Computer,
-    Team,
     Composio,
 }
 
@@ -33,7 +30,7 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
     let token: Arc<str> = token.trim().into();
     let bot: Arc<str> = bot.into();
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    // Requests run side by side (an ask_bot can take minutes); their replies share stdout.
+    // Requests run side by side (a send_file can take minutes); their replies share stdout.
     let (replies, mut outbox) = mpsc::unbounded_channel::<Value>();
     tokio::spawn(async move {
         let mut out = tokio::io::stdout();
@@ -51,15 +48,6 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
         }
         // Listed by the host: they depend on this computer's driver.
         Server::Computer => ("kith-computer", INSTRUCTIONS, Value::Null),
-        Server::Routines => ("kith-routines", crate::routines::INSTRUCTIONS, crate::routines::tools()),
-        Server::Chat => {
-            let mut tools = crate::chat::outbox::tools();
-            if let Some(list) = tools.as_array_mut() {
-                list.extend(crate::chat::profile::tools());
-                list.push(crate::cards::secret::tool());
-            }
-            ("kith-chat", crate::chat::outbox::INSTRUCTIONS, tools)
-        }
         // An hq agent's chat: its words already reach the user as its reply, so it gets only the way to share files.
         Server::Files => {
             let tools = crate::chat::outbox::tools();
@@ -69,7 +57,6 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
             files.push(crate::cards::secret::tool());
             ("kith-files", crate::chat::outbox::FILES_INSTRUCTIONS, Value::Array(files))
         }
-        Server::Team => ("kith-team", crate::chat::team::INSTRUCTIONS, crate::chat::team::tools()),
         Server::Composio => ("kith-composio", crate::market::composio::INSTRUCTIONS, crate::market::composio::tools()),
     };
     while let Some(line) = lines.next_line().await? {
@@ -143,9 +130,8 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
     });
     let (method, timeout) = match server {
         Server::Connectors => ("connectorCall", Duration::from_secs(90)),
-        Server::Routines => ("routineCall", Duration::from_secs(30)),
         Server::Computer => ("computerCall", Duration::from_secs(60)),
-        Server::Chat | Server::Files => (
+        Server::Files => (
             "chatCall",
             Duration::from_secs(if params["name"] == "send_file" {
                 crate::chat::outbox::SEND_FILE_TIMEOUT.as_secs() + 10
@@ -153,7 +139,6 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
                 30
             }),
         ),
-        Server::Team => ("teamCall", crate::chat::team::ASK_TIMEOUT + Duration::from_secs(30)),
         Server::Composio => ("composioCall", Duration::from_secs(120)),
     };
     let res = crate::http()
@@ -171,7 +156,7 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
                     return match server {
                         Server::Computer if v["isError"] == true => json!({"content": v["content"], "isError": true}),
                         Server::Computer => json!({"content": v["content"]}),
-                        Server::Chat | Server::Files | Server::Team | Server::Routines | Server::Connectors => {
+                        Server::Files | Server::Connectors => {
                             json!({"content": [{"type": "text", "text": v.to_string()}]})
                         }
                         Server::Composio => json!({"content": [{"type": "text", "text": v["result"].to_string()}]}),

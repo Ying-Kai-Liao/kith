@@ -363,7 +363,7 @@ impl Entry {
         crate::tui::view::unfoldable(self).is_some()
     }
 
-    /// A notice for a bot-to-bot message or request (`chat::team`).
+    /// A notice for a bot-to-bot message or request (written by the removed `chat::team`; old chats keep them).
     pub fn is_bot_message(&self) -> bool {
         self.kind == Kind::Notice
             && self.data["botMessage"].is_object()

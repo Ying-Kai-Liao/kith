@@ -22,7 +22,7 @@ impl Actor {
                 .map(|d| Depleted { resets_at: d.resets_at.or(seen.and_then(|s| s.resets_at)) })
                 .or(seen.copied()),
             // A rejected limit that still ended the turn with an answer is not one that stopped it.
-            Ok(_) if self.last_text.is_none() && self.sent.is_empty() => seen.copied(),
+            Ok(_) if self.last_text.is_none() => seen.copied(),
             Ok(_) => None,
         }
     }
@@ -50,7 +50,7 @@ impl Actor {
         self.hub.backups.mark_out(&failed, resets_at, RATE_LIMIT);
         self.turn_tried.insert(failed.clone());
         // What the attempt already did can't be done twice: the entry is out for the next turn, this one ends here.
-        if self.attempt_effects || !self.sent.is_empty() {
+        if self.attempt_effects {
             tracing::info!(bot = %self.cfg.id, entry = %failed, "turn ran out of usage after acting; not repeating it");
             return false;
         }
