@@ -511,7 +511,8 @@ extension BotStore {
         let client = try await ready()
         let answer = try await client.newKithAgent(form.params)
         if let bot = answer.bot { bots[bot.id] = bot }
-        return (answer.agent, answer.bot ?? bots[answer.botId ?? ""] ?? (await waitForAgentBot(answer.agent)))
+        if let bot = answer.bot ?? bots[answer.botId ?? ""] { return (answer.agent, bot) }
+        return (answer.agent, await waitForAgentBot(answer.agent))
     }
 
     /// The roster's bot for kith agent `agent`, asking the host to look now and waiting a few seconds for its event.

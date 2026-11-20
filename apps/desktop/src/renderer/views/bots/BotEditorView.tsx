@@ -12,7 +12,7 @@ import { paletteValue, parseColor } from '@shared/living-bots'
 import { AVATAR_PALETTE } from '../../lib/theme'
 import { useStore } from '../../store/context'
 import { botSections, permissionMenu, permissionMode } from '@shared/bot-sections'
-import { errorText, fillDefaults, isValid, lastPathComponent, normalized, usePlugins, type Plugins } from './drafts'
+import { errorText, isValid, lastPathComponent, normalized, usePlugins, type Plugins } from './drafts'
 import { FormSheet } from '../marketplace/pieces'
 import { SkillSheet, type SkillRef } from '../marketplace/SkillSheet'
 import { AutoTextArea, Field, SwitchRow } from './parts'
@@ -20,21 +20,15 @@ import { useKithInfo } from './kith/use-kith'
 import { HqSettings } from './kith/HqSettings'
 import './bots.css'
 
-/** Create or edit a bot in a modal: the settings form plus Close / Save. */
+/** Edit a bot in a modal: the settings form plus Close / Save. */
 export function BotEditorView({ draft: initial }: { draft: BotDraft }) {
   const store = useStore()
   const dismiss = useDismiss()
   const plugins = usePlugins(store)
-  const isNew = !initial.id
-  const [draft, setDraft] = useState(() => (isNew ? fillDefaults(store, initial, { connectors: [], skills: [] }) : initial))
+  const [draft, setDraft] = useState(initial)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const online = store.connection.kind === 'online'
-
-  // A new bot's connectors and skills start on once the computer has listed them.
-  useEffect(() => {
-    if (isNew && plugins) setDraft((d) => fillDefaults(store, d, plugins))
-  }, [isNew, plugins, store])
 
   const save = () => {
     if (!isValid(draft) || saving || !online) return
@@ -42,10 +36,7 @@ export function BotEditorView({ draft: initial }: { draft: BotDraft }) {
     setError(null)
     store
       .save(normalized(draft))
-      .then((bot) => {
-        dismiss()
-        if (isNew) store.setSelection(bot.id)
-      })
+      .then(() => dismiss())
       .catch((e: unknown) => setError(errorText(e)))
       .finally(() => setSaving(false))
   }
@@ -53,8 +44,8 @@ export function BotEditorView({ draft: initial }: { draft: BotDraft }) {
   return (
     <SheetPage>
       <ModalHeader
-        title={isNew ? 'New agent' : 'Settings'}
-        trailing={saving ? <Spinner /> : <IconButton title={isNew ? 'Create' : 'Save'} icon="checkmark" disabled={!isValid(draft) || saving || !online} onClick={save} />}
+        title="Settings"
+        trailing={saving ? <Spinner /> : <IconButton title="Save" icon="checkmark" disabled={!isValid(draft) || saving || !online} onClick={save} />}
       />
       <div className="bot-editor-body">
         <BotSettingsForm draft={draft} onChange={setDraft} error={error} plugins={plugins} />
