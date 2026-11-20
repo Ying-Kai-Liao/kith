@@ -496,11 +496,39 @@ extension BotStore {
 
     public func save(_ draft: BotDraft) async throws -> Bot {
         let client = try await ready()
+        // The host makes no host-native bot any more: a new agent is `newKithAgent`, a new room is `createGroup`.
+        guard draft.id != nil else { throw HostError.http(400, "Make an agent with New agent") }
         // A kith agent's engine, model and tools are kith's: never send them as changes.
         let draft = draft.id.flatMap { bots[$0] }.map { draft.keepingKithOwned(from: $0) } ?? draft
-        let bot = draft.id == nil ? try await client.createBot(draft) : try await client.updateBot(draft)
+        let bot = try await client.updateBot(draft)
         bots[bot.id] = bot
         return bot
+    }
+
+    /// Makes a kith agent and returns its bot: the host's answer, or the roster's once it has it (the host syncs the
+    /// roster itself, so this waits a few seconds at most). Nil when none came (its engine isn't one the host runs).
+    public func newKithAgent(_ form: NewAgent.Form) async throws -> (agent: String, bot: Bot?) {
+        let client = try await ready()
+        let answer = try await client.newKithAgent(form.params)
+        if let bot = answer.bot { bots[bot.id] = bot }
+        if let bot = answer.bot ?? bots[answer.botId ?? ""] { return (answer.agent, bot) }
+        return (answer.agent, await waitForAgentBot(answer.agent))
+    }
+
+    /// The roster's bot for kith agent `agent`, asking the host to look now and waiting a few seconds for its event.
+    public func waitForAgentBot(_ agent: String) async -> Bot? {
+        let find = { self.bots.values.first { $0.hqAgent == agent && !$0.isGroup } }
+        if let client = try? await ready() { _ = try? await client.call("syncHqBots", Empty(), timeout: 60) as Empty }
+        for _ in 0..<10 {
+            if let bot = find() { return bot }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        return find()
+    }
+
+    /// Where a flagged row's export bundle landed.
+    public func exportHostBot(_ botId: String) async throws -> String {
+        try await ready().exportHostBot(botId: botId)
     }
 
     public func listDirs(_ path: String?, showHidden: Bool = false) async throws -> DirListing {

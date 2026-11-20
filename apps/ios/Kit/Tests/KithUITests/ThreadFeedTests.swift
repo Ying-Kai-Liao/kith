@@ -127,6 +127,8 @@ private func summary(origin: String? = nil, writer: String? = nil, busy: Bool? =
     #expect(ThreadFeed.chatBottom(held: root, mismatch: false, guest: true) == .writerBanner(rootId: "e1"))
     #expect(ThreadFeed.chatBottom(held: nil, mismatch: false, guest: true) == .readOnly)
     #expect(ThreadFeed.chatBottom(held: root, mismatch: true, guest: false) == .updateNeeded)
+    #expect(ThreadFeed.chatBottom(held: nil, mismatch: false, guest: false, flagged: true) == .flagged, "a flagged native row has no box")
+    #expect(ThreadFeed.chatBottom(held: nil, mismatch: true, guest: false, flagged: true) == .updateNeeded)
 }
 
 @Test func originAndWriterChipFollowTheSummary() {
