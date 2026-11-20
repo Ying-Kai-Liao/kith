@@ -124,8 +124,8 @@ impl Actor {
     /// sets `turn_session`. A thread without one forks the main session when it can.
     pub(super) async fn ensure_session(&mut self, slot: Option<&str>) -> Result<()> {
         self.cfg.refuse_native()?;
-        // A room never runs a turn of its own; every other row that passed the refusal is an hq agent.
-        if !self.is_hq() {
+        // A room never runs a turn of its own; every other row that passed the refusal is a kith agent.
+        if self.cfg.is_group() {
             bail!("{} has no kith agent behind it", self.cfg.name);
         }
         self.ensure_hq_session(slot).await

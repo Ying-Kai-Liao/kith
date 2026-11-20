@@ -309,7 +309,18 @@ async fn a_room_has_no_workspace_and_deleting_an_agents_bot_keeps_its_files() {
     let group = host.call("createBot", json!({"name": "Group", "kind": "group", "members": [bot]})).await;
     assert_eq!(group["bot"]["cwd"], "");
     assert_eq!(group["bot"]["managedWorkspace"], false);
+    // The host removes a bot's own folders on a background task: give it one to remove, and wait for that before
+    // checking the agent's files are still there.
+    let shared = host.home.join("bots").join(&bot).join("files");
+    std::fs::create_dir_all(&shared).unwrap();
     host.call("deleteBot", json!({"botId": bot})).await;
+    for _ in 0..100 {
+        if !shared.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(!shared.exists(), "the deleted bot's own folder goes");
     assert!(dir.join("keep.txt").is_file(), "deleting a bot must retain its files");
 }
 

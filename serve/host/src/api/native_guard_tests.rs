@@ -23,7 +23,7 @@ fn native(r: &Rig, name: &str) -> String {
         "description": format!("{name} helps"), "model": "sonnet", "modelOptions": {"effort": "high"},
         "tasks": false, "connectors": [], "skills": [],
     }));
-    r.hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned()
+    r.hub.create_native_row(cfg).unwrap()["id"].as_str().unwrap().to_owned()
 }
 
 async fn call(r: &Rig, method: &str, b: Value) -> anyhow::Result<Value> {
@@ -294,4 +294,18 @@ async fn the_export_is_the_owners_alone() {
     let e = dispatch(&r.hub, &sam, "exportHostBot", json!({"botId": "x"})).await.unwrap_err();
     assert!(e.is::<super::devices::NotAllowed>() || e.is::<super::devices::Forbidden>(), "{e:#}");
     assert!(!super::roles::member_may("exportHostBot") && !super::roles::bot_may("exportHostBot"));
+}
+
+#[tokio::test]
+async fn creating_an_agent_row_without_a_name_is_refused_and_a_room_is_not() {
+    let r = Rig::new().await;
+    for name in [json!(null), json!(""), json!("  ")] {
+        let dir = r.dir.to_string_lossy();
+        let nameless = cfg(json!({"id": "", "name": "A", "backend": "claude", "cwd": dir, "hqAgent": name}));
+        let e = r.hub.create_bot(nameless).unwrap_err();
+        assert!(format!("{e:#}").contains("kith agent's name"), "{e:#}");
+    }
+    let house = r.owner_bot("house");
+    let room = cfg(json!({"id": "", "kind": "group", "name": "Crew", "members": [house]}));
+    assert!(r.hub.create_bot(room).is_ok());
 }

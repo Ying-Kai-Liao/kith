@@ -36,8 +36,12 @@ pub const METHODS: &[&str] = &[
 /// The agent of a bot, when it is an hq agent that still exists.
 fn agent_of(hub: &Hub, id: &str) -> Result<String> {
     let cfg = hub.store.bot(id)?.filter(|b| !b.deleted).ok_or_else(|| anyhow!("no such bot"))?.config;
-    let agent =
-        cfg.hq_agent.clone().filter(|_| !cfg.is_group()).ok_or_else(|| anyhow!("this bot isn't a kith agent"))?;
+    let agent = cfg
+        .hq_agent
+        .clone()
+        .map(String::from)
+        .filter(|_| !cfg.is_group())
+        .ok_or_else(|| anyhow!("this bot isn't a kith agent"))?;
     if hub.store.kv_get(&crate::hub::hq::gone_key(id)).is_some() {
         bail!("{agent} is no longer one of kith's agents");
     }

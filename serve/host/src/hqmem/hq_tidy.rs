@@ -35,7 +35,7 @@ pub(super) fn review_due(agent: &str) -> bool {
 /// One run over the agent's files for these conversations. True when it should be tried again later: the agent has
 /// no folder here (gone), or its memory changed while the model worked.
 pub(super) async fn tidy(hub: &Arc<Hub>, cfg: &BotConfig, messages: &[Message], today: &str) -> Result<bool> {
-    let Some(agent) = cfg.hq_agent.clone() else { return Ok(false) };
+    let Some(agent) = cfg.hq_agent.clone().map(String::from) else { return Ok(false) };
     if hub.store.kv_get(&crate::hub::hq::gone_key(&cfg.id)).is_some() {
         return Ok(true);
     }

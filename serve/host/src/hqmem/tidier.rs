@@ -77,7 +77,7 @@ pub fn spawn_tidier(hub: Arc<Hub>, bot_id: String) -> mpsc::UnboundedSender<Tidy
     let (tx, mut rx) = mpsc::unbounded_channel::<TidyEvent>();
     // Only an hq agent's memory is tidied by the host: a host-native row (C5) or a room has none, so events sent to
     // it are dropped.
-    if !hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.is_hq() && !b.config.is_native()) {
+    if !hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.is_hq()) {
         return tx;
     }
     if kv_get_or_old(&hub.store, &bookmark_key(&bot_id)).is_none() {

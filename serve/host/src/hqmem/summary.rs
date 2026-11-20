@@ -196,7 +196,7 @@ pub struct Facets {
 pub fn facets(cfg: &BotConfig, root: Option<&Entry>) -> Facets {
     let group = cfg.is_group();
     let terminal = root.is_some_and(|r| r.data["thread"]["origin"] == "terminal");
-    let agent = cfg.hq_agent.clone().unwrap_or_default();
+    let agent = cfg.hq_agent.as_deref().unwrap_or_default().to_owned();
     Facets {
         room: rules::room(group, &agent, cfg.person.as_deref(), &cfg.id),
         audience: rules::audience(group, terminal, cfg.person.as_deref(), &cfg.id),
