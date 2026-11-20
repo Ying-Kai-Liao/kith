@@ -1,7 +1,9 @@
 //! `kith kernel threads <verb>`: the writer claim and the session registry (`kernel/bin/kith-sessions`) from the
 //! `kith-kernel` crate. This is the one place that asks a running host (`resolveThread` over loopback, the way
-//! `kith-sessions host_call` does), because the crate never calls the host itself. Not routed from `kith` yet, and the
-//! host's own claims (`terminal/claim.rs`) do not go through the crate yet either: the host never switches ahead of the CLI.
+//! `kith-sessions host_call` does) and the one that asks the core (`claim.*`, `session.record`, through
+//! `kith kernel core-call`, the way `kith_claims.call` does), because the crate never calls either itself. `kernel/bin/kith`
+//! routes its `kith-sessions` calls here while `threads` is in `lib/core-switched.txt`; the host's own claims
+//! (`terminal/claim.rs`) do not go through the crate: the host never switches ahead of the CLI.
 
 use std::io::{Read as _, Write as _};
 use std::net::{SocketAddr, TcpStream};
@@ -9,9 +11,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use kith_kernel::paths::{process_env, process_home};
+use kith_kernel::threads::core::{Core, CoreErr};
 use kith_kernel::threads::{Ctx, Host, cli};
 use serde_json::{Value, json};
 
+use crate::core_front::{self, CallEnd};
 use crate::kernel;
 
 /// The host on this Mac, if one answers on loopback with the owner token.
@@ -39,6 +43,24 @@ impl Loopback {
             _ => (self.home.join(".kith").join("serve").to_string_lossy().into_owned(), "19224".to_owned()),
         };
         (PathBuf::from(data.unwrap_or(d)), port.unwrap_or(p))
+    }
+}
+
+/// One claim call: the Python gave eight seconds to find the program and eight to the call.
+const CALL_SECS: u64 = 8;
+
+impl Core for Loopback {
+    /// The call `kith kernel core-call` makes, in this process and within a deadline ([`core_front::core_call_within`]): an
+    /// answer, a rejection (exit 4 there) or no answer (3 and 5), as `kith_claims.call` reads them.
+    fn call(&self, method: &str, params: &Value, timeout: Option<Duration>) -> Result<Value, CoreErr> {
+        match core_front::core_call_within(method, params, timeout.unwrap_or(Duration::from_secs(CALL_SECS))) {
+            CallEnd::Answered(v) if v.is_object() => Ok(v),
+            CallEnd::Answered(_) => Err(CoreErr::NoAnswer("the answer is not a JSON object".to_owned())),
+            CallEnd::Refused(why) => Err(CoreErr::Refused(if why.is_empty() { "refused".to_owned() } else { why })),
+            CallEnd::NoAnswer(why, code) => {
+                Err(CoreErr::NoAnswer(if why.is_empty() { format!("core-call exited {code}") } else { why }))
+            }
+        }
     }
 }
 
@@ -98,7 +120,11 @@ fn parse_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
 pub fn run(kernel_dir: Option<PathBuf>, args: &[String]) -> i32 {
     let home = process_home();
     let kernel_dir = kernel_dir.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
-    let machine = kith_kernel::paths::paths(&home, &kernel_dir, &process_env).machine;
+    // `KITH_MACHINE` first, as every `kith-sessions` lookup of the Mac's folder reads it (the switch files, the cost ledger, the
+    // extra logins), else where the paths put it.
+    let machine = process_env("KITH_MACHINE")
+        .filter(|m| !m.is_empty())
+        .map_or_else(|| kith_kernel::paths::paths(&home, &kernel_dir, &process_env).machine, PathBuf::from);
     let ctx = Ctx {
         state: process_env("KITH_STATE").map(PathBuf::from),
         machine: Some(machine),
@@ -111,7 +137,16 @@ pub fn run(kernel_dir: Option<PathBuf>, args: &[String]) -> i32 {
         let _ = std::io::stdin().read_to_string(&mut text);
         text
     };
-    let out = cli::run(&ctx, &host, args, &stdin);
+    // `pick` shows its table and prompt at once and reads one line (a terminal's stdin never ends); `record` reads the whole
+    // of the hook's.
+    let ask = |prompt: &str| {
+        eprint!("{prompt}");
+        let _ = std::io::stderr().flush();
+        let mut text = String::new();
+        let _ = std::io::stdin().read_line(&mut text);
+        text
+    };
+    let out = cli::run_with(&ctx, &host, Some(&host), args, &stdin, &ask);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();

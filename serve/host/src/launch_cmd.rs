@@ -215,6 +215,13 @@ pub fn print_settings(a: &Args) -> Result<()> {
             .collect(),
         kith_bin.as_deref(),
     );
+    let threads_bin = kith_kernel::launch::assemble::threads_hook_bin(
+        &c.kernel,
+        &std::env::vars_os()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+            .collect(),
+        kith_bin.as_deref(),
+    );
     let input = settings::Input {
         agent: &a.agent,
         paths: &c.p,
@@ -231,6 +238,7 @@ pub fn print_settings(a: &Args) -> Result<()> {
         kith_bin: kith_bin.as_deref(),
         fence_bin: kith_bin.as_deref(),
         cost_bin: cost_bin.as_deref(),
+        threads_bin: threads_bin.as_deref(),
         plugins_json: &plugins_json,
         owner_terminal: a.terminal,
         api_helper: a.api_helper.as_deref().unwrap_or_default(),

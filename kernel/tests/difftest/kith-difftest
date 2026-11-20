@@ -550,6 +550,25 @@ def match(entry, case_name, facet):
     return fnmatch.fnmatchcase(case_name, entry['case']) and fnmatch.fnmatchcase(facet, entry['facet'])
 
 
+def holds(entry, a, b):
+    """An entry with `same_after` ({"old": [[pattern, replacement]..], "new": [..]}) excuses only the difference those rewrites
+    explain: each side must have something to rewrite, and the two texts must be equal once rewritten. Anything else that differs
+    in the facet stays a failure, so a listed difference cannot hide a second one."""
+    rules = entry.get('same_after')
+    if not rules:
+        return True
+    out = []
+    for text, key in ((a, 'old'), (b, 'new')):
+        hits = 0
+        for pat, repl in rules.get(key, []):
+            text, n = re.subn(pat, repl, text)
+            hits += n
+        if not hits:
+            return False
+        out.append(text)
+    return out[0] == out[1]
+
+
 def load_corpus(dirs):
     cases = []
     for d in dirs:
@@ -594,7 +613,7 @@ def run_all(cases, prefixes, intended, jobs=4, keep=False, out=sys.stdout):
         bad = {}
         status['cases'][name] = 'intended' if diffs else 'same'
         for facet, ab in diffs.items():
-            hit = [i for i, e in enumerate(intended) if match(e, name, facet)]
+            hit = [i for i, e in enumerate(intended) if match(e, name, facet) and holds(e, *ab)]
             used.update(hit)
             if not hit:
                 bad[facet] = ab
