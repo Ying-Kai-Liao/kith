@@ -70,7 +70,7 @@ def release(lang, bin_, pid, env):
     if lang == 'py':
         ks.release_claims(pid)
     else:
-        subprocess.run([bin_, 'kernel', 'threads', '--kernel', str(KERNEL), 'release', str(pid)], env=env, check=True)
+        subprocess.run([bin_, 'kernel', 'threads', '--kernel', str(KERNEL), 'release-pid', str(pid)], env=env, check=True)
 
 
 def main():

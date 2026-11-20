@@ -4,7 +4,7 @@
 //! when the two differ. What it writes is what a run writes: `last_started` in the state file (and a legacy file's marks
 //! imported into it), a Claude account's folder made to mirror the main login, and `kith account list` migrating an old
 //! settings file. The verbs that write the set (`add|login|remove|order|move|set|policy|pin|unpin|cross-harness|migrate|use|
-//! backup ...`) are `cli::run_account`, with `kith account` as `kith kernel account`; `bin/kith-account` stays until R3's deletion.
+//! backup ...`) are `cli::run_account`, with `kith account` as `kith kernel account`; `bin/kith-account` is a stub that hands the line to `kith account` (R3).
 //!
 //! Everything outside the file system goes through [`Outside`] (a harness's status command, the `kith-auth granted`
 //! lookup, a program on PATH), so each rule is tested in a tempdir with fakes. No token, credential file or Keychain

@@ -616,51 +616,28 @@ const DAEMON_APPEARS: std::time::Duration = std::time::Duration::from_millis(150
 /// No core file yet answers `{"noCore":true}` and exit 0: a fresh install has nothing to keep in step. 0 ran, 3 nothing ran,
 /// 4 the core refused the call, 5 it failed after it may have written.
 #[cfg(unix)]
-fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> i32 {
+fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> CallEnd {
     let started = std::time::Instant::now();
     loop {
         match kith_core::call_authority_embedded(folders, method, params) {
-            Ok(kith_core::EmbeddedCall::Answered(answer)) => {
-                println!("{answer}");
-                return 0;
-            }
+            Ok(kith_core::EmbeddedCall::Answered(answer)) => return CallEnd::Answered(answer),
             Ok(kith_core::EmbeddedCall::NoCore(dir)) => {
                 eprintln!("no core db at {}: nothing to update", dir.display());
-                println!("{}", json!({"noCore": true}));
-                return 0;
+                return CallEnd::Answered(json!({"noCore": true}));
             }
             Ok(kith_core::EmbeddedCall::Busy) => {
                 // A daemon that came up meanwhile is used, never raced.
                 match kith_core::reach(folders, method, params, false) {
-                    kith_core::Reached::Answered(answer) => {
-                        println!("{answer}");
-                        return 0;
-                    }
-                    kith_core::Reached::Refused(e) => {
-                        eprintln!("{e}");
-                        return 4;
-                    }
+                    kith_core::Reached::Answered(answer) => return CallEnd::Answered(answer),
+                    kith_core::Reached::Refused(e) => return CallEnd::Refused(e.to_string()),
                     _ => {}
                 }
                 if started.elapsed() >= DAEMON_APPEARS {
-                    eprintln!("no core daemon answers, and another core holds the lock");
-                    return 3;
+                    return CallEnd::NoAnswer("no core daemon answers, and another core holds the lock".to_owned(), 3);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            Err(e) => {
-                eprintln!("{e}");
-                return match e {
-                    kith_core::Error::NoSuchMethod(_)
-                    | kith_core::Error::BadParams(_)
-                    | kith_core::Error::NotAllowed(_)
-                    | kith_core::Error::NotServed(_)
-                    | kith_core::Error::Refused(_)
-                    | kith_core::Error::Stopped(_) => 4,
-                    kith_core::Error::Io(_) => 5,
-                    _ => 3,
-                };
-            }
+            Err(e) => return CallEnd::of_error(&e),
         }
     }
 }
@@ -670,34 +647,80 @@ fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> i32 {
 /// yet is exit 3 too: there is no core to be the registry's writer, so the hook keeps its entry. 0 answered (the answer may
 /// be a `refused` as data), 4 refused, 5 failed after it may have written.
 #[cfg(unix)]
-fn record_embedded(folders: &Paths, method: &str, params: &Value) -> i32 {
+fn record_embedded(folders: &Paths, method: &str, params: &Value) -> CallEnd {
     match kith_core::call_transcripts_embedded(folders, method, params) {
-        Ok(kith_core::EmbeddedCall::Answered(answer)) => {
-            println!("{answer}");
-            0
-        }
+        Ok(kith_core::EmbeddedCall::Answered(answer)) => CallEnd::Answered(answer),
         Ok(kith_core::EmbeddedCall::NoCore(dir)) => {
-            eprintln!("no core db at {}: nothing recorded", dir.display());
-            3
+            CallEnd::NoAnswer(format!("no core db at {}: nothing recorded", dir.display()), 3)
         }
         Ok(kith_core::EmbeddedCall::Busy) => {
-            eprintln!("no core daemon answers, and another core holds the lock");
-            3
+            CallEnd::NoAnswer("no core daemon answers, and another core holds the lock".to_owned(), 3)
         }
-        Err(e) => {
-            eprintln!("{e}");
-            match e {
-                kith_core::Error::NoSuchMethod(_)
-                | kith_core::Error::BadParams(_)
-                | kith_core::Error::NotAllowed(_)
-                | kith_core::Error::NotServed(_)
-                | kith_core::Error::Refused(_)
-                | kith_core::Error::Stopped(_) => 4,
-                kith_core::Error::Io(_) => 5,
-                _ => 3,
-            }
+        Err(e) => CallEnd::of_error(&e),
+    }
+}
+
+/// What a core call came to, in the three ends the callers tell apart (`kernel/lib/kith_claims.py`): an answer (a refusal can be
+/// data in it), a rejection (nothing ran: exit 4) and no answer (exit 3: nothing ran, the caller falls back; exit 5: lost
+/// after sending, a claim may or may not have been made).
+pub enum CallEnd {
+    Answered(Value),
+    Refused(String),
+    NoAnswer(String, i32),
+}
+
+impl CallEnd {
+    #[cfg(unix)]
+    fn of_error(e: &kith_core::Error) -> Self {
+        let why = e.to_string();
+        match e {
+            kith_core::Error::NoSuchMethod(_)
+            | kith_core::Error::BadParams(_)
+            | kith_core::Error::NotAllowed(_)
+            | kith_core::Error::NotServed(_)
+            | kith_core::Error::Refused(_)
+            | kith_core::Error::Stopped(_) => Self::Refused(why),
+            kith_core::Error::Io(_) => Self::NoAnswer(why, 5),
+            _ => Self::NoAnswer(why, 3),
         }
     }
+}
+
+/// One owner-socket call of `method`, as `kith kernel core-call` makes it, without the checks of its command line: the
+/// daemon, else (no daemon) the embedded core for the rows that run without one (`claim.sweepPerson`, a revoke must reach a
+/// person's runs while serve is stopped; `session.record`). Only a read is sent again when the connection breaks.
+fn core_call_dispatch(method: &str, params: &Value) -> CallEnd {
+    let folders = kernel::folders(&kith_kernel::paths::process_home());
+    // Only a list (or a read) is repeated when the connection breaks: an open or a ticket may have run.
+    let repeatable =
+        matches!(method, "terminal.list" | "claim.list" | "claim.epoch" | "schedule.jobs" | "schedule.runs");
+    match kith_core::reach(&folders, method, params, repeatable) {
+        kith_core::Reached::Answered(answer) => CallEnd::Answered(answer),
+        kith_core::Reached::Refused(e) => CallEnd::Refused(e.to_string()),
+        #[cfg(unix)]
+        // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
+        // The terminal methods need the daemon's sockets.
+        kith_core::Reached::NoDaemon if kith_core::embedded(method) => core_call_embedded(&folders, method, params),
+        #[cfg(unix)]
+        kith_core::Reached::NoDaemon if method == "session.record" => record_embedded(&folders, method, params),
+        kith_core::Reached::NoDaemon => CallEnd::NoAnswer("no core daemon answers".to_owned(), 3),
+        kith_core::Reached::Mismatch(note) => CallEnd::NoAnswer(note, 3),
+        kith_core::Reached::Lost(note) => CallEnd::NoAnswer(note, 5),
+    }
+}
+
+/// [`core_call_dispatch`] for the kernel takers of `kith kernel threads` (the writer claims, the registry's record): the
+/// methods are theirs alone and the call ends within `limit`, because nothing underneath has a deadline of its own that
+/// fits a `SessionStart` hook (five seconds in all) or a launch. Running out of time is no answer, exit 5: the call may have
+/// run.
+pub fn core_call_within(method: &str, params: &Value, limit: std::time::Duration) -> CallEnd {
+    debug_assert!(CORE_CALL_METHODS.contains(&method));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (m, p) = (method.to_owned(), params.clone());
+    std::thread::spawn(move || {
+        let _ = tx.send(core_call_dispatch(&m, &p));
+    });
+    rx.recv_timeout(limit).unwrap_or_else(|_| CallEnd::NoAnswer("the core did not answer in time".to_owned(), 5))
 }
 
 /// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered (for the
@@ -738,36 +761,18 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         eprintln!("core-call: {method} is for kith-auth's router: it needs viaSwitch: true and no amount");
         return 2;
     }
-    let folders = kernel::folders(&kith_kernel::paths::process_home());
-    // Only a list (or a read) is repeated when the connection breaks: an open or a ticket may have run.
-    let repeatable =
-        matches!(method, "terminal.list" | "claim.list" | "claim.epoch" | "schedule.jobs" | "schedule.runs");
-    match kith_core::reach(&folders, method, &params, repeatable) {
-        kith_core::Reached::Answered(answer) => {
+    match core_call_dispatch(method, &params) {
+        CallEnd::Answered(answer) => {
             println!("{answer}");
             0
         }
-        kith_core::Reached::Refused(e) => {
-            eprintln!("{e}");
+        CallEnd::Refused(why) => {
+            eprintln!("{why}");
             4
         }
-        #[cfg(unix)]
-        // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
-        // The terminal methods need the daemon's sockets.
-        kith_core::Reached::NoDaemon if kith_core::embedded(method) => core_call_embedded(&folders, method, &params),
-        #[cfg(unix)]
-        kith_core::Reached::NoDaemon if method == "session.record" => record_embedded(&folders, method, &params),
-        kith_core::Reached::NoDaemon => {
-            eprintln!("no core daemon answers");
-            3
-        }
-        kith_core::Reached::Mismatch(note) => {
-            eprintln!("{note}");
-            3
-        }
-        kith_core::Reached::Lost(note) => {
-            eprintln!("{note}");
-            5
+        CallEnd::NoAnswer(why, code) => {
+            eprintln!("{why}");
+            code
         }
     }
 }

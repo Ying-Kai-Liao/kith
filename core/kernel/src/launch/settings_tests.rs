@@ -13,8 +13,11 @@ use crate::paths::{self, Paths};
 
 struct Tree {
     root: PathBuf,
+    /// The program the room-ledger hooks name (None: bin/kith-room-ledger, the stub).
+    ledger_bin: Option<&'static str>,
     /// The program the `SessionStart` hook of the cost ledger names (None: bin/kith-cost, the Python).
     cost_bin: Option<&'static str>,
+    threads_bin: Option<&'static str>,
 }
 
 impl Tree {
@@ -33,7 +36,9 @@ impl Tree {
         }
         let t = Tree {
             root,
+            ledger_bin: None,
             cost_bin: None,
+            threads_bin: None,
         };
         t.put(
             "kith/agents/echo/role/agent.md",
@@ -127,7 +132,9 @@ impl Tree {
             user_home: &home,
             kith_bin: Some(kith_bin),
             fence_bin: Some("/usr/local/bin/kith"),
+            ledger_bin: self.ledger_bin,
             cost_bin: self.cost_bin,
+            threads_bin: self.threads_bin,
             plugins_json: "[]",
             owner_terminal: false,
             api_helper: "",
@@ -332,7 +339,9 @@ fn guest_without_a_readfence_program_does_not_run() {
         user_home: &home,
         kith_bin: Some("/usr/local/bin/kith"),
         fence_bin: None,
+        ledger_bin: None,
         cost_bin: None,
+        threads_bin: None,
         plugins_json: "[]",
         owner_terminal: false,
         api_helper: "",
@@ -377,7 +386,9 @@ fn guest_work_dir_is_never_the_home_folder() {
         user_home: &home,
         kith_bin: Some("/usr/local/bin/kith"),
         fence_bin: Some("/usr/local/bin/kith"),
+        ledger_bin: None,
         cost_bin: None,
+        threads_bin: None,
         plugins_json: "[]",
         owner_terminal: false,
         api_helper: "",
@@ -421,7 +432,9 @@ fn guest_without_the_memory_check_does_not_run() {
         user_home: &home,
         kith_bin: None,
         fence_bin: None,
+        ledger_bin: None,
         cost_bin: None,
+        threads_bin: None,
         plugins_json: "[]",
         owner_terminal: false,
         api_helper: "",
@@ -583,6 +596,55 @@ fn mcp_merges_granted_with_the_agents_own_and_gives_a_guest_the_permit_server_on
     assert_eq!(none["mcpServers"].as_object().unwrap().len(), 2);
 }
 
+/// The command of the `PreToolUse` or `PostToolUse` hook that records who was in the room.
+fn ledger_hook(out: &settings::Output, event: &str) -> String {
+    let s = out.settings.as_ref().unwrap();
+    s["hooks"][event]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["hooks"][0]["command"].as_str().unwrap().to_owned())
+        .find(|c| c.contains("room-ledger"))
+        .unwrap()
+}
+
+#[test]
+fn room_ledger_hook_names_the_stub_until_the_program_has_the_module() {
+    let t = Tree::new();
+    let out = t.settings(&Member::owner(), "").unwrap();
+    let root = t.root.to_string_lossy().into_owned();
+    let pre = ledger_hook(&out, "PreToolUse");
+    assert!(
+        pre.starts_with(&format!(
+            "{root}/kernel/bin/kith-room-ledger pre --agent echo --home "
+        )),
+        "{pre}"
+    );
+    assert!(pre.ends_with(" || true"));
+    assert!(ledger_hook(&out, "PostToolUse").contains("kith-room-ledger post --agent echo "));
+}
+
+#[test]
+fn room_ledger_hook_calls_the_rust_verb_when_the_program_has_it() {
+    let mut t = Tree::new();
+    // a space in the path: the hook is a shell line, so the program is quoted the way bash's %q does
+    t.ledger_bin = Some("/opt/my kith/kith");
+    let out = t.settings(&Member::owner(), "").unwrap();
+    let root = t.root.to_string_lossy().into_owned();
+    let want = "/opt/my\\ kith/kith kernel room-ledger --kernel";
+    let pre = ledger_hook(&out, "PreToolUse");
+    assert!(
+        pre.starts_with(&format!("{want} {root}/kernel pre --agent echo --home ")),
+        "{pre}"
+    );
+    assert!(pre.ends_with(" || true"));
+    let post = ledger_hook(&out, "PostToolUse");
+    assert!(
+        post.starts_with(&format!("{want} {root}/kernel post --agent echo --home ")),
+        "{post}"
+    );
+}
+
 /// The command of the `SessionStart` hook that tags the session in the cost ledger.
 fn cost_hook(out: &settings::Output) -> String {
     let s = out.settings.as_ref().unwrap();
@@ -613,5 +675,37 @@ fn session_start_tags_with_the_rust_cost_verb_when_the_program_has_it() {
     assert_eq!(
         cost_hook(&out),
         format!("/opt/my\\ kith/kith kernel cost --kernel {root}/kernel tag")
+    );
+}
+
+fn sessions_hook(out: &settings::Output) -> String {
+    let s = out.settings.as_ref().unwrap();
+    s["hooks"]["SessionStart"][1]["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn session_start_lists_with_the_python_until_the_program_has_the_writer() {
+    let t = Tree::new();
+    let out = t.settings(&t.guest("sam", "acceptEdits"), "plan").unwrap();
+    let root = t.root.to_string_lossy().into_owned();
+    assert_eq!(
+        sessions_hook(&out),
+        format!("\"{root}/kernel/bin/kith-sessions\" record")
+    );
+}
+
+#[test]
+fn session_start_lists_with_the_rust_threads_verb_when_the_program_has_it() {
+    let mut t = Tree::new();
+    // a space in the path: the hook is a shell line, so the program is quoted the way bash's %q does
+    t.threads_bin = Some("/opt/my kith/kith");
+    let out = t.settings(&t.guest("sam", "acceptEdits"), "plan").unwrap();
+    let root = t.root.to_string_lossy().into_owned();
+    assert_eq!(
+        sessions_hook(&out),
+        format!("/opt/my\\ kith/kith kernel threads --kernel {root}/kernel record")
     );
 }
