@@ -252,7 +252,7 @@ mod tests {
             (kept.name.as_str(), kept.pinned, kept.notify, kept.model.as_deref()),
             ("Home", true, Some(false), None)
         );
-        // Model, effort, Fast mode and permission are hq's: an app's edit of them on an hq bot is not stored.
+        // Model, effort and permission are hq's: an app's edit of them on an hq bot is not stored.
         assert_eq!(kept.permission, crate::store::Permission::Ask);
         assert_eq!((kept.hq_agent.as_deref(), kept.backend.as_str()), (Some("house"), "claude"), "not editable");
         assert_eq!(kept.description, "keeps the house tidy", "hq's description");

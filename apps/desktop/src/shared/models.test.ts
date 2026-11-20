@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { draftOf, isChat, needsKithAgent, isWorkingIn, normalizeBot, type Entry } from './models.ts'
+import { isChat, needsKithAgent, isWorkingIn, normalizeBot, type Entry } from './models.ts'
 
 test('a bot works in every place its host lists at once, and only there', () => {
   const bot = normalizeBot({

@@ -78,6 +78,7 @@ impl Actor {
             Some(Incoming::Notification { method, params }) => {
                 // Any session's, turn or not: the agent changed an option itself, which is not turn output.
                 if method == "session/update" && params["update"]["sessionUpdate"] == "config_option_update" {
+                    // Ignored on purpose: nothing here tracks agent-set options any more.
                 } else if method == "session/update" && params["sessionId"].as_str() == self.turn_session.as_deref() {
                     if self.turn.is_none() && super::offturn::wakes(self, &params["update"]) {
                         // The agent woke itself (a background task finished): its work goes where the last turn was.

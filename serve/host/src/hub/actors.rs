@@ -381,7 +381,7 @@ impl Hub {
     }
 
     /// The bot as clients see it: its own chat's state while that is busy, else a place waiting on the user,
-    /// else one at work, else its own chat's (idle, or how its last turn ended). Fast mode is the bot's.
+    /// else one at work, else its own chat's (idle, or how its last turn ended).
     pub fn bot_runtime(&self, bot_id: &str) -> Runtime {
         let runtime = self.runtime.locked();
         let main = runtime.get(bot_id).cloned().unwrap_or_default();

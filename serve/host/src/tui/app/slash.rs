@@ -37,9 +37,7 @@ impl App {
                 detail: s["description"].as_str().unwrap_or_default().to_owned(),
             })
         });
-        skills
-            .filter(|c| c.name.contains(&query) || c.title.to_lowercase().contains(&query))
-            .collect()
+        skills.filter(|c| c.name.contains(&query) || c.title.to_lowercase().contains(&query)).collect()
     }
 
     /// The highlighted row of `count`: kept while the draft stays the same, else the first.
