@@ -88,7 +88,7 @@ export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTa
           <MemberRoomInfo room={bot} />
         ) : bot && group ? (
           <GroupMembersList group={bot} editGroup={editGroup} addMember={addMember} addPerson={addPerson} />
-        ) : isFlagged(bot) ? (
+        ) : bot && isFlagged(bot) ? (
           <NativeBotNotice bot={bot} />
         ) : (
           <>

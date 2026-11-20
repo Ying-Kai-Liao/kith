@@ -13,7 +13,7 @@ import './bots.css'
 export const NATIVE_BOT_LINE = 'This bot no longer runs. Make a kith agent like it, or export what it kept.'
 
 /** A host-native row the host refuses to run. Every other bot is a kith agent or a room. */
-export const isFlagged = (bot: Bot | null | undefined): bot is Bot => !!bot && needsKithAgent(bot)
+export const isFlagged = (bot: Bot): boolean => needsKithAgent(bot)
 
 /**
  * A flagged row's two ways out: "Make a kith agent like this" (New agent, filled from the row) and "Export" (the host

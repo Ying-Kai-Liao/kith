@@ -90,7 +90,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
     void botGuestsFor(store).load()
   }, [store, botId, group, online])
   // A bot guest's chat is read-only here (v1): no calls, no composer, no place picker.
-  const callBlocked = guestChat ? 'Read only' : isFlagged(bot) ? 'This bot no longer runs' : callBlockedReason(store)
+  const callBlocked = guestChat ? 'Read only' : bot && isFlagged(bot) ? 'This bot no longer runs' : callBlockedReason(store)
   // One call per chat window: a second press (double click, or the details page while in a call) does nothing.
   const startCall = () => {
     if (calling || callBlocked) return
@@ -275,7 +275,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
           <div className="composer-fade" />
           {bot && guestChat ? (
             <Text as="div" size="footnote" tone="secondary" className="composer-read-only">{botGuestReadOnlyLine(guestChat, bot.name)}</Text>
-          ) : isFlagged(bot) ? (
+          ) : bot && isFlagged(bot) ? (
             <NativeBotNotice bot={bot} />
           ) : store.mismatch ? (
             <div className="composer-update-needed">
