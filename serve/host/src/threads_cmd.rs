@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use kith_kernel::paths::{process_env, process_home};
 use kith_kernel::threads::core::{Core, CoreErr};
-use kith_kernel::threads::{Ctx, Host, cli};
+use kith_kernel::threads::{self, Ctx, Host, cli};
 use serde_json::{Value, json};
 
 use crate::core_front::{self, CallEnd};
@@ -131,6 +131,16 @@ pub fn run(kernel_dir: Option<PathBuf>, args: &[String]) -> i32 {
         home: home.clone(),
         env: &process_env,
     };
+    // `run AGENT -- CMD...` is the one verb that is a process and not an answer: it keeps stdio and the terminal, and ends with
+    // its child's code. Anything else after `run` is `kith-sessions`' usage text, which `cli` prints.
+    if let [verb, agent, dash, cmd @ ..] = args
+        && verb == "run"
+        && dash == "--"
+        && !cmd.is_empty()
+    {
+        let host = Loopback { kernel: kernel_dir.clone(), home };
+        return threads::run::run(&ctx, &host, Some(&host), &kernel_dir, agent, cmd, &threads::run::say);
+    }
     let host = Loopback { kernel: kernel_dir, home };
     let stdin = || {
         let mut text = String::new();
@@ -146,7 +156,11 @@ pub fn run(kernel_dir: Option<PathBuf>, args: &[String]) -> i32 {
         let _ = std::io::stdin().read_line(&mut text);
         text
     };
-    let out = cli::run_with(&ctx, &host, Some(&host), args, &stdin, &ask);
+    let mut out = cli::run_with(&ctx, &host, Some(&host), args, &stdin, &ask);
+    // `run` without a command ends in the Python's `sys.exit(__doc__)`, which writes the text and a newline of its own.
+    if args.first().is_some_and(|a| a == "run") {
+        out.stderr.push('\n');
+    }
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();

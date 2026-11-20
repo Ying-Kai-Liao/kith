@@ -100,7 +100,7 @@ pub const STATUS_FD: RawFd = 9;
 
 /// `fd` moved to the lowest free descriptor from 10 up, so that the descriptors of the child's own plumbing never take a number the
 /// stub is told about (`F_DUPFD_CLOEXEC`; the original is closed).
-fn high(fd: RawFd) -> RawFd {
+pub(crate) fn high(fd: RawFd) -> RawFd {
     // SAFETY: F_DUPFD_CLOEXEC on a descriptor this module owns.
     let dup = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 10) };
     if dup < 0 {

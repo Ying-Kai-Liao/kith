@@ -16,7 +16,7 @@ SYNC=f9b5e509f476bb88f6203a125ae863369ba03aa9
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
-  kernel/bin/kith                     # --resume: resolve + r_sid; csid: claim / terminal before claude; exec run
+  kernel/bin/kith                     # --resume: resolve + r_sid; csid: claim / terminal before claude; exec run (the Rust `kernel threads run` when the program lists threads-run, else the Python)
   kernel/bin/kith-lifecycle           # compact: take_claim for the parked child's pid, still(), then it execs claude; end
   core/kernel/src/lifecycle/sweep.rs  # the Rust compact and end: Taker::take (lifecycle_owner) for the parked child's pid, still(), then it execs claude; end
   core/kernel/src/lifecycle/proc.rs   # parked(): the fork that is claude (or the stub), held before its exec; reap
@@ -40,6 +40,8 @@ FILES=(
   core/kernel/src/threads/core.rs     # R5: Writer mode = the claims marker or the switch file (fail closed), the core's three ends
   core/kernel/src/threads/writer.rs   # R5: Taker: core_take (revokeSeen, held / waiting / takeover, lock-alone for the owner only), epoch, release, sweep, proc (never held when down)
   core/kernel/src/threads/spool.rs    # R5: record: the spool first, session.record, drain, the marker re-check
+  core/kernel/src/threads/run.rs      # R5: `run`, the wrapper of an interactive launch: forks and waits (the shell's pid keeps the claim, claude is its child), the idle stop (rule 3), the post-exit steps in order: quit intent, release_claims, sleep sweep, take-over / resume note, wake_owed
+  core/kernel/src/threads/runproc.rs  # R5: run's fork and exec (signals and mask reset, only fds 0-2 and the status pipe), TERM/HUP passed on, waitpid, detached helpers (setsid, null stdio)
   serve/host/src/threads_cmd.rs       # R5: the core client of the verbs (claim.* and session.record through core_call_within), the host's resolveThread
   serve/host/src/core_front.rs        # R5: core_call_dispatch / core_call_within: the daemon, else the embedded rows, with a deadline
   kernel/lib/core-switched.txt        # R5: the `threads` line is the switch of kith-sessions' verbs (one decision per launch in bin/kith)
