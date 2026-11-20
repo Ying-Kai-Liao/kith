@@ -486,10 +486,10 @@ impl Actor {
         }
     }
 
-    /// The agent name the core records for this actor's claims: the hq agent's. A host-native bot (once `bot:<id>`,
-    /// B10) never starts, and a room's turns run in its members' actors.
+    /// The agent name the core records for this actor's claims (`BotConfig::claim_agent`). A host-native bot never
+    /// starts, and a room's turns run in its members' actors.
     pub(super) fn writer_agent(&self) -> String {
-        self.cfg.hq_agent.clone().unwrap_or_default()
+        self.cfg.claim_agent()
     }
 
     /// Starts `command` under a resident stub, as `kith-serve`'s own `start_agent` starts it bare: the same handshake, plus a

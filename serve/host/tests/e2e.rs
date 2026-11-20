@@ -298,6 +298,21 @@ async fn phone_pairs_and_chats_over_the_direct_channel() {
     assert_eq!(devices["devices"][0]["connected"], true);
 }
 
+/// What is left of "personal workspaces": a room has no folder of its own, and deleting a kith agent's bot never
+/// touches the agent's folder (the agent is the kernel's, not the host's).
+#[tokio::test]
+async fn a_room_has_no_workspace_and_deleting_an_agents_bot_keeps_its_files() {
+    let host = start_host().await;
+    let bot = tester(&host).await;
+    let dir = common::agents_dir(&host.home).join("tester");
+    std::fs::write(dir.join("keep.txt"), "persistent output").unwrap();
+    let group = host.call("createBot", json!({"name": "Group", "kind": "group", "members": [bot]})).await;
+    assert_eq!(group["bot"]["cwd"], "");
+    assert_eq!(group["bot"]["managedWorkspace"], false);
+    host.call("deleteBot", json!({"botId": bot})).await;
+    assert!(dir.join("keep.txt").is_file(), "deleting a bot must retain its files");
+}
+
 // ---------- wire shape snapshot (docs/reference/compatibility.md) ----------
 
 /// Snapshot of what clients decode: field paths and JSON types of `hello` and the event

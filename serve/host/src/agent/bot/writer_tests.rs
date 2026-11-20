@@ -360,6 +360,8 @@ actor_test! {
     /// claimed: the turn runs under the lock, and the core hears each step in order. The epoch is read before the enqueue, the account
     /// sent is the process's own, an agent claims under its own name, and the process has its `warm_procs` row.
     async fn a_claimed_turn_runs_and_reports_done(rig) {
+        // The launch names this account, so the assertion below can tell it from the rig's own "claude".
+        std::fs::write(rig.dir.join("a/account"), "claude:launch").unwrap();
         rig.send("a", "hello").await;
         rig.until("the reply", |r| r.replied("a", "hello")).await;
         rig.until("the end report", |r| r.w().reports.iter().any(|(k, _)| k == "done")).await;
@@ -371,7 +373,7 @@ actor_test! {
         let enqueue = &w.asked.iter().find(|(m, _)| m == "hostclaim.enqueue").unwrap().1;
         assert_eq!(enqueue["agent"], agent_a(&rig).as_str(), "an agent's claims name the agent");
         assert!(enqueue["key"].as_str().is_some_and(|k| !k.is_empty()), "every enqueue carries its key");
-        assert_eq!(w.sent_accounts, [Some("claude".to_owned())], "the launch's own account, not a fixed one");
+        assert_eq!(w.sent_accounts, [Some("claude:launch".to_owned())], "the launch's own account, not a fixed one");
         assert_eq!(w.turns[0].1, "done");
         assert_eq!(w.claims[0].state, "ended");
         assert!(!w.procs.is_empty(), "the warm process is known to the core");

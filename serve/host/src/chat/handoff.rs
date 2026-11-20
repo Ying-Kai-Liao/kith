@@ -1,6 +1,6 @@
 //! A rollover's handoff card in an old host-native chat. One-bot-model C5: the host drafts none any more (an agent's
-//! context is its own), but a card an earlier host left in a chat is still a draft the user can edit or keep, until
-//! their next message; `editHandoff` and `keepConversation` act on it. The card is a notice whose `handoff` field holds
+//! context is its own), but a card an earlier host left in a chat is still a draft the user can edit or keep. The card
+//! stays until the user keeps it; `editHandoff` and `keepConversation` act on it. The card is a notice whose `handoff` field holds
 //! the draft, so an app that doesn't know it still shows the text.
 
 use crate::hub::Hub;

@@ -28,12 +28,18 @@ def launch(agent):
     model = args[args.index("-m") + 1] if "-m" in args else "haiku"
     project = args[args.index("-p") + 1] if "-p" in args else None
     via = os.environ.get("KITH_VIA", "")
+    # A test that wants a distinctive account writes it in the agent's folder (`<agent folder>/account`).
+    try:
+        with open(os.path.join(home, "account"), encoding="utf-8") as f:
+            account = f.read().strip() or "claude"
+    except OSError:
+        account = "claude"
     env = {"KITH_AGENT": agent, "HQ_AGENT": agent, "KITH_VIA": via, "HQ_VIA": via, "KITH_MODEL": model,
-           "HQ_MODEL": model, "KITH_PROVIDER": "claude", "KITH_ACCOUNT": "", "KITH_ACCOUNT_ID": "claude",
+           "HQ_MODEL": model, "KITH_PROVIDER": "claude", "KITH_ACCOUNT": "", "KITH_ACCOUNT_ID": account,
            "KITH_BACKUP": ""}
     print(json.dumps({
         "version": 1, "agent": agent, "agent_version": "v1", "harness": "claude", "cwd": home,
-        "backup": None, "provider": "claude", "account": None, "account_id": "claude", "env": env,
+        "backup": None, "provider": "claude", "account": None, "account_id": account, "env": env,
         "system_prompt": "You are " + agent + ".", "settings": {"hooks": {"SessionStart": []}},
         "mcp_servers": {}, "add_dirs": [], "allowed_tools": [], "disable_slash_commands": True,
         "model": model, "effort": None, "project": project, "call_model": None, "permission_mode": "default",

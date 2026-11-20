@@ -211,9 +211,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("kith-owner-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let bin = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../kernel/bin/kith-auth");
-        *crate::channels::hq::TEST_ENV.lock().unwrap() = vec![("KITH_AUTH", dir.join("auth.json"))];
+        // Its own kith home too: a person `sam` removed from this Mac's real home would refuse the id.
+        let kith_home = dir.join("home");
+        std::fs::create_dir_all(&kith_home).unwrap();
+        *crate::channels::hq::TEST_ENV.lock().unwrap() =
+            vec![("KITH_AUTH", dir.join("auth.json")), ("KITH_HOME", kith_home.clone())];
         let auth = |args: &[&str]| {
-            let out = std::process::Command::new(&bin).args(args).env("KITH_AUTH", dir.join("auth.json")).output();
+            let out = std::process::Command::new(&bin)
+                .args(args)
+                .env("KITH_AUTH", dir.join("auth.json"))
+                .env("KITH_HOME", &kith_home)
+                .output();
             assert!(out.unwrap().status.success(), "kith-auth {args:?}");
         };
         let s = store();

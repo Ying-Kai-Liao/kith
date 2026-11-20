@@ -51,10 +51,6 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             b["rotate"].as_bool().unwrap_or(false),
         )?,
         "routineCall" => crate::routines::call(hub, str_arg(&b, "botId")?, str_arg(&b, "name")?, &b["arguments"])?,
-        "memoryCall" => {
-            let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
-            crate::chat::memory::tool_call(hub, bot, actor_arg(&b, bot), name, &b["arguments"]).await?
-        }
         "chatCall" => {
             let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
             if name == "call_person" {
@@ -428,12 +424,9 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             hub.send_cmd(str_arg(&b, "botId")?, Cmd::NewSession)?;
             json!({})
         }
-        "memory" | "saveMemory" | "pinMemory" | "archiveMemory" | "forgetMemory" | "clearMemory" | "undoTidy"
-        | "undoDream" | "answerMemory" | "undoMemory" | "memoryFile" | "saveMemoryFile" | "deleteMemoryFile"
-        | "restoreMemoryFile" => crate::chat::memory::call(hub, method, &b).await?,
-        m if crate::chat::memory::HQ_METHODS.contains(&m) => {
+        m if crate::hqmem::HQ_METHODS.contains(&m) => {
             let (hub, method, b) = (hub.clone(), m.to_owned(), b.clone());
-            tokio::task::spawn_blocking(move || crate::chat::memory::hq_call(&hub, &method, &b)).await??
+            tokio::task::spawn_blocking(move || crate::hqmem::hq_call(&hub, &method, &b)).await??
         }
         "editHandoff" | "keepConversation" => crate::chat::handoff::call(hub, method, &b)?,
         "react" => {

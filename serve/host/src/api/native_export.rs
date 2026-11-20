@@ -5,6 +5,7 @@
 //! The bundle is `<data dir>/bots/<id>/kith-export/`, next to the bot's own memory files:
 //! - `bot.json`: name, description, engine, model, effort and the other settings the row had;
 //! - `memory/`: a copy of its host chat-memory files (the folder `chat::memory::files::folder` names);
+//! - `entries.json`: its kith-mem facts (the entries of its own layer in serve.db);
 //! - `routines.json`: each routine's name, prompt, triggers and whether it is paused. A webhook trigger is only the word
 //!   `webhook`: the key that authorizes it is never written;
 //! - `vault.json`: the NAMES of the engine's saved env keys (`agent::auth::saved_env`), never a value. They stay where
@@ -45,9 +46,13 @@ async fn export(hub: &Arc<Hub>, bot_id: &str) -> Result<Value> {
     let slot = crate::agent::auth::env_slot(&cfg.backend);
     let unlocked = crate::market::vault::unlock_if_sealed(hub, slot).await;
     let names = unlocked.and_then(|()| crate::agent::auth::saved_env(&hub.store, &cfg.backend)).ok();
+    // The row's kith-mem facts live in serve.db, not in the memory folder, and nothing else reads them now.
+    let entries = hub.store.memory_read(|c| kith_mem::store::layer(c, Some(bot_id)))?;
     let id = bot_id.to_owned();
-    let path = tokio::task::spawn_blocking(move || write_bundle(&cfg, &routines, names.as_deref(), &bundle_dir(&id)))
-        .await??;
+    let path = tokio::task::spawn_blocking(move || {
+        write_bundle(&cfg, &routines, &entries, names.as_deref(), &bundle_dir(&id))
+    })
+    .await??;
     Ok(json!({"path": path.to_string_lossy()}))
 }
 
@@ -68,7 +73,13 @@ fn routines_of(hub: &Hub, bot_id: &str) -> Vec<Value> {
 }
 
 /// Builds the bundle next to `dir` and swaps it in, so a failed export leaves the last good one.
-fn write_bundle(cfg: &BotConfig, routines: &[Value], key_names: Option<&[String]>, dir: &Path) -> Result<PathBuf> {
+fn write_bundle(
+    cfg: &BotConfig,
+    routines: &[Value],
+    entries: &[kith_mem::store::Entry],
+    key_names: Option<&[String]>,
+    dir: &Path,
+) -> Result<PathBuf> {
     let staging = dir.with_extension("tmp");
     if staging.exists() {
         std::fs::remove_dir_all(&staging).context("couldn't clear an earlier unfinished export")?;
@@ -79,6 +90,7 @@ fn write_bundle(cfg: &BotConfig, routines: &[Value], key_names: Option<&[String]
     };
     put("bot.json", &settings_of(cfg))?;
     put("routines.json", &json!({"routines": routines}))?;
+    put("entries.json", &json!({"entries": entries}))?;
     put(
         "vault.json",
         &json!({

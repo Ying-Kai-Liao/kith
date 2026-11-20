@@ -1,4 +1,4 @@
-//! UTC dates used by stored memories and transcript search.
+//! UTC dates used by the tidier and transcript search.
 
 pub fn ymd(ms: i64) -> String {
     if ms <= 0 {

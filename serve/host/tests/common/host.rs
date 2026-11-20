@@ -126,18 +126,6 @@ impl Host {
         id
     }
 
-    pub async fn memory(&self, bot: &str) -> Value {
-        self.call("memory", json!({"botId": bot})).await
-    }
-
-    pub async fn tool(&self, bot: &str, name: &str, arguments: Value) -> Value {
-        self.call("memoryCall", json!({"botId": bot, "name": name, "arguments": arguments})).await
-    }
-
-    pub async fn tool_refused(&self, bot: &str, name: &str, arguments: Value) -> String {
-        self.refused("memoryCall", json!({"botId": bot, "name": name, "arguments": arguments})).await
-    }
-
     /// The folder of the kith agent `name` ([`Self::start_agents`]).
     pub fn agent_dir(&self, name: &str) -> PathBuf {
         super::agents_dir(&self.home).join(name)

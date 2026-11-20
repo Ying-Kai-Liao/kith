@@ -229,6 +229,12 @@ impl BotConfig {
         !self.is_group() && self.hq_agent.as_deref().is_none_or(|a| a.trim().is_empty())
     }
 
+    /// The agent name the core records for this bot's claims and runs: its kith agent's, or `bot:<id>` for a host-native
+    /// row (which never starts, so only an old routine row can ask). The one rule for the actor and the routine runs.
+    pub fn claim_agent(&self) -> String {
+        self.hq_agent.clone().unwrap_or_else(|| format!("bot:{}", self.id))
+    }
+
     /// Refuses to start anything for a native bot, with the one error every path gives.
     pub fn refuse_native(&self) -> anyhow::Result<()> {
         if self.is_native() {

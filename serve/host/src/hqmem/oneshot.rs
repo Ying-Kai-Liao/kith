@@ -1,4 +1,4 @@
-//! Background jobs on the bot's own harness (tidying, automatic naming): one prompt to a throwaway agent.
+//! Background jobs for the hq agents (tidying, thread summaries): one prompt to a throwaway agent.
 
 use crate::agent::acp::{self, Acp, Incoming};
 use crate::agent::bot::{Adapter, Instructions};
@@ -43,27 +43,9 @@ impl Usage {
     }
 }
 
-/// Runs one prompt on a throwaway agent of the bot's harness and returns its reply.
-/// Claude gets a real system prompt, no tools, no settings and no saved session; an agent with ACP
-/// `systemPrompt` gets the instructions there, other harnesses inline. None of them may remember the job.
-pub async fn one_shot(hub: &Arc<Hub>, cfg: &BotConfig, system: &str, user: &str) -> Result<String> {
-    cfg.refuse_native()?;
-    if cfg.is_hq() {
-        bail!("{} is an hq agent: the host runs no background jobs as it", cfg.name);
-    }
-    Ok(run(hub, cfg, system, user, false).await?.text)
-}
-
-/// [`one_shot`] with what the job used, for a job whose cost goes in a ledger (the thread summaries).
-pub async fn one_shot_reply(hub: &Arc<Hub>, cfg: &BotConfig, system: &str, user: &str) -> Result<Reply> {
-    cfg.refuse_native()?;
-    if cfg.is_hq() {
-        bail!("{} is an hq agent: the host runs no background jobs as it", cfg.name);
-    }
-    run(hub, cfg, system, user, false).await
-}
-
-/// [`one_shot`] for an hq agent's tidying. The agent itself is not launched (no `--launch-json`, tools, servers or
+/// Runs one prompt on a throwaway Claude and returns its reply, with what it used. Claude gets a real system
+/// prompt, no tools, no settings and no saved session, so nothing remembers the job. It serves an hq agent's
+/// tidying and summaries. The agent itself is not launched (no `--launch-json`, tools, servers or
 /// settings of its own), so the job takes no agent slot: it is plain Claude with model haiku, whatever the agent's
 /// own model. A test host names the ACP command in `KITH_SERVE_HQ_ACP_COMMAND`, as it does for the agents.
 pub async fn one_shot_plain(hub: &Arc<Hub>, system: &str, user: &str) -> Result<Reply> {
