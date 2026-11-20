@@ -131,7 +131,7 @@ async fn a_room_takes_people_only_with_kith_agents_in_it() {
         .map(|id| {
             let cfg =
                 serde_json::from_value(json!({"id": "", "name": id, "backend": "claude", "cwd": "/tmp"})).unwrap();
-            r.hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned()
+            r.hub.create_native_row(cfg).unwrap()["id"].as_str().unwrap().to_owned()
         })
         .collect();
     let plain = r

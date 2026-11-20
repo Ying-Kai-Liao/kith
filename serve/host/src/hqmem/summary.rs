@@ -9,7 +9,7 @@
 
 use super::cost::{Tag, record_cost};
 use crate::LockExt;
-use crate::chat::oneshot;
+use crate::hqmem::oneshot;
 use crate::hub::Hub;
 use crate::store::{BotConfig, Entry, EntryKind, Lane, Store, now_ms};
 use anyhow::{Result, anyhow};
@@ -196,7 +196,7 @@ pub struct Facets {
 pub fn facets(cfg: &BotConfig, root: Option<&Entry>) -> Facets {
     let group = cfg.is_group();
     let terminal = root.is_some_and(|r| r.data["thread"]["origin"] == "terminal");
-    let agent = cfg.hq_agent.clone().unwrap_or_default();
+    let agent = cfg.hq_agent.as_deref().unwrap_or_default().to_owned();
     Facets {
         room: rules::room(group, &agent, cfg.person.as_deref(), &cfg.id),
         audience: rules::audience(group, terminal, cfg.person.as_deref(), &cfg.id),
@@ -290,12 +290,12 @@ async fn write_now(
     if text.is_empty() {
         return Ok(Wrote::Nothing);
     }
-    // A group has no harness of its own: its first bot with one writes the summary.
+    // A group has no harness of its own: its first kith agent writes the summary (a host-native member can't).
     let runner = if cfg.is_group() {
         cfg.members
             .iter()
             .filter_map(|m| hub.store.bot(m).ok().flatten())
-            .find(|b| !b.deleted && !b.config.is_group())
+            .find(|b| !b.deleted && !b.config.is_group() && !b.config.is_native())
             .map(|b| b.config)
     } else {
         Some(cfg.clone())
@@ -304,10 +304,9 @@ async fn write_now(
     // Remembered before the run: a crash or a refused summary doesn't make the next sweep pay again.
     hub.store.kv_set(&tried_key(key), &last_seq.to_string())?;
     let user = format!("<conversation>\n{text}\n</conversation>");
-    let reply = match runner.hq_agent {
-        Some(_) => oneshot::one_shot_plain(hub, SYSTEM, &user).await?,
-        None => oneshot::one_shot_reply(hub, &runner, SYSTEM, &user).await?,
-    };
+    // A host-native row has no agent to write for (C5): refused with the one error every native path gives.
+    runner.refuse_native()?;
+    let reply = oneshot::one_shot_plain(hub, SYSTEM, &user).await?;
     let f = facets(&cfg, thread.and_then(|t| hub.store.entry(t)).as_ref());
     // Tagged to the person and project the thread was for (the room is the agent and person). A terminal thread is the
     // owner's whoever the chat belongs to, so it carries no person.

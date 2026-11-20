@@ -33,8 +33,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// The agent fixture names its session after its folder (`sess-<folder>`); a bot's folder is `workspace`.
-const SESSION: &str = "sess-workspace";
+/// The agent fixture names its session after its folder (`sess-<folder>`); the kith agent's folder is its name.
+const SESSION: &str = "sess-direct-park";
 /// How long a step may take. A parked turn asks again after 2 s, then 4 s, and so on up to 30 s.
 const WAIT: Duration = Duration::from_secs(90);
 
@@ -175,7 +175,7 @@ impl Rig {
     }
 
     fn workspace(&self) -> PathBuf {
-        self.host.home.join("bots").join(&self.bot).join("workspace")
+        self.host.agent_dir("direct-park")
     }
 
     /// The lines the fixture logged in its folder (`prompts.jsonl`, `loads.jsonl`).

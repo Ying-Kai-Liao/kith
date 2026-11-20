@@ -208,7 +208,13 @@ pub fn print_settings(a: &Args) -> Result<()> {
     };
     let once_id = a.once_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let mode = a.mode.clone().or_else(|| kith_kernel::paths::process_env("KITH_PERMISSION_MODE")).unwrap_or_default();
+    // The room-ledger hooks run the program's verb when `room-ledger` is switched and the program lists it (as the launch does).
+    let process_env: kith_kernel::launch::assemble::Env = std::env::vars_os()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+        .collect();
+    let ledger_bin = kith_kernel::launch::assemble::ledger_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
     let cost_bin = kith_kernel::launch::assemble::cost_hook_bin(kith_bin.as_deref());
+    let threads_bin = kith_kernel::launch::assemble::threads_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
     let input = settings::Input {
         agent: &a.agent,
         paths: &c.p,
@@ -224,7 +230,9 @@ pub fn print_settings(a: &Args) -> Result<()> {
         user_home: &c.home,
         kith_bin: kith_bin.as_deref(),
         fence_bin: kith_bin.as_deref(),
+        ledger_bin: ledger_bin.as_deref(),
         cost_bin: cost_bin.as_deref(),
+        threads_bin: threads_bin.as_deref(),
         plugins_json: &plugins_json,
         owner_terminal: a.terminal,
         api_helper: a.api_helper.as_deref().unwrap_or_default(),

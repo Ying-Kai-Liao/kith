@@ -1,6 +1,6 @@
 //! Fast mode in a session's config options (ACP `configOptions`).
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 /// Fast mode's option IDs: Claude's adapter (`fast`) and Codex's (`fast-mode`).
 const FAST_MODE_IDS: [&str; 2] = ["fast", "fast-mode"];
@@ -83,16 +83,10 @@ impl FastModeSupport {
     }
 }
 
-/// The value that turns `config` on or off: a boolean, or the `on` / `off` select entries.
-/// `None` when it already is.
-pub fn fast_mode_change(config: &Value, on: bool) -> Option<Value> {
-    let value = if config["type"] == "boolean" { json!(on) } else { json!(if on { "on" } else { "off" }) };
-    (config["currentValue"] != value).then_some(value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn fast_mode_is_claudes_and_codexs_on_off_option() {
@@ -131,15 +125,5 @@ mod tests {
         assert_eq!(refused.issue(), Some("no extra usage"));
         assert_eq!(FastModeSupport::from_stored(refused.stored()), FastModeSupport::Offered);
         assert_eq!(FastModeSupport::from_stored(FastModeSupport::Unknown.stored()), FastModeSupport::Unknown);
-    }
-
-    #[test]
-    fn fast_mode_change_sends_only_a_different_value() {
-        let select = json!({"id": "fast", "type": "select", "currentValue": "off"});
-        assert_eq!(fast_mode_change(&select, true), Some(json!("on")));
-        assert_eq!(fast_mode_change(&select, false), None);
-        let boolean = json!({"id": "fast-mode", "type": "boolean", "currentValue": true});
-        assert_eq!(fast_mode_change(&boolean, false), Some(json!(false)));
-        assert_eq!(fast_mode_change(&boolean, true), None);
     }
 }

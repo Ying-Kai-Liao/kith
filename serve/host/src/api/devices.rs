@@ -54,7 +54,6 @@ pub(super) const LOCAL_ONLY: &[&str] = &[
     "callPerson",
     "runEnv",
     "teamCall",
-    "memoryCall",
     "routineCall",
     "composioCall",
     "connectorTarget",

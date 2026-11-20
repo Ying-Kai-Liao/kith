@@ -455,6 +455,42 @@ pub fn cost_hook_bin(kith_bin: Option<&str>) -> Option<String> {
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)))
 }
 
+/// The program the `SessionStart` hook runs for the session registry (`kith kernel threads record`): `kith_bin` when `threads`
+/// is switched and the program has the `threads-writer` module (every `kith-sessions` verb in both modes of the claims, not the
+/// Files-mode `threads` an older program lists). `None` keeps `bin/kith-sessions record`. `kith_core_bin threads` in
+/// lib/kith-core.sh decides the same way for the bash launch.
+pub fn threads_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Option<String> {
+    switched_bin(kernel, env, kith_bin, "threads", "threads-writer")
+}
+
+fn switched_bin(
+    kernel: &Path,
+    env: &Env,
+    kith_bin: Option<&str>,
+    verb: &str,
+    module: &str,
+) -> Option<String> {
+    kith_bin
+        .filter(|b| {
+            !b.is_empty() && switched(kernel, env, verb) && knows_module(Path::new(b), module)
+        })
+        .map(str::to_owned)
+}
+
+/// The program the Pre/PostToolUse room-ledger hooks run (`kith kernel room-ledger`): `kith_bin` when `room-ledger` is
+/// switched (a line in `lib/core-switched.txt` and no `KITH_CORE=python`) and the program lists the module. `None` keeps the
+/// hooks on `bin/kith-room-ledger`, a stub that forwards, for runs that hold the old path. `kith_core_bin room-ledger` in
+/// lib/kith-core.sh decides the same way for the bash launch.
+pub fn ledger_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Option<String> {
+    kith_bin
+        .filter(|b| {
+            !b.is_empty()
+                && switched(kernel, env, "room-ledger")
+                && knows_module(Path::new(b), "room-ledger")
+        })
+        .map(str::to_owned)
+}
+
 /// `kith_paths.guest_tmp_ready`: the guest's Claude Code temp folder, made.
 fn guest_tmp_ready(p: &paths::Paths, id: &str, uid: u32) -> Option<String> {
     use sha2::{Digest as _, Sha256};
@@ -861,10 +897,9 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     let _ = (&mem, &files);
 
     // ---- the pinned package
-    let sys = Sys { env: &env };
     let mut pkg = src_pkg.clone();
-    // `pkg` in lib/core-switched.txt: the core's own `resolve` (kith-pkg resolve is the rollback, KITH_CORE=python).
-    let resolved = if switched(kernel, &env, "pkg") {
+    // The core's own `resolve`, in process. The Python `kith-pkg resolve` is no longer a fallback (retire-python R2).
+    let resolved = {
         let ctx = crate::pkg::Ctx {
             kernel: kernel.to_path_buf(),
             agents: p.agents.clone(),
@@ -882,8 +917,6 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         let out = crate::pkg::cli::run(&ctx, &["resolve".to_owned(), agent.to_owned()]);
         eprint!("{}", out.stderr);
         (out.code == 0).then(|| out.stdout.trim_end_matches('\n').to_owned())
-    } else {
-        sys.out(kernel.join("bin/kith-pkg"), &["resolve", agent], true)
     };
     match resolved
         .map(PathBuf::from)
@@ -1336,7 +1369,9 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .clone()
         .filter(|b| knows_readfence(Path::new(b)))
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
+    let ledger_bin = ledger_hook_bin(kernel, &env, kith_bin.as_deref());
     let cost_bin = cost_hook_bin(kith_bin.as_deref());
+    let threads_bin = threads_hook_bin(kernel, &env, kith_bin.as_deref());
     if perm_mode.is_empty() {
         perm_mode.clear();
     }
@@ -1367,7 +1402,9 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             user_home: &home_dir,
             kith_bin: kith_bin.as_deref(),
             fence_bin: fence_bin.as_deref(),
+            ledger_bin: ledger_bin.as_deref(),
             cost_bin: cost_bin.as_deref(),
+            threads_bin: threads_bin.as_deref(),
             plugins_json: &plugins_json,
             owner_terminal: false,
             api_helper: &bget(&be, "backup_api_helper"),

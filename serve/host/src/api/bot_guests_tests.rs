@@ -534,7 +534,7 @@ fn router_methods() -> BTreeSet<String> {
             open = !arm;
         }
     }
-    out.extend(crate::chat::memory::HQ_METHODS.iter().map(|m| (*m).to_owned()));
+    out.extend(crate::hqmem::HQ_METHODS.iter().map(|m| (*m).to_owned()));
     out.insert("readFile".into());
     out
 }
@@ -982,4 +982,28 @@ fn the_revoked_answer_says_only_what_was_checked() {
     assert_eq!(revoked_answer(true, Some(Mirror::AuthFailed)), json!({"revoked": true, "authUpdated": false}));
     assert_eq!(revoked_answer(true, Some(Mirror::NotSent)), json!({"revoked": true}));
     assert_eq!(revoked_answer(false, None), json!({"revoked": false}));
+}
+
+/// C5: a bot's room ask never reaches a host-native member: the ask is refused and nothing is posted or sent to it.
+#[tokio::test]
+async fn a_bot_asking_a_host_native_room_member_is_refused() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let j = active_bot(&r).await;
+    let old: crate::store::BotConfig = serde_json::from_value(json!({
+        "id": "", "name": "Oldbot", "backend": "claude", "cwd": r.dir.to_string_lossy(), "tasks": false,
+    }))
+    .unwrap();
+    let old = r.hub.create_native_row(old).unwrap()["id"].as_str().unwrap().to_owned();
+    let members = vec![old.clone(), j.bot.clone()];
+    let room: crate::store::BotConfig =
+        serde_json::from_value(json!({"id": "", "kind": "group", "name": "Crew", "members": members})).unwrap();
+    let room = r.hub.create_bot(room).unwrap()["id"].as_str().unwrap().to_owned();
+    crate::chat::group::members_changed(&r.hub, &room, &[], &members);
+    let before = r.hub.store.max_turn(&room);
+    let e = call(&r, &j.caller, "botAsk", json!({"room": room, "text": "@Oldbot hi", "clientNonce": "n-native"}))
+        .await
+        .unwrap_err();
+    assert!(format!("{e:#}").contains("kith agent"), "{e:#}");
+    assert_eq!(r.hub.store.max_turn(&room), before, "nothing was written to the room by the ask");
 }

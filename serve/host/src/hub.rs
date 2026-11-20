@@ -214,10 +214,15 @@ impl Hub {
         // Approval cards and queued sends from a previous run can't be honored anymore.
         self.store.expire_pending()?;
         crate::chat::room_pointer::sweep(self);
-        crate::chat::memory::import_old_memory(self);
         self.routines.restore(&self.store)?;
         crate::market::turn_on_installed_once(&self.store)?;
-        for row in self.store.bots()? {
+        let rows = self.store.bots()?;
+        // C5: host-native rows stay listed and readable, but nothing runs them; say how many there are.
+        let native = crate::store::native_ids(&rows);
+        if !native.is_empty() {
+            tracing::warn!(count = native.len(), ids = ?native, "host-native bots are no longer run; each needs to become a kith agent");
+        }
+        for row in rows {
             if row.deleted {
                 self.routines.disable_bot(&self.store, &row.config.id)?;
             } else if !row.config.is_group() {
@@ -244,7 +249,22 @@ impl Hub {
         self.store.bot(id).ok().flatten().map_or_else(|| "A deleted bot".into(), |b| b.config.name)
     }
 
-    pub fn create_bot(self: &Arc<Self>, mut cfg: BotConfig) -> Result<Value> {
+    /// A new row. An agent row needs a kith agent's name (the roster sync and `newKithAgent` set one); a room has none.
+    pub fn create_bot(self: &Arc<Self>, cfg: BotConfig) -> Result<Value> {
+        if !cfg.is_group() && cfg.hq_agent.is_none() {
+            bail!("an agent row needs a kith agent's name");
+        }
+        self.insert_bot(cfg)
+    }
+
+    /// A host-native row as an old release left it, for the tests of what the host does with one (the only way to make
+    /// one: `create_bot` refuses).
+    #[cfg(test)]
+    pub fn create_native_row(self: &Arc<Self>, cfg: BotConfig) -> Result<Value> {
+        self.insert_bot(cfg)
+    }
+
+    fn insert_bot(self: &Arc<Self>, mut cfg: BotConfig) -> Result<Value> {
         cfg.id = uuid::Uuid::new_v4().to_string();
         cfg.created_at = crate::store::now_ms();
         cfg.position = self.new_bot_position()?;
@@ -370,9 +390,6 @@ impl Hub {
             crate::chat::group::members_changed(self, &id, &row.config.members, &cfg.members);
             self.close_group_places(&id, &cfg.members);
         } else {
-            if crate::chat::memory::shared(&cfg) != crate::chat::memory::shared(&row.config) {
-                crate::chat::memory::changed(self, Some(&id));
-            }
             self.send_cmd(&id, Cmd::Reconfigure(Box::new(cfg)))?;
         }
         self.emit_bot(&id);
@@ -395,14 +412,20 @@ impl Hub {
                 self.events.send(json!({"type": "bot", "rev": rev, "bot": {"id": id, "deleted": true, "rev": rev}}));
         }
         // Its shared files are unreachable once the bot is deleted.
-        let files = crate::chat::files::root(id);
-        let bot = id.to_owned();
+        // The owner's own Delete also takes a host-native row's old memory files and its export bundle (C5 itself
+        // deletes nothing).
+        let folders = [
+            crate::chat::files::root(id),
+            crate::chat::memory::files::folder(Some(id)),
+            crate::api::native_export::bundle_dir(id),
+        ];
         tokio::task::spawn_blocking(move || {
-            crate::chat::memory::files::remove_bot(&bot);
-            if let Err(error) = std::fs::remove_dir_all(&files)
-                && error.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(error = %error, "couldn't remove a deleted bot's shared files");
+            for dir in folders {
+                if let Err(error) = std::fs::remove_dir_all(&dir)
+                    && error.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::warn!(dir = %dir.display(), error = %error, "couldn't remove a deleted bot's folder");
+                }
             }
         });
         // A deleted bot leaves its groups; what it said there stays.

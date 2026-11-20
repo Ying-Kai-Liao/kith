@@ -1,7 +1,7 @@
 {
   "fakes": "",
   "state:home/.claude/projects/p/lc-held.jsonl": "{\"type\": \"user\", \"timestamp\": \"<TS>\", \"message\": {\"content\": \"do the thing\"}}\n{\"type\": \"assistant\", \"timestamp\": \"<TS>\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"shall I go on with plan B?\"}], \"usage\": {\"input_tokens\": 10, \"cache_read_input_tokens\": 150000, \"cache_creation_input_tokens\": 5}}}\n",
-  "state:home/.kith/live/terminal/lc-held.claim": "{\"pid\": 1, \"procStart\": \"e1793672168913\", \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/live/terminal/lc-held.claim": "{\"pid\": 1, \"procStart\": \"<PSTART>\", \"at\": \"<TS>\", \"kind\": \"terminal\"}",
   "state:home/.kith/live/terminal/lc-held.claim.lock": "",
   "state:home/.kith/live/terminal/lc-held.json": "{\n  \"agent\": \"designer\",\n  \"cwd\": \"<HOME>/work\",\n  \"kind\": \"terminal\",\n  \"pid\": null,\n  \"sessionId\": \"lc-held\",\n  \"startedAt\": \"<TS>\",\n  \"transcriptPath\": \"<HOME>/.claude/projects/p/lc-held.jsonl\",\n  \"v\": 1\n}\n",
   "state:home/.kith/sessions/decisions/": "<empty dir>\n",

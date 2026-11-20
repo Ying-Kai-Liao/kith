@@ -23,19 +23,6 @@ pub enum Permission {
     BypassPermissions,
 }
 
-impl Permission {
-    /// The mode id the agent knows it by.
-    pub fn mode_id(self) -> &'static str {
-        match self {
-            Self::Ask => "default",
-            Self::AcceptEdits => "acceptEdits",
-            Self::Plan => "plan",
-            Self::Auto => "auto",
-            Self::BypassPermissions => "bypassPermissions",
-        }
-    }
-}
-
 /// Transcript entry kinds (the `kind` column / wire field).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntryKind {
@@ -162,8 +149,9 @@ pub struct BotConfig {
     pub tasks: Option<bool>,
     /// The hq agent this bot runs (its folder name under `hq ls`). Set: the bot starts from `hq <agent> --launch-json`
     /// with the agent's own prompt, memory, skills and servers, and none of Kith's (see `agent::hq`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hq_agent: Option<String>,
+    /// Only ever a non-empty name: an old row with it missing, empty or blank loads as None, which makes it native.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "agent_or_none")]
+    pub hq_agent: Option<AgentName>,
     /// The bot of an agent that ships with the kernel (scratch): quick chats, one thread each. Only the hq sync sets
     /// it; the apps keep it off the roster of ordinary bots.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -178,6 +166,51 @@ pub struct BotConfig {
     pub person: Option<String>,
     #[serde(default)]
     pub created_at: i64,
+}
+
+/// The name of the kith agent behind an agent row. It only refuses blank names (the kernel's own name rule is not
+/// re-checked here: an old row with an odd name must still load); the one way to make one is [`AgentName::new`].
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
+pub struct AgentName(String);
+
+impl AgentName {
+    /// Refuses an empty or blank name.
+    pub fn new(name: impl Into<String>) -> anyhow::Result<Self> {
+        let name = name.into();
+        anyhow::ensure!(!name.trim().is_empty(), "an agent needs a name");
+        Ok(Self(name))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for AgentName {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for AgentName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<AgentName> for String {
+    fn from(a: AgentName) -> String {
+        a.0
+    }
+}
+
+/// Reads `hq_agent` from a row: missing, null, empty or blank is None (a native row, see [`BotConfig::is_native`]),
+/// so an old row still loads and a client can't put an empty name in.
+fn agent_or_none<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<AgentName>, D::Error> {
+    let raw = <Option<String> as Deserialize>::deserialize(d)?;
+    Ok(raw.and_then(|a| AgentName::new(a).ok()))
 }
 
 impl BotConfig {
@@ -226,7 +259,7 @@ impl BotConfig {
         self.project = self.project.take().map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
     }
 
-    /// Whether the bot is an hq agent.
+    /// Whether the bot is a kith agent (it has a name; a group or a native row has none).
     pub fn is_hq(&self) -> bool {
         self.hq_agent.is_some()
     }
@@ -235,10 +268,43 @@ impl BotConfig {
         self.kind == BotKind::Group
     }
 
+    /// A host-native bot: an agent row with no hq agent behind it (`hq_agent` unset, empty or blank). One-bot-model C5:
+    /// the host never launches one; it is flagged (`needsKithAgent`) and can be exported to become a kith agent.
+    /// A group room has no agent either and is not native.
+    pub fn is_native(&self) -> bool {
+        !self.is_group() && self.hq_agent.is_none()
+    }
+
+    /// The agent name the core records for this bot's claims and runs: its kith agent's, or `bot:<id>` for a host-native
+    /// row (which never starts, so only an old routine row can ask). The one rule for the actor and the routine runs.
+    pub fn claim_agent(&self) -> String {
+        self.hq_agent.as_ref().map_or_else(|| format!("bot:{}", self.id), ToString::to_string)
+    }
+
+    /// Refuses to start anything for a native bot, with the one error every path gives.
+    pub fn refuse_native(&self) -> anyhow::Result<()> {
+        if self.is_native() {
+            anyhow::bail!("{}", native_refusal(&self.name));
+        }
+        Ok(())
+    }
+
     /// Whether the user's messages to this bot are tasks (a group's never are: it's one room).
     pub fn uses_tasks(&self) -> bool {
         !self.is_group() && self.tasks != Some(false)
     }
+}
+
+/// What every refused start of a host-native bot says.
+pub fn native_refusal(name: &str) -> String {
+    format!(
+        "{name} is a host-native bot and the host no longer runs those. Make it a kith agent (New agent), then chat with that."
+    )
+}
+
+/// The ids of the rows that are host-native (see [`BotConfig::is_native`]), deleted rows left out.
+pub fn native_ids(rows: &[BotRow]) -> Vec<String> {
+    rows.iter().filter(|r| !r.deleted && r.config.is_native()).map(|r| r.config.id.clone()).collect()
 }
 
 fn null_as_empty<'de, D: serde::Deserializer<'de>>(value: D) -> Result<Vec<String>, D::Error> {
@@ -379,7 +445,6 @@ mod tests {
         );
         for mode in ["default", "acceptEdits", "plan", "auto", "bypassPermissions"] {
             let p: Permission = serde_json::from_str(&format!("\"{mode}\"")).unwrap();
-            assert_eq!(p.mode_id(), mode);
             assert_eq!(serde_json::to_string(&p).unwrap(), format!("\"{mode}\""));
         }
         assert!(serde_json::from_str::<Permission>("\"yolo\"").is_err(), "unknown modes are rejected at the boundary");

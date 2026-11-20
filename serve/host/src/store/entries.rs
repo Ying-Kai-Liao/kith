@@ -7,7 +7,6 @@ use crate::chat::room_pointer::SEEN_ROWS_SQL;
 use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
-use std::fmt::Write as _;
 
 pub(super) fn row_entry(r: &rusqlite::Row) -> rusqlite::Result<Entry> {
     let data: String = r.get(6)?;
@@ -419,44 +418,6 @@ impl Store {
         st.query_row(rusqlite::params![bot_id, thread, kind], row_entry).ok()
     }
 
-    /// Chat-visible messages (the user's, final replies) in any of `bot_id`'s lanes that
-    /// contain every term (case-insensitive for ASCII), newest first, from `from` (a `seq`) back.
-    // ponytail: substring scan, no index (CJK needs no tokenizer this way): 0.6 s over 180k messages of one bot.
-    // An FTS5 trigram table once a bot's search passes a second.
-    pub fn search_messages(&self, bot_id: &str, terms: &[String], from: Option<i64>, limit: i64) -> Result<Vec<Entry>> {
-        self.search_messages_seen(bot_id, terms, from, limit, None)
-    }
-
-    /// [`Self::search_messages`] for a person in a room: with `seat` (their open stay's `joined_gen`) only messages
-    /// stamped with a gen of at least that (see [`Self::history_seen`]).
-    pub fn search_messages_seen(
-        &self,
-        bot_id: &str,
-        terms: &[String],
-        from: Option<i64>,
-        limit: i64,
-        seat: Option<i64>,
-    ) -> Result<Vec<Entry>> {
-        let mut sql = format!(
-            "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND seq <= ?3 AND
-               (kind = 'user' OR (kind = 'agent' AND json_extract(data, '$.final') = 1))"
-        );
-        for i in 0..terms.len() {
-            let _ = write!(sql, " AND instr(lower(json_extract(data, '$.text')), ?{}) > 0", i + 4);
-        }
-        let mut args: Vec<rusqlite::types::Value> =
-            vec![bot_id.to_owned().into(), limit.into(), from.unwrap_or(i64::MAX).into()];
-        args.extend(terms.iter().map(|t| t.to_lowercase().into()));
-        if let Some(seat) = seat {
-            let _ = write!(sql, " AND origin_gen >= ?{}", args.len() + 1);
-            args.push(seat.into());
-        }
-        sql.push_str(" ORDER BY seq DESC LIMIT ?2");
-        let c = self.db.locked();
-        let mut st = c.prepare(&sql)?;
-        Ok(st.query_map(rusqlite::params_from_iter(args), row_entry)?.collect::<rusqlite::Result<_>>()?)
-    }
-
     /// A thread's newest `limit` entries, oldest first.
     pub fn thread(&self, bot_id: &str, root: &str, limit: i64) -> Result<Vec<Entry>> {
         let c = self.db.locked();
@@ -742,44 +703,6 @@ mod tests {
             let main = cold.iter().filter(|e| e.bot_id == id && e.thread_id.is_none()).count();
             assert!((40..=45).contains(&main), "{id}: {main} main rows");
         }
-    }
-
-    #[test]
-    fn history_search_matches_every_term_in_chat_messages() {
-        let s = temp_store();
-        let main = Lane::main("b1");
-        s.insert_entry(&main, EntryKind::User, 1, &json!({"text": "我們用 Swift 6 寫 Kith"})).unwrap();
-        s.insert_entry(&main, EntryKind::Agent, 1, &json!({"text": "swift narration", "final": false})).unwrap();
-        s.insert_entry(&main, EntryKind::Agent, 1, &json!({"text": "Swift 6 strict mode is on", "final": true}))
-            .unwrap();
-        s.insert_entry(&Lane::main("b2"), EntryKind::User, 1, &json!({"text": "Swift 6 elsewhere"})).unwrap();
-        let texts = |terms: &[&str]| -> Vec<String> {
-            let terms: Vec<String> = terms.iter().map(|t| (*t).to_owned()).collect();
-            s.search_messages("b1", &terms, None, 10)
-                .unwrap()
-                .into_iter()
-                .map(|e| e.data["text"].as_str().unwrap().to_owned())
-                .collect()
-        };
-        assert_eq!(texts(&["SWIFT", "6"]), ["Swift 6 strict mode is on", "我們用 Swift 6 寫 Kith"]);
-        assert_eq!(texts(&["kith", "寫"]), ["我們用 Swift 6 寫 Kith"]);
-        assert_eq!(texts(&["narration"]).len(), 0);
-    }
-
-    #[test]
-    fn history_search_reads_back_from_a_message() {
-        let s = temp_store();
-        let main = Lane::main("b1");
-        let seqs: Vec<i64> = (1..=4)
-            .map(|i| s.insert_entry(&main, EntryKind::User, 1, &json!({"text": format!("note {i}")})).unwrap().seq)
-            .collect();
-        let texts = |terms: &[String], from| -> Vec<String> {
-            let rows = s.search_messages("b1", terms, from, 2).unwrap();
-            rows.into_iter().map(|e| e.data["text"].as_str().unwrap().to_owned()).collect()
-        };
-        assert_eq!(texts(&[], Some(seqs[2])), ["note 3", "note 2"], "starts at the message itself");
-        assert_eq!(texts(&["1".to_owned()], Some(seqs[2])), ["note 1"]);
-        assert_eq!(texts(&[], None), ["note 4", "note 3"]);
     }
 
     #[test]

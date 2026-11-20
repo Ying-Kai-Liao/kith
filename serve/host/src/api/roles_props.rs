@@ -539,6 +539,7 @@ pub(super) fn router_methods() -> Vec<String> {
         include_str!("backups.rs"),
         include_str!("kith_info.rs"),
         include_str!("kith_new.rs"),
+        include_str!("native_export.rs"),
         include_str!("marketplace.rs"),
         include_str!("remote.rs"),
         include_str!("people.rs"),
@@ -574,7 +575,7 @@ pub(super) fn router_methods() -> Vec<String> {
             open = !arm;
         }
     }
-    out.extend(crate::chat::memory::HQ_METHODS.iter().map(|m| (*m).to_owned()));
+    out.extend(crate::hqmem::HQ_METHODS.iter().map(|m| (*m).to_owned()));
     out.insert("readFile".into());
     out.into_iter().collect()
 }
@@ -1559,6 +1560,7 @@ fn a_bot_guest_may_call_only_its_short_list() {
         "leaveRoom",
         "createBot",
         "newKithAgent",
+        "exportHostBot",
         "kernelStatus",
         "updateBot",
         "deleteBot",

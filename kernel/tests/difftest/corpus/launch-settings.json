@@ -137,6 +137,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -151,6 +159,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -304,6 +328,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -318,6 +350,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -471,6 +519,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -485,6 +541,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -635,6 +707,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -649,6 +729,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -802,6 +898,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -816,6 +920,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -969,6 +1089,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -983,6 +1111,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -1137,6 +1281,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -1151,6 +1303,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -1308,6 +1476,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -1322,6 +1498,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -1476,6 +1668,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -1490,6 +1690,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -1644,6 +1860,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -1658,6 +1882,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -1812,6 +2052,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -1826,6 +2074,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -1980,6 +2244,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -1994,6 +2266,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -2148,6 +2436,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -2162,6 +2458,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -2316,6 +2628,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -2330,6 +2650,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -2484,6 +2820,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -2498,6 +2842,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -2652,6 +3012,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -2666,6 +3034,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -2816,6 +3200,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -2830,6 +3222,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -2980,6 +3388,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -2994,6 +3410,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -3140,6 +3572,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -3154,6 +3594,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -3304,6 +3760,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -3318,6 +3782,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -3482,6 +3962,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -3496,6 +3984,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -3660,6 +4164,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -3674,6 +4186,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -3824,6 +4352,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -3838,6 +4374,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -3988,6 +4540,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -4002,6 +4562,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -4156,6 +4732,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -4170,6 +4754,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -4321,6 +4921,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -4335,6 +4943,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -4486,6 +5110,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -4500,6 +5132,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -4651,6 +5299,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -4665,6 +5321,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -4824,6 +5496,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -4838,6 +5518,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -4997,6 +5693,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -5011,6 +5715,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -5170,6 +5890,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -5184,6 +5912,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -5343,6 +6087,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -5357,6 +6109,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -5519,6 +6287,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -5533,6 +6309,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -5692,6 +6484,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -5706,6 +6506,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -5865,6 +6681,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -5879,6 +6703,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -6038,6 +6878,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -6052,6 +6900,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -6222,6 +7086,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -6236,6 +7108,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -6399,6 +7287,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -6413,6 +7309,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -6576,6 +7488,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -6590,6 +7510,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -6750,6 +7686,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -6764,6 +7708,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -6924,6 +7884,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -6938,6 +7906,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -7097,6 +8081,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -7111,6 +8103,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -7270,6 +8278,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -7284,6 +8300,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -7443,6 +8475,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -7457,6 +8497,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -7620,6 +8676,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -7634,6 +8698,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -7771,8 +8851,8 @@
     "text": "---\nname: Beta\ndescription: x\n---\nx\n"
    },
    {
-    "write": "kith/agents/\u00c9clair/role/agent.md",
-    "text": "---\nname: \u00c9clair\ndescription: x\n---\nx\n"
+    "write": "kith/agents/Éclair/role/agent.md",
+    "text": "---\nname: Éclair\ndescription: x\n---\nx\n"
    },
    {
     "write": "kith/agents/my agent/role/agent.md",
@@ -7811,11 +8891,11 @@
     "text": "f\n"
    },
    {
-    "write": "kith/agents/echo/memory/\u00e4rger.md",
+    "write": "kith/agents/echo/memory/ärger.md",
     "text": "m\n"
    },
    {
-    "write": "kith/agents/echo/files/\u00e4rger.md",
+    "write": "kith/agents/echo/files/ärger.md",
     "text": "f\n"
    },
    {
@@ -7859,15 +8939,15 @@
     "text": "P\n"
    },
    {
-    "write": "kith/agents/echo/memory/people/\u00c9mile/MEMORY.md",
+    "write": "kith/agents/echo/memory/people/Émile/MEMORY.md",
     "text": "p\n"
    },
    {
-    "write": "kith/agents/echo/files/people/\u00c9mile/n.md",
+    "write": "kith/agents/echo/files/people/Émile/n.md",
     "text": "p\n"
    },
    {
-    "write": "kith/state/people/\u00c9mile.md",
+    "write": "kith/state/people/Émile.md",
     "text": "P\n"
    },
    {
@@ -7917,6 +8997,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -7931,6 +9019,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -8068,8 +9172,8 @@
     "text": "---\nname: Beta\ndescription: x\n---\nx\n"
    },
    {
-    "write": "kith/agents/\u00c9clair/role/agent.md",
-    "text": "---\nname: \u00c9clair\ndescription: x\n---\nx\n"
+    "write": "kith/agents/Éclair/role/agent.md",
+    "text": "---\nname: Éclair\ndescription: x\n---\nx\n"
    },
    {
     "write": "kith/agents/my agent/role/agent.md",
@@ -8108,11 +9212,11 @@
     "text": "f\n"
    },
    {
-    "write": "kith/agents/echo/memory/\u00e4rger.md",
+    "write": "kith/agents/echo/memory/ärger.md",
     "text": "m\n"
    },
    {
-    "write": "kith/agents/echo/files/\u00e4rger.md",
+    "write": "kith/agents/echo/files/ärger.md",
     "text": "f\n"
    },
    {
@@ -8156,15 +9260,15 @@
     "text": "P\n"
    },
    {
-    "write": "kith/agents/echo/memory/people/\u00c9mile/MEMORY.md",
+    "write": "kith/agents/echo/memory/people/Émile/MEMORY.md",
     "text": "p\n"
    },
    {
-    "write": "kith/agents/echo/files/people/\u00c9mile/n.md",
+    "write": "kith/agents/echo/files/people/Émile/n.md",
     "text": "p\n"
    },
    {
-    "write": "kith/state/people/\u00c9mile.md",
+    "write": "kith/state/people/Émile.md",
     "text": "P\n"
    },
    {
@@ -8214,6 +9318,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -8228,6 +9340,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -8390,6 +9518,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -8404,6 +9540,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -8559,6 +9711,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -8573,6 +9733,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -8735,6 +9911,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -8749,6 +9933,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -8904,6 +10104,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -8918,6 +10126,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -9080,6 +10304,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -9094,6 +10326,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -9249,6 +10497,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -9263,6 +10519,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -9422,6 +10694,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -9436,6 +10716,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -9594,6 +10890,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -9608,6 +10912,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -9758,6 +11078,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -9772,6 +11100,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -9925,6 +11269,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -9939,6 +11291,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -10093,6 +11461,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -10107,6 +11483,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -10265,6 +11657,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -10279,6 +11679,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -10437,6 +11853,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -10451,6 +11875,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -10610,6 +12050,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -10624,6 +12072,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -10779,6 +12243,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -10793,6 +12265,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -10955,6 +12443,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -10969,6 +12465,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -11135,6 +12647,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -11149,6 +12669,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -11315,6 +12851,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -11329,6 +12873,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -11491,6 +13051,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -11505,6 +13073,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -11668,6 +13252,14 @@
   },
   "normalize": [
    [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
     "\"command\": \"<COSTTAG>\""
    ],
@@ -11682,6 +13274,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",

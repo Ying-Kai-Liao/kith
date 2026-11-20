@@ -1,6 +1,6 @@
 ---
 name: thread-writers
-description: Model-checks (TLA+/TLC) that one thread has one writer at a time. Use when a change touches kernel/bin/kith-sessions (resolve, the writer claims, record), the claim and `--resume` / take-over parts of kernel/bin/kith, the compact claim in kernel/bin/kith-lifecycle, a wake's start in kernel/bin/kith-wake or cards/resume.rs, serve/host/src/terminal/ (sync.rs, claim.rs, registry.rs), serve/host/src/api/threads.rs, the thread `send` in api/bots.rs, the bot guest gate in api/botguests.rs, the host turn queue, start and claim (`claim_for_turn`) in agent/bot/{queue,turn,session}.rs, working_lanes in hub/actors.rs, or when a new path starts Claude on a thread's session. Also use to answer "can two things write to this conversation?".
+description: Model-checks (TLA+/TLC) that one thread has one writer at a time. Use when a change touches kernel/bin/kith-sessions (resolve, the writer claims, record), the claim and `--resume` / take-over parts of kernel/bin/kith, the compact claim in kernel/bin/kith-lifecycle (and its Rust port core/kernel/src/lifecycle/{sweep,proc}.rs), a wake's start in kernel/bin/kith-wake or cards/resume.rs, serve/host/src/terminal/ (sync.rs, claim.rs, registry.rs), serve/host/src/api/threads.rs, the thread `send` in api/bots.rs, the bot guest gate in api/botguests.rs, the host turn queue, start and claim (`claim_for_turn`) in agent/bot/{queue,turn,session}.rs, working_lanes in hub/actors.rs, or when a new path starts Claude on a thread's session. Also use to answer "can two things write to this conversation?".
 ---
 
 # Thread writers: one writer per thread
@@ -80,9 +80,10 @@ write the thread, so `Threads.tla` and `base.consts` are unchanged:
   - the core's `terminal.open` Files path (`core/runtime/src/terminal.rs`, `claim::take` after one `switched` read, no re-check
     after the link) runs inside the daemon, which holds the core's lifetime lock; the step needs that lock, so the two never
     overlap;
-  - the Rust twin `kith kernel threads` (`core/kernel/src/threads.rs`) has no tombstone check at all, and nothing calls it
-    (`serve/host/src/threads_cmd.rs`: not routed from `kith`). **Before `kith` is routed to it**, it needs the same "link, then
-    read the tombstone again, take the file back if switched" step as `kith-sessions` `take_claim`.
+  - the Rust twin `kith kernel threads` (`core/kernel/src/threads.rs`) is routed from `kith` since R5 and has the same step: its
+    file take re-checks the mode right after the link, under the claim's lock, and takes its own file back (only while the file
+    still names its pid and start time); the library returns `Outcome::Switched` and the CLI (`threads/writer.rs`) claims in the
+    core, while the daemon's `terminal.open` refuses. `proc` and Files-mode `record` re-check likewise.
 
 The changes from `1978d087` to `b3f38db7` were re-read at that sync: the core's claim list and reconcile check (`claims.rs`), the writer
 mode re-checks, the abandon order (`stop`, `killpg`, `settle_gone`, already `AbandonKeepsLock`), the stray sweep and
@@ -199,11 +200,13 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 | `terminal/sync.rs` `scan()` -> `sync_session` -> `mapped` / `adopt` (fork: lane session := terminal's), `import` (`forget_loaded` on new lines) and `update_state` (`stale` + `forget_loaded` when seen live; skipped while `taking`; `set_writer`) | `Scan` |
 | `agent/bot/session.rs` `forget_loaded()` ("a turn running there is left alone"), `hub/actors.rs` `Cmd::ForgetLoaded` | `Forgets` |
 | `api/botguests.rs` `ask` -> `terminal::bot_gate` (under `thread_lock`, `writer()`: a `Kind::Bot` claim is the bot's own turn and queues; a terminal refuses `heldByOtherWriter`); the claim at turn start as above; `liveWriter` is display only | `BotGate_` (`BotEnabled`, `BotGate = "live"`) |
-| `kernel/bin/kith-lifecycle` `compact()` (F12): `parked()` forks the process that will be claude, held before its exec; `take_claim(sid, <that child's pid>, 'oneshot', lifecycle_owner=True)`, the checks again under it (`still`: decision unchanged, last turn unchanged, no live writer but that claim, not compacted since, over the floor), then the child execs `kith-stub ... -- claude -p --resume SID /compact` (same pid, so the claim is the stub's, which waits for claude as its child and goes stale only with it; the stub holds the conversation's lock meanwhile, and a run that already holds it makes the compaction `busy`, claim given back; a sweep that dies before the go leaves a child that exits without exec), `release_claims(child)` after. A claim-only one-shot start of a session nobody holds; `lifecycle_owner` only keeps the intent and decision that `take_claim` clears for every other taker (rules 12, 14); the re-check only ever refuses more | `TermLaunch` (`FreshClaims`, one-shot kind), `TermUp`, `TermExit` |
+| `kernel/bin/kith-lifecycle` `compact()` (F12), and its Rust port `core/kernel/src/lifecycle/sweep.rs` `Sweep::compact` with `proc.rs` `parked()` (answers when `lifecycle` is switched in `lib/core-switched.txt`; the claim is `threads::writer::Taker::take` with `Take { lifecycle_owner: true, kind: "oneshot" }`, the one claim code of both modes, never a copy; `parked` is a raw `fork` whose child only does setpgid/read/chdir/dup2/execve): `parked()` forks the process that will be claude, held before its exec; `take_claim(sid, <that child's pid>, 'oneshot', lifecycle_owner=True)`, the checks again under it (`still`: decision unchanged, last turn unchanged, no live writer but that claim, not compacted since, over the floor), then the child execs `kith-stub ... -- claude -p --resume SID /compact` (same pid, so the claim is the stub's, which waits for claude as its child and goes stale only with it; the stub holds the conversation's lock meanwhile, and a run that already holds it makes the compaction `busy`, claim given back; a sweep that dies before the go leaves a child that exits without exec), `release_claims(child)` after. A claim-only one-shot start of a session nobody holds; `lifecycle_owner` only keeps the intent and decision that `take_claim` clears for every other taker (rules 12, 14); the re-check only ever refuses more | `TermLaunch` (`FreshClaims`, one-shot kind), `TermUp`, `TermExit` |
 | `kernel/bin/kith-wake` `deliver()` (and `drain()`, which calls it per owed wake): skips a session whose `writer_live` holds, then runs `kith AGENT --resume SESSION NOTE` with `KITH_VIA=wake`, `KITH_CLAIM_WAIT=0`: the start goes through `resolve()`, which claims, so it is `TermClaim` then `TermResolve` like any `--resume`; refused (held, host busy, open) -> owed again, a held writer not counted as a failed try. `take()` hands host-door items to the host, see the next row. Writes nothing to the session itself | `TermClaim`, `TermResolve`, `TermUp` (no action of its own) |
 | `cards/resume.rs` `handle()` (the host's wake doors): an `acp:` session -> `bot_door` (`Cmd::WakeBatch` onto the bot's queue, then `HostStart` / `HostClaim` as any queued turn; a refused start goes back to the wake queue held); a channel session -> `channel_door`; any other -> `run_door`: `claim::holder` held -> back to the queue, else it runs `kith AGENT --resume SESSION` (or `kith ask --reply ID AGENT --resume SESSION`), which claims through `resolve()` as in the row above. A card-only wake (no waiting message) is pushed with no gate, and `resolve()`'s `send_queued` does not count it while it waits; it is not modelled as its own step because no writer comes of it but through `HostStart` and the `HostClaim` CAS. Checked on a scratch copy (2026-11-01): a gate-free `WakeEnqueue` with `HostBusyCountsQueued = FALSE` leaves `TypeOK`, the three `code` rows and the four `code-no-fork` pass rows passing | `Enqueue` without `AppGate` (scratch only), then `HostStart`, `HostClaim`; `run_door` as `TermClaim` |
 | `agent/bot/queue.rs` `Queued::Group` (group rooms, `botguests.rs` `ask_room` -> `chat::group::ask_agent`) and `agent/bot/hq.rs` (an hq lane loads its session after `claim_for_turn`): both start through `start_turn` / `claim_for_turn`; not thread lanes | none (outside the thread, claimed like any turn) |
-| `kith-lifecycle` `end()`: `take_claim` for the sweep's own pid, `still`, writes the decision `ended`, `release_claims`. Starts no Claude and writes nothing to the session | none (not a writer) |
+| `kith-lifecycle` `end()` (and the Rust `Sweep::end`): `take_claim` for the sweep's own pid, `still`, writes the decision `ended`, `release_claims`. Starts no Claude and writes nothing to the session | none (not a writer) |
+
+The Rust rows for `kith-lifecycle` (`core/kernel/src/lifecycle/sweep.rs`, `proc.rs`) were read against this model at the head of #1086 (R5 ports 4/4: the claim is the one `Taker::take`, the child execs only after the checks under it); the sync commit in `drift.sh` still waits for the full re-sync, so `drift.sh` lists these two files as changed until then.
 
 **Core writer (`CoreWriter = TRUE`)**
 
@@ -234,7 +237,7 @@ One step in the code is one action here. A check followed later by the act it gu
 (`AppGate` then `Enqueue` then `HostStart` then `HostClaim`; `TermClaim` then `TermResolve` then `TermUp`;
 `TakeRecheck` then `TakeSignal`), because another writer can act between them.
 
-## The Rust twin (A4-2, not switched)
+## The Rust twin (A4-2; routed from `kith` by R5 while `threads` is in `lib/core-switched.txt`)
 
 `core/kernel/src/threads*` (`kith kernel threads ...`) ports the kernel half of the table above step for step: the
 same order in `resolve` (claim, then ask the host, then the checks), `take_in` = `take_claim` (temp file, lock file,
@@ -435,3 +438,12 @@ and `verification/rooms/` (`steer`, `warmreuse`) for what a turn reads.
 A room turn runs on an actor of its own (`hub/actors.rs`, key `bot|lane#room-<room>-<join gen>`) with a session of its own
 (`session_owner`): one writer per (agent, room, join epoch), claimed through the same `claim_for_turn` as any person's. Nothing
 is steered into a running turn, and its session is never loaded again after the next join. Drift was read; SYNC not moved.
+
+## One bot model C5, the host-native arms removed (2026-11-20) - prose only, no model row
+The host no longer starts a host-native bot (`BotConfig::refuse_native`), so the native arms of the covered host code are gone:
+`ensure_session`'s own session start (`agent/bot/session.rs`: only `ensure_hq_session` is left), the native `compose`, the
+host-started compaction and handoff turn (`Queued::Compact`, `start_compaction`, `take_handoff`; an agent's context is its own) in
+`queue.rs` / `turn.rs` / `compaction.rs`, and `writer_agent`'s `bot:<id>` name (`writer.rs`: a claim names the kith agent).
+No claim step, gate or CAS moved: `start_gate_in`, `claim_for_turn` and `release_turn_claim` are as they were, and every start
+that remains is the kith agent's. Drift was read for `queue.rs`, `turn.rs`, `session.rs`, `writer.rs` and `hub/actors.rs`
+(`api/bots.rs` only lost `createBot`'s test exception); SYNC not moved.

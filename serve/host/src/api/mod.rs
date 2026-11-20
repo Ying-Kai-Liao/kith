@@ -38,6 +38,9 @@ mod kith_info;
 mod kith_new;
 pub(crate) mod kith_tools;
 mod marketplace;
+pub(crate) mod native_export;
+#[cfg(test)]
+mod native_guard_tests;
 mod peers;
 #[cfg(test)]
 mod peers_tests;
@@ -298,6 +301,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Continue(b) => b,
     };
     let b = match kith_new::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match native_export::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

@@ -102,6 +102,7 @@ pub(super) fn router_methods() -> BTreeSet<String> {
         include_str!("backups.rs"),
         include_str!("kith_info.rs"),
         include_str!("kith_new.rs"),
+        include_str!("native_export.rs"),
         include_str!("marketplace.rs"),
         include_str!("remote.rs"),
         include_str!("people.rs"),
@@ -137,7 +138,7 @@ pub(super) fn router_methods() -> BTreeSet<String> {
             open = !arm;
         }
     }
-    out.extend(crate::chat::memory::HQ_METHODS.iter().map(|m| (*m).to_owned()));
+    out.extend(crate::hqmem::HQ_METHODS.iter().map(|m| (*m).to_owned()));
     out.extend(crate::chat::topics::METHODS.iter().map(|m| (*m).to_owned()));
     out.insert("readFile".into());
     out
@@ -166,10 +167,10 @@ async fn every_router_method_is_denied_to_members_unless_listed() {
         "updateBot",
         "deleteBot",
         "newKithAgent",
+        "exportHostBot",
         "kernelStatus",
         "listDirs",
         "registerProject",
-        "memoryCall",
         "routines",
         "skills",
     ] {

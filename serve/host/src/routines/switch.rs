@@ -197,15 +197,7 @@ impl Routines {
     #[allow(clippy::type_complexity, reason = "(bot, agent, jobs) read once by two callers")]
     fn jobs_of(&self, hub: &Hub, id: &str) -> Option<(String, String, Vec<(String, bool)>)> {
         let r = self.state.locked().routines.iter().find(|r| r.id == id && !r.deleted).cloned()?;
-        let agent = hub
-            .store
-            .bot(&r.bot_id)
-            .ok()
-            .flatten()
-            .filter(|b| !b.deleted)?
-            .config
-            .hq_agent
-            .filter(|a| !a.is_empty())?;
+        let agent: String = hub.store.bot(&r.bot_id).ok().flatten().filter(|b| !b.deleted)?.config.hq_agent?.into();
         let n = r.triggers.len();
         let jobs = r
             .triggers

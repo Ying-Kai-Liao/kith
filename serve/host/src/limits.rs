@@ -233,7 +233,7 @@ pub fn park(hub: &Hub, bot: &BotConfig, lane: &Lane, ids: &[String], state: &Val
 /// A guest's run the kernel refused at their budget (`refused`, its text): the owner gets a card in that chat to add
 /// to the budget, which runs the message again. Reads the month's numbers first, so it runs on its own task.
 pub fn guest_refused(hub: std::sync::Arc<Hub>, bot: BotConfig, lane: Lane, ids: Vec<String>, refused: &str) {
-    let (Some(person), Some(agent)) = (bot.person.clone(), bot.hq_agent.clone()) else { return };
+    let (Some(person), Some(agent)) = (bot.person.clone(), bot.hq_agent.clone().map(String::from)) else { return };
     let Some(kind) = refused_at(refused).filter(|_| valid_agent(&agent)) else { return };
     if kind == "bots" {
         return bots_refused(hub, bot, lane, ids, agent);

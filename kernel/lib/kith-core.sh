@@ -80,6 +80,37 @@ kith_cost_bin() {
   printf '%s' "$bin"
 }
 
+# kith_core_bin VERB   prints the program kith_core_exec VERB would run (and returns 0), or returns 1 when the Python answers:
+# the same rule without the exec, for a caller that has to name the program (the SessionStart hook of `kith AGENT`).
+kith_core_bin() {
+  local verb=$1 module bin ver
+  [[ ${KITH_CORE:-} == python ]] && return 1
+  read -r module _ < <(awk -F'\t' -v v="$verb" '$1 == v { print $2, ($3 != "" ? $3 : $2); exit }' "$KITH/lib/core-switched.txt" 2>/dev/null) || true
+  if [[ -z $module ]]; then
+    [[ ${KITH_CORE:-} == rust ]] || return 1
+    module=${verb%% *}
+    # `kith-sessions` needs every verb in both modes of the claims, not the Files-mode port an older program has under `threads`
+    [[ $module == threads ]] && module=threads-writer
+  fi
+  if [[ -n ${_kith_core_primed:-} ]]; then
+    bin=$_kith_core_bin ver=$_kith_core_ver
+  else
+    bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+    ver=$("$bin" kernel version 2>/dev/null)
+  fi
+  [[ -n $bin && $ver == *"\"$module\""* ]] || return 1
+  printf '%s' "$bin"
+}
+
+# kith_threads VERB ARGS...   `kith-sessions VERB ARGS`, on the side this launch decided once (bin/kith sets `kthreads`, the
+# program that answers `kernel threads`, or leaves it empty for the Python, which stays the rollback). Never decides itself: a
+# launch must not split its claims between the two programs. The caller's env prefix (KITH_REVOKE_SEEN=..) reaches either.
+kith_threads() {
+  if [[ -n ${kthreads:-} ]]; then "$kthreads" kernel threads --kernel "$KITH" "$@"
+  else python3 "$KITH/bin/kith-sessions" "$@"
+  fi
+}
+
 # kith_cost ARGS...   `kith-cost ARGS`: the stub, which runs `kith kernel cost ARGS` on a program that has `cost-ledger` and
 # otherwise says so on stderr and fails (exit 3). Given the program the launch already looked up, the stub does not look again.
 # A subshell, so `KITH_PERSON_WAS=.. kith_cost ..` reaches it.
@@ -225,7 +256,7 @@ kith_held_launch() {
     if [[ -n $rsid ]]; then
       ans=$(echo '{}' | kith_held_call terminal.list) || rc=$?
       if [[ $rc -ne 0 || $(printf '%s' "$ans" | kith_held_get link) != up ]]; then why="holder not reachable"
-      elif python3 "$KITH/bin/kith-sessions" release "$rsid"; then released=1
+      elif kith_threads release "$rsid"; then released=1
       else why="the session's claim is not this shell's to hand over"
       fi
       rc=0
@@ -288,7 +319,7 @@ print(json.dumps(p))' "$agent" "$sid" "$@")
   if [[ $released -eq 1 ]]; then
     # The claim again; a core that gave no answer marks the run lock-alone (bin/kith passes --lock-alone to the stub).
     local claimed
-    claimed=$(python3 "$KITH/bin/kith-sessions" terminal "$rsid" "$$") || exit 1
+    claimed=$(kith_threads terminal "$rsid" "$$") || exit 1
     [[ $claimed != lock-alone ]] || held_alone=1
   fi
   return 1

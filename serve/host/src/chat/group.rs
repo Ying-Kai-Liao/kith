@@ -31,7 +31,7 @@ use crate::store::{
 };
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -428,6 +428,14 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
                 // An outside bot whose own post is the room's latest line has nothing new to read: waking it
                 // again would only spend its owner's Grok runs.
                 speakers.retain(|id| !spoke_last(hub, &lane, id));
+                // C5: a host-native member is left out of the queue, so no turn is charged for it.
+                speakers.retain(|id| {
+                    let native = members
+                        .iter()
+                        .find(|m| m.id == *id)
+                        .filter(|m| m.is_native() && guest_member(hub, &m.id).is_none());
+                    native.inspect(|m| skip_native(hub, &lane, &conv.id, m)).is_none()
+                });
                 // Each round starts one member later, so the same bot doesn't always speak first.
                 if !speakers.is_empty() {
                     let offset = conv.queue.round as usize % speakers.len();
@@ -471,6 +479,11 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         };
         let text = if let Some(guest) = guest_member(hub, &member.id) {
             bot_turn(hub, conv, &group, &guest).await?
+        } else if member.is_native() {
+            // C5: the host no longer runs a host-native bot. It passes, and the room is told why; the rest of the
+            // turn goes on.
+            skip_native(hub, &lane, &conv.id, member);
+            None
         } else {
             let prompt = member_prompt(hub, &group, &members, member, &lane, &basis, &stays)?;
             let (reply, answer) = oneshot::channel();
@@ -539,6 +552,10 @@ pub fn ask_agent(hub: &Arc<Hub>, room: &str, agent_id: &str) -> Result<()> {
     };
     let members = members(hub, &group);
     let Some(agent) = members.iter().find(|m| m.id == agent_id) else { bail!("{agent_id} isn't in this room") };
+    // An outside bot is a member with no hq agent of its own; it is not a native row.
+    if guest_member(hub, &agent.id).is_none() {
+        agent.refuse_native()?;
+    }
     let lane = Lane::main(room);
     // Called by `botAsk` with the membership lock held.
     let (basis, stays) = (RoomBasis::read_held(&hub.store, room), hub.store.room_stays(room));
@@ -651,6 +668,21 @@ async fn bot_turn(
         bot_notice(hub, &conv.lane, guest, notice, Some(&conv.id), what);
     }
     Ok(text)
+}
+
+/// A quiet line in the room: this member is a host-native bot, which the host no longer runs.
+/// It is said once per conversation for each such member, not once per round.
+fn skip_native(hub: &Hub, lane: &Lane, conversation: &str, member: &BotConfig) {
+    static TOLD: Mutex<BTreeSet<(String, String)>> = Mutex::new(BTreeSet::new());
+    let first = TOLD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert((conversation.to_owned(), member.id.clone()));
+    if !first {
+        return;
+    }
+    let data = json!({"notice": "nativeSkipped", "style": "info", "text": crate::store::native_refusal(&member.name)});
+    hub.add_entry(lane, EntryKind::Notice, hub.store.max_turn(&lane.chat), &data);
 }
 
 /// The bot as a notice names it.
@@ -1067,8 +1099,10 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    /// A host with agent bots `a` and `b` (the scripted fixture agent) and a group of both.
+    /// A host with kith agents `a` and `b` (a stand-in kernel, the scripted fixture agent) and a group of both.
     struct Room {
+        /// The stand-in kernel is the process's one (`hq::TEST_KERNEL_BIN`): held for the test, as the api rig does.
+        _one: tokio::sync::MutexGuard<'static, ()>,
         hub: Arc<Hub>,
         dir: PathBuf,
         group: String,
@@ -1079,15 +1113,34 @@ mod tests {
 
     impl Room {
         fn new() -> Self {
+            // Another test may hold the kernel (each test has its own runtime, so waiting on this thread is fine).
+            let one = loop {
+                match crate::remote::account::ONE_AT_A_TIME.try_lock() {
+                    Ok(guard) => break guard,
+                    Err(_) => std::thread::sleep(Duration::from_millis(20)),
+                }
+            };
+            *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap() =
+                Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/kernel_agents.py"));
             let dir = std::env::temp_dir().join(format!("kith-group-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
+            // A bot guest's ask is checked against its owner's grants (kith-auth); here it holds every agent.
+            let auth = dir.join("kith-auth");
+            std::fs::write(&auth, "#!/bin/sh\necho '{\"allowed\": true, \"owner\": false}'\n").unwrap();
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            *crate::remote::account::TEST_BIN.lock().unwrap() = Some(auth);
             let store = Store::open(&dir.join("test.db")).unwrap();
             let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/team_agent.py");
             for id in ["a", "b"] {
                 let cwd = dir.join(id);
                 std::fs::create_dir_all(&cwd).unwrap();
+                // The stand-in kernel puts an agent named `<test folder>.<id>` in `<tmp>/<test folder>/<id>`.
+                let name = format!("{}.{id}", dir.file_name().unwrap().to_string_lossy());
                 let cfg: BotConfig = serde_json::from_value(json!({
-                    "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false,
+                    "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false, "hqAgent": name,
                     "command": crate::shell::python(&agent), "notify": false,
                 }))
                 .unwrap();
@@ -1110,7 +1163,7 @@ mod tests {
                 )
                 .unwrap();
             let group = group["id"].as_str().unwrap().to_owned();
-            Self { hub, dir, group, bg: format!("bg-{}", uuid::Uuid::new_v4()) }
+            Self { _one: one, hub, dir, group, bg: format!("bg-{}", uuid::Uuid::new_v4()) }
         }
 
         async fn send(&self, text: &str, thread: Option<&str>) -> Entry {
@@ -1155,7 +1208,9 @@ mod tests {
 
         async fn shutdown(self) {
             self.hub.shutdown().await;
-            let _ = std::fs::remove_dir_all(self.dir);
+            let _ = std::fs::remove_dir_all(&self.dir);
+            *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            *crate::remote::account::TEST_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         }
     }
 

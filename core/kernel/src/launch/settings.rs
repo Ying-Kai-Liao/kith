@@ -140,9 +140,15 @@ pub struct Input<'a> {
     pub kith_bin: Option<&'a str>,
     /// `kith_bin` when it also knows `kernel readfence` (the Rust read fence), else None: the fence stays the Python hook.
     pub fence_bin: Option<&'a str>,
+    /// `kith_bin` when `room-ledger` is switched and it lists the `room-ledger` module (see `assemble::ledger_hook_bin`), else
+    /// None: the hooks then name `bin/kith-room-ledger`, which is a stub that forwards to a program that has the module.
+    pub ledger_bin: Option<&'a str>,
     /// The program that has the `cost-ledger` module (see `assemble::cost_hook_bin`), else None: the `SessionStart` hook is then
     /// the stub, `bin/kith-cost tag`, which forwards to a program and does nothing when it finds none.
     pub cost_bin: Option<&'a str>,
+    /// `kith_bin` when `threads` is switched and it has the `threads-writer` module (see `assemble::threads_hook_bin`), else
+    /// None: the registry's `SessionStart` hook then stays `bin/kith-sessions record`.
+    pub threads_bin: Option<&'a str>,
     /// `claude plugin list --json` (`[]` when it failed).
     pub plugins_json: &'a str,
     /// The owner at their own terminal: their plugins stay as their settings have them.
@@ -522,9 +528,18 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     let builtin = i.src_pkg.starts_with(i.kernel.join("agents"));
 
     // Memory checks and the room ledger
+    // The Rust hook when the program has it, else the stub at the old path (it forwards, or does nothing: a hook never fails).
+    // Quoted as bash's %q does, so both launch paths write the same bytes.
+    let ledger_cmd = match i.ledger_bin.filter(|b| !b.is_empty()) {
+        Some(bin) => format!(
+            "{} kernel room-ledger --kernel {}",
+            bash_q(bin),
+            bash_q(&kernel)
+        ),
+        None => bash_q(&format!("{kernel}/bin/kith-room-ledger")),
+    };
     let ledger_pre = format!(
-        "{} pre --agent {} --home {} || true",
-        bash_q(&format!("{kernel}/bin/kith-room-ledger")),
+        "{ledger_cmd} pre --agent {} --home {} || true",
         bash_q(i.agent),
         bash_q(&f.home)
     );
@@ -768,8 +783,18 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         };
         list(hooks, "SessionStart")?
             .push(json!({"hooks": [{"type": "command", "command": cost_hook, "timeout": 10}]}));
-        // Lists the session in the apps when it is a listable terminal run; never fails the session.
-        list(hooks, "SessionStart")?.push(json!({"hooks": [{"type": "command", "command": format!("\"{kernel}/bin/kith-sessions\" record"), "timeout": 5}]}));
+        // Lists the session in the apps when it is a listable terminal run; never fails the session. The Rust `kith kernel
+        // threads record` when the program has it and `threads` is switched, else the Python, as the ledger's hook above.
+        let sessions_hook = match i.threads_bin.filter(|b| !b.is_empty()) {
+            Some(bin) => format!(
+                "{} kernel threads --kernel {} record",
+                bash_q(bin),
+                bash_q(&kernel)
+            ),
+            None => format!("\"{kernel}/bin/kith-sessions\" record"),
+        };
+        list(hooks, "SessionStart")?
+            .push(json!({"hooks": [{"type": "command", "command": sessions_hook, "timeout": 5}]}));
         for (event, cmd) in [
             ("PreToolUse", &mem_pre),
             ("PostToolUse", &mem_post),

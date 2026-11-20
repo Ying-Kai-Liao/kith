@@ -40,6 +40,7 @@ FAKES = HERE / 'fakes'
 ABSENT = '<absent>\n'
 SIDES = ('old', 'new')
 CORE = {'old': 'python', 'new': 'rust'}
+LAUNCH_COMMANDS = ('launch-json', 'launch-prompt', 'launch-settings', 'launch-whole')   # their OLD side needs the program for pkg resolve
 WITH_CORE = False    # --core: the NEW side has its core database before the case runs
 CORE_RAN, CORE_BARE = [], []    # --core: names of the cases that ran with a core, and those that started before any setup
 CORE_INTENDED = {'case': '*', 'facet': 'state:*/core/*',
@@ -189,7 +190,9 @@ def base_env(side, side_dir, case):
         'GIT_COMMITTER_NAME': 'difftest', 'GIT_COMMITTER_EMAIL': 'd@example.invalid',
         'GIT_AUTHOR_DATE': '2026-01-01T00:00:00Z', 'GIT_COMMITTER_DATE': '2026-01-01T00:00:00Z',
     }
-    if RUST_BIN and (side == 'new' or case.get('bin_both')):   # bin_both: the OLD side's guest runs need a kith program for the memory check too
+    # The OLD side gets the program too: the bash launch has no Python `kith-pkg resolve` to fall back to (retire-python R2), so its
+    # package snapshot is the program's, and only the verbs the router sends to the Python are still Python's under KITH_CORE=python.
+    if RUST_BIN and (side == 'new' or case.get('bin_both') or case.get('command') in LAUNCH_COMMANDS):
         env['KITH_BIN'] = RUST_BIN   # where the router finds the Rust program (kernel/lib/kith-core.sh)
     for k, v in case.get('env', {}).items():
         if v is None:   # null: this variable is not set at all (e.g. no KITH_HOME, to test the folder rules)
@@ -550,6 +553,25 @@ def match(entry, case_name, facet):
     return fnmatch.fnmatchcase(case_name, entry['case']) and fnmatch.fnmatchcase(facet, entry['facet'])
 
 
+def holds(entry, a, b):
+    """An entry with `same_after` ({"old": [[pattern, replacement]..], "new": [..]}) excuses only the difference those rewrites
+    explain: each side must have something to rewrite, and the two texts must be equal once rewritten. Anything else that differs
+    in the facet stays a failure, so a listed difference cannot hide a second one."""
+    rules = entry.get('same_after')
+    if not rules:
+        return True
+    out = []
+    for text, key in ((a, 'old'), (b, 'new')):
+        hits = 0
+        for pat, repl in rules.get(key, []):
+            text, n = re.subn(pat, repl, text)
+            hits += n
+        if not hits:
+            return False
+        out.append(text)
+    return out[0] == out[1]
+
+
 def load_corpus(dirs):
     cases = []
     for d in dirs:
@@ -594,7 +616,7 @@ def run_all(cases, prefixes, intended, jobs=4, keep=False, out=sys.stdout):
         bad = {}
         status['cases'][name] = 'intended' if diffs else 'same'
         for facet, ab in diffs.items():
-            hit = [i for i, e in enumerate(intended) if match(e, name, facet)]
+            hit = [i for i, e in enumerate(intended) if match(e, name, facet) and holds(e, *ab)]
             used.update(hit)
             if not hit:
                 bad[facet] = ab
