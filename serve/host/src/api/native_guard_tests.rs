@@ -1,14 +1,12 @@
 //! One-bot-model C5, the safety net: the host never launches a host-native row (an agent row with no kith agent behind
-//! it), flags it, and can export it. Groups are exempt everywhere. Each test marks its native bot with
-//! `enforce_native_in_tests`: the host refuses it as a release build would, while the old suites still run theirs.
+//! it), flags it, and can export it. Groups are exempt everywhere.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::rig::Rig;
 use crate::agent::bot::Cmd;
 use crate::api::{devices::Caller, dispatch};
-use crate::chat::oneshot;
-use crate::store::{BotConfig, EntryKind, Lane, enforce_native_in_tests, native_ids};
+use crate::store::{BotConfig, EntryKind, Lane, native_ids};
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -18,16 +16,14 @@ fn cfg(v: Value) -> BotConfig {
     serde_json::from_value(v).unwrap()
 }
 
-/// A host-native row, as an old release left it, and marked to be refused as in a release build.
+/// A host-native row, as an old release left it.
 fn native(r: &Rig, name: &str) -> String {
     let cfg = cfg(json!({
         "id": "", "name": name, "backend": "claude", "cwd": r.dir.to_string_lossy(),
         "description": format!("{name} helps"), "model": "sonnet", "modelOptions": {"effort": "high"},
         "tasks": false, "connectors": [], "skills": [],
     }));
-    let id = r.hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned();
-    enforce_native_in_tests(&id);
-    id
+    r.hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned()
 }
 
 async fn call(r: &Rig, method: &str, b: Value) -> anyhow::Result<Value> {
@@ -138,18 +134,16 @@ async fn a_routine_of_a_native_bot_fails_to_start_and_says_why() {
 }
 
 #[tokio::test]
-async fn a_one_shot_of_a_native_bot_is_refused_and_a_groups_is_not() {
+async fn a_native_bot_fails_the_guard_and_a_group_passes_it() {
     let r = Rig::new().await;
     let a = native(&r, "Old");
     let row = r.hub.store.bot(&a).unwrap().unwrap().config;
-    let e = oneshot::one_shot(&r.hub, &row, "s", "u").await.unwrap_err();
-    assert!(format!("{e:#}").contains(WORDS));
-    let e = oneshot::one_shot_reply(&r.hub, &row, "s", "u").await.map(|_| ()).unwrap_err();
+    let e = row.refuse_native().unwrap_err();
     assert!(format!("{e:#}").contains(WORDS));
     let room = cfg(json!({"id": "r", "name": "R", "kind": "group", "members": []}));
     assert!(room.refuse_native().is_ok(), "a room passes the guard");
-    assert!(!room.refused_native());
-    assert!(row.refused_native(), "compaction and idle upkeep read this: nothing of a native bot is compacted");
+    assert!(!room.is_native());
+    assert!(row.is_native(), "compaction and idle upkeep read this: nothing of a native bot is compacted");
 }
 
 #[tokio::test]
@@ -207,6 +201,14 @@ async fn the_export_has_the_row_memory_and_routines_and_no_secret_or_webhook_key
     std::fs::create_dir_all(memory.join("notes")).unwrap();
     std::fs::write(memory.join("likes.md"), "likes tea").unwrap();
     std::fs::write(memory.join("notes/deep.md"), "deeper").unwrap();
+    // A kith-mem fact of the bot's own layer, which lives in serve.db.
+    r.hub
+        .store
+        .memory_write(|c, now, rev| {
+            let new = kith_mem::store::New { bot: Some(&a), text: "Likes oolong", room: None, evidence: &[] };
+            kith_mem::store::add(c, kith_mem::store::Writer::User, new, now, rev)
+        })
+        .unwrap();
     // A routine with a webhook trigger and a schedule, one of them paused; the engine's saved key.
     let saved = r
         .hub
@@ -235,6 +237,7 @@ async fn the_export_has_the_row_memory_and_routines_and_no_secret_or_webhook_key
     );
     assert_eq!(std::fs::read_to_string(dir.join("memory/likes.md")).unwrap(), "likes tea");
     assert_eq!(std::fs::read_to_string(dir.join("memory/notes/deep.md")).unwrap(), "deeper");
+    assert_eq!(read("entries.json")["entries"][0]["text"], "Likes oolong");
     let routines = read("routines.json");
     let first = &routines["routines"][0];
     assert_eq!(
@@ -256,6 +259,20 @@ async fn the_export_has_the_row_memory_and_routines_and_no_secret_or_webhook_key
     assert_eq!(again["path"], out["path"]);
     assert!(!dir.join("memory/likes.md").exists());
     assert!(dir.join("memory/notes/deep.md").exists());
+}
+
+#[tokio::test]
+async fn deleting_a_native_row_removes_its_memory_files_and_export_bundle() {
+    let r = Rig::new().await;
+    let a = native(&r, "Old");
+    let memory = crate::chat::memory::files::folder(Some(&a));
+    std::fs::create_dir_all(&memory).unwrap();
+    std::fs::write(memory.join("likes.md"), "likes tea").unwrap();
+    let out = call(&r, "exportHostBot", json!({"botId": a})).await.unwrap();
+    let dir = bundle(out["path"].as_str().unwrap());
+    assert!(dir.exists() && memory.exists(), "kept until the owner deletes the row");
+    r.hub.delete_bot(&a).unwrap();
+    until("the folders to go", || !memory.exists() && !dir.exists()).await;
 }
 
 #[tokio::test]

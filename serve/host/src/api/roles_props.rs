@@ -575,7 +575,7 @@ pub(super) fn router_methods() -> Vec<String> {
             open = !arm;
         }
     }
-    out.extend(crate::chat::memory::HQ_METHODS.iter().map(|m| (*m).to_owned()));
+    out.extend(crate::hqmem::HQ_METHODS.iter().map(|m| (*m).to_owned()));
     out.insert("readFile".into());
     out.into_iter().collect()
 }

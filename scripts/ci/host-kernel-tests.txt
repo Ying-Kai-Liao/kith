@@ -49,3 +49,5 @@ src/routines/schedule_golden.rs	routines::schedule_golden::
 src/agent/bot/writer_tests.rs	agent::bot::writer::tests::
 src/terminal/core_writer_tests.rs	terminal::core_writer::tests::
 src/api/native_guard_tests.rs	api::native_guard_tests::
+src/chat/group.rs	chat::group::tests::
+src/market/requests.rs	market::requests::tests::

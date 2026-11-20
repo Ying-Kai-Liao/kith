@@ -38,7 +38,7 @@ mod kith_info;
 mod kith_new;
 pub(crate) mod kith_tools;
 mod marketplace;
-mod native_export;
+pub(crate) mod native_export;
 #[cfg(test)]
 mod native_guard_tests;
 mod peers;

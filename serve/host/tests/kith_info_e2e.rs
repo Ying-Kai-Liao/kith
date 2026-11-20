@@ -73,8 +73,8 @@ async fn info_passes_kith_json_through_and_is_cached() {
 
 #[tokio::test]
 async fn a_non_kith_bot_has_no_info_and_no_memory_to_read() {
-    let s = start().await;
-    let plain = s.host.bot("plain", "ask").await;
+    let mut s = start().await;
+    let plain = s.host.native_row("plain").await;
     let got = s.host.call("kithInfo", json!({"botId": plain})).await;
     assert_eq!(got["info"], Value::Null);
     assert!(got.get("error").is_none());
@@ -90,7 +90,7 @@ async fn a_non_kith_bot_has_no_info_and_no_memory_to_read() {
 /// caller's), and the answer is the job read back.
 #[tokio::test]
 async fn a_schedule_button_runs_kith_sched_as_the_jobs_person() {
-    let s = start().await;
+    let mut s = start().await;
     let jobs =
         json!([{"id": "news", "person": "sam", "paused": false}, {"id": "mine", "person": null, "paused": false}]);
     std::fs::write(s.home.join("schedules.json"), jobs.to_string()).unwrap();
@@ -114,7 +114,7 @@ async fn a_schedule_button_runs_kith_sched_as_the_jobs_person() {
     assert!(!ok && body.to_string().contains("no scheduled job gone"), "{body}");
     let (ok, body) = s.host.post("kithSchedule", &json!({"botId": s.id, "id": "news", "op": "delete"})).await;
     assert!(!ok && body.to_string().contains("op must be"), "{body}");
-    let plain = s.host.bot("plain", "ask").await;
+    let plain = s.host.native_row("plain").await;
     let (ok, _) = s.host.post("kithSchedule", &json!({"botId": plain, "id": "news", "op": "run"})).await;
     assert!(!ok, "not a kith agent");
 }

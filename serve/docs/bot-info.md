@@ -6,7 +6,7 @@ Same path as place folders (`place-folders.md`): kernel JSON, host API, apps.
 
 All methods are `POST /api/<method>` (loopback bearer token) or the same call over a phone's E2E channel. They are
 read-only and none is in `LOCAL_ONLY` (`api/devices.rs`): a paired phone with the Control scope may read and search
-a kith bot's memory. These are the agent's own files, not Kith's bot memory (`memory`, `memoryCall`).
+a kith bot's memory. These are the agent's own files, not Kith's bot memory (the host's old `memory` methods are gone).
 
 ## `kithInfo { botId, refresh?: bool }`
 

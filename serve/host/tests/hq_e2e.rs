@@ -513,7 +513,7 @@ async fn a_new_task_starts_in_the_folder_the_message_picked() {
 
 #[tokio::test]
 async fn without_hq_projects_is_empty_and_says_why() {
-    let host = Host::start().await;
+    let host = Host::start_env(&[("KITH_KERNEL_BIN", "")]).await;
     let answer = host.call("projects", json!({})).await;
     assert_eq!(answer["projects"], json!([]));
     assert!(answer["error"].as_str().is_some_and(|e| e.contains("kith")), "{answer}");
@@ -756,8 +756,8 @@ async fn a_call_turn_gets_the_voice_note_and_the_call_model() {
 
 #[tokio::test]
 async fn a_plain_bot_has_no_hq_permission_to_set() {
-    let s = start().await;
-    let plain = s.host.bot("plain", "ask").await;
+    let mut s = start().await;
+    let plain = s.host.native_row("plain").await;
     let why = s.host.refused("kithSetPermission", json!({"botId": plain, "mode": "plan"})).await;
     assert!(why.contains("isn't a kith agent"), "{why}");
 }
@@ -976,7 +976,7 @@ async fn settled(s: &Setup) -> usize {
 async fn a_warm_owner_process_in_a_room_starts_again_when_the_rooms_members_change() {
     let mut s = start().await;
     let house = s.house().await["id"].as_str().unwrap().to_owned();
-    let guest = s.host.bot("Guest", "default").await;
+    let guest = s.host.native_row("Guest").await;
     // A bot guest's row: its person is set while the host is stopped (the rig has no invite path).
     s.host
         .restart(|dir| {
@@ -1076,7 +1076,7 @@ async fn a_warm_owner_process_in_a_room_is_not_reused_after_a_join_then_a_leave_
 async fn a_bot_guests_warm_run_in_a_room_starts_again_when_the_rooms_members_change() {
     let mut s = start_for_a_person().await;
     let house = s.house().await["id"].as_str().unwrap().to_owned();
-    let other = s.host.bot("Other", "default").await;
+    let other = s.host.native_row("Other").await;
     s.host
         .restart(|dir| {
             let db = rusqlite::Connection::open(dir.join("serve.db")).unwrap();

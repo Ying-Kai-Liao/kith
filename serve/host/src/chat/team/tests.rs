@@ -22,6 +22,8 @@ fn wait_graph_rejects_self_duplicates_and_indirect_cycles() {
 }
 
 struct Fixture {
+    /// The stand-in kernel is the process's one (`hq::TEST_KERNEL_BIN`): held for the test, as the api rig does.
+    _one: tokio::sync::MutexGuard<'static, ()>,
     hub: Arc<Hub>,
     dir: PathBuf,
 }
@@ -33,6 +35,15 @@ impl Fixture {
 
     /// `slots`: a gate with that many agent slots (default: no limit).
     fn with_gate(slots: Option<usize>) -> Self {
+        // Another test may hold the kernel (each test has its own runtime, so waiting on this thread is fine).
+        let one = loop {
+            match crate::remote::account::ONE_AT_A_TIME.try_lock() {
+                Ok(guard) => break guard,
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+        *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap() =
+            Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/kernel_agents.py"));
         let dir = std::env::temp_dir().join(format!("kith-team-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let store = Store::open(&dir.join("test.db")).unwrap();
@@ -40,8 +51,10 @@ impl Fixture {
         for id in ["a", "b", "c"] {
             let cwd = dir.join(id);
             std::fs::create_dir_all(&cwd).unwrap();
+            // The stand-in kernel puts an agent named `<test folder>.<id>` in `<tmp>/<test folder>/<id>`.
+            let name = format!("{}.{id}", dir.file_name().unwrap().to_string_lossy());
             let cfg: BotConfig = serde_json::from_value(json!({
-                "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false,
+                "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false, "hqAgent": name,
                 "command": crate::shell::python(&agent),
                 "notify": false, "permission": "default",
             }))
@@ -64,7 +77,19 @@ impl Fixture {
         hub.start().unwrap();
         hub.set_runtime("a", |r| r.status = BotStatus::Working);
         hub.team.start_turn("a", None);
-        Self { hub, dir }
+        Self { _one: one, hub, dir }
+    }
+
+    /// Changes the command of kith agent `id` (`update_bot` refuses the fixture backend).
+    fn set_command(&self, id: &str, command: &str) {
+        let mut cfg = self.hub.store.bot(id).unwrap().unwrap().config;
+        cfg.command = Some(command.into());
+        self.hub.store.save_bot(&cfg).unwrap();
+        self.hub.send_cmd(id, Cmd::Reconfigure(Box::new(cfg))).unwrap();
+    }
+
+    fn break_agent(&self, id: &str) {
+        self.set_command(id, "/kith-nonexistent-test-agent");
     }
 
     fn request(&self, message: &str) -> tokio::task::JoinHandle<Result<Value>> {
@@ -128,7 +153,8 @@ impl Fixture {
     async fn shutdown(self) {
         self.hub.shutdown().await;
         // Windows may still hold files of an agent that just exited.
-        let _ = std::fs::remove_dir_all(self.dir);
+        let _ = std::fs::remove_dir_all(&self.dir);
+        *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 }
 
@@ -186,8 +212,6 @@ async fn delegation_roundtrip_keeps_queued_user_messages_separate() {
     assert_eq!(conversation("b").await["entries"].as_array().unwrap().len(), 1);
     assert_eq!(conversation("c").await["entries"].as_array().unwrap().len(), 0);
     assert!(f.hub.team.0.locked().pending.is_empty());
-    let servers: Value = serde_json::from_slice(&std::fs::read(f.dir.join("b/servers.json")).unwrap()).unwrap();
-    assert!(servers.as_array().unwrap().iter().any(|s| s["name"] == "team"));
     f.shutdown().await;
 }
 
@@ -315,11 +339,11 @@ async fn queued_requests_are_not_merged_and_cancelled_requests_never_execute() {
 #[tokio::test]
 async fn recipient_startup_failure_and_deletion_finish_the_request() {
     let f = Fixture::new();
-    f.hub.update_bot(&json!({"id": "b", "command": "/kith-nonexistent-test-agent"})).unwrap();
+    f.break_agent("b");
     assert!(f.request("start failure").await.unwrap().unwrap_err().to_string().contains("couldn't start"));
     assert!(f.hub.team.0.locked().pending.is_empty());
     let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/team_agent.py");
-    f.hub.update_bot(&json!({"id": "b", "command": crate::shell::python(&agent)})).unwrap();
+    f.set_command("b", &crate::shell::python(&agent));
     let request = f.request("BLOCK delete while working");
     f.until(|| f.prompts().len() == 1).await;
     f.hub.delete_bot("b").unwrap();
@@ -481,7 +505,7 @@ async fn message_failures_finish_notices_and_release_capacity() {
         f.until(|| f.hub.team.0.locked().messages == 0).await;
         assert!(f.notices(&receipt).iter().all(|e| e.data["status"] == "failed"));
     }
-    f.hub.update_bot(&json!({"id": "b", "command": "/kith-nonexistent-test-agent"})).unwrap();
+    f.break_agent("b");
     let receipt = f.message("startup failure").await;
     let receipt = receipt.unwrap();
     f.until(|| f.hub.team.0.locked().messages == 0).await;

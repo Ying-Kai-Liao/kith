@@ -23,19 +23,6 @@ pub enum Permission {
     BypassPermissions,
 }
 
-impl Permission {
-    /// The mode id the agent knows it by.
-    pub fn mode_id(self) -> &'static str {
-        match self {
-            Self::Ask => "default",
-            Self::AcceptEdits => "acceptEdits",
-            Self::Plan => "plan",
-            Self::Auto => "auto",
-            Self::BypassPermissions => "bypassPermissions",
-        }
-    }
-}
-
 /// Transcript entry kinds (the `kind` column / wire field).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntryKind {
@@ -242,14 +229,15 @@ impl BotConfig {
         !self.is_group() && self.hq_agent.as_deref().is_none_or(|a| a.trim().is_empty())
     }
 
-    /// [`Self::is_native`] and the host really refuses it (a debug test build may let an old suite run one).
-    pub fn refused_native(&self) -> bool {
-        self.is_native() && !native_allowed_for_tests(&self.id)
+    /// The agent name the core records for this bot's claims and runs: its kith agent's, or `bot:<id>` for a host-native
+    /// row (which never starts, so only an old routine row can ask). The one rule for the actor and the routine runs.
+    pub fn claim_agent(&self) -> String {
+        self.hq_agent.clone().unwrap_or_else(|| format!("bot:{}", self.id))
     }
 
     /// Refuses to start anything for a native bot, with the one error every path gives.
     pub fn refuse_native(&self) -> anyhow::Result<()> {
-        if self.refused_native() {
+        if self.is_native() {
             anyhow::bail!("{}", native_refusal(&self.name));
         }
         Ok(())
@@ -260,35 +248,6 @@ impl BotConfig {
         !self.is_group() && self.tasks != Some(false)
     }
 }
-
-/// The old suites run host-native bots against fake agents; until they move to kith agents (later C5 steps) a debug
-/// build lets them, and only them: a release build has no such way. `KITH_SERVE_NATIVE_FOR_TESTS` is what a spawned test
-/// host is given; in this crate's own unit tests every native bot runs unless it was named by [`enforce_native_in_tests`]
-/// (the refusal tests do).
-pub fn native_allowed_for_tests(id: &str) -> bool {
-    #[cfg(test)]
-    return cfg!(debug_assertions)
-        && !ENFORCED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|e| e == id);
-    #[cfg(not(test))]
-    return {
-        let _ = id;
-        native_env_for_tests()
-    };
-}
-
-/// Whether this is a debug build that was told to let the old suites make and run host-native bots.
-pub fn native_env_for_tests() -> bool {
-    cfg!(debug_assertions) && std::env::var_os("KITH_SERVE_NATIVE_FOR_TESTS").is_some_and(|v| !v.is_empty())
-}
-
-/// Unit tests: the host refuses this bot as a release build would.
-#[cfg(test)]
-pub fn enforce_native_in_tests(id: &str) {
-    ENFORCED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(id.to_owned());
-}
-
-#[cfg(test)]
-static ENFORCED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// What every refused start of a host-native bot says.
 pub fn native_refusal(name: &str) -> String {
@@ -440,7 +399,6 @@ mod tests {
         );
         for mode in ["default", "acceptEdits", "plan", "auto", "bypassPermissions"] {
             let p: Permission = serde_json::from_str(&format!("\"{mode}\"")).unwrap();
-            assert_eq!(p.mode_id(), mode);
             assert_eq!(serde_json::to_string(&p).unwrap(), format!("\"{mode}\""));
         }
         assert!(serde_json::from_str::<Permission>("\"yolo\"").is_err(), "unknown modes are rejected at the boundary");

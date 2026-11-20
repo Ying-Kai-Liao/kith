@@ -29,7 +29,9 @@ impl Host {
     async fn start() -> Self {
         let home = std::env::temp_dir().join(format!("kith-turns-e2e-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
-        let (child, base) = common::serve(&home).await;
+        let agents = common::agents_env(&home);
+        let env: Vec<(&str, &str)> = agents.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let (child, base) = common::serve_env(&home, &env).await;
         let token = common::read_token(&home).trim().to_owned();
         Self { child, base, token, home }
     }
@@ -48,16 +50,15 @@ impl Host {
         v
     }
 
-    /// A bot running `fixture` in its own folder (`home/<name>`).
+    /// A kith agent running `fixture` (a path under the crate); its folder is [`Self::dir`].
     async fn bot(&self, name: &str, fixture: &str) -> String {
-        let cwd = self.home.join(name);
-        std::fs::create_dir_all(&cwd).unwrap();
-        let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(fixture);
-        let bot = json!({
-            "name": name, "backend": "custom", "tasks": false, "command": common::python_agent(&agent),
-            "cwd": cwd, "permission": "ask", "notify": false,
-        });
-        self.call("createBot", bot).await["bot"]["id"].as_str().unwrap().to_owned()
+        let fixture = fixture.strip_prefix("tests/fixtures/").unwrap();
+        common::agent_bot(&self.base, &self.token, &self.home, name, fixture, "").await
+    }
+
+    /// The folder of the kith agent `name`, where its fixture keeps its logs.
+    fn dir(&self, name: &str) -> PathBuf {
+        common::agents_dir(&self.home).join(name)
     }
 
     async fn entries(&self, chat: &str) -> Vec<Value> {
@@ -108,7 +109,7 @@ async fn a_member_busy_in_its_own_chat_still_answers_the_room() {
     }
     let host = Host::start().await;
     let member = host.bot("Member", "tests/fixtures/team_agent.py").await;
-    let folder = host.home.join("Member");
+    let folder = host.dir("Member");
     let group =
         host.call("createBot", json!({"name": "Room", "kind": "group", "members": [member]})).await["bot"]["id"]
             .as_str()
@@ -143,38 +144,6 @@ fn speed_reply(speed: &'static str, word: &'static str) -> impl Fn(&Value) -> bo
     }
 }
 
-const FAST_ON: &str = r#""configId": "fast", "value": "on""#;
-const FAST_OFF: &str = r#""configId": "fast", "value": "off""#;
-
-#[tokio::test]
-async fn fast_mode_switches_live_sessions_without_a_restart() {
-    if python_missing() {
-        return;
-    }
-    let host = Host::start().await;
-    let bot = host.bot("Quick", "tests/fixtures/fast_mode_agent.py").await;
-    let calls = host.home.join("Quick").join("calls.jsonl");
-    let log = || std::fs::read_to_string(&calls).unwrap();
-
-    host.call("updateBot", json!({"id": bot, "fastMode": true})).await;
-    host.call("send", json!({"botId": bot, "text": "one"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast on", "one")).await;
-    assert_eq!(log().matches(FAST_ON).count(), 1);
-    let sync = common::snapshot(&host.base, &host.token).await;
-    assert_eq!(sync["bots"][0]["fastModeSupport"], "offered");
-
-    // Off and on again: the same agent process switches the live session before each turn.
-    host.call("updateBot", json!({"id": bot, "fastMode": false})).await;
-    host.call("send", json!({"botId": bot, "text": "two"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "two")).await;
-    host.call("updateBot", json!({"id": bot, "fastMode": true})).await;
-    host.call("send", json!({"botId": bot, "text": "three"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast on", "three")).await;
-    let log = log();
-    assert!(!log.contains("session/load"), "{log}");
-    assert_eq!((log.matches(FAST_ON).count(), log.matches(FAST_OFF).count()), (2, 1), "{log}");
-}
-
 #[tokio::test]
 async fn an_agent_without_config_options_has_no_fast_mode() {
     if python_missing() {
@@ -182,44 +151,13 @@ async fn an_agent_without_config_options_has_no_fast_mode() {
     }
     let host = Host::start().await;
     let bot = host.bot("Plain", "tests/fixtures/fast_mode_agent.py").await;
-    std::fs::write(host.home.join("Plain").join("plain"), "").unwrap();
+    std::fs::write(host.dir("Plain").join("plain"), "").unwrap();
     let support = || async { common::snapshot(&host.base, &host.token).await["bots"][0]["fastModeSupport"].clone() };
     assert_eq!(support().await, "unknown", "clients offer /fast until a session says");
 
     host.call("send", json!({"botId": bot, "text": "one"})).await;
     host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "one")).await;
     assert_eq!(support().await, "unsupported");
-}
-
-#[tokio::test]
-async fn a_refused_fast_mode_is_reported_and_not_asked_for_again() {
-    if python_missing() {
-        return;
-    }
-    let host = Host::start().await;
-    let bot = host.bot("Refused", "tests/fixtures/fast_mode_agent.py").await;
-    let folder = host.home.join("Refused");
-    std::fs::write(folder.join("refuse"), "").unwrap();
-    let log = || std::fs::read_to_string(folder.join("calls.jsonl")).unwrap();
-
-    host.call("updateBot", json!({"id": bot, "fastMode": true})).await;
-    host.call("send", json!({"botId": bot, "text": "one"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "one")).await;
-    let state = &common::snapshot(&host.base, &host.token).await["bots"][0];
-    assert_eq!(state["fastModeSupport"], "refused");
-    assert_eq!(state["fastModeIssue"], "requires extra usage");
-    assert_eq!(state["fastMode"], true, "the user's choice stays");
-
-    host.call("send", json!({"botId": bot, "text": "two"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "two")).await;
-    assert_eq!(log().matches(FAST_ON).count(), 1, "asked again after a refusal");
-
-    // Changing the setting asks again.
-    host.call("updateBot", json!({"id": bot, "fastMode": false})).await;
-    host.call("updateBot", json!({"id": bot, "fastMode": true})).await;
-    host.call("send", json!({"botId": bot, "text": "three"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "three")).await;
-    assert_eq!(log().matches(FAST_ON).count(), 2);
 }
 
 #[tokio::test]

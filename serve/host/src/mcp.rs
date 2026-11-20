@@ -18,7 +18,6 @@ pub enum Server {
     Routines,
     Computer,
     Team,
-    Memory,
     Composio,
 }
 
@@ -71,7 +70,6 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
             ("kith-files", crate::chat::outbox::FILES_INSTRUCTIONS, Value::Array(files))
         }
         Server::Team => ("kith-team", crate::chat::team::INSTRUCTIONS, crate::chat::team::tools()),
-        Server::Memory => ("kith-memory", crate::chat::memory::INSTRUCTIONS, crate::chat::memory::tools()),
         Server::Composio => ("kith-composio", crate::market::composio::INSTRUCTIONS, crate::market::composio::tools()),
     };
     while let Some(line) = lines.next_line().await? {
@@ -156,7 +154,6 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
             }),
         ),
         Server::Team => ("teamCall", crate::chat::team::ASK_TIMEOUT + Duration::from_secs(30)),
-        Server::Memory => ("memoryCall", Duration::from_secs(120)),
         Server::Composio => ("composioCall", Duration::from_secs(120)),
     };
     let res = crate::http()
@@ -174,12 +171,7 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
                     return match server {
                         Server::Computer if v["isError"] == true => json!({"content": v["content"], "isError": true}),
                         Server::Computer => json!({"content": v["content"]}),
-                        Server::Chat
-                        | Server::Files
-                        | Server::Team
-                        | Server::Memory
-                        | Server::Routines
-                        | Server::Connectors => {
+                        Server::Chat | Server::Files | Server::Team | Server::Routines | Server::Connectors => {
                             json!({"content": [{"type": "text", "text": v.to_string()}]})
                         }
                         Server::Composio => json!({"content": [{"type": "text", "text": v["result"].to_string()}]}),

@@ -26,7 +26,7 @@ impl Hub {
         let id = cfg.id.clone();
         // An hq agent keeps its memory in files in its folder: its tidier writes those, through hqmem.
         let tidier = memory::spawn_tidier(self.clone(), id.clone());
-        if !cfg.refused_native() {
+        if !cfg.is_native() {
             crate::hqmem::summary::spawn_sweeper(self.clone(), id.clone());
         }
         let mut places = HashMap::new();
