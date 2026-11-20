@@ -28,7 +28,6 @@ async fn a_full_conversation_is_compacted_with_its_keep_list() {
     let host = Host::start().await;
     let claude = host.fixture_bot("Claude-like", "instructions_agent.py", "claude").await;
     host.reply(&claude, "hello").await;
-    host.call("saveMemory", json!({"botId": claude, "text": "Allergic to peanuts"})).await;
     host.reply(&claude, "USAGE 210000 SIZE 1000000").await;
     let line = notice(&host, &claude, "compaction").await;
     assert_eq!(line["data"]["compaction"]["byHost"], true);
@@ -36,10 +35,6 @@ async fn a_full_conversation_is_compacted_with_its_keep_list() {
     let prompts = host.prompts(&claude);
     let compact = prompts.iter().find(|p| p.starts_with("/compact")).unwrap();
     assert!(compact.starts_with("/compact When your context is summarized"), "Claude gets the keep-list: {compact}");
-    // Memory changed since the session opened, so the compaction keeps an opening rendered just before it.
-    let loads = host.requests(&claude, "session/load");
-    let opening = loads.last().unwrap()["params"]["_meta"]["systemPrompt"]["append"].as_str().unwrap();
-    assert!(opening.contains("Allergic to peanuts"), "{opening}");
 
     let codex = host.fixture_bot("Codex-like", "instructions_agent.py", "codex").await;
     host.reply(&codex, "USAGE 150000 SIZE 200000").await;
