@@ -25,7 +25,8 @@
 //! holder SID                               the live claim on SID under either name, as its file says; exit 1 when none
 //! ```
 //!
-//! Not here: `run` (the wrapper that runs claude and writes the idle intent), which is the launch's.
+//! Not here: `run` (the wrapper that runs claude and writes the idle intent), which is a process and not an answer: see [`super::run`]
+//! (`threads_cmd` calls it before this module, for `run AGENT -- CMD...`).
 
 use std::time::Duration;
 

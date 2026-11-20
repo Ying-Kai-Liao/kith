@@ -59,7 +59,6 @@ const MAX_REACTIONS: usize = 8;
 pub struct Hub {
     pub analytics: crate::analytics::Analytics,
     pub routines: crate::routines::Routines,
-    pub team: crate::chat::team::Requests,
     pub calls: crate::calls::Calls,
     pub store: Store,
     pub host_id: String,
@@ -178,7 +177,6 @@ impl Hub {
             me: me.clone(),
             analytics: crate::analytics::Analytics::load(&store),
             routines: crate::routines::Routines::default(),
-            team: crate::chat::team::Requests::default(),
             calls: crate::calls::Calls::for_host(),
             store,
             host_id,
@@ -398,7 +396,6 @@ impl Hub {
 
     pub fn delete_bot(&self, id: &str) -> Result<()> {
         self.routines.disable_bot(&self.store, id)?;
-        self.team.cancel_bot(id);
         crate::chat::group::stop(self, id);
         self.store.drop_room(id)?;
         // Secrets of this room (if a group), and any this bot sent or was handed in another room (if a member).
@@ -418,6 +415,8 @@ impl Hub {
             crate::chat::files::root(id),
             crate::chat::memory::files::folder(Some(id)),
             crate::api::native_export::bundle_dir(id),
+            // An export that delete interrupted may leave its staging folder.
+            crate::api::native_export::staging_dir(&crate::api::native_export::bundle_dir(id)),
         ];
         tokio::task::spawn_blocking(move || {
             for dir in folders {

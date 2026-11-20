@@ -311,29 +311,8 @@ enum McpServer {
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
         port: u16,
     },
-    /// Scheduled and event-triggered bot routines.
-    Routines {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
-    /// Send the user chat messages.
-    Chat {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
     /// Share files with the user (an hq agent's way to send an image or a document in its chat).
     Files {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
-    /// Discover and ask the user's other bots for help.
-    Team {
         #[arg(long)]
         bot: String,
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
@@ -1783,10 +1762,7 @@ async fn main() -> Result<()> {
             mcp::serve(bot, port, mcp::Server::Connectors).await
         }
         Sub::Mcp { server: McpServer::Computer { bot, port } } => mcp::serve(bot, port, mcp::Server::Computer).await,
-        Sub::Mcp { server: McpServer::Routines { bot, port } } => mcp::serve(bot, port, mcp::Server::Routines).await,
-        Sub::Mcp { server: McpServer::Chat { bot, port } } => mcp::serve(bot, port, mcp::Server::Chat).await,
         Sub::Mcp { server: McpServer::Files { bot, port } } => mcp::serve(bot, port, mcp::Server::Files).await,
-        Sub::Mcp { server: McpServer::Team { bot, port } } => mcp::serve(bot, port, mcp::Server::Team).await,
         Sub::Mcp { server: McpServer::Composio { bot, port } } => mcp::serve(bot, port, mcp::Server::Composio).await,
         Sub::Mcp { server: McpServer::Local { connector, port } } => mcp::serve_local(connector, port).await,
         Sub::Mcp { server: McpServer::Remote { connector, port } } => mcp::serve_remote(connector, port).await,

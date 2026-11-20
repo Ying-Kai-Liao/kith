@@ -37,7 +37,6 @@ impl Actor {
     async fn wait_for_terminal(&self, held: &crate::terminal::HeldByWriter, entry_ids: &[String]) -> bool {
         let owners_own = self.cfg.person.is_none()
             && held.code == "liveInTerminal"
-            && self.active_request.is_none()
             && self.active_group.is_none()
             && self.active_routine.is_none()
             && !entry_ids.is_empty();
@@ -115,7 +114,7 @@ impl Actor {
         }
         for id in entry_ids {
             if self.hub.store.entry(id).is_some_and(|e| e.kind == EntryKind::User.as_str()) {
-                self.set_user_status(id, crate::chat::team::RequestStatus::Cancelled);
+                self.set_user_status(id, crate::chat::status::RequestStatus::Cancelled);
             }
         }
         Err(StartCancelled.into())
@@ -149,7 +148,7 @@ impl Actor {
             }
             for id in entry_ids {
                 if let Some(mut e) = self.hub.store.entry(id).filter(|e| e.kind == EntryKind::User.as_str()) {
-                    e.data["status"] = json!(crate::chat::team::RequestStatus::Failed);
+                    e.data["status"] = json!(crate::chat::status::RequestStatus::Failed);
                     self.hub.set_entry(id, &e.data);
                 }
             }
@@ -166,19 +165,15 @@ impl Actor {
             |e| e.turn,
         );
         // Only a person's own words to an hq agent say what the chat is about.
-        let from_person = !hidden
-            && self.active_request.is_none()
-            && self.active_group.is_none()
-            && self.active_routine.is_none()
-            && !entry_ids.is_empty();
+        let from_person =
+            !hidden && self.active_group.is_none() && self.active_routine.is_none() && !entry_ids.is_empty();
         self.project_turn = if from_person { self.infer_project(&lane, entry_ids, text).await } else { None };
         for id in entry_ids {
-            // Bot-message notices belong to `chat::team`; writing them here would race its final status.
             if let Some(mut e) = self.hub.store.entry(id).filter(|e| e.kind == EntryKind::User.as_str()) {
                 // A wake's message is sent once its prompt is (`turn_started`): until then a failed start gives it
                 // back to the queue, still waiting.
                 if !crate::cards::resume::wake_carries(id) {
-                    e.data["status"] = json!(crate::chat::team::RequestStatus::Sent);
+                    e.data["status"] = json!(crate::chat::status::RequestStatus::Sent);
                 }
                 if let Some(turn) = &self.project_turn {
                     e.data["projects"] = json!(turn.projects);
@@ -197,11 +192,7 @@ impl Actor {
         // The opening turn of a call the agent placed (`calls::greet`) is the host's, not the person's words.
         let greeting = !entry_ids.is_empty()
             && entry_ids.iter().all(|id| self.hub.store.entry(id).is_some_and(|e| e.data["greeting"] == true));
-        let from_user = !hidden
-            && !greeting
-            && self.active_request.is_none()
-            && self.active_group.is_none()
-            && self.active_routine.is_none();
+        let from_user = !hidden && !greeting && self.active_group.is_none() && self.active_routine.is_none();
         self.turn_call = (from_user || greeting)
             && !entry_ids.is_empty()
             && entry_ids.iter().all(|id| self.hub.store.entry(id).is_some_and(|e| e.data["via"] == "call"));
@@ -210,7 +201,6 @@ impl Actor {
         self.stop_requested = false;
         self.secrets_turn = false;
         self.cancel_deadline = None;
-        self.hub.team.start_turn(&self.rt, self.active_request.as_ref());
         self.exit_tail = None;
         self.seg = Seg::None;
         self.tools.clear();
@@ -218,14 +208,11 @@ impl Actor {
         self.plan_card = None;
         self.last_text = None;
         self.last_agent = None;
-        self.sent.clear();
         self.files.summary = None;
         self.files.cancel();
-        // A delegated or group turn has no live waiter after a host restart. Its persisted
+        // A group turn has no live waiter after a host restart. Its persisted
         // notices are marked interrupted instead of silently repeating work.
-        self.set_inflight(
-            self.active_request.is_none() && self.active_group.is_none() && self.active_routine.is_none(),
-        );
+        self.set_inflight(self.active_group.is_none() && self.active_routine.is_none());
         self.hub.set_runtime(&self.rt, |r| {
             r.status = BotStatus::Working;
             r.activity = if hidden { "Picking up where it left off…" } else { "Starting…" }.into();
@@ -265,8 +252,7 @@ impl Actor {
         let session = self.turn_session.clone();
         // What the agent does on this session after the turn, by itself, belongs to this lane: unless the turn was
         // a room's, an ask's or a routine's.
-        self.off_lane = (self.active_group.is_none() && self.active_request.is_none() && self.active_routine.is_none())
-            .then(|| lane.clone());
+        self.off_lane = (self.active_group.is_none() && self.active_routine.is_none()).then(|| lane.clone());
         self.hub.set_runtime(&self.rt, |r| r.session.clone_from(&session));
         if let Some(sid) = session {
             self.sync_call_model(&sid).await;
@@ -283,7 +269,6 @@ impl Actor {
             if self.routine_completion.is_none() {
                 self.set_inflight(false);
             }
-            self.hub.team.cancel_from(&self.rt);
             self.hub.set_runtime(&self.rt, |r| {
                 r.status = BotStatus::Idle;
                 r.activity = String::new();
@@ -474,13 +459,6 @@ impl Actor {
         let mut reply_entry = None;
         let routine = self.active_routine.is_some();
         let grouped = self.active_group.is_some() || routine;
-        let delegated = self.active_request.as_ref().is_some_and(crate::chat::team::BotRequest::expects_reply);
-        let sent = std::mem::take(&mut self.sent);
-        if !sent.is_empty() {
-            // The bot talked through send_message: what it wrote as its reply stays in the trace.
-            self.last_text = None;
-            final_text = Some(sent.join("\n\n"));
-        }
         if let Some(id) = self.last_text.take().filter(|_| !stopped)
             && let Some(mut e) = self.hub.store.entry(&id)
         {
@@ -489,7 +467,7 @@ impl Actor {
             if !(grouped && text.as_deref().is_none_or(crate::chat::group::is_pass)) {
                 // A room turn that a newer message or Stop moved on from: the reply is kept, marked, and wakes nobody.
                 if let Some(g) = &self.active_group {
-                    // Saved with the `final` mark just below (a room turn is never a delegated ask).
+                    // Saved with the `final` mark just below.
                     if let Some(conversation) = &g.conversation {
                         e.data["conversation"] = conversation.clone().into();
                     }
@@ -504,13 +482,9 @@ impl Actor {
                         e.data["lateWhy"] = if stopped { "stopped" } else { "newer" }.into();
                     }
                 }
-                // An ask's answer belongs to its requesting bot and exchange notice.
-                // Independent messages still report to the user in this chat.
-                if !delegated {
-                    e.data["final"] = true.into();
-                    self.hub.set_entry(&id, &e.data);
-                    reply_entry = Some(id);
-                }
+                e.data["final"] = true.into();
+                self.hub.set_entry(&id, &e.data);
+                reply_entry = Some(id);
                 final_text = text;
             }
         }
@@ -551,16 +525,6 @@ impl Actor {
         let failure = done.as_ref().err().filter(|_| !self.stop_requested);
         let failed = failure.is_some();
         self.report_turn(stopped, failure, &stop_reason);
-        let reply = if stopped {
-            Err(anyhow!("recipient was stopped; partial work may have happened"))
-        } else if stop_reason != "end_turn" {
-            Err(anyhow!("recipient did not finish ({stop_reason}); partial work may have happened"))
-        } else {
-            final_text
-                .clone()
-                .filter(|s| !s.trim().is_empty())
-                .ok_or_else(|| anyhow!("recipient finished without a text reply"))
-        };
         if routine {
             let (status, detail) = if self.routine_timed_out {
                 (
@@ -580,9 +544,6 @@ impl Actor {
             let text = (status == crate::routines::Status::Succeeded).then(|| final_text.clone()).flatten();
             self.finish_routine(status, detail, text);
         }
-        let message_failed =
-            !stopped && reply.is_err() && self.active_request.as_ref().is_some_and(|r| !r.expects_reply());
-        self.complete_request(reply, stopped);
         self.complete_group(if stopped || failed || stop_reason != "end_turn" {
             Err(anyhow!("turn did not complete ({stop_reason})"))
         } else {
@@ -609,13 +570,11 @@ impl Actor {
             r.message = None;
             r.session = None;
         });
-        self.hub.team.cancel_from(&self.rt);
         // A room turn's news comes from the group once the room is done (see `group`).
         let more = self.queue.iter().any(|q| matches!(q, Queued::User { .. }));
         if !self.stop_requested
-            && !delegated
             && !grouped
-            && let Some(kind) = turn_alert(failed || message_failed, &stop_reason, more)
+            && let Some(kind) = turn_alert(failed, &stop_reason, more)
         {
             let body = final_text.unwrap_or_else(|| match kind {
                 AlertKind::Done => "Finished.".into(),
@@ -631,7 +590,7 @@ impl Actor {
     /// them (see `rich_card::jev`). The reply is already shown; the card is attached when and if Jev answers.
     fn start_reply_card(&self, entry_id: String, text: &str) {
         let run = crate::rich_card::jev::Run {
-            owner: self.cfg.person.is_none() && self.active_request.is_none() && self.active_routine.is_none(),
+            owner: self.cfg.person.is_none() && self.active_routine.is_none(),
             owner_only_room: if self.cfg.is_group() || self.active_group.is_some() {
                 self.run_members() == crate::agent::hq::Members::OwnerOnly
             } else {
@@ -663,8 +622,6 @@ impl Actor {
             TurnSource::Routine
         } else if self.active_group.is_some() {
             TurnSource::Group
-        } else if self.active_request.is_some() {
-            TurnSource::Bot
         } else {
             TurnSource::User
         };

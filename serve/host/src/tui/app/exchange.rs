@@ -1,4 +1,4 @@
-//! Bot-to-bot exchanges: the notices `chat::team` writes, and the conversation a pair of bots had.
+//! Bot-to-bot exchanges: the notices the removed `chat::team` wrote, and the conversation a pair of bots had.
 //! Pure functions over entries, so the chat row and the conversation sheet share one reading.
 
 use std::collections::BTreeMap;

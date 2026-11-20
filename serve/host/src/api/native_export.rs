@@ -23,6 +23,9 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// One export at a time: two share the staging folder, and one's cleanup would wipe the other's half-written copy.
+static EXPORTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
     Ok(ControlFlow::Break(match method {
         "exportHostBot" => export(hub, str_arg(&b, "botId")?).await?,
@@ -35,7 +38,13 @@ pub(crate) fn bundle_dir(bot_id: &str) -> PathBuf {
     crate::service::data_dir().join("bots").join(bot_id).join("kith-export")
 }
 
+/// The row if it is still a host-native bot that exists.
+fn native_row(hub: &Hub, bot_id: &str) -> Result<Option<crate::store::BotRow>> {
+    Ok(hub.store.bot(bot_id)?.filter(|r| !r.deleted && r.config.is_native()))
+}
+
 async fn export(hub: &Arc<Hub>, bot_id: &str) -> Result<Value> {
+    let _one = EXPORTS.lock().await;
     let row = hub.store.bot(bot_id)?.filter(|r| !r.deleted).ok_or_else(|| anyhow!("unknown bot"))?;
     if !row.config.is_native() {
         bail!("only a host-native bot can be exported; this one is a kith agent or a room");
@@ -53,7 +62,27 @@ async fn export(hub: &Arc<Hub>, bot_id: &str) -> Result<Value> {
         write_bundle(&cfg, &routines, &entries, names.as_deref(), &bundle_dir(&id))
     })
     .await??;
+    settle(hub, bot_id, &path)
+}
+
+/// Delete holds no lock the export could take, and removes the bot's folders after its row write. Read the row again
+/// now the bundle is in place: either this sees the delete and removes the bundle, or the delete's own removal runs
+/// after the rename and takes it.
+pub(super) fn settle(hub: &Hub, bot_id: &str, path: &Path) -> Result<Value> {
+    if native_row(hub, bot_id)?.is_none() {
+        remove_bundle(path);
+        bail!("unknown bot");
+    }
     Ok(json!({"path": path.to_string_lossy()}))
+}
+
+/// A missing folder is already what this wants.
+fn remove_bundle(dir: &Path) {
+    if let Err(error) = std::fs::remove_dir_all(dir)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(dir = %dir.display(), error = %error, "couldn't remove the export of a deleted bot");
+    }
 }
 
 /// The routines as a bundle keeps them: no id, no key, no run state.
@@ -80,11 +109,31 @@ fn write_bundle(
     key_names: Option<&[String]>,
     dir: &Path,
 ) -> Result<PathBuf> {
-    let staging = dir.with_extension("tmp");
+    let staging = staging_dir(dir);
     if staging.exists() {
         std::fs::remove_dir_all(&staging).context("couldn't clear an earlier unfinished export")?;
     }
-    std::fs::create_dir_all(&staging)?;
+    // Whatever fails below, no half-written staging folder stays behind.
+    let built = stage(cfg, routines, entries, key_names, &staging).and_then(|()| swap_in(&staging, dir));
+    if built.is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    built.map(|()| dir.to_owned())
+}
+
+/// The folder a bundle is built in before it replaces `dir`.
+pub(crate) fn staging_dir(dir: &Path) -> PathBuf {
+    dir.with_extension("tmp")
+}
+
+fn stage(
+    cfg: &BotConfig,
+    routines: &[Value],
+    entries: &[kith_mem::store::Entry],
+    key_names: Option<&[String]>,
+    staging: &Path,
+) -> Result<()> {
+    std::fs::create_dir_all(staging)?;
     let put = |name: &str, v: &Value| -> Result<()> {
         std::fs::write(staging.join(name), serde_json::to_string_pretty(v)?).with_context(|| format!("writing {name}"))
     };
@@ -98,12 +147,15 @@ fn write_bundle(
             "note": "Names only, never values. The engine's keys stay where they are (saved per engine), and a kith agent on the same engine already uses them: nothing needs to be copied or entered again. keyNames is null when the vault could not be read just now.",
         }),
     )?;
-    copy_memory(&crate::chat::memory::files::folder(Some(&cfg.id)), &staging.join("memory"))?;
+    copy_memory(&crate::chat::memory::files::folder(Some(&cfg.id)), &staging.join("memory"))
+}
+
+fn swap_in(staging: &Path, dir: &Path) -> Result<()> {
     if dir.exists() {
         std::fs::remove_dir_all(dir).context("couldn't replace the earlier export")?;
     }
-    std::fs::rename(&staging, dir)?;
-    Ok(dir.to_owned())
+    std::fs::rename(staging, dir)?;
+    Ok(())
 }
 
 fn settings_of(cfg: &BotConfig) -> Value {

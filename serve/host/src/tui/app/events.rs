@@ -479,7 +479,6 @@ mod tests {
         let mut app = test_app();
         app.upsert_bot(&json!({"id":"b", "fastMode":true}));
         assert!(app.bots["b"].fast_mode);
-        assert!(FIELDS.contains(&Field::Fast));
     }
 
     #[test]

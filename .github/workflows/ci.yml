@@ -160,6 +160,7 @@ jobs:
               - 'serve/host/src/hub/actors.rs'
               - 'core/kernel/src/threads.rs'
               - 'core/kernel/src/threads/**'
+              - 'serve/host/src/threads_cmd.rs'
               - 'kernel/tests/kith-threads-race'
               - 'core/stub/**'
               - 'kernel/lib/kith-core.sh'
@@ -953,7 +954,8 @@ jobs:
         run: |
           # A direct run holds its conversation's lock under kith-stub (M1-3).
           cargo build --manifest-path serve/host/Cargo.toml -p kith-stub
-          KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check
+          # The interactive rows run again through the Rust `run` (`kith kernel threads run`) and `bin/kith` is launched under a pty.
+          KITH_BIN="$PWD/serve/host/target/debug/kith" KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check
           # A compaction (kith-lifecycle) holds the conversation's lock the same way: busy, held for its whole life, killed with claude.
           KITH_CORE=python KITH_BIN="$PWD/serve/host/target/debug/kith" KITH_REAL_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-lifecycle-check
           # ... and again with the Rust core answering (`kith kernel lifecycle`), which the check asserts by the calls the program saw.
