@@ -1,14 +1,11 @@
-//! Remote screen: the phone views and controls this computer over WebRTC, and
-//! bots operate it through the built-in `computer` MCP server (`mcp.rs`, `computer.rs`).
+//! Remote screen: the phone views and controls this computer over WebRTC.
 //!
 //! Capture, encoding and the phone's input live in a separate *screen helper*
 //! that connects to `~/.kith/serve/screen.sock` — on macOS `KithScreen.app`
 //! (a signed bundle, so Screen Recording / Accessibility grants stick), on
 //! Linux `kith-screen` (xdg portals + `GStreamer`). The host stays the only
-//! network-facing process: it relays WebRTC signaling, gates access (on by
-//! default where there is a desktop, toggled only from this computer) and arbitrates control between
-//! the user and bots. Bots act through the computer-use driver (`cua.rs`), which Kith Screen
-//! starts on macOS and the host starts on Windows and Linux.
+//! network-facing process: it relays WebRTC signaling and gates access (on by
+//! default where there is a desktop, toggled only from this computer).
 //!
 //! Helper protocol: newline-delimited JSON-RPC 2.0 over the socket.
 //! - helper → host notifications
@@ -18,28 +15,16 @@
 //!   - `answer {session, sdp, display?, iceServers, maxBitrateBps, maxFramerate}` → `{sdp}`:
 //!     non-trickle ICE, with short-lived STUN/TURN credentials for remote connections.
 //!   - `close {session}`, `closeAll {}`
-//!   - `focusedField {pid?}` → `{app, pid, url?, secure}`: the focused control of that app (the
-//!     frontmost one by default), for `type_login`
-//!   - macOS: `driver {}` → `{socket}`: starts the computer-use driver if it isn't running
-//!   - Linux, for bots on desktops the driver doesn't support (`helper_tools.rs`):
-//!     `screenshot {display, width, height}` → `{data}` (base64 JPEG, exactly that size);
-//!     `input {display, event}` → `{}` (display points); `uiTree {display}` → `{app, tree}`;
-//!     `openApp {name}` → `{}`
 //!
 //! The phone's input travels straight to the helper over WebRTC data channels
 //! (`input-fast` unordered for moves, `input` reliable): `move`, `click`, `drag`, `scroll`,
 //! `text`, `key` in display points, plus `down`/`up` for touch drags and `clipboard {text}`.
 
-mod computer;
-mod cua;
 mod helper;
-#[cfg(target_os = "linux")]
-mod helper_tools;
 mod permissions;
 mod protocol;
 mod viewer;
 
-pub use computer::{computer, computer_tools};
 pub use helper::serve_helpers;
 #[cfg(target_os = "linux")]
 pub use helper::supervise_linux_helper;
@@ -54,14 +39,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::broadcast;
 
-/// How long after its last computer call a bot still counts as "using the computer".
-const AGENT_HOLD: Duration = Duration::from_secs(20);
-/// Lets the UI react to an action before the follow-up screenshot.
-#[cfg(target_os = "linux")]
-const SETTLE: Duration = Duration::from_millis(400);
 const HELPER_TIMEOUT: Duration = Duration::from_secs(15);
 const KV_ENABLED: &str = "screen_enabled";
 
@@ -69,14 +49,6 @@ const KV_ENABLED: &str = "screen_enabled";
 struct Control {
     /// The phone took over: bots may only look.
     user: bool,
-    /// The bot using the computer, and when it last did.
-    agent: Option<(String, Instant)>,
-}
-
-impl Control {
-    fn active_agent(&self) -> Option<&str> {
-        self.agent.as_ref().filter(|(_, t)| t.elapsed() < AGENT_HOLD).map(|(b, _)| b.as_str())
-    }
 }
 
 struct Viewer {
@@ -94,7 +66,6 @@ pub struct Screen {
     status: Mutex<HelperStatus>,
     control: Mutex<Control>,
     sessions: Mutex<HashMap<String, Viewer>>,
-    driver: cua::Driver,
     #[cfg_attr(windows, expect(dead_code, reason = "Windows has no screen helper yet"))]
     next_link: AtomicU64,
 }
@@ -108,7 +79,6 @@ impl Screen {
             status: Mutex::default(),
             control: Mutex::default(),
             sessions: Mutex::default(),
-            driver: cua::Driver::default(),
             next_link: AtomicU64::new(1),
         }
     }
@@ -143,8 +113,9 @@ impl Screen {
             "input": st.input,
             "displays": st.displays,
             "userControl": c.user,
-            "agentBot": c.active_agent(),
-            "computerUse": self.computer_use(),
+            // Bots no longer operate the computer; older clients still read these two.
+            "agentBot": null,
+            "computerUse": false,
             "viewers": viewers,
         })
     }

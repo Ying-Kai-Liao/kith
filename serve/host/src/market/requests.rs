@@ -1,6 +1,6 @@
-//! Durable, non-secret connection requests. Only the client submits credentials;
-//! tools receive status, never credential values.
-use super::connectors;
+//! Durable, non-secret connection requests. Only the client submits credentials.
+//! Agents no longer raise connection, secret, app or login cards; `finish` still closes
+//! the ones created before that, and the agent sign-in card is posted by the host.
 use crate::{
     LockExt,
     agent::bot::Cmd,
@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-pub const INSTRUCTIONS: &str = "Connect external services with search_connectors, list_connectors and request_connection. To update an installed connector's key use request_secret. To sign in to a website or app on the screen, check list_logins, ask with request_login if it's missing, then type it with the computer tool type_login. Requests appear as secure cards in the user's conversation. Never ask for passwords or keys in ordinary chat or tool arguments. After requesting, finish your turn and wait; Kith resumes you after the user completes setup.";
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 enum RequestKind {
@@ -106,107 +105,6 @@ pub fn agent_signed_in(hub: &Hub, backend: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn tools() -> Value {
-    json!([
-        {"name":"search_connectors","description":"Find registry connectors by service name.","inputSchema":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}},
-        {"name":"list_connectors","description":"List installed connectors without credentials.","inputSchema":{"type":"object","properties":{}}},
-        {"name":"request_connection","description":"Invite the user to install or authorize a connector. Supply either registryName from search or connectorId from the installed list.","inputSchema":{"type":"object","properties":{"registryName":{"type":"string"},"connectorId":{"type":"string"},"reason":{"type":"string"}},"required":["reason"]}},
-        {"name":"request_app","description":"Invite the user to connect a hosted app through Composio, for example gmail or slack.","inputSchema":{"type":"object","properties":{"toolkit":{"type":"string"},"reason":{"type":"string"}},"required":["toolkit","reason"]}},
-        {"name":"list_logins","description":"List saved website and app logins (site and username; never passwords).","inputSchema":{"type":"object","properties":{}}},
-        {"name":"request_login","description":"Ask the user to save a login for a website or app, e.g. github.com. They fill it in on a secure card; you never see the password. Then use the computer tool type_login.","inputSchema":{"type":"object","properties":{"site":{"type":"string","description":"The website's domain, or the app's name."},"reason":{"type":"string"}},"required":["site","reason"]}},
-        {"name":"request_secret","description":"Ask the user to securely provide a credential for an installed connector. The value goes directly to that connector and is never returned to you.","inputSchema":{"type":"object","properties":{"connectorId":{"type":"string"},"field":{"type":"string"},"location":{"type":"string","enum":["env","header"]},"reason":{"type":"string"}},"required":["connectorId","field","location","reason"]}}
-    ])
-}
-
-/// `actor`: the bot's actor whose agent called (see `agent::bot::actor_key`); its request cards go where its turn talks.
-pub async fn call(hub: &Arc<Hub>, bot: &str, actor: &str, name: &str, args: &Value) -> Result<Value> {
-    hub.store.bot(bot)?.filter(|b| !b.deleted && !b.config.is_group()).ok_or_else(|| anyhow!("unknown bot"))?;
-    match name {
-        "search_connectors" => super::browse_connectors(&hub.store, text(args, "query")?, "").await,
-        "list_connectors" => super::list_connectors(&hub.store),
-        "list_logins" => super::logins::list(&hub.store),
-        "request_login" => {
-            let site = super::logins::normalize_site(text(args, "site")?);
-            if site.is_empty() || site.len() > 200 {
-                bail!("Give the website's domain or the app's name");
-            }
-            let lane = hub.runtime(actor).lane.unwrap_or_else(|| Lane::main(bot));
-            let reason: String = text(args, "reason")?.chars().take(400).collect();
-            let entry = hub
-                .add_entry(
-                    &lane,
-                    EntryKind::Notice,
-                    hub.store.max_turn(bot),
-                    &json!({"text":reason,"connectionRequest":{"kind":RequestKind::Login,"status":RequestStatus::Pending,"title":site,"site":site,"botId":bot}}),
-                )
-                .ok_or_else(|| anyhow!("Could not save login request"))?;
-            Ok(json!({"requestId":entry.id,"status":"waitingForUser"}))
-        }
-        "request_app" => {
-            let toolkit = text(args, "toolkit")?.to_ascii_lowercase();
-            if toolkit.len() > 100 || !toolkit.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-') {
-                bail!("Invalid app identifier");
-            }
-            let lane = hub.runtime(actor).lane.unwrap_or_else(|| Lane::main(bot));
-            let reason: String = text(args, "reason")?.chars().take(400).collect();
-            // The card shows the app's own name and logo when Composio lists it.
-            let listed = super::composio::toolkits(&hub.store, &toolkit, "")
-                .await
-                .ok()
-                .and_then(|v| v["items"].as_array()?.iter().find(|t| t["slug"] == toolkit.as_str()).cloned());
-            let title = listed.as_ref().and_then(|t| t["name"].as_str()).unwrap_or(&toolkit).to_owned();
-            let logo = listed.as_ref().map_or(Value::Null, |t| t["logo"].clone());
-            let entry = hub.add_entry(&lane,EntryKind::Notice,hub.store.max_turn(bot),&json!({"text":reason,"connectionRequest":{
-                "kind":RequestKind::App,"status":RequestStatus::Pending,"title":title,"logo":logo,"botId":bot,"toolkit":toolkit,"connectorId":format!("{}{}",super::composio::PREFIX,toolkit)
-            }})).ok_or_else(|| anyhow!("Could not save connection request"))?;
-            Ok(json!({"requestId":entry.id,"status":"waitingForUser"}))
-        }
-        "request_connection" | "request_secret" => {
-            let installed = args["connectorId"].as_str().filter(|s| !s.is_empty());
-            let (title, registry) = if let Some(id) = installed {
-                let c = connectors(&hub.store)?
-                    .into_iter()
-                    .find(|c| c.id == id)
-                    .ok_or_else(|| anyhow!("unknown connector"))?;
-                (c.name, c.registry_name)
-            } else {
-                let registry = text(args, "registryName")?;
-                let item = super::connector_info(&hub.store, registry).await?;
-                (item["title"].as_str().unwrap_or(registry).to_owned(), Some(registry.to_owned()))
-            };
-            let secret = name == "request_secret";
-            if secret {
-                if installed.is_none() {
-                    bail!("A secret request needs an installed connector");
-                }
-                let field = text(args, "field")?;
-                if field.len() > 128 || !field.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
-                    bail!("Invalid credential field");
-                }
-                if !matches!(text(args, "location")?, "env" | "header") {
-                    bail!("Invalid credential destination");
-                }
-            }
-            let lane = hub.runtime(actor).lane.unwrap_or_else(|| Lane::main(bot));
-            let request = json!({"kind":if secret {RequestKind::Secret} else {RequestKind::Connection}, "status":RequestStatus::Pending, "title":title,
-                "registryName":registry, "connectorId":installed, "botId":bot,
-                "field":if secret {args["field"].clone()} else {Value::Null},
-                "location":if secret {args["location"].clone()} else {Value::Null}});
-            let reason: String = text(args, "reason")?.chars().take(400).collect();
-            let entry = hub
-                .add_entry(
-                    &lane,
-                    EntryKind::Notice,
-                    hub.store.max_turn(bot),
-                    &json!({"text":reason,"connectionRequest":request}),
-                )
-                .ok_or_else(|| anyhow!("Could not save connection request"))?;
-            Ok(json!({"requestId":entry.id,"status":"waitingForUser"}))
-        }
-        _ => bail!("Unknown connection tool"),
-    }
-}
-
 fn text<'a>(v: &'a Value, key: &str) -> Result<&'a str> {
     v[key].as_str().filter(|s| !s.is_empty()).ok_or_else(|| anyhow!("{key} is required"))
 }
@@ -256,7 +154,7 @@ pub async fn finish(hub: &Arc<Hub>, args: &Value) -> Result<Value> {
             text(args, "value")?,
         )?;
         let note = format!(
-            "[Login for {} saved as `{}`{}. Type it with the computer tool type_login; the password is never shown to you. Continue the task.]",
+            "[Login for {} saved as `{}`{}. The password is never shown to you. Continue the task.]",
             login.site,
             login.id,
             if login.username.is_empty() { String::new() } else { format!(" (username {})", login.username) }
@@ -336,6 +234,7 @@ fn complete(hub: &Arc<Hub>, e: &Entry, id: &str, note: String) -> Result<Value> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::market::connectors;
     use crate::store::{BotConfig, Store};
     use std::path::{Path, PathBuf};
 
@@ -360,18 +259,46 @@ mod tests {
         (hub, dir)
     }
 
+    /// The cards an older host raised through the connector tools, so `finish` still closes them.
+    fn old_card(hub: &Hub, text: &str, request: &Value) -> Value {
+        let entry = hub
+            .add_entry(
+                &Lane::main("bot"),
+                EntryKind::Notice,
+                hub.store.max_turn("bot"),
+                &json!({"text": text, "connectionRequest": request}),
+            )
+            .unwrap();
+        json!({"requestId": entry.id, "status": "waitingForUser"})
+    }
+
+    fn old_secret_card(hub: &Hub, args: &Value) -> Value {
+        old_card(
+            hub,
+            args["reason"].as_str().unwrap(),
+            &json!({"kind": RequestKind::Secret, "status": RequestStatus::Pending, "title": "Fixture",
+                "registryName": null, "connectorId": args["connectorId"], "botId": "bot",
+                "field": args["field"], "location": args["location"]}),
+        )
+    }
+
+    fn old_login_card(hub: &Hub, args: &Value) -> Value {
+        let site = super::super::logins::normalize_site(args["site"].as_str().unwrap());
+        old_card(
+            hub,
+            args["reason"].as_str().unwrap(),
+            &json!({"kind": RequestKind::Login, "status": RequestStatus::Pending, "title": site, "site": site,
+                "botId": "bot"}),
+        )
+    }
+
     #[tokio::test]
     async fn secure_submission_enables_connector_and_resumes_only_once() {
         let (hub, dir) = fixture();
-        let r = call(
+        let r = old_secret_card(
             &hub,
-            "bot",
-            "bot",
-            "request_secret",
             &json!({"connectorId":"fixture","field":"API_KEY","location":"env","reason":"Connect the test service"}),
-        )
-        .await
-        .unwrap();
+        );
         let id = r["requestId"].as_str().unwrap();
         let submitted = json!({"entryId":id,"value":"test-private-key"});
         let first = finish(&hub, &submitted).await.unwrap();
@@ -391,7 +318,7 @@ mod tests {
     fn remote_control_devices_cannot_retrieve_credentials_or_forge_requests() {
         let caller =
             crate::api::devices::Caller::Device { key: "test".into(), scopes: vec![crate::store::Scope::Control] };
-        for method in ["connectorRuntime", "connectorTarget", "connectorCall"] {
+        for method in ["connectorRuntime", "connectorTarget"] {
             assert!(crate::api::devices::permit(&caller, method).is_err());
         }
         assert!(crate::api::devices::permit(&caller, "connectorRequestFinish").is_ok());
@@ -400,26 +327,18 @@ mod tests {
     #[tokio::test]
     async fn saved_login_resumes_the_bot_without_its_password() {
         let (hub, dir) = fixture();
-        let r = call(
-            &hub,
-            "bot",
-            "bot",
-            "request_login",
-            &json!({"site":"https://www.GitHub.com/login","reason":"Sign in to open the PR"}),
-        )
-        .await
-        .unwrap();
+        let r = old_login_card(&hub, &json!({"site":"https://www.GitHub.com/login","reason":"Sign in to open the PR"}));
         let id = r["requestId"].as_str().unwrap();
         let done = finish(&hub, &json!({"entryId":id,"username":"kevin","value":"hunter2-private"})).await.unwrap();
         assert_eq!(done["entry"]["data"]["connectionRequest"]["status"], "ready");
-        let listed = call(&hub, "bot", "bot", "list_logins", &json!({})).await.unwrap();
+        let listed = super::super::logins::list(&hub.store).unwrap();
         assert_eq!(listed["items"][0]["site"], "github.com");
         assert_eq!(listed["items"][0]["username"], "kevin");
         assert!(!listed.to_string().contains("hunter2-private"));
         assert!(hub.store.kv_read("logins").unwrap().is_none_or(|v| !v.contains("hunter2-private")));
         let history = hub.store.history("bot", i64::MAX, 100).unwrap();
         let history = serde_json::to_string(&history).unwrap();
-        assert!(history.contains("type_login") && !history.contains("hunter2-private"));
+        assert!(history.contains("saved as") && !history.contains("hunter2-private"));
         hub.shutdown().await;
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -468,15 +387,8 @@ mod tests {
     #[tokio::test]
     async fn cancellation_rejects_later_secret_submission() {
         let (hub, dir) = fixture();
-        let r = call(
-            &hub,
-            "bot",
-            "bot",
-            "request_secret",
-            &json!({"connectorId":"fixture","field":"API_KEY","location":"env","reason":"Test"}),
-        )
-        .await
-        .unwrap();
+        let r =
+            old_secret_card(&hub, &json!({"connectorId":"fixture","field":"API_KEY","location":"env","reason":"Test"}));
         let id = &r["requestId"];
         finish(&hub, &json!({"entryId":id,"cancel":true})).await.unwrap();
         assert!(finish(&hub, &json!({"entryId":id,"value":"test-private-key"})).await.is_err());
@@ -488,15 +400,8 @@ mod tests {
     #[tokio::test]
     async fn failed_verification_does_not_enable_connector_or_resume() {
         let (hub, dir) = fixture();
-        let r = call(
-            &hub,
-            "bot",
-            "bot",
-            "request_secret",
-            &json!({"connectorId":"fixture","field":"API_KEY","location":"env","reason":"Test"}),
-        )
-        .await
-        .unwrap();
+        let r =
+            old_secret_card(&hub, &json!({"connectorId":"fixture","field":"API_KEY","location":"env","reason":"Test"}));
         let id = r["requestId"].as_str().unwrap();
         assert!(finish(&hub, &json!({"entryId":id,"value":"wrong"})).await.is_err());
         assert_eq!(hub.store.entry(id).unwrap().data["connectionRequest"]["status"], "pending");

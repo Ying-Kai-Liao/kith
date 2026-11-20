@@ -203,11 +203,6 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             hub.screen.set_enabled(&hub.store, b["enabled"].as_bool().unwrap_or(false)).await?;
             hub.screen.state()
         }
-        "computerTools" => crate::screen::computer_tools(hub).await,
-        "computerCall" => {
-            let args = b.get("arguments").filter(|a| a.is_object()).cloned().unwrap_or_else(|| json!({}));
-            crate::screen::computer(hub, str_arg(&b, "botId")?, str_arg(&b, "name")?, args).await?
-        }
         // Owner only: on no guest list.
         "sampleCards" => crate::samples::post(hub)?,
         _ => return Ok(ControlFlow::Continue(b)),
