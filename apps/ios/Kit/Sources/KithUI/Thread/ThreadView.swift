@@ -92,6 +92,7 @@ public struct ThreadView: View {
     /// Why a call can't start now; nil when it can. The phone and header buttons show it.
     var callBlock: String? {
         if bot == nil { return "This chat is no longer available." }
+        if bot?.isFlagged == true { return "This bot no longer runs" }
         if model.isOffline { return "\(model.hostName) is offline." }
         if model.mismatch != nil { return "Update Kith to make calls." }
         return nil

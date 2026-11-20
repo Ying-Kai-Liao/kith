@@ -7,6 +7,8 @@ import SwiftUI
 struct NativeBotNotice: View {
     let bot: Bot
     @Environment(BotStore.self) private var model
+    @Environment(AccountStore.self) private var accounts: AccountStore?
+    @Environment(\.dismissModal) private var dismissDetails
     @State private var making = false
     @State private var exporting = false
     @State private var path: String?
@@ -28,14 +30,22 @@ struct NativeBotNotice: View {
                 .buttonStyle(.bordered)
             }
             if let path {
-                Text("Exported to \(path)").font(.footnote).foregroundStyle(Palette.secondary).textSelection(.enabled)
+                Text("Exported to \(path) on \(model.hostName)").font(.footnote).foregroundStyle(Palette.secondary).textSelection(.enabled)
             }
             if let error { Text(error).font(.footnote).foregroundStyle(Palette.danger) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .kithSheet(isPresented: $making) { NewAgentSheet(like: bot) }
+        .kithSheet(isPresented: $making) { NewAgentSheet(like: bot) { made in open(made) } }
+    }
+
+    /// The agent is made: open its chat on this computer and close the details this notice may sit in.
+    private func open(_ made: Bot) {
+        if let accounts {
+            accounts.selection = BotReference(accountId: accounts.selection?.accountId, computerId: model.computer.id, botId: made.id)
+        }
+        dismissDetails()
     }
 
     private func export() {

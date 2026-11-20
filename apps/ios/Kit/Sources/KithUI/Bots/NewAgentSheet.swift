@@ -13,7 +13,11 @@ public struct NewAgentSheet: View {
     /// Made, but this app can't run its engine: nothing to open.
     @State private var madeOnly: String?
 
-    public init(like bot: Bot? = nil) {
+    /// Where a made agent opens. Nil: the sheet sets the store's selection, which the home list's sheets watch.
+    private let onMade: ((Bot) -> Void)?
+
+    public init(like bot: Bot? = nil, onMade: ((Bot) -> Void)? = nil) {
+        self.onMade = onMade
         _form = State(initialValue: bot.map(NewAgent.Form.init(like:)) ?? NewAgent.Form())
     }
 
@@ -70,6 +74,11 @@ public struct NewAgentSheet: View {
         .background(Palette.background)
     }
 
+    private func open(_ bot: Bot) {
+        if let onMade { onMade(bot) } else { model.selection = bot.id }
+        dismiss()
+    }
+
     private func create() {
         guard !running, ready else { return }
         running = true
@@ -79,17 +88,16 @@ public struct NewAgentSheet: View {
             do {
                 let made = try await model.newKithAgent(form)
                 if let bot = made.bot {
-                    model.selection = bot.id
-                    dismiss()
+                    open(bot)
                 } else {
                     madeOnly = NewAgent.engineNotRunHere(made.agent)
                 }
             } catch {
-                let message = error.localizedDescription
+                // An older host has no New agent method: the fix is on the computer, not in the form.
+                let message = isUnknownMethod(error) ? "Update Kith on your computer to make agents from here." : error.localizedDescription
                 if NewAgent.madeButFailed(message, name: name), let bot = await model.waitForAgentBot(name) {
                     // The agent exists: open it.
-                    model.selection = bot.id
-                    dismiss()
+                    open(bot)
                 } else {
                     withAnimation(Motion.fade) { self.error = message }
                 }
