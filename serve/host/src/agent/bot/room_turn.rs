@@ -69,8 +69,11 @@ impl Actor {
             if turn.author != "owner" && !now.people.contains(&turn.author) {
                 return Err("the person who asked is not in the room any more");
             }
+            // No agent behind the row (a native row never gets here): nobody could be checked, so no turn.
+            let Some(agent) = self.cfg.hq_agent.as_deref().map(str::to_owned) else {
+                return Err("this row has no kith agent behind it");
+            };
             self.hub.room_turn_begins(&self.rt, &now.people);
-            let agent = self.cfg.hq_agent.as_deref().unwrap_or_default().to_owned();
             for person in &now.people {
                 if !crate::api::roles::may_use(person, &agent).await {
                     self.hub.room_turn_ends(&self.rt);
