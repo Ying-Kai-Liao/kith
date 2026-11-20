@@ -4869,10 +4869,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
   Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)
   Copyright (c) 2014-2016, SourceLair Private Company (https://www.sourcelair.com)
   Copyright (c) 2012-2013, Christopher Jeffrey (https://github.com/chjj/)
-- cua-driver (vendored)
-  https://github.com/trycua/cua
-  Computer-use driver shipped beside the app.
-  Copyright (c) 2025 Cua AI, Inc.
 - thinking-orbs (vendored)
   https://github.com/jakubantalik/thinking-orbs
   Ported to SwiftUI (iOS) and React (desktop) as ThinkingOrb.

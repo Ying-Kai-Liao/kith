@@ -42,7 +42,6 @@ if (process.platform === 'win32') {
     build(target, '-p', name)
     copyFileSync(built(target, `${name}.exe`), join(bin, `${name}.exe`))
   }
-  run(process.execPath, [join(root, '../packaging/cua-driver/fetch.mjs'), 'windows-x86_64', out])
 } else {
   const native = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
   const targets = nativeOnly ? [native] : ['aarch64-apple-darwin', 'x86_64-apple-darwin']

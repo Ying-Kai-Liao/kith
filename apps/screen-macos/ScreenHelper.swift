@@ -8,7 +8,6 @@ import CoreGraphics
 final class ScreenHelper {
     private let link = HostLink()
     let input = InputInjector()
-    private let driver = Driver()
     private var sessions: [String: Session] = [:]
     private let badge = ViewingBadge()
     private var lastStatus: [String: AnyHashable] = [:]
@@ -84,11 +83,6 @@ final class ScreenHelper {
             return [String: Any]()
         case "focusedField":
             return try AXTree.focusedField(pid: (p["pid"] as? NSNumber).map { pid_t($0.int32Value) })
-        case "driver":
-            guard CGPreflightScreenCaptureAccess(), AXIsProcessTrusted() else {
-                throw HelperError("Set up Computer access in Kith → Settings on this computer first.")
-            }
-            return ["socket": try await driver.socket()]
         default:
             throw HelperError("unknown method \(method)")
         }
