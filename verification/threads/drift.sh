@@ -33,6 +33,14 @@ FILES=(
   serve/host/src/terminal/claim.rs    # the writer claim: take_as, holder, is_live, Kind::Bot, Kind::Other (unknown kinds are live)
   core/kernel/src/threads.rs          # the Rust twin of kith-sessions (A4-2): take_in, resolve, claim_live, sweep_persons
   core/kernel/src/threads/os.rs       # pid_runs / start time the twin judges a claim by
+  core/kernel/src/threads/cli.rs      # R5: the verbs bin/kith calls (claim, terminal, proc exit 9, epoch, release SID, sweep, lock-alone), in both modes
+  core/kernel/src/threads/resolve.rs  # R5: resolve: the claim first, then the host's busy answer (a modelled row); the agent sent with the claim
+  core/kernel/src/threads/core.rs     # R5: Writer mode = the claims marker or the switch file (fail closed), the core's three ends
+  core/kernel/src/threads/writer.rs   # R5: Taker: core_take (revokeSeen, held / waiting / takeover, lock-alone for the owner only), epoch, release, sweep, proc (never held when down)
+  core/kernel/src/threads/spool.rs    # R5: record: the spool first, session.record, drain, the marker re-check
+  serve/host/src/threads_cmd.rs       # R5: the core client of the verbs (claim.* and session.record through core_call_within), the host's resolveThread
+  serve/host/src/core_front.rs        # R5: core_call_dispatch / core_call_within: the daemon, else the embedded rows, with a deadline
+  kernel/lib/core-switched.txt        # R5: the `threads` line is the switch of kith-sessions' verbs (one decision per launch in bin/kith)
   core/kernel/src/threads/registry.rs # the twin's registry reads and writes
   serve/host/src/hub/actors.rs        # working_lanes, Cmd::ForgetLoaded fan-out
   serve/host/src/terminal/core_writer.rs  # CoreWriter: begin (gate, settle, claim_next, take, redeem), finish, abandon, adopt

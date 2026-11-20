@@ -357,6 +357,11 @@ Git noise: `.git/index`, `.git/objects/*`, `.git/hooks/*` and `.git/config` are 
 matches no entry fails. An entry that matches no difference in the cases that ran is reported as `STALE` and fails the
 run, so the list shrinks when a difference goes away. Every entry needs a reason (a ticket, a B-step of the plan).
 
+An entry may carry `same_after`: `{"old": [[pattern, replacement]..], "new": [..]}`. It then excuses only the difference those
+rewrites explain: each side must have something to rewrite (so each side still shows which form it took), and the two texts must be
+equal once rewritten. Use it when a case masks two forms to two tokens (the SessionStart hook of the session registry:
+`<SESSIONSHOOK-PYTHON>` on OLD, `<SESSIONSHOOK-RUST>` on NEW); a second difference in the same facet still fails.
+
 ## Self-test
 
 `selftest.py` checks the runner itself: the same line is the same, a deliberately different NEW side fails with a diff,

@@ -139,7 +139,13 @@ tty() { script -q /dev/null "$@" >"$T/tty.out" 2>&1 < <(sleep 20); }   # a termi
 rm -rf "$REG"; (cd "$T/work/a" && STUB_SID=run1 tty "$KERNEL/bin/kith" designer)
 cmds=$(python3 -c 'import json; print("|".join(h["hooks"][0]["command"].rsplit("/",1)[-1] for h in json.load(open("'$T/settings.json'"))["hooks"]["SessionStart"]))')
 # which form is the bash terminal launch's to write: the core's when the program has the cost-ledger module, else the Python's
-if [[ -n ${KITH_BIN:-} && -x ${KITH_BIN} ]] && "$KITH_BIN" kernel version 2>/dev/null | grep -q '"cost-ledger"'; then want='kernel tag|kith-sessions" record'; else want='kith-cost" tag|kith-sessions" record'; fi
+# and the registry's hook likewise: `kith kernel threads --kernel K record` when the program has the threads-writer module (R5)
+want_cost='kith-cost" tag'; want_rec='kith-sessions" record'
+if [[ -n ${KITH_BIN:-} && -x ${KITH_BIN} ]]; then
+  "$KITH_BIN" kernel version 2>/dev/null | grep -q '"cost-ledger"' && want_cost='kernel tag'
+  "$KITH_BIN" kernel version 2>/dev/null | grep -q '"threads-writer"' && want_rec='kernel record'
+fi
+want="$want_cost|$want_rec"
 [[ $cmds == *"$want"* ]] && ok "settings: the cost tag hook ($want) then kith-sessions record" || bad "hook list" "$cmds"
 # the rollback writes the Python's
 rm -rf "$REG"; (cd "$T/work/a" && KITH_CORE=python STUB_SID=run1 tty "$KERNEL/bin/kith" designer)
