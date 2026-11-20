@@ -30,7 +30,7 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
     let token: Arc<str> = token.trim().into();
     let bot: Arc<str> = bot.into();
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    // Requests run side by side (an ask_bot can take minutes); their replies share stdout.
+    // Requests run side by side (a send_file can take minutes); their replies share stdout.
     let (replies, mut outbox) = mpsc::unbounded_channel::<Value>();
     tokio::spawn(async move {
         let mut out = tokio::io::stdout();

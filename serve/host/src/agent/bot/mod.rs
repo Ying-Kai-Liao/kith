@@ -253,11 +253,9 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
     BotHandle { tx, task }
 }
 
-/// The working line for a tool call: composing a message reads as typing.
+/// The working line for a tool call.
 fn activity(title: &str) -> &str {
-    if title.contains("send_message") {
-        "Typing…"
-    } else if ["memory__", "memory.", "bot-memory", "shared-memory"].iter().any(|m| title.contains(m)) {
+    if ["memory__", "memory.", "bot-memory", "shared-memory"].iter().any(|m| title.contains(m)) {
         // Memory stays out of the chat, its working line included: the memory settings show it.
         "Thinking…"
     } else {
@@ -679,7 +677,6 @@ async fn recv_incoming(conn: &mut Option<Conn>) -> Option<Incoming> {
 mod tests {
     #[test]
     fn memory_work_reads_as_thinking() {
-        assert_eq!(super::activity("mcp__chat__send_message"), "Typing…");
         assert_eq!(super::activity("mcp__memory__remember"), "Thinking…");
         assert_eq!(super::activity("Write /Users/me/.kith/serve/bots/b/bot-memory/trip.md"), "Thinking…");
         assert_eq!(super::activity("Terminal"), "Terminal");
