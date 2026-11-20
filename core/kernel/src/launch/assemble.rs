@@ -969,11 +969,10 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .unwrap_or_else(|| get(&env, "KITH_PERMISSION_MODE").to_owned());
 
     // ---- the agent's monthly limit
-    let sys = Sys { env: &env };
-    let limit_line = if !p_owner {
-        None
-    } else {
+    let limit_line = if p_owner {
         cost_core(kernel, &p, &env, &home_dir, "", &["limit", agent, "--sh"])
+    } else {
+        None
     };
     if let Some(lim) = limit_line.filter(|l| !l.is_empty()) {
         let v = assignments(&lim);
