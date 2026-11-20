@@ -3,8 +3,7 @@
 // layout; universal). `fast` (the sandbox runs of tools/dev.mjs): the host's `dev-app` profile for this
 // Mac's architecture only, since that build never leaves the Mac that made it. KITH_HOST_NATIVE_ONLY=1
 // does the same for the release profile (CI's unsigned build: its runner has no x86_64 target). Windows:
-// build/native/kith-serve.exe and kith-servew.exe (runs it at sign-in), build/native/kith/bin/kith-stub.exe and kith-holder.exe, plus the computer-use
-// driver the host starts from beside itself. Linux apps use the installed host, so there's
+// build/native/kith-serve.exe and kith-servew.exe (runs it at sign-in), build/native/kith/bin/kith-stub.exe and kith-holder.exe. Linux apps use the installed host, so there's
 // nothing to do there.
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'

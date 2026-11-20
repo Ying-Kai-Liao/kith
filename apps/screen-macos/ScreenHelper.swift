@@ -81,8 +81,6 @@ final class ScreenHelper {
         case "closeAll":
             closeAll()
             return [String: Any]()
-        case "focusedField":
-            return try AXTree.focusedField(pid: (p["pid"] as? NSNumber).map { pid_t($0.int32Value) })
         default:
             throw HelperError("unknown method \(method)")
         }
