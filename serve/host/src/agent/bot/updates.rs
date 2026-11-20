@@ -387,7 +387,11 @@ impl Actor {
             bot_id: Some(self.cfg.id.clone()),
             run_id: None,
             person: whose.as_ref().map(|w| w.0.clone()).unwrap_or_default(),
-            agent: whose.as_ref().map(|w| w.1.clone()).or_else(|| self.cfg.hq_agent.clone()).unwrap_or_default(),
+            agent: whose
+                .as_ref()
+                .map(|w| w.1.to_string())
+                .or_else(|| self.cfg.hq_agent.as_ref().map(ToString::to_string))
+                .unwrap_or_default(),
             answerable_by: answerable_by.clone(),
             in_grants,
             tool: tool_name,

@@ -249,7 +249,22 @@ impl Hub {
         self.store.bot(id).ok().flatten().map_or_else(|| "A deleted bot".into(), |b| b.config.name)
     }
 
-    pub fn create_bot(self: &Arc<Self>, mut cfg: BotConfig) -> Result<Value> {
+    /// A new row. An agent row needs a kith agent's name (the roster sync and `newKithAgent` set one); a room has none.
+    pub fn create_bot(self: &Arc<Self>, cfg: BotConfig) -> Result<Value> {
+        if !cfg.is_group() && cfg.hq_agent.is_none() {
+            bail!("an agent row needs a kith agent's name");
+        }
+        self.insert_bot(cfg)
+    }
+
+    /// A host-native row as an old release left it, for the tests of what the host does with one (the only way to make
+    /// one: `create_bot` refuses).
+    #[cfg(test)]
+    pub fn create_native_row(self: &Arc<Self>, cfg: BotConfig) -> Result<Value> {
+        self.insert_bot(cfg)
+    }
+
+    fn insert_bot(self: &Arc<Self>, mut cfg: BotConfig) -> Result<Value> {
         cfg.id = uuid::Uuid::new_v4().to_string();
         cfg.created_at = crate::store::now_ms();
         cfg.position = self.new_bot_position()?;

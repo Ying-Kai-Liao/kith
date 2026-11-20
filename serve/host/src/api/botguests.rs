@@ -183,7 +183,7 @@ fn agents_here(hub: &Hub) -> Vec<String> {
         .unwrap_or_default()
         .into_iter()
         .filter(|r| !r.deleted && r.config.person.is_none())
-        .filter_map(|r| r.config.hq_agent)
+        .filter_map(|r| r.config.hq_agent.map(String::from))
         .collect();
     agents.sort();
     agents.dedup();
@@ -614,7 +614,7 @@ fn chats_of(hub: &Hub, person: &str) -> Vec<(String, Option<String>)> {
         .unwrap_or_default()
         .into_iter()
         .filter(|r| !r.deleted && r.config.person.as_deref() == Some(person))
-        .map(|r| (r.config.id, r.config.hq_agent))
+        .map(|r| (r.config.id, r.config.hq_agent.map(String::from)))
         .collect()
 }
 

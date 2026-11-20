@@ -5,6 +5,8 @@
 //! microseconds, so async callers use them directly; the one bulk read (a fresh
 //! client's catch-up) is capped per bot, and the history search runs through `spawn_blocking`.
 
+#[cfg(test)]
+mod agent_name_tests;
 mod botguests;
 mod bots;
 mod cards;
@@ -30,7 +32,7 @@ pub use conversations::RoomQueue;
 pub use conversations::{Charge, ConvState, Conversation, EndedWhy};
 pub use devices::{Device, DeviceSource, PushTicket, Scope};
 #[cfg(test)]
-pub use model::Permission;
+pub use model::{AgentName, Permission};
 pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, is_person_message, lane_key};
 pub use model::{native_ids, native_refusal};
 pub use peers::{PeerIn, PeerOut};

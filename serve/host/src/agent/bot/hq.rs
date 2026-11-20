@@ -75,10 +75,6 @@ pub(super) struct ProjectTurn {
 }
 
 impl Actor {
-    pub(super) fn is_hq(&self) -> bool {
-        self.cfg.is_hq()
-    }
-
     /// The room an hq run is for: the group chat of the turn, else the 1:1 of this bot's person (or the owner).
     pub(super) fn run_room(&self) -> String {
         let agent = self.cfg.hq_agent.as_deref().unwrap_or_default();

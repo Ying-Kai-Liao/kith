@@ -438,7 +438,8 @@ mod tests {
         let (hub, dir) = fixture();
         std::fs::create_dir_all(dir.join("bot")).unwrap();
         let mut cfg = hub.store.bot("bot").unwrap().unwrap().config;
-        cfg.hq_agent = Some(format!("{}.bot", dir.file_name().unwrap().to_string_lossy()));
+        cfg.hq_agent =
+            Some(crate::store::AgentName::new(format!("{}.bot", dir.file_name().unwrap().to_string_lossy())).unwrap());
         hub.store.save_bot(&cfg).unwrap();
         hub.send_cmd("bot", Cmd::Reconfigure(Box::new(cfg))).unwrap();
         let lane = Lane::main("bot");
