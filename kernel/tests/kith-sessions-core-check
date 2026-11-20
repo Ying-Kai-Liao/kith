@@ -376,7 +376,8 @@ s = open(sys.argv[1]).read()
 a = s.index('if [[ $p_owner != 1 && $launch -ne 1 ]]; then')
 b = s.index('# Another harness: the same run')
 f = s.index('claims_core() {')
-print(s[f:s.index('\n}\n', f) + 3] + s[a:b])
+# bin/kith's kith_threads (lib/kith-core.sh) runs the Python here: the stand-in kith-sessions below is what is under test
+print('kith_threads() { python3 "$KITH/bin/kith-sessions" "$@"; }\n' + s[f:s.index('\n}\n', f) + 3] + s[a:b])
 PY
 mkdir -p "$T/gk/bin"
 gate() {   # gate <proc exit code> <owner 0|1>: runs the launcher's block against a stand-in kith-sessions

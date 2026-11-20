@@ -210,7 +210,7 @@ kernel/                    the code
   bin/kith-remote            agents on your other machines over ssh: kith remote add, kith ask agent@machine
   bin/kith-memory            search the agents' memory and shared notes
   bin/kith-sched             scheduled agent jobs (cron, launchd)
-  bin/kith-account           extra Claude / Codex logins and the backup chain: kith account add, kith backup list|add|remove
+  bin/kith-account           (a stub for `kith account`) extra Claude / Codex logins and the backup chain: kith account add, kith backup list|add|remove
   PROTOCOL.md              the core memory rules, appended to every agent's prompt
   skills/<name>/SKILL.md   kernel skills an agent reads when the case comes up (keys, rooms, guests, calls…)
   services/<name>.json     shared services (MCP servers, APIs, logins): how to start them, which secrets by name
