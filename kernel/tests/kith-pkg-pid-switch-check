@@ -48,7 +48,7 @@ check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails
 calls() { grep -c "^$1" "$LOG" 2>/dev/null || true; }
 reset() { rm -f "$LOG"; touch "$LOG"; }
 launch() { (cd "$T/work" && "$KITH" echo --launch-json 2>"$T/err"); }
-norm() { sed -e "s#$T#<T>#g" -E -e 's#(\\*")\\*"[^"]*kith-cost\\*" tag#\1COSTTAG#g' -e 's#(\\*")[^"]*kernel cost --kernel [^"]* tag#\1COSTTAG#g' -e 's/@[0-9a-f]{10}/@<h>/g' -e 's/"[0-9a-f]{10}"/"<h>"/g' -e 's/[0-9a-f]{32}/<id>/g'; }
+norm() { sed -e "s#$T#<T>#g" -E -e 's#(\\*")\\*"[^"]*kith-cost\\*" tag#\1COSTTAG#g' -e 's#(\\*")[^"]*kernel cost --kernel [^"]* tag#\1COSTTAG#g' -e 's#(\\*")\\*"[^"]*kith-sessions\\*" record#\1SESSIONSHOOK#g' -e 's#(\\*")[^"]*kernel threads --kernel [^"]* record#\1SESSIONSHOOK#g' -e 's/@[0-9a-f]{10}/@<h>/g' -e 's/"[0-9a-f]{10}"/"<h>"/g' -e 's/[0-9a-f]{32}/<id>/g'; }
 
 # A registered project the work folder belongs to, as the Python wrote it.
 mkdir -p "$T/work/proj"

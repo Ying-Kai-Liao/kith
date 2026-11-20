@@ -80,9 +80,10 @@ write the thread, so `Threads.tla` and `base.consts` are unchanged:
   - the core's `terminal.open` Files path (`core/runtime/src/terminal.rs`, `claim::take` after one `switched` read, no re-check
     after the link) runs inside the daemon, which holds the core's lifetime lock; the step needs that lock, so the two never
     overlap;
-  - the Rust twin `kith kernel threads` (`core/kernel/src/threads.rs`) has no tombstone check at all, and nothing calls it
-    (`serve/host/src/threads_cmd.rs`: not routed from `kith`). **Before `kith` is routed to it**, it needs the same "link, then
-    read the tombstone again, take the file back if switched" step as `kith-sessions` `take_claim`.
+  - the Rust twin `kith kernel threads` (`core/kernel/src/threads.rs`) is routed from `kith` since R5 and has the same step: its
+    file take re-checks the mode right after the link, under the claim's lock, and takes its own file back (only while the file
+    still names its pid and start time); the library returns `Outcome::Switched` and the CLI (`threads/writer.rs`) claims in the
+    core, while the daemon's `terminal.open` refuses. `proc` and Files-mode `record` re-check likewise.
 
 The changes from `1978d087` to `b3f38db7` were re-read at that sync: the core's claim list and reconcile check (`claims.rs`), the writer
 mode re-checks, the abandon order (`stop`, `killpg`, `settle_gone`, already `AbandonKeepsLock`), the stray sweep and
@@ -234,7 +235,7 @@ One step in the code is one action here. A check followed later by the act it gu
 (`AppGate` then `Enqueue` then `HostStart` then `HostClaim`; `TermClaim` then `TermResolve` then `TermUp`;
 `TakeRecheck` then `TakeSignal`), because another writer can act between them.
 
-## The Rust twin (A4-2, not switched)
+## The Rust twin (A4-2; routed from `kith` by R5 while `threads` is in `lib/core-switched.txt`)
 
 `core/kernel/src/threads*` (`kith kernel threads ...`) ports the kernel half of the table above step for step: the
 same order in `resolve` (claim, then ask the host, then the checks), `take_in` = `take_claim` (temp file, lock file,

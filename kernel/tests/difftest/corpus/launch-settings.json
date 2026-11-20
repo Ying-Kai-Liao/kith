@@ -161,6 +161,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -334,6 +350,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -511,6 +543,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -681,6 +729,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -858,6 +922,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -1031,6 +1111,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -1207,6 +1303,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -1388,6 +1500,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -1562,6 +1690,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -1740,6 +1884,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -1914,6 +2074,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -2092,6 +2268,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -2266,6 +2458,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -2444,6 +2652,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -2618,6 +2842,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -2796,6 +3036,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -2966,6 +3222,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -3140,6 +3412,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -3306,6 +3594,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -3478,6 +3782,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -3666,6 +3986,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -3852,6 +4188,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -4024,6 +4376,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -4194,6 +4562,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -4372,6 +4756,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -4543,6 +4943,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -4718,6 +5134,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -4889,6 +5321,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -5072,6 +5520,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -5251,6 +5715,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -5434,6 +5914,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -5613,6 +6109,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -5799,6 +6311,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -5978,6 +6506,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -6161,6 +6705,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -6340,6 +6900,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -6534,6 +7110,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -6717,6 +7309,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -6904,6 +7512,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -7084,6 +7708,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -7268,6 +7908,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -7447,6 +8103,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -7630,6 +8302,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -7809,6 +8497,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -7994,6 +8698,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -8301,6 +9021,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -8606,6 +9342,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -8790,6 +9542,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -8965,6 +9733,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -9151,6 +9935,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -9326,6 +10126,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -9512,6 +10328,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -9687,6 +10519,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -9870,6 +10718,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ],
@@ -10050,6 +10914,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -10220,6 +11100,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -10397,6 +11293,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -10571,6 +11483,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -10753,6 +11681,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -10931,6 +11875,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -11114,6 +12074,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -11289,6 +12265,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -11473,6 +12465,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -11663,6 +12671,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -11851,6 +12875,22 @@
     "<COSTTAG>"
    ],
    [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
     "<h>"
    ]
@@ -12033,6 +13073,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
@@ -12218,6 +13274,22 @@
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
     "<COSTTAG>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
    ],
    [
     "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",

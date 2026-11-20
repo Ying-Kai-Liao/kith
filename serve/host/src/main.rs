@@ -545,7 +545,7 @@ enum KernelCmd {
         args: Vec<String>,
     },
     /// The writer claim of a Claude session and the session registry: `record`, `resolve`, `claim`, `terminal`, `proc`,
-    /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release` and `holder` (not routed from `kith` yet).
+    /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release`, `release-pid`, `holder`, `epoch`, `pick` and `latest` (`bin/kith` and `kith-core.sh` route all of them but `run`).
     // -h/--help belong to kith-sessions' own usage text, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Threads {

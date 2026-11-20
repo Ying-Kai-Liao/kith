@@ -451,11 +451,27 @@ pub(crate) fn knows_module(bin: &Path, module: &str) -> bool {
 /// Python hook, `bin/kith-cost tag`, which stays as the rollback and for runs that hold the old path. `kith_core_bin cost` in
 /// lib/kith-core.sh decides the same way for the bash launch.
 pub fn cost_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Option<String> {
+    switched_bin(kernel, env, kith_bin, "cost", "cost-ledger")
+}
+
+/// The program the `SessionStart` hook runs for the session registry (`kith kernel threads record`): `kith_bin` when `threads`
+/// is switched and the program has the `threads-writer` module (every `kith-sessions` verb in both modes of the claims, not the
+/// Files-mode `threads` an older program lists). `None` keeps `bin/kith-sessions record`. `kith_core_bin threads` in
+/// lib/kith-core.sh decides the same way for the bash launch.
+pub fn threads_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Option<String> {
+    switched_bin(kernel, env, kith_bin, "threads", "threads-writer")
+}
+
+fn switched_bin(
+    kernel: &Path,
+    env: &Env,
+    kith_bin: Option<&str>,
+    verb: &str,
+    module: &str,
+) -> Option<String> {
     kith_bin
         .filter(|b| {
-            !b.is_empty()
-                && switched(kernel, env, "cost")
-                && knows_module(Path::new(b), "cost-ledger")
+            !b.is_empty() && switched(kernel, env, verb) && knows_module(Path::new(b), module)
         })
         .map(str::to_owned)
 }
@@ -1374,6 +1390,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
     let ledger_bin = ledger_hook_bin(kernel, &env, kith_bin.as_deref());
     let cost_bin = cost_hook_bin(kernel, &env, kith_bin.as_deref());
+    let threads_bin = threads_hook_bin(kernel, &env, kith_bin.as_deref());
     if perm_mode.is_empty() {
         perm_mode.clear();
     }
@@ -1406,6 +1423,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             fence_bin: fence_bin.as_deref(),
             ledger_bin: ledger_bin.as_deref(),
             cost_bin: cost_bin.as_deref(),
+            threads_bin: threads_bin.as_deref(),
             plugins_json: &plugins_json,
             owner_terminal: false,
             api_helper: &bget(&be, "backup_api_helper"),
