@@ -168,7 +168,8 @@ pub struct BotConfig {
     pub created_at: i64,
 }
 
-/// The name of the kith agent behind an agent row. Never empty or blank: the one way to make one is [`AgentName::new`].
+/// The name of the kith agent behind an agent row. It only refuses blank names (the kernel's own name rule is not
+/// re-checked here: an old row with an odd name must still load); the one way to make one is [`AgentName::new`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct AgentName(String);

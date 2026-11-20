@@ -72,7 +72,7 @@ impl Actor {
             self.hub.room_turn_begins(&self.rt, &now.people);
             let agent = self.cfg.hq_agent.as_deref().unwrap_or_default().to_owned();
             for person in &now.people {
-                if agent.is_empty() || !crate::api::roles::may_use(person, &agent).await {
+                if !crate::api::roles::may_use(person, &agent).await {
                     self.hub.room_turn_ends(&self.rt);
                     return Err("somebody in the room may not use this agent any more");
                 }
