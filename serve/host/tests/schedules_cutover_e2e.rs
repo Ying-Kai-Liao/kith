@@ -702,12 +702,14 @@ fn count(lab: &Lab, sql: &str) -> i64 {
 async fn kith_schedule_on_a_switched_mac_talks_to_the_core_in_kith_scheds_words() {
     let lab = Lab::new("e", None);
     lab.step_before_schedules();
-    let hourly = json!({"id": "hourly", "cron": "0 * * * *", "task": "do it"});
+    // Feb 31 is a cron no month has: neither kith-sched nor the core fires it at the wall clock's hour, so the run cannot
+    // change `ls` or the counts whatever time it runs at, and both sides report the same `next` (none).
+    let hourly = json!({"id": "hourly", "cron": "0 0 31 2 *", "task": "do it"});
     std::fs::write(lab.kith_home.join("agents/mel/jobs.json"), format!("{}\n", json!([hourly]))).unwrap();
     // What kith-sched itself answers before the switch: the shapes, and the file `add` leaves, to compare with after it.
     let (rc, before_ls) = cli_json(&lab, &["ls", "mel"]);
     assert_eq!(rc, 0, "{before_ls}");
-    let add = |agent: &'static str| ["add", agent, "0 9 * * *", "Do B!", "-m", "sonnet", "-e", "low"];
+    let add = |agent: &'static str| ["add", agent, "0 0 31 2 *", "Do B!", "-m", "sonnet", "-e", "low"];
     let (rc, before_add) = cli_json(&lab, &add("house"));
     assert_eq!(rc, 0, "{before_add}");
     let house_file = jobs_text(&lab, "house");
@@ -741,7 +743,7 @@ async fn kith_schedule_on_a_switched_mac_talks_to_the_core_in_kith_scheds_words(
     let guest = lab
         .cmd("python3")
         .arg(lab.kernel.join("bin/kith-sched"))
-        .args(["add", "mel", "5 5 * * *", "guest job", "--json"])
+        .args(["add", "mel", "0 0 31 2 *", "guest job", "--json"])
         .env("KITH_PERSON", "sam")
         .output()
         .unwrap();
@@ -796,7 +798,7 @@ async fn kith_schedule_on_a_switched_mac_talks_to_the_core_in_kith_scheds_words(
     // Without a daemon nothing is done and the line says so: the files are the core's, so there is no fallback.
     lab.stop_host(host);
     let before = jobs_text(&lab, "mel");
-    let out = lab.sched(None, &["add", "mel", "1 1 * * *", "late"]);
+    let out = lab.sched(None, &["add", "mel", "0 0 31 2 *", "late"]);
     assert_eq!(out.status.code(), Some(1), "{}", text(&out));
     assert!(text(&out).contains("Kith core is not answering"), "{}", text(&out));
     assert_eq!(jobs_text(&lab, "mel"), before);
