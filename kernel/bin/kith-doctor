@@ -430,6 +430,16 @@ def reason_network():
              'agent runs directly, past kith-auth. reason network setup --remove (or untick Claude Code in setup)')
 
 
+def is_sh_stub(path):
+    """A kernel script that is a forwarding stub (first line a sh shebang). The jobs kith's own installers write (sched, backup,
+    serve) name Python scripts and rewrite themselves; only a job nobody rewrites is worth a warning."""
+    try:
+        with open(path, 'rb') as f:
+            return f.readline().startswith(b'#!/bin/sh')
+    except OSError:
+        return False
+
+
 def jobs():
     plists = sorted([*(HOME / 'Library/LaunchAgents').glob('dev.kith.*.plist'),
                      *(HOME / 'Library/LaunchAgents').glob('dev.hq.*.plist')])   # dev.hq.*: installed before the rename
@@ -450,9 +460,9 @@ def jobs():
             bad(f'{label}: runs {missing[0]}, which is not there (reinstall the job)')
             continue
         # A kernel script as the job's program stops working when its stub is removed (retire-python R9): it has to be rewritten first.
-        named = [a for a in argv if re.search(r'/kernel/bin/[^/]+$', a)]
+        named = [a for a in argv if re.search(r'/kernel/bin/[^/]+$', a) and is_sh_stub(a)]
         if named:
-            warn(f'{label}: runs the kernel script {named[0]}; a later release replaces it with a forwarding stub and then removes it, so this job needs rewriting before that')
+            warn(f'{label}: runs the kernel stub {named[0]} through a launcher; a later release removes the stub, so this job needs rewriting before that')
         info = run('launchctl', 'print', f'gui/{uid}/{label}').stdout
         if not info:
             bad(f'{label}: not loaded (launchctl bootstrap gui/{uid} {f})')

@@ -437,12 +437,17 @@ print("p_env_names=%s" % q(" ".join(env)))')"
     . "$KITH/lib/kith-core.sh"
     [[ -n ${_kith_core_primed:-} ]] || kith_core_prime
     # The stub says on stderr why when there is no program with the ledger (a Mac not yet on the release): that line shows.
-    if ! spent=$(KITH_PERSON_WAS=$p_was kith_cost spent "$KITH_PERSON" "$p_budget_agent" 2>"${TMPDIR:-/tmp}/kith-spent.$$"); then
-      cost_why=$(cat "${TMPDIR:-/tmp}/kith-spent.$$" 2>/dev/null); rm -f "${TMPDIR:-/tmp}/kith-spent.$$"
+    cost_err=$(mktemp "${TMPDIR:-/tmp}/kith-spent.XXXXXX" 2>/dev/null) || cost_err=/dev/null
+    if ! spent=$(KITH_PERSON_WAS=$p_was kith_cost spent "$KITH_PERSON" "$p_budget_agent" 2>"$cost_err"); then
+      cost_why=$(cat "$cost_err" 2>/dev/null)
+      [[ $cost_err == /dev/null ]] || rm -f "$cost_err"
       [[ -z $cost_why ]] || echo "$cost_why" >&2
       [[ $p_owner == 1 ]] && spent=0 || { echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost failed); not running without the budget check" >&2; exit 3; }
-    elif rm -f "${TMPDIR:-/tmp}/kith-spent.$$"; [[ $p_owner == 0 && ! $spent =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-      echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost gave '$spent'); not running without the budget check" >&2; exit 3
+    else
+      [[ $cost_err == /dev/null ]] || rm -f "$cost_err"
+      if [[ $p_owner == 0 && ! $spent =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost gave '$spent'); not running without the budget check" >&2; exit 3
+      fi
     fi
     if python3 -I -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= float(sys.argv[2]) else 1)' "$spent" "$p_budget"; then
       if [[ -z $p_budget_agent ]]; then   # the owner's bots, capped together on every agent (kith-auth bots-cap)
@@ -611,7 +616,14 @@ fi
 # turn with a card), tells and goes on, or holds only when this Mac chose hold (kith AGENT set at-limit hold). A spend
 # that can't be read is no reason to stop the owner. Anyone else's runs keep their membership budget above.
 # (No program with the ledger: the stub's one line shows, and the run goes on without the limit.)
-if [[ $p_owner == 1 ]] && lim=$(kith_cost limit "$agent" --sh) && [[ -n $lim ]]; then
+lim="" limit_failed=0
+if [[ $p_owner == 1 ]]; then
+  limit_err=$(mktemp "${TMPDIR:-/tmp}/kith-limit.XXXXXX" 2>/dev/null) || limit_err=/dev/null
+  lim=$(kith_cost limit "$agent" --sh 2>"$limit_err") || limit_failed=1
+  [[ $limit_failed == 0 ]] || cat "$limit_err" >&2 2>/dev/null
+  [[ $limit_err == /dev/null ]] || rm -f "$limit_err"
+fi
+if [[ $limit_failed == 0 && -n $lim ]]; then
   l_over=0 l_at=ask l_text=""
   eval "$lim"
   if [[ $l_over == 1 ]]; then

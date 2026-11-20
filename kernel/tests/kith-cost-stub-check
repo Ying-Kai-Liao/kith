@@ -37,7 +37,9 @@ for as in sh python3; do
   run $as "$T/link" sync
   check "$as: through a link the kernel folder is still the real one" "[ $rc = 5 ] && [ \"\$out\" = \"args: kernel cost --kernel $T/rel/share/kith/kernel sync\" ]"
   run $as "$S" tag
-  check "$as: an argument that looks like a flag goes through untouched" "run $as '$S' -h; [ \"\$out\" = \"args: kernel cost --kernel $T/rel/share/kith/kernel -h\" ]"
+  check "$as: tag (what a session on the old hook path runs) forwards to the program" "[ $rc = 5 ] && [ \"\$out\" = \"args: kernel cost --kernel $T/rel/share/kith/kernel tag\" ]"
+  run $as "$S" -h
+  check "$as: an argument that looks like a flag goes through untouched" "[ \"\$out\" = \"args: kernel cost --kernel $T/rel/share/kith/kernel -h\" ]"
 done
 
 # No program: the stub alone in a folder with nothing around it.

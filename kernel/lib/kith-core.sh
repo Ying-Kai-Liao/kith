@@ -112,7 +112,7 @@ kith_threads() {
 }
 
 # kith_cost ARGS...   `kith-cost ARGS`: the stub, which runs `kith kernel cost ARGS` on a program that has `cost-ledger` and
-# otherwise says so on stderr and fails (exit 3). Given the program the launch already looked up, the stub does not look again.
+# otherwise says so on stderr and fails (exit 3). Given the program the launch already looked up (KITH_BIN), the stub only asks it for its modules once.
 # A subshell, so `KITH_PERSON_WAS=.. kith_cost ..` reaches it.
 kith_cost() {
   ( [[ -z ${_kith_core_bin:-} || ${_kith_core_ver:-} != *'"cost-ledger"'* ]] || export KITH_BIN=$_kith_core_bin
