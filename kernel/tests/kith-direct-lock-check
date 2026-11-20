@@ -196,7 +196,10 @@ RUNNER=$T/run-py LABEL=py rows_busy 55555555-5555-4555-8555-555555555555
 # bin/kith itself on a program that lists it. The program is wrapped so its calls are logged: the check asserts which side answered
 # (the Python `run` must stay the rollback, so KITH_CORE=python must not reach the program).
 KB=${KITH_BIN:-}
-if [[ -n $KB && -x $KB ]] && "$KB" kernel version 2>/dev/null | grep -q '"threads-run"'; then
+if [[ -n $KB ]] && ! { [[ -x $KB ]] && "$KB" kernel version 2>/dev/null | grep -q '"threads-run"'; }; then
+  # a program was named, so a build that lost the module must fail here, not skip
+  bad "KITH_BIN ($KB) does not list the threads-run module"
+elif [[ -n $KB ]]; then
   printf '#!/bin/sh\necho "$*" >> "%s/kith-calls"\nexec "%s" "$@"\n' "$T" "$KB" > "$T/kith-wrap"; chmod +x "$T/kith-wrap"
   printf '#!/bin/sh\nexec "%s" kernel threads --kernel "%s" "$@"\n' "$T/kith-wrap" "$KERNEL" > "$T/run-rust"; chmod +x "$T/run-rust"
   : > "$T/kith-calls"

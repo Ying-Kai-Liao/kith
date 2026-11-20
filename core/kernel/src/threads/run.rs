@@ -503,7 +503,8 @@ pub fn run(
         }
     }
     runproc::forget_child();
-    spawned.saved.restore();
+    // The handlers stay until the last step is done: a TERM or HUP now has no child to go to, and must not end the wrapper
+    // before the claim is back and the wake queue is told.
     after(
         c,
         host,
@@ -517,6 +518,7 @@ pub fn run(
     if let Some((r, _)) = status {
         ended = stub_verdict(r, ended, say);
     }
+    spawned.saved.restore();
     if ended < 0 { 128 - ended } else { ended }
 }
 
