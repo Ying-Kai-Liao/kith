@@ -156,14 +156,9 @@ impl Actor {
                     cfg.connectors != self.cfg.connectors || cfg.computer != self.cfg.computer || memory_changed;
                 // Places with a folder of their own keep working in it; the rest follow the bot's default.
                 let default_changed = folder::default_of(&cfg) != folder::default_of(&self.cfg);
-                // Live sessions switch before their next turn (see `fast_mode`).
-                let fast_changed = cfg.fast_mode != self.cfg.fast_mode;
                 // Name, description and skill changes reach the agent as a profile update
                 // on the next message (see `context`).
                 self.cfg = cfg;
-                if fast_changed {
-                    self.fast_mode_changed();
-                }
                 if memory_changed {
                     // Claude Code's notes come or go on the memory screen.
                     memory::screen_changed(&self.hub, &self.cfg.id);

@@ -1,5 +1,5 @@
 //! A real host driving scripted ACP agents: Stop on an agent that ignores it, room turns
-//! that a newer group message replaced, and Fast mode across session resumes.
+//! that a newer group message replaced, and an old app's Fast mode switch, which is ignored.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -144,82 +144,30 @@ fn speed_reply(speed: &'static str, word: &'static str) -> impl Fn(&Value) -> bo
 }
 
 const FAST_ON: &str = r#""configId": "fast", "value": "on""#;
-const FAST_OFF: &str = r#""configId": "fast", "value": "off""#;
 
+/// Fast mode is gone: an old app's `fastMode` is accepted and ignored, the agent's option is never switched, and the
+/// bot always reports the fixed values that make an old app hide its switch.
 #[tokio::test]
-async fn fast_mode_switches_live_sessions_without_a_restart() {
+async fn an_old_apps_fast_mode_is_ignored() {
     if python_missing() {
         return;
     }
     let host = Host::start().await;
     let bot = host.bot("Quick", "tests/fixtures/fast_mode_agent.py").await;
     let calls = host.home.join("Quick").join("calls.jsonl");
-    let log = || std::fs::read_to_string(&calls).unwrap();
 
-    host.call("updateBot", json!({"id": bot, "fastMode": true})).await;
-    host.call("send", json!({"botId": bot, "text": "one"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast on", "one")).await;
-    assert_eq!(log().matches(FAST_ON).count(), 1);
-    let sync = common::snapshot(&host.base, &host.token).await;
-    assert_eq!(sync["bots"][0]["fastModeSupport"], "offered");
-
-    // Off and on again: the same agent process switches the live session before each turn.
-    host.call("updateBot", json!({"id": bot, "fastMode": false})).await;
-    host.call("send", json!({"botId": bot, "text": "two"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "two")).await;
-    host.call("updateBot", json!({"id": bot, "fastMode": true})).await;
-    host.call("send", json!({"botId": bot, "text": "three"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast on", "three")).await;
-    let log = log();
-    assert!(!log.contains("session/load"), "{log}");
-    assert_eq!((log.matches(FAST_ON).count(), log.matches(FAST_OFF).count()), (2, 1), "{log}");
-}
-
-#[tokio::test]
-async fn an_agent_without_config_options_has_no_fast_mode() {
-    if python_missing() {
-        return;
+    for on in [true, false, true] {
+        let saved = host.call("updateBot", json!({"id": bot, "fastMode": on})).await;
+        assert_eq!(saved["bot"]["fastMode"], false);
     }
-    let host = Host::start().await;
-    let bot = host.bot("Plain", "tests/fixtures/fast_mode_agent.py").await;
-    std::fs::write(host.home.join("Plain").join("plain"), "").unwrap();
-    let support = || async { common::snapshot(&host.base, &host.token).await["bots"][0]["fastModeSupport"].clone() };
-    assert_eq!(support().await, "unknown", "clients offer /fast until a session says");
-
     host.call("send", json!({"botId": bot, "text": "one"})).await;
     host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "one")).await;
-    assert_eq!(support().await, "unsupported");
-}
-
-#[tokio::test]
-async fn a_refused_fast_mode_is_reported_and_not_asked_for_again() {
-    if python_missing() {
-        return;
-    }
-    let host = Host::start().await;
-    let bot = host.bot("Refused", "tests/fixtures/fast_mode_agent.py").await;
-    let folder = host.home.join("Refused");
-    std::fs::write(folder.join("refuse"), "").unwrap();
-    let log = || std::fs::read_to_string(folder.join("calls.jsonl")).unwrap();
-
-    host.call("updateBot", json!({"id": bot, "fastMode": true})).await;
-    host.call("send", json!({"botId": bot, "text": "one"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "one")).await;
+    let log = std::fs::read_to_string(&calls).unwrap();
+    assert_eq!(log.matches(FAST_ON).count(), 0, "{log}");
     let state = &common::snapshot(&host.base, &host.token).await["bots"][0];
-    assert_eq!(state["fastModeSupport"], "refused");
-    assert_eq!(state["fastModeIssue"], "requires extra usage");
-    assert_eq!(state["fastMode"], true, "the user's choice stays");
-
-    host.call("send", json!({"botId": bot, "text": "two"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "two")).await;
-    assert_eq!(log().matches(FAST_ON).count(), 1, "asked again after a refusal");
-
-    // Changing the setting asks again.
-    host.call("updateBot", json!({"id": bot, "fastMode": false})).await;
-    host.call("updateBot", json!({"id": bot, "fastMode": true})).await;
-    host.call("send", json!({"botId": bot, "text": "three"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "three")).await;
-    assert_eq!(log().matches(FAST_ON).count(), 2);
+    assert_eq!(state["fastMode"], false);
+    assert_eq!(state["fastModeSupport"], "unsupported");
+    assert!(state["fastModeIssue"].is_null());
 }
 
 #[tokio::test]

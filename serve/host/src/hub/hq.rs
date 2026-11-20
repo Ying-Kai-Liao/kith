@@ -222,7 +222,6 @@ mod tests {
             (json!({"model": "opus"}), "kith house set model"),
             (json!({"backend": "codex"}), "kith house set harness"),
             (json!({"modelOptions": {"effort": "high"}}), "kith house set effort"),
-            (json!({"fastMode": true}), "no Fast mode"),
             (json!({"connectors": ["github"]}), "kith house connect"),
             (json!({"skills": ["pdf"]}), "kith house skill add"),
         ] {
@@ -231,11 +230,14 @@ mod tests {
             let e = hub.update_bot(&patch).unwrap_err().to_string();
             assert!(e.contains(command), "{patch}: {e}");
         }
-        hub.update_bot(
-            &json!({"id": bot.id, "backend": "claude", "model": null, "modelOptions": {}, "fastMode": false,
-            "connectors": [], "skills": []}),
-        )
-        .unwrap();
+        // An old app's Fast mode switch is no change at all, on or off.
+        for fast in [true, false] {
+            hub.update_bot(
+                &json!({"id": bot.id, "backend": "claude", "model": null, "modelOptions": {}, "fastMode": fast,
+                "connectors": [], "skills": []}),
+            )
+            .unwrap();
+        }
         let done = hub.apply_hq_agents(&[agent(&dir, "house", "keeps the house tidy")]).unwrap();
         assert!(done.created.is_empty(), "never a second bot: {done:?}");
         let all = bots(&hub);

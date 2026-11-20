@@ -1,6 +1,5 @@
 //! The bot's ACP sessions: starting its agent, new/load/fork, thread sessions.
 
-use super::fast_mode::Listing;
 use super::launch::{claude_meta, launch_commands, select_model, start_agent, system_prompt};
 use super::{Actor, Conn, Instructions, NoticeStyle};
 use crate::agent::acp::{self, Incoming};
@@ -271,7 +270,6 @@ impl Actor {
             {
                 conn.loaded.insert(sid.clone(), Instant::now());
                 self.set_session(slot, Some(&sid));
-                self.note_options(&sid, &res, Listing::Session);
                 self.set_bot_mode(&sid, &res).await;
                 context::adopt(&self.hub.store, &self.cfg, &sid, parent.system.clone(), parent.memory.clone())?;
                 memory::opened(&self.hub.store, &self.cfg.id, &sid, &parent.memory)?;
@@ -331,16 +329,13 @@ impl Actor {
                     let loaded = res.clone();
                     // A resumed session can come back on the agent's last-used model (Cursor
                     // keeps one for all its sessions), so the bot's own is set again.
-                    let res = if res.get("configOptions").is_some() || res.get("models").is_some() {
+                    if res.get("configOptions").is_some() || res.get("models").is_some() {
                         let acp = conn.acp.clone();
                         let selected = select_model(&acp, &res, &sid, &self.cfg).await;
-                        self.drop_if_silent(selected)?
-                    } else {
-                        res
-                    };
+                        self.drop_if_silent(selected)?;
+                    }
                     let Some(conn) = self.conn.as_mut() else { bail!("agent not running") };
                     conn.loaded.insert(sid.clone(), Instant::now());
-                    self.note_options(&sid, &res, Listing::Session);
                     self.set_bot_mode(&sid, &loaded).await;
                     if let Some(s) = snapshot {
                         // Its system prompt now names the bot and holds memory as rendered.
@@ -377,8 +372,7 @@ impl Actor {
         conn.loaded.insert(sid.clone(), Instant::now());
         let acp = conn.acp.clone();
         let selected = select_model(&acp, &res, &sid, &self.cfg).await;
-        let options = self.drop_if_silent(selected)?;
-        self.note_options(&sid, &options, Listing::Session);
+        self.drop_if_silent(selected)?;
         self.set_bot_mode(&sid, &res).await;
         self.set_session(slot, Some(&sid));
         self.session_fresh = true;

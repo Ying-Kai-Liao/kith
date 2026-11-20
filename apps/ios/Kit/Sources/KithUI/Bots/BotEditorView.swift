@@ -230,10 +230,7 @@ struct BotSettingsForm: View {
     }
 
     private var modelPicker: some View {
-        AgentModelPicker(backend: draft.backend, selection: $draft.model, options: $draft.modelOptions,
-                         fastMode: Binding(get: { draft.fastMode ?? false }, set: { on in
-                             withAnimation(Motion.reduced(Motion.fade, reduceMotion)) { draft.fastMode = on }
-                         }), bot: draft.id.flatMap { model.bots[$0] })
+        AgentModelPicker(backend: draft.backend, selection: $draft.model, options: $draft.modelOptions)
     }
 
     @ViewBuilder private var sections: some View {

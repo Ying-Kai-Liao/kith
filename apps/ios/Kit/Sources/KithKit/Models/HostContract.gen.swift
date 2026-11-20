@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "98263f4dab0b900f53daf4ee5f6a9af81e8a02c4b97eb674d57fa292e411f863"
+    public static let sha256 = "54712c01874595d9ab8587f9999a6efca93e2c59b246057b23fc047a53519458"
 }
 
 extension HostContract {
@@ -429,7 +429,7 @@ extension HostContract {
         }
     }
 
-    /// A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev.
+    /// A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev. Deprecated: fastMode, fastModeSupport and fastModeIssue. Fast mode is gone; the host always sends false, "unsupported" and null so an older app hides its switch, and ignores a fastMode it is sent.
     public struct Bot: Codable, Hashable, Sendable {
         public var id: String
         public var kind: BotKind

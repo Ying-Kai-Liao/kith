@@ -21,7 +21,6 @@
 mod call_model;
 mod compaction;
 mod failover;
-mod fast_mode;
 mod files;
 mod hq;
 mod launch;
@@ -37,7 +36,6 @@ mod updates;
 pub(crate) use launch::{launch_commands, select_model, start_agent, system_prompt};
 
 use crate::agent::acp::{self, Acp, Incoming};
-use crate::agent::config::FastModeSupport;
 use crate::agent::gate::{Admission, Permit};
 use crate::chat::context::{Identity, Snapshot};
 use crate::chat::group::GroupTurn;
@@ -171,9 +169,6 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         hub.store.kv_get(&lane_key("session", &cfg.id, &home)).filter(|s| !s.is_empty())
     };
     let interrupted = place::interrupted(&hub.store, &rt, &home);
-    let fast_support = FastModeSupport::from_stored(hub.store.kv_get(&fast_mode::stored_key(&cfg.id)).as_deref());
-    let support = fast_support.clone();
-    hub.set_runtime(&rt, |r| r.fast_mode = support);
     let retire_after = lifecycle::retire_after(&hub.store);
     let actor = Actor {
         hub,
@@ -247,7 +242,6 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         attempt_effects: false,
         exhausted: None,
         tools_changed: false,
-        fast_support,
         idle_checked: Instant::now(),
         busy_at: Instant::now(),
         own_tx: tx.downgrade(),
@@ -318,8 +312,6 @@ pub(crate) struct Conn {
     /// Sessions already created or loaded in this process, and when each was last used.
     loaded: HashMap<String, Instant>,
     started: Instant,
-    /// Each live session's Fast mode option, as the agent last listed it.
-    fast_options: HashMap<String, Value>,
     /// The agent reports compactions (`compaction_update`); until it does, a fall in usage stands in for them.
     reports_compaction: bool,
     /// Each session's context use and window size at its last `usage_update`.
@@ -505,8 +497,6 @@ struct Actor {
     /// Connectors changed: restart the agent before the next turn so the
     /// session is resumed with the new MCP servers.
     tools_changed: bool,
-    /// What the agent says about Fast mode; clients see it in the bot's runtime.
-    fast_support: FastModeSupport,
     /// When idle sessions and agents were last looked for.
     idle_checked: Instant,
     /// When this actor was last in use (see `lifecycle::retire_if_unused`).

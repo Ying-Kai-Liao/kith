@@ -90,7 +90,7 @@ function callModelName(id: string): string {
 }
 
 export interface HqSetting {
-  key: 'permission' | 'callModel' | 'harness' | 'model' | 'effort' | 'fastMode'
+  key: 'permission' | 'callModel' | 'harness' | 'model' | 'effort'
   label: string
   /** What hq reports, or plain words when it has nothing. */
   value: string
@@ -149,7 +149,6 @@ export function hqSettings(info: Pick<KithInfo, 'permissionMode' | 'callModel' |
       value: info ? (info.effort ?? 'default') : '…',
       hint: 'How hard the agent thinks. Kept by Kith for this agent.',
     },
-    { key: 'fastMode', label: 'Fast mode', editable: false, value: 'Off', hint: `${SET_IN_KITH}: hq has no Fast mode.` },
   ]
 }
 

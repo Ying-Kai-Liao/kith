@@ -22,7 +22,7 @@ import { TurnsChip, TurnsPopover } from './ConversationLine'
 import { clampTurns, DEFAULT_TURNS } from '@shared/conversation'
 import { ComposerAttachment } from './ComposerAttachment'
 import { useDictation } from './dictation'
-import { builtInCommand, slashCommands, slashQuery, type SlashCommand } from './slash-commands'
+import { slashCommands, slashQuery, type SlashCommand } from './slash-commands'
 
 type Trailing = 'interrupt' | 'stop' | 'call' | 'send'
 
@@ -156,15 +156,7 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
 
   const run = (command: SlashCommand) => {
     if (!bot) return
-    switch (command.action.kind) {
-      case 'fast':
-        store.setFastMode(bot, !bot.fastMode)
-        setDraft('')
-        break
-      case 'skill':
-        setDraft(`/${command.action.id} `)
-        break
-    }
+    setDraft(`/${command.action.id} `)
     field.current?.focus()
   }
   const menu = useCommandMenu(draft, commands, run)
@@ -187,8 +179,6 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
   const submit = () => {
     // Send while recording: the recording ends and what it heard goes with the message.
     if (dictation.listening) dictation.stop()
-    const command = files.length ? null : builtInCommand(bot, draft)
-    if (command) return run(command)
     if (!canSend) return
     const into = goesOn
     const text = withQuote(draft, quote)

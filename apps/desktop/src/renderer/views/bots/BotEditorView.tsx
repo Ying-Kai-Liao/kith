@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fastModeRefusal, fastModeShown } from '@shared/fast-mode'
 import type { ProjectInfo } from '@shared/place-folders'
 import { draftOf, type BotDraft, type DirListing } from '@shared/models'
 import { AgentIcon } from '../../components/AgentIcon'
@@ -147,21 +146,10 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
       <AutoTextArea className="field-box" value={draft.description} placeholder="e.g. Reviews PRs. Never pushes without asking." minRows={3} maxRows={8} onChange={(v) => set('description', v)} />
     </Field>
   )
-  // hq is the one source of an hq bot's permission, model, effort and Fast mode: one set of rows replaces Kith's own.
+  // hq is the one source of an hq bot's permission, model and effort: one set of rows replaces Kith's own.
   // A kith agent's model, effort and harness are the CLI's (`kith <agent> set …`): never the host-native pickers, whose edits the host would drop.
   const model = kith ? [<HqSettings key="hq" kith={kith} inSheet={part === 'often'} />] : [
     <AgentModelPicker key="model" backend={draft.backend} models={models} selection={draft.model} onChange={setModel} options={draft.modelOptions ?? {}} onOptionsChange={setModelOptions} />,
-    (draft.backend !== 'custom' && models.catalog?.fastMode) || draft.fastMode || (saved?.backend === draft.backend && fastModeShown(saved)) ? (
-      // Shown while the agent offers it (its model list, or the bot's own sessions), or while it's on.
-      <div key="fast" className="fade-in">
-        <SwitchRow
-          title="Fast mode"
-          detail={(saved && fastModeRefusal(saved)) ?? 'Faster replies for more usage, on models that offer it.'}
-          on={draft.fastMode ?? false}
-          onChange={(on) => set('fastMode', on)}
-        />
-      </div>
-    ) : null,
   ]
 
   const agent = shown.backendPicker ? (

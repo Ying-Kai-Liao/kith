@@ -47,7 +47,6 @@ pub struct Runtime {
     pub message: Option<String>,
     /// The ACP session the running turn prompts. A memory write made there is one that session already knows.
     pub session: Option<String>,
-    pub fast_mode: crate::agent::config::FastModeSupport,
 }
 
 /// Reactions per message: a handful of distinct emoji.
@@ -280,10 +279,9 @@ impl Hub {
             refuse_cli_owned(&row.config, &cfg)?;
             cfg.backend.clone_from(&row.config.backend);
             cfg.command = None;
-            // Model, effort, Fast mode and permission are hq's; an app's (stale) copy doesn't get stored over them.
+            // Model, effort and permission are hq's; an app's (stale) copy doesn't get stored over them.
             cfg.model.clone_from(&row.config.model);
             cfg.model_options.clone_from(&row.config.model_options);
-            cfg.fast_mode = row.config.fast_mode;
             cfg.permission = row.config.permission;
         }
         if cfg.name.trim().is_empty() {
@@ -442,11 +440,7 @@ impl Hub {
             (before, rt.clone())
         };
         let id = bot::bot_of(key);
-        if before.status != after.status
-            || before.activity != after.activity
-            || before.lane != after.lane
-            || before.fast_mode != after.fast_mode
-        {
+        if before.status != after.status || before.activity != after.activity || before.lane != after.lane {
             self.emit_bot(id);
             // A group shows what its busy member is doing.
             for lane in [&before.lane, &after.lane].into_iter().flatten() {
@@ -870,8 +864,6 @@ fn refuse_cli_owned(old: &BotConfig, new: &BotConfig) -> Result<()> {
         format!("set it with `kith {agent} set model <name>`")
     } else if new.model_options != old.model_options {
         format!("set it with `kith {agent} set effort <level>`")
-    } else if new.fast_mode != old.fast_mode {
-        "kith has no Fast mode setting".to_owned()
     } else if new.connectors != old.connectors {
         format!("use `kith {agent} connect <connector>` or `kith {agent} disconnect <connector>`")
     } else if new.skills != old.skills {

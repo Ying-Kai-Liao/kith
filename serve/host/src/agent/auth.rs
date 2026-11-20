@@ -157,7 +157,7 @@ pub(crate) fn model_ids(session: &Value) -> Vec<String> {
     catalog["models"].as_array().into_iter().flatten().filter_map(|m| text(&m["id"])).collect()
 }
 
-/// `{models: [{id, name, description, options}], currentModelId, fastMode}`; `options` is
+/// `{models: [{id, name, description, options}], currentModelId}`; `options` is
 /// Cursor's `cursor/list_available_models` answer (`Null` for other agents).
 fn model_catalog(session: &Value, options: &Value) -> Value {
     fn collect(options: &Value, out: &mut Vec<Value>) {
@@ -190,8 +190,7 @@ fn model_catalog(session: &Value, options: &Value) -> Value {
     for model in &mut models {
         model["options"] = json!(model_options(options, model["id"].as_str().unwrap_or_default()));
     }
-    json!({"models": models, "currentModelId": current,
-        "fastMode": crate::agent::config::fast_mode_config(session).is_some()})
+    json!({"models": models, "currentModelId": current})
 }
 
 /// One model's options as `[{id, name, values: [{id, name}], default}]`, from Cursor's
@@ -472,10 +471,7 @@ mod tests {
         );
         assert_eq!(result["models"].as_array().unwrap().len(), 1);
         assert_eq!(result["models"][0]["description"], "Available here");
-        assert_eq!(
-            model_catalog(&json!({}), &Value::Null),
-            json!({"models": [], "currentModelId": null, "fastMode": false})
-        );
+        assert_eq!(model_catalog(&json!({}), &Value::Null), json!({"models": [], "currentModelId": null}));
     }
 
     #[test]

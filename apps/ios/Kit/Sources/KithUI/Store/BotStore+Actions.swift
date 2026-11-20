@@ -411,10 +411,6 @@ extension BotStore {
         }
     }
 
-    public func setFastMode(_ bot: Bot, _ fastMode: Bool) {
-        setting(bot, "fastMode", fastMode, \.fastMode)
-    }
-
     // MARK: roster order
 
     /// Puts the roster in `ids` order (pinned bots still sort first) and sends it; the host

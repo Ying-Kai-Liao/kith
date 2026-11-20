@@ -13,7 +13,7 @@ public struct BotSections: Equatable, Sendable {
     /// folder (the host's `projectMemory`), not the agent's memory: kith's "Agent memory" lists the real files.
     /// Gone for every hq bot, loaded or not.
     public var harnessMemoryTab = true
-    /// Kith's own permission, model, effort and Fast mode controls. hq is the one source for an hq bot's settings
+    /// Kith's own permission, model and effort controls. hq is the one source for an hq bot's settings
     /// (the host ignores its stored copy), so they go and the `HqSetting` rows take their place. A host that predates
     /// `kithInfo` can't serve those, so the controls stay there.
     public var kithSettings = true
@@ -34,12 +34,12 @@ public struct BotSections: Equatable, Sendable {
 
 /// One of an hq bot's settings as the apps show it, read from hq. Mirrors the desktop's `hqSettings`.
 public struct HqSetting: Equatable, Sendable {
-    public enum Key: String, Sendable { case permission, callModel, harness, model, effort, fastMode }
+    public enum Key: String, Sendable { case permission, callModel, harness, model, effort }
     public var key: Key
     public var label: String
     /// What hq reports, or plain words when it has nothing.
     public var value: String
-    /// Written through to hq (`kith <agent> set …`). Fast mode has no kith setting, so it is no row at all.
+    /// Written through to hq (`kith <agent> set …`).
     public var editable: Bool
     public var hint: String
 
@@ -123,7 +123,6 @@ extension BotDraft {
         d.backend = bot.backend
         d.model = bot.model
         d.modelOptions = bot.modelOptions
-        d.fastMode = bot.fastMode
         d.connectors = bot.connectors
         d.skills = bot.skills
         return d

@@ -328,7 +328,6 @@ impl Actor {
             .then(|| lane.clone());
         self.hub.set_runtime(&self.rt, |r| r.session.clone_from(&session));
         if let Some(sid) = session {
-            self.sync_fast_mode(&sid).await;
             self.sync_call_model(&sid).await;
         }
         if hidden && self.session_fresh {

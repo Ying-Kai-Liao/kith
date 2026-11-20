@@ -583,10 +583,6 @@ export class BotStore extends BotSync {
     this.patchBot(bot, { hidden })
   }
 
-  setFastMode(bot: Bot, fastMode: boolean) {
-    this.patchBot(bot, { fastMode })
-  }
-
   /** The roster as the user dragged it, top first: shown at once, then saved on the host. */
   reorder(ids: string[]) {
     const before = new Map<string, number>()

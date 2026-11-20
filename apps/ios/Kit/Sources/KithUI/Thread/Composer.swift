@@ -384,11 +384,7 @@ struct Composer: View {
     }
 
     private func run(_ command: SlashCommand) {
-        guard let bot else { return }
         switch command.action {
-        case .fast:
-            model.setFastMode(bot, !bot.fastMode)
-            draft = ""
         case .skill(let id):
             draft = "/\(id) "
         }
@@ -398,7 +394,6 @@ struct Composer: View {
     private func submit() {
         // Send while recording: the recording ends and what it heard goes with the message.
         dictation.stop()
-        if files.isEmpty, let command = SlashCommands.builtIn(for: bot, draft: draft) { return run(command) }
         guard canSend, !taking else { return }
         let destination = destination
         let into = destination?.into

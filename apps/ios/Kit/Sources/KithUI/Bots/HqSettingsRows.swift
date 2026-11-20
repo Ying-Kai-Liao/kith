@@ -47,7 +47,6 @@ struct HqSettingsRows: View {
         case .permission: store.savingPermission
         case .callModel: store.savingCallModel
         case .harness, .model, .effort: store.savingSetting != nil
-        case .fastMode: false
         }
     }
 
@@ -62,7 +61,7 @@ struct HqSettingsRows: View {
                     case .harness: await store.setSetting("harness", pick)
                     case .model: await store.setSetting("model", pick)
                     case .effort: await store.setSetting("effort", pick)
-                    case .permission, .fastMode: await store.setPermission(pick)
+                    case .permission: await store.setPermission(pick)
                     }
                 }
             })

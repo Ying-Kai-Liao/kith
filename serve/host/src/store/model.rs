@@ -117,9 +117,6 @@ pub struct BotConfig {
     /// The model's own settings (effort, fast…): ACP config option id → value.
     #[serde(default)]
     pub model_options: BTreeMap<String, String>,
-    /// Ask the agent for its Fast mode (Claude Code, Codex): faster replies for more usage.
-    #[serde(default)]
-    pub fast_mode: bool,
     #[serde(default)]
     pub pinned: bool,
     /// Place in the roster, lowest first (after pinned bots). All 0 until the user drags one:
