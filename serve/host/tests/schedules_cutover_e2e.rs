@@ -17,7 +17,7 @@
 #[allow(dead_code)]
 mod common;
 
-use chrono::{Timelike as _, Utc};
+use chrono::{Datelike as _, Timelike as _, Utc};
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::io::{BufRead as _, BufReader};
@@ -702,13 +702,17 @@ fn count(lab: &Lab, sql: &str) -> i64 {
 async fn kith_schedule_on_a_switched_mac_talks_to_the_core_in_kith_scheds_words() {
     let lab = Lab::new("e", None);
     lab.step_before_schedules();
-    // Feb 31 is a cron no month has: neither kith-sched nor the core fires it at the wall clock's hour, so the run cannot
-    // change `ls` or the counts whatever time it runs at, and both sides report the same `next` (none).
-    let hourly = json!({"id": "hourly", "cron": "0 0 31 2 *", "task": "do it"});
+    // Nothing here may fire at the wall clock's hour. `hourly` gets noon UTC on the day 30 days out (the lab runs in UTC):
+    // a real next slot that both sides must find and print the same way, far from the catch-up window. The `add` calls
+    // below use Feb 31, a cron no month has, since they only compare keys or refusals.
+    let slot = Utc::now() + chrono::Duration::days(30);
+    let cron = format!("0 12 {} {} *", slot.day(), slot.month());
+    let hourly = json!({"id": "hourly", "cron": cron, "task": "do it"});
     std::fs::write(lab.kith_home.join("agents/mel/jobs.json"), format!("{}\n", json!([hourly]))).unwrap();
     // What kith-sched itself answers before the switch: the shapes, and the file `add` leaves, to compare with after it.
     let (rc, before_ls) = cli_json(&lab, &["ls", "mel"]);
     assert_eq!(rc, 0, "{before_ls}");
+    assert!(job_rows(&before_ls, "hourly")["next"].is_string(), "kith-sched finds the dated slot: {before_ls}");
     let add = |agent: &'static str| ["add", agent, "0 0 31 2 *", "Do B!", "-m", "sonnet", "-e", "low"];
     let (rc, before_add) = cli_json(&lab, &add("house"));
     assert_eq!(rc, 0, "{before_add}");
