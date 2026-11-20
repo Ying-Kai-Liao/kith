@@ -5,5 +5,10 @@ launch	launch
 settings	settings
 account	account
 account-state	account-state	accounts
+# pkg and room-ledger: neither launch reads these lines any more (R2: no Python to go back to, so removing one is no rollback; the
+# program that lists the module answers). room-ledger's line only picks the program hook over the stub.
 pkg	pkg
 cost	cost-ledger	cost
+room-ledger	room-ledger
+threads	threads-writer
+lifecycle	lifecycle

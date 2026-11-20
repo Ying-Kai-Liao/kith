@@ -15,14 +15,20 @@
 //! named `*_differs_*`); none of them changes what a reader of the folder sees for a claim a live writer made.
 
 pub mod cli;
+pub mod core;
 pub mod intent;
 // The one place with `unsafe` (kill(2)); the crate denies it everywhere else.
 #[allow(unsafe_code)]
 pub(crate) mod os;
+pub mod pick;
 pub mod registry;
 pub mod resolve;
+pub mod spool;
 #[cfg(test)]
 mod tests;
+pub mod writer;
+#[cfg(test)]
+mod writer_tests;
 
 use std::fs::File;
 use std::io::Write as _;
@@ -322,11 +328,38 @@ impl<'a> Take<'a> {
     }
 }
 
+/// How [`take_claim_checked`] ended.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Taken,
+    /// A live claim holds the session.
+    Held(Held),
+    /// The claims became the core's between the caller's look at the mode and the link: the file just linked was taken
+    /// back (it is ours: we linked it), and the caller claims in the core.
+    Switched,
+}
+
 /// Takes the writer claim on `sid` for `pid` (`take_claim`): `Ok(Ok(()))` taken, `Ok(Err(Held))` a live claim holds it.
 /// The claim is made whole in a temp file and linked into place (exclusive); a stale or damaged one is removed and
 /// replaced under the lock file next to it, so two takers never both judge it stale and one deletes the other's fresh
 /// claim. A taker ends the session's intent and pending decision (F12 rules 12, 14).
 pub fn take_claim(c: &Ctx, sid: &str, pid: i64, how: &Take) -> std::io::Result<Result<(), Held>> {
+    Ok(match take_claim_checked(c, sid, pid, how, &|| false)? {
+        Outcome::Held(h) => Err(h),
+        Outcome::Taken | Outcome::Switched => Ok(()),
+    })
+}
+
+/// [`take_claim`] for the kernel's takers: `switched` is asked again right after the link, under the claim's lock (the
+/// Python's link-then-re-check). The claims step puts its marker down and then re-reads the claim files, so a file linked
+/// after the marker is either seen by the step or taken back here, never a writer nobody reads.
+pub fn take_claim_checked(
+    c: &Ctx,
+    sid: &str,
+    pid: i64,
+    how: &Take,
+    switched: &dyn Fn() -> bool,
+) -> std::io::Result<Outcome> {
     let Some(dir) = c.reg_dir() else {
         return Err(std::io::Error::other(
             "KITH_STATE is not set, so the session cannot be claimed",
@@ -338,7 +371,7 @@ pub fn take_claim(c: &Ctx, sid: &str, pid: i64, how: &Take) -> std::io::Result<R
             "not a session id",
         ));
     }
-    take_in(&dir, c.state.as_deref(), sid, pid, how)
+    take_in(&dir, c.state.as_deref(), sid, pid, how, switched)
 }
 
 fn take_in(
@@ -347,14 +380,16 @@ fn take_in(
     sid: &str,
     pid: i64,
     how: &Take,
-) -> std::io::Result<Result<(), Held>> {
+    switched: &dyn Fn() -> bool,
+) -> std::io::Result<Outcome> {
     create_private_dir(dir)?;
     let mine = Claim {
         pid: Some(pid),
         proc_start: os::proc_start(pid),
         at: iso_utc(),
         kind: how.kind.to_owned(),
-        person: how.person.map(str::to_owned),
+        // An empty person is no person (Python's `if person:`), so the claim stays the owner's.
+        person: how.person.filter(|p| !p.is_empty()).map(str::to_owned),
         agent: how.agent.map(str::to_owned),
         takeover: how.takeover,
     };
@@ -365,17 +400,30 @@ fn take_in(
         let lock = Lock::exclusive(&lock_path(&dest))?;
         for _ in 0..3 {
             match std::fs::hard_link(&tmp, &dest) {
-                Ok(()) => return Ok(Ok(lock)),
+                Ok(()) => {
+                    if !how.takeover && switched() {
+                        // Ours, if it still names this process: a taker never takes back another's claim.
+                        if read_claim(&dest)
+                            .is_some_and(|c| c.pid == Some(pid) && c.proc_start == mine.proc_start)
+                        {
+                            let _ = std::fs::remove_file(&dest);
+                        }
+                        return Ok(Err(None));
+                    }
+                    return Ok(Ok(lock));
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(e) => return Err(e),
             }
             if let Some(seen) = read_claim(&dest).filter(Claim::is_live) {
-                return Ok(Err(Held(seen)));
+                return Ok(Err(Some(Held(seen))));
             }
             // Stale or garbage; nobody else judges it while we hold the lock.
             let _ = std::fs::remove_file(&dest);
         }
-        Ok(Err(Held(read_claim(&dest).unwrap_or_else(|| mine.clone()))))
+        Ok(Err(Some(Held(
+            read_claim(&dest).unwrap_or_else(|| mine.clone()),
+        ))))
     })();
     let _ = std::fs::remove_file(&tmp);
     match outcome? {
@@ -391,9 +439,10 @@ fn take_in(
                     intent::taken(state, sid);
                 }
             }
-            Ok(Ok(()))
+            Ok(Outcome::Taken)
         }
-        Err(held) => Ok(Err(held)),
+        Err(Some(held)) => Ok(Outcome::Held(held)),
+        Err(None) => Ok(Outcome::Switched),
     }
 }
 
@@ -610,6 +659,11 @@ pub fn sweep_persons(c: &Ctx, persons: &[String], grace: Duration) -> Vec<i64> {
             holders.push(pid);
         }
     }
+    end_holders(holders, grace)
+}
+
+/// Ends the processes in `holders` and everything below them: SIGTERM, and SIGKILL after `grace`. Returns the pids it signalled.
+pub(crate) fn end_holders(holders: Vec<i64>, grace: Duration) -> Vec<i64> {
     if holders.is_empty() {
         return Vec::new();
     }

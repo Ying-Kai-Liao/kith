@@ -9,10 +9,10 @@ use std::sync::atomic::AtomicU32;
 
 static N: AtomicU32 = AtomicU32::new(0);
 
-struct Tmp(PathBuf);
+pub(super) struct Tmp(pub(super) PathBuf);
 
 impl Tmp {
-    fn new() -> Tmp {
+    pub(super) fn new() -> Tmp {
         let dir = std::env::temp_dir().join(format!(
             "kith-threads-{}-{}",
             std::process::id(),
@@ -23,15 +23,15 @@ impl Tmp {
         Tmp(dir)
     }
 
-    fn state(&self) -> PathBuf {
+    pub(super) fn state(&self) -> PathBuf {
         self.0.join("state")
     }
 
-    fn reg(&self) -> PathBuf {
+    pub(super) fn reg(&self) -> PathBuf {
         registry_dir(&self.state())
     }
 
-    fn put(&self, name: &str, text: &str) {
+    pub(super) fn put(&self, name: &str, text: &str) {
         fs::create_dir_all(self.reg()).unwrap();
         fs::write(self.reg().join(name), text).unwrap();
     }
@@ -43,11 +43,11 @@ impl Drop for Tmp {
     }
 }
 
-fn no_env(_: &str) -> Option<String> {
+pub(super) fn no_env(_: &str) -> Option<String> {
     None
 }
 
-fn ctx<'a>(t: &Tmp, env: &'a dyn Fn(&str) -> Option<String>) -> Ctx<'a> {
+pub(super) fn ctx<'a>(t: &Tmp, env: &'a dyn Fn(&str) -> Option<String>) -> Ctx<'a> {
     Ctx {
         state: Some(t.state()),
         machine: Some(t.0.join("machine")),
@@ -57,10 +57,10 @@ fn ctx<'a>(t: &Tmp, env: &'a dyn Fn(&str) -> Option<String>) -> Ctx<'a> {
 }
 
 /// A process that lives until the guard drops: a claimer that is not the test itself.
-struct Sleeper(Child);
+pub(super) struct Sleeper(Child);
 
 impl Sleeper {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self(
             Command::new("sleep")
                 .arg("60")
@@ -70,7 +70,7 @@ impl Sleeper {
         )
     }
 
-    fn pid(&self) -> i64 {
+    pub(super) fn pid(&self) -> i64 {
         i64::from(self.0.id())
     }
 }
@@ -90,7 +90,7 @@ fn dead_pid() -> i64 {
     pid
 }
 
-fn me() -> i64 {
+pub(super) fn me() -> i64 {
     i64::from(std::process::id())
 }
 
@@ -736,7 +736,7 @@ fn fake(first: Option<Value>, again: Option<Value>) -> Fake {
     }
 }
 
-fn transcript(t: &Tmp, sid: &str, cwd: &Path) {
+pub(super) fn transcript(t: &Tmp, sid: &str, cwd: &Path) {
     let dir = t.0.join("home").join(".claude").join("projects").join("p");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -757,7 +757,16 @@ fn a_raw_session_id_resolves_with_no_host_and_takes_the_claim() {
     fs::create_dir_all(&work).unwrap();
     transcript(&t, "abc-1", &work);
     let holder = Sleeper::new();
-    let r = resolve(&c, &NoHost, "coder", "abc-1", holder.pid(), Duration::ZERO).unwrap();
+    let r = resolve(
+        &c,
+        &NoHost,
+        None,
+        "coder",
+        "abc-1",
+        holder.pid(),
+        Duration::ZERO,
+    )
+    .unwrap();
     assert_eq!(
         r,
         Resolved {
@@ -772,7 +781,16 @@ fn a_raw_session_id_resolves_with_no_host_and_takes_the_claim() {
     assert_eq!(on_disk(&t, "abc-1").pid, Some(holder.pid()));
     // A second terminal is refused, and its failed attempt does not give the first one's claim back.
     let again = Sleeper::new();
-    let err = resolve(&c, &NoHost, "coder", "abc-1", again.pid(), Duration::ZERO).unwrap_err();
+    let err = resolve(
+        &c,
+        &NoHost,
+        None,
+        "coder",
+        "abc-1",
+        again.pid(),
+        Duration::ZERO,
+    )
+    .unwrap_err();
     assert_eq!(
         err,
         format!(
@@ -787,19 +805,30 @@ fn a_raw_session_id_resolves_with_no_host_and_takes_the_claim() {
 fn an_unknown_thread_says_whether_the_host_was_there() {
     let t = Tmp::new();
     let c = ctx(&t, &no_env);
-    let e = resolve(&c, &NoHost, "coder", "nope", me(), Duration::ZERO).unwrap_err();
+    let e = resolve(&c, &NoHost, None, "coder", "nope", me(), Duration::ZERO).unwrap_err();
     assert_eq!(
         e,
         "unknown thread \"nope\" (the Kith host is not running, so only a Claude session id can be resumed)"
     );
     let host = fake(Some(serde_json::json!({"error": "unknown thread"})), None);
     assert_eq!(
-        resolve(&c, &host, "coder", "nope", me(), Duration::ZERO).unwrap_err(),
+        resolve(&c, &host, None, "coder", "nope", me(), Duration::ZERO).unwrap_err(),
         "unknown thread \"nope\""
     );
     // Text that is no session id is never a path to look under.
-    assert!(resolve(&c, &NoHost, "coder", "../../etc", me(), Duration::ZERO).is_err());
-    assert!(resolve(&c, &NoHost, "coder", "*", me(), Duration::ZERO).is_err());
+    assert!(
+        resolve(
+            &c,
+            &NoHost,
+            None,
+            "coder",
+            "../../etc",
+            me(),
+            Duration::ZERO
+        )
+        .is_err()
+    );
+    assert!(resolve(&c, &NoHost, None, "coder", "*", me(), Duration::ZERO).is_err());
 }
 
 #[test]
@@ -812,7 +841,16 @@ fn the_host_names_the_thread_and_is_asked_again_with_the_claim_held() {
         serde_json::json!({"sessionId": "s-9", "agent": "coder", "cwd": work, "claims": 1});
     let host = fake(Some(answer.clone()), Some(answer.clone()));
     let holder = Sleeper::new();
-    let r = resolve(&c, &host, "coder", "thread-x", holder.pid(), Duration::ZERO).unwrap();
+    let r = resolve(
+        &c,
+        &host,
+        None,
+        "coder",
+        "thread-x",
+        holder.pid(),
+        Duration::ZERO,
+    )
+    .unwrap();
     assert_eq!(r.sid, "s-9");
     assert_eq!(*host.asked.borrow(), ["thread-x", "s-9"]);
     assert_eq!(on_disk(&t, "s-9").pid, Some(holder.pid()));
@@ -849,7 +887,7 @@ fn a_busy_host_or_the_wrong_agent_or_a_silent_host_refuses_and_gives_the_claim_b
         ),
     ];
     for (host, want) in cases {
-        let err = resolve(&c, &host, "coder", "t", me(), Duration::ZERO).unwrap_err();
+        let err = resolve(&c, &host, None, "coder", "t", me(), Duration::ZERO).unwrap_err();
         assert_eq!(err, want);
         assert!(
             !claim_path(&t.reg(), "s-9", false).exists(),
@@ -869,6 +907,7 @@ fn a_host_from_before_claims_only_resumes_what_a_terminal_started() {
     let e = resolve(
         &c,
         &fake(Some(old.clone()), None),
+        None,
         "coder",
         "s-9",
         me(),
@@ -889,6 +928,7 @@ fn a_host_from_before_claims_only_resumes_what_a_terminal_started() {
     let r = resolve(
         &c,
         &fake(Some(old), None),
+        None,
         "coder",
         "s-9",
         me(),
@@ -901,6 +941,7 @@ fn a_host_from_before_claims_only_resumes_what_a_terminal_started() {
     let e = resolve(
         &c,
         &fake(Some(missing), None),
+        None,
         "coder",
         "s-8",
         me(),
@@ -916,7 +957,7 @@ fn a_session_open_in_another_terminal_or_with_its_folder_gone_is_refused() {
     let c = ctx(&t, &no_env);
     let gone = t.0.join("gone");
     transcript(&t, "abc-2", &gone);
-    let e = resolve(&c, &NoHost, "coder", "abc-2", me(), Duration::ZERO).unwrap_err();
+    let e = resolve(&c, &NoHost, None, "coder", "abc-2", me(), Duration::ZERO).unwrap_err();
     assert_eq!(
         e,
         format!("the session's folder {} is gone", gone.display())
@@ -941,7 +982,7 @@ fn a_session_open_in_another_terminal_or_with_its_folder_gone_is_refused() {
             claude.pid()
         ),
     );
-    let e = resolve(&c, &NoHost, "coder", "abc-3", me(), Duration::ZERO).unwrap_err();
+    let e = resolve(&c, &NoHost, None, "coder", "abc-3", me(), Duration::ZERO).unwrap_err();
     assert_eq!(
         e,
         format!(
@@ -971,7 +1012,7 @@ fn a_takeover_in_progress_refuses_a_resume() {
     )
     .unwrap()
     .unwrap();
-    let e = resolve(&c, &NoHost, "coder", "abc-4", me(), Duration::ZERO).unwrap_err();
+    let e = resolve(&c, &NoHost, None, "coder", "abc-4", me(), Duration::ZERO).unwrap_err();
     assert_eq!(
         e,
         "that session is being taken over in the app right now; try again in a moment"
@@ -981,7 +1022,7 @@ fn a_takeover_in_progress_refuses_a_resume() {
 
 // --- record ------------------------------------------------------------------------------------------------------------
 
-fn run_env(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+pub(super) fn run_env(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
     let pairs: Vec<_> = pairs.to_vec();
     move |k| {
         pairs
@@ -1144,7 +1185,7 @@ fn the_iso_clock_is_python_shaped() {
 
 // --- the verbs ---------------------------------------------------------------------------------------------------------
 
-fn args(a: &[&str]) -> Vec<String> {
+pub(super) fn args(a: &[&str]) -> Vec<String> {
     a.iter().map(|s| (*s).to_owned()).collect()
 }
 
@@ -1156,7 +1197,7 @@ fn the_verbs_answer_like_kith_sessions() {
     let stdin = || String::new();
     let other = Sleeper::new();
     let pid = other.pid().to_string();
-    let go = |a: &[&str]| cli::run(&c, &NoHost, &args(a), &stdin);
+    let go = |a: &[&str]| cli::run(&c, &NoHost, None, &args(a), &stdin);
     assert_eq!(go(&["claim", "s-1", &pid]), cli::Out::default());
     let busy = go(&["claim", "s-1", &me().to_string()]);
     assert_eq!((busy.code, busy.stdout.as_str()), (1, ""));
@@ -1174,7 +1215,7 @@ fn the_verbs_answer_like_kith_sessions() {
         holder.stdout
     );
     assert_eq!(go(&["holder", "s-0"]).code, 1);
-    assert_eq!(go(&["release", &pid]), cli::Out::default());
+    assert_eq!(go(&["release-pid", &pid]), cli::Out::default());
     assert!(
         fs::read_dir(t.reg())
             .unwrap()
@@ -1199,7 +1240,7 @@ fn help_is_kith_sessions_own_usage_on_stderr() {
     let c = ctx(&t, &env);
     let stdin = || String::new();
     for flag in ["-h", "--help"] {
-        let o = cli::run(&c, &NoHost, &args(&[flag]), &stdin);
+        let o = cli::run(&c, &NoHost, None, &args(&[flag]), &stdin);
         assert_eq!(o.code, 1, "{flag}");
         assert_eq!(o.stdout, "", "{flag}");
         assert!(o.stderr.starts_with("kith-sessions — terminal"), "{flag}");

@@ -19,6 +19,7 @@ mod hqmem;
 mod hub;
 mod kernel;
 mod launch_cmd;
+mod lifecycle_cmd;
 mod limits;
 mod market;
 mod mcp;
@@ -496,9 +497,9 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
-    /// `kith account list|pick|out|clear|usage` (`kernel/bin/kith-account`), plus `state` and `started` for the Python readers:
+    /// `kith account list|pick|out|clear|usage`, plus `state` and `started` for the Python readers:
     /// the accounts' state in the file, or in the core once `kith migrate step accounts` moved it.
-    // -h/--help belong to the Python usage text, which this is not routed for.
+    // -h/--help belong to the usage text of `kith kernel account-state`, so clap must not answer them.
     #[command(name = "account-state", disable_help_flag = true)]
     AccountState {
         /// The kernel folder (default: the one this program finds).
@@ -507,10 +508,10 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
-    /// `kith account ...`, every verb of `kernel/bin/kith-account`: the state ones (`list|pick|out|clear|usage`) and the ones that
+    /// `kith account ...`, every verb of the command (`kernel/bin/kith-account` is a stub for it): the state ones (`list|pick|out|clear|usage`) and the ones that
     /// write the set (`add|login|remove|order|move|set|policy|pin|unpin|cross-harness|migrate|use|backup`). `add` and `remove`
     /// with `--json` return the login command and run nothing; without it the harness's own login runs.
-    // -h/--help belong to the usage text of the Python this is routed for.
+    // -h/--help belong to the usage text of `kith kernel account`, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Account {
         /// The kernel folder (default: the one this program finds).
@@ -545,7 +546,7 @@ enum KernelCmd {
         args: Vec<String>,
     },
     /// The writer claim of a Claude session and the session registry: `record`, `resolve`, `claim`, `terminal`, `proc`,
-    /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release` and `holder` (not routed from `kith` yet).
+    /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release`, `release-pid`, `holder`, `epoch`, `pick` and `latest` (`bin/kith` and `kith-core.sh` route all of them but `run`).
     // -h/--help belong to kith-sessions' own usage text, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Threads {
@@ -553,6 +554,18 @@ enum KernelCmd {
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
+    /// What Kith does with a session no process runs, as `kernel/bin/kith-lifecycle` does: `sweep [--session SID] [--at-sleep]`
+    /// (compact, sleep or end, under the writer claim), `status SID`, `intent SID WHY PID`. Routed from the script while `lifecycle` is
+    /// switched.
+    // argparse's own usage and errors (exit 2) belong to the verb, so clap must not answer -h.
+    #[command(disable_help_flag = true)]
+    Lifecycle {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
     /// The kith project of a directory (`kernel/bin/project-id` is a stub that runs this; a guest run asks the host over the run socket).
@@ -564,7 +577,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// The Pre/PostToolUse hook of `kernel/bin/kith-room-ledger` (not routed from the launch yet; the hook JSON is on stdin).
+    /// The Pre/PostToolUse hook of `kernel/bin/kith-room-ledger` (the launch registers it as the hook; the hook JSON is on stdin).
     #[command(name = "room-ledger", disable_help_flag = true)]
     RoomLedger {
         /// The kernel folder (default: the one this program finds).
@@ -1653,6 +1666,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Threads { kernel, args } = cmd {
                 std::process::exit(threads_cmd::run(kernel, &args));
             }
+            if let KernelCmd::Lifecycle { kernel, args } = cmd {
+                std::process::exit(lifecycle_cmd::run(kernel, &args));
+            }
             if let KernelCmd::ProjectId { kernel, args } = cmd {
                 std::process::exit(project_id_cmd(kernel, &args));
             }
@@ -1739,6 +1755,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::People { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
+                    | KernelCmd::Lifecycle { .. }
                     | KernelCmd::ProjectId { .. }
                     | KernelCmd::RoomLedger { .. }
                     | KernelCmd::Pkg { .. }

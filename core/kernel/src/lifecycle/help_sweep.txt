@@ -1,0 +1,6 @@
+usage: kith-lifecycle sweep [-h] [--session SESSION] [--at-sleep]
+
+optional arguments:
+  -h, --help         show this help message and exit
+  --session SESSION
+  --at-sleep
