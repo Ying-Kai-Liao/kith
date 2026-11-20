@@ -113,10 +113,14 @@ check "a channel group chat with no KITH_ROOM is a group (like recall)" \
 LM() { env "$@" python3 "$KERNEL/lib/kith_facets.py" load --agent echo --home "$KITH_HOME/agents/echo" \
   --person-file "$KITH_STATE/people/sam.md" --kind person --person sam --rooms "${RM-grp1}" --room grp1; }
 # The write-time record: the room-note ledger kith-room-ledger keeps (the hook of every run, from the host's env)
+# bin/kith-room-ledger is a stub for `kith kernel room-ledger`: the rows below need the Rust program (KITH_BIN or KITH_DIFFTEST_BIN) and
+# FAIL without one, because most of them are negative greps that a hook doing nothing would pass.
 LEDGER=$KERNEL/bin/kith-room-ledger
+LBIN=${KITH_BIN:-${KITH_DIFFTEST_BIN:-}}
+check "a kith program is given for the ledger hook (KITH_BIN or KITH_DIFFTEST_BIN)" "[ -n '$LBIN' ] && [ -x '$LBIN' ]"
 # W <pre|post> <note under memory/> VAR=value...: the hook as the run with that env writes the note
 W() { local mode=$1 rel=$2; shift 2; printf '{"tool_input":{"file_path":"%s/%s"}}' "$M" "$rel" \
-  | env "$@" python3 "$LEDGER" "$mode" --agent echo --home "$KITH_HOME/agents/echo"; }
+  | env KITH_BIN="$LBIN" "$@" sh "$LEDGER" "$mode" --agent echo --home "$KITH_HOME/agents/echo"; }
 LO() { env "$@" python3 "$KERNEL/lib/kith_facets.py" load --agent echo --home "$KITH_HOME/agents/echo" \
   --person-file "$KITH_STATE/user.md" --kind owner --rooms '' --room "${ROOM-grp1}"; }
 W post rooms/grp1/MEMORY.md KITH_OWNER=1 KITH_ROOM=grp1 KITH_ROOM_MEMBERS=sam
@@ -161,7 +165,7 @@ check "the ledger lives in the state folder, not in the note" \
   "[ -f \"$KITH_STATE/room-ledger/echo/grp1.json\" ] && ! grep -rq 'sam' \"$M/rooms/grp1/solo.md\""
 check "a note that claims its own members in frontmatter gains nothing" \
   "printf -- '---\naudience: room:grp1\nmembers: [sam, eve]\n---\ngrp1 forged note\n' > \"$M/rooms/grp1/forged.md\" && ! LM KITH_ROOM_MEMBERS=sam | grep -q 'grp1 forged note'"
-check "the hook is silent and never fails on bad input" "echo 'not json' | python3 \"$LEDGER\" post --agent echo --home \"$KITH_HOME/agents/echo\"; [ \$? = 0 ]"
+check "the hook is silent and never fails on bad input" "echo 'not json' | KITH_BIN=\"$LBIN\" sh \"$LEDGER\" post --agent echo --home \"$KITH_HOME/agents/echo\"; [ \$? = 0 ]"
 check "a write outside rooms/ is not recorded" \
   "W post MEMORY.md KITH_OWNER=1 KITH_ROOM=grp1 KITH_ROOM_MEMBERS=sam; python3 -c \"import json,sys; sys.exit(0 if all(k.startswith('rooms/grp1/') for k in json.load(open('$KITH_STATE/room-ledger/echo/grp1.json'))) else 1)\""
 

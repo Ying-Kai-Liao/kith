@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # kith-pkg-pid-switch-check — the `pkg` switch (kernel/lib/core-switched.txt) and the project-id stub: the launch's lookup
-# `kith-pkg resolve AGENT` is answered by the Rust core when the line is there, by the Python when KITH_CORE=python or the
-# line is gone; `project-id` has no line any more (kernel/bin/project-id is a stub for `kith kernel project-id`, so the bash
+# `kith-pkg resolve AGENT` has no Python fallback any more (retire-python R2): the program that lists `pkg` answers on both launch
+# paths whatever the line or KITH_CORE says, and a Mac without one runs the live folder with a line saying so. The room-ledger hooks
+# of the settings: the program's `kernel room-ledger` when its line is there and the program lists it, else the stub's path, the same
+# on both launch paths; `project-id` has no line any more (kernel/bin/project-id is a stub for `kith kernel project-id`, so the bash
 # launch always reaches the Rust program through it and the Rust launch answers in process). Which program was asked is read
 # from loggers standing in for kernel/bin/kith-pkg and kernel/bin/project-id in a copy of the kernel folder: each logs its
 # call and runs the real script. Also: the other kith-pkg verbs stay Python, and a guest's project-id (run token + socket)
@@ -60,17 +62,23 @@ check "switched: kith-pkg resolve is not run" "[ \"\$(calls 'kith-pkg resolve')\
 check "switched: project-id is not run" "[ \"\$(calls project-id)\" = 0 ]"
 check "switched: the project came from the core" "grep -q demo '$T/rust.out'"
 
-# 2. KITH_CORE=python: both programs are asked, and the launch object is the same.
+# 2. KITH_CORE=python: kith-pkg resolve is still not run (no Python to go back to); the snapshot is the program's.
 reset; (cd "$T/work/proj" && KITH_CORE=python "$KITH" echo --launch-json 2>"$T/err") > "$T/py.out"
-check "KITH_CORE=python: kith-pkg resolve is run" "[ \"\$(calls 'kith-pkg resolve')\" -ge 1 ]"
+check "KITH_CORE=python: kith-pkg resolve is not run" "[ \"\$(calls 'kith-pkg resolve')\" = 0 ]"
 check "KITH_CORE=python: project-id (the stub) is run" "[ \"\$(calls project-id)\" -ge 1 ]"
-check "same launch object either way" "[ \"\$(norm < '$T/rust.out')\" = \"\$(norm < '$T/py.out')\" ]"
+check "KITH_CORE=python: the package snapshot is still the core's (no live folder)" "grep -q 'echo@' '$T/py.out' && ! grep -q 'running the live folder' '$T/err'"
 
-# 3. Rollback of pkg: its line gone from the copy, kith-pkg is asked again; the Rust launch still asks no project-id.
+# 3. The pkg line is no rollback any more: gone from the copy, kith-pkg resolve is still never run.
 cp "$T/k/lib/core-switched.txt" "$T/switched.keep"
 grep -v '^pkg	' "$T/switched.keep" > "$T/k/lib/core-switched.txt"
 reset; (cd "$T/work/proj" && "$KITH" echo --launch-json 2>/dev/null) > /dev/null
-check "pkg line removed: kith-pkg resolve is run, project-id is not" "[ \"\$(calls 'kith-pkg resolve')\" -ge 1 ] && [ \"\$(calls project-id)\" = 0 ]"
+check "pkg line removed: neither program is run (the launch resolves through the program, not the line)" "[ \"\$(calls 'kith-pkg resolve')\" = 0 ] && [ \"\$(calls project-id)\" = 0 ]"
+# 3a. The room-ledger hooks: the program's verb with the line there, the stub's path with it gone.
+check "switched: the hooks run kernel room-ledger on the program" "grep -q 'kernel room-ledger --kernel' '$T/rust.out' && ! grep -q 'bin/kith-room-ledger' '$T/rust.out'"
+grep -v '^room-ledger	' "$T/switched.keep" > "$T/k/lib/core-switched.txt"
+(cd "$T/work/proj" && "$KITH" echo --launch-json 2>/dev/null) > "$T/rust.nolg"
+cp "$T/switched.keep" "$T/k/lib/core-switched.txt"
+check "room-ledger line removed: the hooks name the stub, not the program" "grep -q 'bin/kith-room-ledger pre --agent echo' '$T/rust.nolg' && ! grep -q 'kernel room-ledger' '$T/rust.nolg'"
 check "no project-id line in core-switched.txt: the stub is the only way" "! grep -q '^project-id	' '$T/switched.keep'"
 cp "$T/switched.keep" "$T/k/lib/core-switched.txt"
 
@@ -92,13 +100,17 @@ check "bash path, switched: exits 0" "[ \"\$(cat '$T/b.rc')\" = 0 ]"
 check "bash path, switched: kith-pkg resolve is not run, project-id (the stub) is" "[ \"\$(calls 'kith-pkg resolve')\" = 0 ] && [ \"\$(calls project-id)\" -ge 1 ]"
 check "bash path, switched: the project came from the core" "grep -q demo '$T/b.out'"
 check "bash path: same launch object as the Rust launch" "[ \"\$(norm < '$T/b.out')\" = \"\$(norm < '$T/rust.out')\" ]"
+check "bash path: the hooks run kernel room-ledger on the program, as the Rust launch's do" "grep -q 'kernel room-ledger --kernel' '$T/b.out'"
+grep -v '^room-ledger	' "$NOLAUNCH" > "$T/sw.nolg"
+reset; bash_launch "$T/sw.nolg" X=1 > "$T/b.nolg"
+check "bash path, room-ledger line removed: the hooks name the stub, not the program" "grep -q 'bin/kith-room-ledger pre --agent echo' '$T/b.nolg' && ! grep -q 'kernel room-ledger' '$T/b.nolg'"
+check "room-ledger line removed: same launch object on both launch paths" "[ \"\$(norm < '$T/b.nolg')\" = \"\$(norm < '$T/rust.nolg')\" ]"
 
 grep -v '^pkg	' "$NOLAUNCH" > "$T/sw.nopkg"
-reset; bash_launch "$T/sw.nopkg" X=1 > /dev/null
-check "bash path, pkg line removed: kith-pkg resolve and project-id are run" "[ \"\$(calls 'kith-pkg resolve')\" -ge 1 ] && [ \"\$(calls project-id)\" -ge 1 ]"
+reset; bash_launch "$T/sw.nopkg" X=1 > "$T/b.nopkg"
+check "bash path, pkg line removed: no rollback, the snapshot is still the program's and kith-pkg resolve is not run" "[ \"\$(calls 'kith-pkg resolve')\" = 0 ] && grep -q 'echo@' '$T/b.nopkg' && ! grep -q 'live folder' '$T/err'"
 reset; bash_launch "$NOLAUNCH" KITH_CORE=python > "$T/b.py"
-check "bash path, KITH_CORE=python: both programs are run" "[ \"\$(calls 'kith-pkg resolve')\" -ge 1 ] && [ \"\$(calls project-id)\" -ge 1 ]"
-check "bash path, KITH_CORE=python: same launch object" "[ \"\$(norm < '$T/b.py')\" = \"\$(norm < '$T/b.out')\" ]"
+check "bash path, KITH_CORE=python: kith-pkg resolve is not run, the snapshot is still the core's" "[ \"\$(calls 'kith-pkg resolve')\" = 0 ] && grep -q 'echo@' '$T/b.py'"
 reset; bash_launch "$NOLAUNCH" KITH_RUN_TOKEN=tok KITH_RUN_SOCKET="$T/none.sock" > "$T/bg.out"
 check "bash path under a guest token: project found (the token is dropped for the launch's lookups)" "grep -q demo '$T/bg.out'"
 
@@ -140,16 +152,13 @@ check "launch under a guest token: project found, core answered" "grep -q demo '
 mv "$T/state/projects.json" "$T/projects.keep"
 reset; (cd "$T/work" && "$KITH" echo --launch-json 2>/dev/null) > "$T/np.out"; nrc=$?
 reset; (cd "$T/work" && KITH_CORE=python "$KITH" echo --launch-json 2>/dev/null) > "$T/np.py"; nprc=$?
-check "no projects.json: same exit and object as the Python" "[ $nrc = $nprc ] && [ \"\$(norm < '$T/np.out')\" = \"\$(norm < '$T/np.py')\" ]"
+check "no projects.json: same exit as with KITH_CORE=python" "[ $nrc = $nprc ]"
 # The Rust launch fails in Registry::load before the switch is consulted, so this case no longer exercises the switch: it
 # only pins that a broken registry ends the launch the same way with the lines on or off.
 printf '{not json' > "$T/state/projects.json"
 (cd "$T/work" && "$KITH" echo --launch-json >/dev/null 2>&1); mrc=$?
-# The Rust launch reads the registry itself, so the comparison is the same launch with the pkg line gone (the Python lookup).
-grep -v '^pkg	' "$T/switched.keep" > "$T/k/lib/core-switched.txt"
-(cd "$T/work" && "$KITH" echo --launch-json >/dev/null 2>&1); mprc=$?
-cp "$T/switched.keep" "$T/k/lib/core-switched.txt"
-check "malformed projects.json: same exit as with the Python lookups" "[ $mrc = $mprc ]"
+(cd "$T/work" && KITH_CORE=python "$KITH" echo --launch-json >/dev/null 2>&1); mprc=$?
+check "malformed projects.json: the Rust launch ends the launch (exit 1)" "[ $mrc = 1 ]"
 mv "$T/projects.keep" "$T/state/projects.json"
 
 echo

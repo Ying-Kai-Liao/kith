@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # kith-accounts-tombstone-check: once `kith migrate step accounts` has tombstoned <machine>/accounts/state.json, every Python
 # writer of it fails closed with a clear message and leaves the note exactly as it is (lib/kith_accounts.py read_state,
-# update_state, mark_out, clear_out, record_started, the old-kernel-marks import; bin/kith-account out|clear|usage). A plain
+# update_state, mark_out, clear_out, record_started, the old-kernel-marks import). A plain
 # file, or none, behaves as before. Throwaway machine folder; nothing real is touched. The Rust half is the kernel's
 # `a_tombstoned_state_file_is_never_written_over...` and the runtime's cutover/modules tests.
 #
@@ -44,11 +44,6 @@ a.record_started('claude')\" >'$T/out' 2>&1 && grep -q 'was not noted' '$T/out' 
 echo '{"claude": {"out_until": 1900000000}}' > "$KITH_MACHINE/serve/kernel-backups-out.json"
 check "the old kernel's marks are neither merged nor renamed while tombstoned" "refuses 'a.read_state()' && [[ -e '$KITH_MACHINE/serve/kernel-backups-out.json' ]]"
 rm "$KITH_MACHINE/serve/kernel-backups-out.json"
-
-for verb in "out claude" "clear claude" "usage claude"; do
-  check "kith account $verb: one clear line, exit 1, note untouched" \
-    "\"$KERNEL/bin/kith-account\" $verb >'$T/out' 2>&1 </dev/null; rc=\$?; [[ \$rc -eq 1 ]] && grep -q 'moved to the Kith core' '$T/out' && grep -q 'kith rollback accounts' '$T/out' && [[ \"\$(cat '$S')\" == '$NOTE' ]]"
-done
 
 # A plain file (or none) is the old behaviour.
 printf '{"version": 1, "accounts": {"claude": {"last_started": 5}}}\n' > "$S"
