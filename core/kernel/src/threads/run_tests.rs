@@ -148,37 +148,94 @@ fn a_run_that_could_not_start_still_gives_its_claims_back_and_says_why() {
     );
 }
 
-/// A descriptor that survives exec: what a launcher's shell leaves open.
-fn leak(path: &Path) -> i32 {
+/// A descriptor that survives exec, at `at` or above: what a launcher's shell leaves open.
+fn leak(path: &Path, at: i32) -> i32 {
     use std::os::unix::io::IntoRawFd as _;
     let fd = fs::File::open(path).unwrap().into_raw_fd();
     // SAFETY: F_DUPFD with no close-on-exec on a descriptor this test owns.
-    let high = unsafe { libc::fcntl(fd, libc::F_DUPFD, 40) };
+    let high = unsafe { libc::fcntl(fd, libc::F_DUPFD, at) };
     // SAFETY: closing the descriptor `open` returned.
     unsafe { libc::close(fd) };
-    assert!(high >= 40);
+    assert!(high >= at);
     high
 }
 
 #[test]
-fn claude_gets_descriptors_0_to_2_and_nothing_else() {
+fn claude_gets_descriptors_0_to_2_and_nothing_else_and_under_the_stub_the_status_pipe_as_9() {
     let t = Tmp::new();
-    let out = t.0.join("seen");
     let file = t.0.join("kernel-file");
     fs::write(&file, "x").unwrap();
-    let fd = leak(&file);
-    let see = script(
+    // Leaked at 7 and 9 and well above: none may reach the engine, and the one at 9 must not be mistaken for the status pipe.
+    let leaked: Vec<i32> = [7, 9, 40].iter().map(|at| leak(&file, *at)).collect();
+    let out = t.0.join("seen");
+    let probe = |extra: &str| {
+        let tests: Vec<String> = leaked
+            .iter()
+            .map(|fd| {
+                format!(
+                    "[ -e /dev/fd/{fd} ] && echo \"leaked {fd}\" >> {o}; ",
+                    o = out.display()
+                )
+            })
+            .collect();
+        let tests = tests.concat();
+        format!("{tests}{extra}echo done >> {o}\n", o = out.display())
+    };
+    let see = script(&t, "see", &probe(""));
+    assert_eq!(go(&t, &slow, &[&see]).0, 0);
+    // Under the stub: fd 9 is the status pipe (its write end), so the leaked fd 9 is the pipe now, and nothing else is there.
+    let stub = script(
         &t,
-        "see",
+        "kith-stub",
         &format!(
-            "if [ -e /dev/fd/{fd} ]; then echo leaked > {o}; else echo clean > {o}; fi\n",
+            "fd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\n\
+             [ \"$fd\" = 9 ] && echo \"status 9\" >> {o}\n\
+             for n in 7 8 10 11 12 40; do [ -e /dev/fd/$n ] && echo \"leaked $n\" >> {o}; done\n\
+             echo locked >&9\nexit 0\n",
             o = out.display()
         ),
     );
-    assert_eq!(go(&t, &slow, &[&see]).0, 0);
-    // SAFETY: the descriptor `leak` made.
-    unsafe { libc::close(fd) };
-    assert_eq!(fs::read_to_string(out).unwrap().trim(), "clean");
+    let ok = script(&t, "ok", "exit 0\n");
+    assert_eq!(go(&t, &slow, &[&stub, "--key", "s", "--", &ok]).0, 0);
+    for fd in leaked {
+        // SAFETY: the descriptors `leak` made.
+        unsafe { libc::close(fd) };
+    }
+    let seen = fs::read_to_string(out).unwrap();
+    assert_eq!(
+        seen.lines().collect::<Vec<_>>(),
+        ["done", "status 9"],
+        "{seen}"
+    );
+}
+
+#[test]
+fn a_stub_that_cannot_start_is_told_even_with_the_low_descriptors_taken() {
+    let t = Tmp::new();
+    // Hold descriptors until 8 and 9 are the next free ones: before the pipes were moved above 9, the pipe that says an exec failed
+    // landed on it, the child's dup2 closed it, and the failure was read as the stub's own word.
+    let mut held = Vec::new();
+    loop {
+        let f = fs::File::open("/dev/null").unwrap();
+        let fd = std::os::unix::io::AsRawFd::as_raw_fd(&f);
+        held.push(f);
+        if fd >= 7 || held.len() > 64 {
+            break;
+        }
+    }
+    let gone =
+        t.0.join("no-such-dir")
+            .join("kith-stub")
+            .to_string_lossy()
+            .into_owned();
+    let (code, notes) = go(&t, &slow, &[&gone, "--key", "s", "--", "claude"]);
+    drop(held);
+    assert_eq!(code, 127);
+    assert!(
+        notes.iter().any(|n| n.starts_with("kith: cannot run ")
+            && n.ends_with("[Errno 2] No such file or directory")),
+        "{notes:?}"
+    );
 }
 
 #[test]

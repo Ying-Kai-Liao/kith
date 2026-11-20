@@ -14,6 +14,8 @@
 #
 #   kernel/tests/kith-direct-lock-check    a few seconds; prints each check, exits 1 when one fails
 #   KITH_STUB_BIN=/path/to/kith-stub       else a build under $CARGO_TARGET_DIR / serve/host/target (no stub: the check skips)
+#   KITH_BIN=/path/to/kith                 a program that lists `threads-run`: the interactive rows run again through `kith kernel threads
+#                                          run`, and `bin/kith` is launched once under a pty (and once with KITH_CORE=python)
 set -uo pipefail
 
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
@@ -128,8 +130,9 @@ err=$(cd "$T/work" && KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope
 err=$(cd "$T/work" && KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
 [[ $rc != 0 && $err == *"cannot be locked"* ]] && ok "KITH_REQUIRE_STUB=1: refused with an install hint" || bad "require stub" "$rc $err"
 
+rows_registry() {   # rows_registry SESSION-ID: needs $RUNNER (the wrapper to run) and $LABEL
 # an interactive run: kith-sessions run keeps claude's registry entry and its /exit intent even though the child is the stub
-SID4=44444444-4444-4444-8444-444444444444
+SID4=$1
 cat > "$T/bin/claude-reg" <<'REG'
 #!/usr/bin/env bash
 mkdir -p "$CLAUDE_CONFIG_DIR/sessions" "$CLAUDE_CONFIG_DIR/projects/p"
@@ -141,17 +144,21 @@ while [[ ! -e $STUB_GO ]]; do sleep 0.1; done
 REG
 chmod +x "$T/bin/claude-reg"
 rm -f "$T/go" "$T/started"
-( cd "$T/work" && KERNEL_SK=$SK STUB_SID=$SID4 python3 "$SK" run designer -- "$STUB" --lock-dir "$LOCKS" --key "$SID4" -- "$T/bin/claude-reg" ) >/dev/null 2>&1 &
+( cd "$T/work" && KERNEL_SK=$SK STUB_SID=$SID4 "$RUNNER" run designer -- "$STUB" --lock-dir "$LOCKS" --key "$SID4" -- "$T/bin/claude-reg" ) >/dev/null 2>&1 &
 RP=$!
-waitfor '[[ -s $T/started && -f $REG/$SID4.json ]]' || bad "interactive: claude never registered"
+waitfor '[[ -s $T/started && -f $REG/$SID4.json ]]' || bad "$LABEL interactive: claude never registered"
 cpid=$(cat "$T/started")
-is "interactive: registry names claude's own pid" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$REG/$SID4.json")" "$cpid"
-is "interactive: registry notes the stub as launcher" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("launcher"))' "$REG/$SID4.json")" "$(ps -o ppid= -p "$cpid" | tr -d ' ')"
+is "$LABEL interactive: registry names claude's own pid" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$REG/$SID4.json")" "$cpid"
+is "$LABEL interactive: registry notes the stub as launcher" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("launcher"))' "$REG/$SID4.json")" "$(ps -o ppid= -p "$cpid" | tr -d ' ')"
 sleep 0.5   # kith-sessions has found claude behind the stub by now (it names that pid in the quit intent)
 touch "$T/go"; wait $RP
 intent=$(find "$KITH_STATE" -path '*intent*' -name "$SID4.json" 2>/dev/null | head -1)
-[[ -n $intent ]] && is "interactive: Kai's /exit leaves a quit intent for claude's pid" "$(python3 -c 'import json,sys; i=json.load(open(sys.argv[1])); print(i["why"], i["pid"])' "$intent")" "quit $cpid" \
-  || bad "interactive: no quit intent (the wrapper lost claude behind the stub)"
+[[ -n $intent ]] && is "$LABEL interactive: Kai's /exit leaves a quit intent for claude's pid" "$(python3 -c 'import json,sys; i=json.load(open(sys.argv[1])); print(i["why"], i["pid"])' "$intent")" "quit $cpid" \
+  || bad "$LABEL interactive: no quit intent (the wrapper lost claude behind the stub)"
+
+}
+printf '#!/bin/sh\nexec python3 "%s" "$@"\n' "$SK" > "$T/run-py"; chmod +x "$T/run-py"
+RUNNER=$T/run-py LABEL=py rows_registry 44444444-4444-4444-8444-444444444444
 
 # kith-sessions run reads the stub's status pipe: "busy" is 75 whatever the engine exits with; "locked" and an engine exit of
 # 75/126/127 are the engine's own; no word and exit 70 is a lock error.
@@ -166,20 +173,72 @@ PY
 )
 is "stub status pipe: busy wins; the engine's own 75/127 stay; a lock error stays 70" "$verdict" "75 75 127 70"
 
+rows_busy() {   # rows_busy SESSION-ID: needs $RUNNER and $LABEL
 # an interactive run that finds the lock busy (another holder has the conversation): the wrapper exits 75, claude never starts,
 # the terminal claim it took is given back, and no resume note reaches Kai
-SID5=55555555-5555-4555-8555-555555555555
+SID5=$1
 rm -f "$T/go" "$T/started"
 "$STUB" --lock-dir "$LOCKS" --key "$SID5" -- bash -c 'while [ ! -e "$0" ]; do sleep 0.1; done' "$T/go" & HELD5=$!
-waitfor '! "$STUB" --lock-dir "$LOCKS" --key "$SID5" -- true >/dev/null 2>&1' || bad "interactive busy: held stub did not take the lock"
-( cd "$T/work" && KERNEL_SK=$SK STUB_SID=$SID5 exec bash -c 'python3 "$0" terminal "$1" $$ && exec python3 "$0" run designer -- "$2" --lock-dir "$3" --key "$1" -- "$4"' \
+waitfor '! "$STUB" --lock-dir "$LOCKS" --key "$SID5" -- true >/dev/null 2>&1' || bad "$LABEL interactive busy: held stub did not take the lock"
+( cd "$T/work" && KERNEL_SK=$SK STUB_SID=$SID5 exec bash -c 'python3 "$0" terminal "$1" $$ && exec "$RUNNER" run designer -- "$2" --lock-dir "$3" --key "$1" -- "$4"' \
   "$SK" "$SID5" "$STUB" "$LOCKS" "$T/bin/claude-reg" ) > "$T/r5.out" 2>&1
 rc=$?
-is "interactive busy: the run exits 75" "$rc" 75
-[[ ! -s $T/started && ! -f $REG/$SID5.json ]] && ok "interactive busy: claude never started" || bad "interactive busy: claude started"
-unheld $SID5 && ok "interactive busy: the claim was released" || bad "interactive busy: claim still held"
-grep -qE 'Resume it as|continued in Kith' "$T/r5.out" && bad "interactive busy: a resume note was printed" "$(cat "$T/r5.out")" || ok "interactive busy: no resume note"
+is "$LABEL interactive busy: the run exits 75" "$rc" 75
+[[ ! -s $T/started && ! -f $REG/$SID5.json ]] && ok "$LABEL interactive busy: claude never started" || bad "$LABEL interactive busy: claude started"
+unheld $SID5 && ok "$LABEL interactive busy: the claim was released" || bad "$LABEL interactive busy: claim still held"
+grep -qE 'Resume it as|continued in Kith' "$T/r5.out" && bad "$LABEL interactive busy: a resume note was printed" "$(cat "$T/r5.out")" || ok "$LABEL interactive busy: no resume note"
 touch "$T/go"; wait $HELD5
+
+}
+RUNNER=$T/run-py LABEL=py rows_busy 55555555-5555-4555-8555-555555555555
+
+# The same rows again through the Rust wrapper, `kith kernel threads run` (R5 ports 2/4, module threads-run), and a launch through
+# bin/kith itself on a program that lists it. The program is wrapped so its calls are logged: the check asserts which side answered
+# (the Python `run` must stay the rollback, so KITH_CORE=python must not reach the program).
+KB=${KITH_BIN:-}
+if [[ -n $KB && -x $KB ]] && "$KB" kernel version 2>/dev/null | grep -q '"threads-run"'; then
+  printf '#!/bin/sh\necho "$*" >> "%s/kith-calls"\nexec "%s" "$@"\n' "$T" "$KB" > "$T/kith-wrap"; chmod +x "$T/kith-wrap"
+  printf '#!/bin/sh\nexec "%s" kernel threads --kernel "%s" "$@"\n' "$T/kith-wrap" "$KERNEL" > "$T/run-rust"; chmod +x "$T/run-rust"
+  : > "$T/kith-calls"
+  RUNNER=$T/run-rust LABEL=rust rows_registry 77777777-7777-4777-8777-777777777777
+  RUNNER=$T/run-rust LABEL=rust rows_busy 88888888-8888-4888-8888-888888888888
+  is "rust run: the program was asked for run (both rows)" "$(grep -c ' run designer -- ' "$T/kith-calls")" 2
+  # bin/kith's last exec, under a terminal: the program's stdio is the slave of a pty (BSD and GNU `script` differ, and Python's
+  # pty.spawn does not return on macOS while stdin is /dev/null). The master is drained and the run is waited for.
+  ptyrun() { python3 -c 'import os, subprocess, sys, threading
+m, s = os.openpty()
+def drain():
+    try:
+        while os.read(m, 4096):
+            pass
+    except OSError:
+        pass
+threading.Thread(target=drain, daemon=True).start()
+p = subprocess.Popen(sys.argv[1:], stdin=s, stdout=s, stderr=s, close_fds=True)
+os.close(s)
+sys.exit(p.wait())' "$@"; }
+  SID7=99999999-9999-4999-8999-999999999999
+  rm -f "$T/go" "$T/started"
+  : > "$T/kith-calls"
+  ( cd "$T/work" && KITH_BIN=$T/kith-wrap KITH_CLAIM_WAIT=1 KITH_CLAUDE_ARGS="--session-id $SID7" ptyrun "$KERNEL/bin/kith" designer ) > "$T/r7.out" 2>&1 &
+  R7=$!
+  waitfor '[[ -s $T/started ]]' && ok "bin/kith: claude started under the Rust run" || bad "bin/kith: claude never started" "$(cat "$T/r7.out")"
+  [[ $(grep -c "^kernel threads --kernel .* run designer -- .*kith-stub" "$T/kith-calls") == 1 ]] && ok "bin/kith: the last exec is kernel threads run" \
+    || bad "bin/kith: the last exec did not go to the Rust run" "$(cat "$T/kith-calls")"
+  touch "$T/go"; wait $R7; is "bin/kith: the run exits 0 when claude does" "$?" 0
+  unheld $SID7 && ok "bin/kith: the claim ended with the run" || bad "bin/kith: claim still held"
+  # the rollback: KITH_CORE=python keeps the Python run (the program is not asked for it)
+  SID8=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+  rm -f "$T/go" "$T/started"
+  : > "$T/kith-calls"
+  ( cd "$T/work" && KITH_CORE=python KITH_BIN=$T/kith-wrap KITH_CLAIM_WAIT=1 KITH_CLAUDE_ARGS="--session-id $SID8" ptyrun "$KERNEL/bin/kith" designer ) > "$T/r8.out" 2>&1 &
+  R8=$!
+  waitfor '[[ -s $T/started ]]' && ok "bin/kith, KITH_CORE=python: claude started" || bad "bin/kith, KITH_CORE=python: claude never started" "$(cat "$T/r8.out")"
+  [[ $(grep -c ' run designer -- ' "$T/kith-calls") == 0 ]] && ok "bin/kith, KITH_CORE=python: the Python run answered" || bad "bin/kith, KITH_CORE=python: the program was asked for run" "$(cat "$T/kith-calls")"
+  touch "$T/go"; wait $R8; is "bin/kith, KITH_CORE=python: the run exits 0" "$?" 0
+else
+  echo "skip: the Rust run rows need KITH_BIN (a kith program that lists threads-run)"
+fi
 
 # Writer mode (the claims marker) with the core not answering: the owner's run goes on under the lock alone, and the stub is
 # told so (--lock-alone: it clears a host warm process that has the conversation loaded before claude starts; the clear itself

@@ -448,10 +448,14 @@ pub fn run(
     let mut status = None;
     let mut argv = cmd.to_vec();
     if let Some(with) = with_status_fd(cmd)
-        && let Ok(pipe) = crate::lifecycle::proc::pipe()
+        && let Ok((r, w)) = crate::lifecycle::proc::pipe()
     {
+        // Above the status descriptor (9) the child gets it as: see `runproc::spawn`.
         argv = with;
-        status = Some(pipe);
+        status = Some((
+            crate::lifecycle::proc::high(r),
+            crate::lifecycle::proc::high(w),
+        ));
     }
     let argv_os: Vec<OsString> = argv.iter().map(OsString::from).collect();
     let spawned = match runproc::spawn(&argv_os, status) {
@@ -486,6 +490,7 @@ pub fn run(
             Wait::Gone => break,
             Wait::Running => {}
         }
+        runproc::drain_pending(spawned.pid);
         // Until the engine is found a short tick: an engine that exits within one long tick would leave no pid to name in
         // the quit intent (a clean /exit then reads as a crash).
         std::thread::sleep(Duration::from_millis(if eng.is_some() { 250 } else { 50 }));

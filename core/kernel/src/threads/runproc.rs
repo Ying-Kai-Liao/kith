@@ -1,6 +1,9 @@
 //! The process half of `run`: the fork that becomes claude, the signals the wrapper passes on, `waitpid`, and the few `libc`
 //! reads the idle check needs. Everything with `unsafe` in `run` lives here (the crate denies it elsewhere).
 //!
+//! The signals are passed on from a raw `sigaction` handler and an atomic pid; the process is a tokio runtime (the program's
+//! `main`), so the handler may run on any thread, and it is written for that ([`forward`]): no async-runtime signal stream.
+//!
 //! The fork is raw because the child's whole life has to be known: after `fork` it calls only async-signal-safe functions on
 //! data made before (`sigaction`, `sigprocmask`, `dup2`, `close`, `execve`, `write`, `_exit`), as the host is multi-threaded.
 //! What claude is given (the architect's MUSTs on #1090): every signal back at its default and nothing blocked, so a
@@ -46,7 +49,17 @@ extern "C" fn forward(sig: libc::c_int) {
         if child > 0 {
             libc::kill(child, sig);
         } else {
+            // The pid is not known yet: hold the signal. This handler may run on any thread of the process (it is a tokio
+            // runtime's), so the thread that stores the pid can have looked for a held signal just before this store: look at
+            // the pid once more, and whoever swaps the held signal out sends it.
             PENDING.store(sig, Ordering::SeqCst);
+            let child = CHILD.load(Ordering::SeqCst);
+            if child > 0 {
+                let held = PENDING.swap(0, Ordering::SeqCst);
+                if held > 0 {
+                    libc::kill(child, held);
+                }
+            }
         }
         *slot = saved;
     }
@@ -70,17 +83,19 @@ fn errno() -> i32 {
 /// What the signals were before [`install_handlers`], so they can be given back once the child is gone.
 pub struct Saved {
     mask: libc::sigset_t,
-    actions: [libc::sigaction; 3],
+    actions: [libc::sigaction; 4],
 }
 
-const PASSED_ON: [libc::c_int; 3] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP];
+/// INT is ignored, TERM and HUP are passed on, and CHLD is put to its default: a launcher that left it ignored would make
+/// `waitpid` fail with ECHILD, and a crash would read as a clean exit.
+const HANDLED: [libc::c_int; 4] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGCHLD];
 
 impl Saved {
     /// The dispositions and the mask this process had: after the run, whatever it does next is as it was.
     pub fn restore(&self) {
         // SAFETY: sigaction and pthread_sigmask with what `install_handlers` read.
         unsafe {
-            for (s, a) in PASSED_ON.iter().zip(&self.actions) {
+            for (s, a) in HANDLED.iter().zip(&self.actions) {
                 libc::sigaction(*s, a, std::ptr::null_mut());
             }
             libc::pthread_sigmask(
@@ -114,17 +129,17 @@ fn install_handlers() -> Saved {
         };
         let mut act: libc::sigaction = std::mem::zeroed();
         libc::sigemptyset(&raw mut act.sa_mask);
-        for (s, old) in PASSED_ON.iter().zip(saved.actions.iter_mut()) {
-            act.sa_sigaction = if *s == libc::SIGINT {
-                libc::SIG_IGN
-            } else {
-                forward as extern "C" fn(libc::c_int) as usize
+        for (s, old) in HANDLED.iter().zip(saved.actions.iter_mut()) {
+            act.sa_sigaction = match *s {
+                libc::SIGINT => libc::SIG_IGN,
+                libc::SIGCHLD => libc::SIG_DFL,
+                _ => forward as extern "C" fn(libc::c_int) as usize,
             };
             libc::sigaction(*s, &raw const act, old);
         }
         let mut block: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&raw mut block);
-        for s in PASSED_ON {
+        for s in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
             libc::sigaddset(&raw mut block, s);
         }
         libc::pthread_sigmask(libc::SIG_BLOCK, &raw const block, &raw mut saved.mask);
@@ -160,7 +175,13 @@ fn candidates(file: &OsStr, path: Option<&OsStr>) -> Vec<CString> {
 /// stdio. `status`: the status pipe (read end, write end); the child gets the write end as [`STATUS_FD`], the parent's copy of
 /// it is closed here. From the return on, TERM and HUP reach the child and `^C` is ignored.
 pub fn spawn(argv: &[OsString], status: Option<(RawFd, RawFd)>) -> std::io::Result<Spawned> {
-    let (err_r, err_w) = super::super::lifecycle::proc::pipe()?;
+    // Above the status descriptor (9): the lowest free numbers could be 9 itself, and the child's `dup2` onto it would close the
+    // pipe that tells us an exec failed.
+    let (err_r, err_w) = crate::lifecycle::proc::pipe()?;
+    let (err_r, err_w) = (
+        crate::lifecycle::proc::high(err_r),
+        crate::lifecycle::proc::high(err_w),
+    );
     let cargs: Vec<CString> = argv.iter().map(|a| cstr(a)).collect();
     let mut argv_ptrs: Vec<*const libc::c_char> = cargs.iter().map(|a| a.as_ptr()).collect();
     argv_ptrs.push(std::ptr::null());
@@ -189,7 +210,7 @@ pub fn spawn(argv: &[OsString], status: Option<(RawFd, RawFd)>) -> std::io::Resu
         let e = std::io::Error::last_os_error();
         saved.restore();
         for fd in [err_r, err_w] {
-            super::super::lifecycle::proc::close(fd);
+            crate::lifecycle::proc::close(fd);
         }
         return Err(e);
     }
@@ -242,12 +263,12 @@ pub fn spawn(argv: &[OsString], status: Option<(RawFd, RawFd)>) -> std::io::Resu
         // SAFETY: a signal that arrived before the pid was known, for our own child.
         unsafe { libc::kill(pid, held) };
     }
-    super::super::lifecycle::proc::close(err_w);
+    crate::lifecycle::proc::close(err_w);
     if let Some((_, w)) = status {
-        super::super::lifecycle::proc::close(w);
+        crate::lifecycle::proc::close(w);
     }
-    let said = super::super::lifecycle::proc::read_to_end(err_r);
-    super::super::lifecycle::proc::close(err_r);
+    let said = crate::lifecycle::proc::read_to_end(err_r);
+    crate::lifecycle::proc::close(err_r);
     let exec_failed = said
         .get(..4)
         .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]));
@@ -289,6 +310,15 @@ pub fn read_status(fd: RawFd, limit: std::time::Duration) -> Vec<u8> {
             return all;
         }
         all.extend_from_slice(&buf[..usize::try_from(n).unwrap_or(0)]);
+    }
+}
+
+/// A TERM or HUP that was held because the pid was not known when it arrived, passed on now (the wait loop looks every tick).
+pub fn drain_pending(pid: i32) {
+    let held = PENDING.swap(0, Ordering::SeqCst);
+    if held > 0 {
+        // SAFETY: a signal that arrived before the pid was known, for our own child.
+        unsafe { libc::kill(pid, held) };
     }
 }
 
@@ -367,8 +397,8 @@ pub fn stdin_atime() -> Option<f64> {
     }
 }
 
-/// A command that runs on after this process is gone: its own session (no terminal, no signal of ours reaches it) and no
-/// stdio. The descriptors are closed by `Command` (every one this crate opens is close-on-exec).
+/// A command that runs on after this process is gone: its own session (no terminal, no signal of ours reaches it), no stdio and
+/// no descriptor but 0-2.
 pub fn detached(program: &str, args: &[OsString]) -> std::io::Result<()> {
     use std::os::unix::process::CommandExt as _;
     let mut c = Command::new(program);
@@ -376,10 +406,17 @@ pub fn detached(program: &str, args: &[OsString]) -> std::io::Result<()> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    // SAFETY: setsid(2) in the forked child, between fork and exec: async-signal-safe and touches nothing of ours.
+    // SAFETY: getdtablesize has no arguments; the cap keeps the closing loop short.
+    let maxfd = unsafe { libc::getdtablesize() }.clamp(16, 65_536);
+    // SAFETY: setsid(2) and close(2) in the forked child, between fork and exec: async-signal-safe and touch nothing of ours.
+    // Python's `Popen` closed every descriptor above 2 (close_fds); `Command` does not, so a descriptor the launcher leaked
+    // would otherwise stay open in a helper that outlives us.
     unsafe {
-        c.pre_exec(|| {
+        c.pre_exec(move || {
             libc::setsid();
+            for fd in 3..maxfd {
+                libc::close(fd);
+            }
             Ok(())
         });
     }
