@@ -76,6 +76,8 @@ kith_core_bin() {
     module=${verb%% *}
     # the cost hook needs the ledger's writers, not just the read verbs an older program has under `cost`
     [[ $module == cost ]] && module=cost-ledger
+    # `kith-sessions` needs every verb in both modes of the claims, not the Files-mode port an older program has under `threads`
+    [[ $module == threads ]] && module=threads-writer
   fi
   if [[ -n ${_kith_core_primed:-} ]]; then
     bin=$_kith_core_bin ver=$_kith_core_ver
@@ -85,6 +87,15 @@ kith_core_bin() {
   fi
   [[ -n $bin && $ver == *"\"$module\""* ]] || return 1
   printf '%s' "$bin"
+}
+
+# kith_threads VERB ARGS...   `kith-sessions VERB ARGS`, on the side this launch decided once (bin/kith sets `kthreads`, the
+# program that answers `kernel threads`, or leaves it empty for the Python, which stays the rollback). Never decides itself: a
+# launch must not split its claims between the two programs. The caller's env prefix (KITH_REVOKE_SEEN=..) reaches either.
+kith_threads() {
+  if [[ -n ${kthreads:-} ]]; then "$kthreads" kernel threads --kernel "$KITH" "$@"
+  else python3 "$KITH/bin/kith-sessions" "$@"
+  fi
 }
 
 # kith_cost ARGS...   `kith-cost ARGS`: the core's when `cost` is switched and the program has the `cost-ledger` module (tag and
@@ -231,7 +242,7 @@ kith_held_launch() {
     if [[ -n $rsid ]]; then
       ans=$(echo '{}' | kith_held_call terminal.list) || rc=$?
       if [[ $rc -ne 0 || $(printf '%s' "$ans" | kith_held_get link) != up ]]; then why="holder not reachable"
-      elif python3 "$KITH/bin/kith-sessions" release "$rsid"; then released=1
+      elif kith_threads release "$rsid"; then released=1
       else why="the session's claim is not this shell's to hand over"
       fi
       rc=0
@@ -294,7 +305,7 @@ print(json.dumps(p))' "$agent" "$sid" "$@")
   if [[ $released -eq 1 ]]; then
     # The claim again; a core that gave no answer marks the run lock-alone (bin/kith passes --lock-alone to the stub).
     local claimed
-    claimed=$(python3 "$KITH/bin/kith-sessions" terminal "$rsid" "$$") || exit 1
+    claimed=$(kith_threads terminal "$rsid" "$$") || exit 1
     [[ $claimed != lock-alone ]] || held_alone=1
   fi
   return 1

@@ -374,6 +374,13 @@ fi
 # kith-auth decides that they may run, and travels with the run's claim (KITH_REVOKE_SEEN): a revoke that lands in between
 # refuses the claim instead of being missed by the sweep that ran before it. Files mode (no marker): nothing is read.
 claim_seen=""
+# `kith-sessions` (the writer claims, the registry, --resume's pick) is the Rust `kith kernel threads` when `threads` is switched
+# (lib/core-switched.txt) and the program lists the module `threads-writer`, else the Python, which stays the rollback. Decided
+# ONCE here, in a plain variable: every call of this launch (epoch, proc, claim, terminal, resolve, the SessionStart hook and
+# the held launch's release) runs on the same side, so one launch never splits its claims between the two programs.
+. "$KITH/lib/kith-core.sh"
+[[ -n ${_kith_core_primed:-} ]] || kith_core_prime
+kthreads=""; kthreads=$(kith_core_bin threads) || kthreads=""
 # Writer mode is either source (kernel/lib/kith_claims.py switched): the marker, or the module's switch file once it says more than
 # `stepping`, so a marker lost while the core serves does not send a taker back to the files.
 claims_core() {
@@ -382,7 +389,7 @@ claims_core() {
   [[ -e $f ]] && ! grep -qx 'state=stepping' "$f" 2>/dev/null
 }
 if [[ -n ${KITH_PERSON:-} ]] && claims_core; then
-  claim_seen=$(python3 "$KITH/bin/kith-sessions" epoch "$KITH_PERSON") || exit 1
+  claim_seen=$(kith_threads epoch "$KITH_PERSON") || exit 1
 fi
 if [[ -n ${KITH_PERSON:-} ]]; then
   # Anyone but the owner is resolved while this Mac is in sync with the Kith cloud (revoke-person R5c, R8): while
@@ -482,11 +489,18 @@ shared=$home/memory/shared
 
 # The pinned package (prompt.md = agent.md body + PROTOCOL.md). If versioning itself breaks, run the live folder
 # rather than not at all.
-# `resolve` is the Rust core's when `pkg` is switched (lib/core-switched.txt); kith_core_exec returns otherwise (or with
-# KITH_CORE=python) and the Python answers. The rest of kith-pkg stays Python.
+# `resolve` is the Rust core's and has no Python fallback: the program that lists the `pkg` module answers, whatever
+# lib/core-switched.txt or KITH_CORE says (there is no Python to go back to; the rollback is a previous release), and a Mac without
+# one names that and takes the live folder. The rest of kith-pkg stays Python.
 . "$KITH/lib/kith-core.sh"
 [[ -n ${_kith_core_primed:-} ]] || kith_core_prime   # one program lookup for the pkg call and the project_id calls below
-pkg=$({ kith_core_exec pkg --kernel "$KITH" resolve "$agent" || "$KITH/bin/kith-pkg" resolve "$agent"; }) && [[ -f $pkg/prompt.md ]] \
+pkg_missing() {
+  echo "kith: no kith program with the pkg module was found (kith update); $agent runs its live folder, so a pin or rollback is ignored until one is" >&2
+}
+if [[ -n ${_kith_core_bin:-} && ${_kith_core_ver:-} == *'"pkg"'* ]]; then
+  pkg=$(KITH_BIN=$_kith_core_bin "$_kith_core_bin" kernel pkg --kernel "$KITH" resolve "$agent")
+else pkg=""; pkg_missing; fi
+[[ -f $pkg/prompt.md ]] \
   || { echo "kith: $agent: package snapshot failed; running the live folder" >&2; pkg=$src_pkg; }
 export KITH_AGENT=$agent KITH_AGENT_DIR=$pkg KITH_AGENT_HOME=$home KITH_AGENT_VERSION=${pkg##*@}
 [[ $pkg == "$src_pkg" ]] && KITH_AGENT_VERSION=live
@@ -559,13 +573,13 @@ r_sid="" r_cwd="" r_from="" r_alone=""
 if [[ -n $resume_thread || -n $resume_pick ]]; then
   [[ $launch -eq 0 && $print -eq 0 ]] || { echo "kith: --resume is for a run in this terminal, not --launch-json or --print" >&2; exit 1; }
   [[ $p_owner == 1 ]] || { echo "kith: --resume is for the owner's own sessions" >&2; exit 1; }
-  if [[ -z $resume_thread && $resume_pick == pick ]]; then resume_thread=$(python3 "$KITH/bin/kith-sessions" pick "$agent") || exit 1
-  elif [[ -z $resume_thread ]]; then resume_thread=$(python3 "$KITH/bin/kith-sessions" latest "$agent" "$PWD") || exit 1; fi
+  if [[ -z $resume_thread && $resume_pick == pick ]]; then resume_thread=$(kith_threads pick "$agent") || exit 1
+  elif [[ -z $resume_thread ]]; then resume_thread=$(kith_threads latest "$agent" "$PWD") || exit 1; fi
   [[ -n $resume_thread ]] || exit 1   # a pick that named nothing must not fall through to a fresh claude
   # Whatever named the session (--resume, -r ID, the picker, -c), it is claimed and checked here and nowhere else.
   # Not `eval "$(…)" || exit 1`: a refusal prints nothing, eval of nothing succeeds, and claude would start anyway.
   # A one-shot (a task is given) waits a few seconds for a held session; a terminal run refuses at once.
-  resolved=$(python3 "$KITH/bin/kith-sessions" resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit 1
+  resolved=$(kith_threads resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit 1
   eval "$resolved"
   [[ -z $r_cwd ]] || cd "$r_cwd" || exit 1
   # A built-in's engine and model are per thread: a resumed one keeps what it started with unless -H/-m say otherwise.
@@ -884,7 +898,11 @@ plugins=$(claude plugin list --json 2>/dev/null || echo '[]')
 # checks and blocks a refused write with the reason; after it, `post` records the version. Files that aren't memory
 # return at once. Without the kith binary (a kernel checkout never built) writes still go through, unchecked.
 # Room notes also get a write-time record of who was in the room (bin/kith-room-ledger); it never blocks a write.
-ledger_pre=$(printf '%q pre --agent %q --home %q || true' "$KITH/bin/kith-room-ledger" "$agent" "$home")
+# The Rust `kith kernel room-ledger` when `room-ledger` is switched and the program lists it, else the stub at the old path, which
+# forwards (or does nothing: a hook never fails). Quoted with %q as the memory hook below is, so both launch paths write the same bytes.
+ledger_cmd=$(printf '%q' "$KITH/bin/kith-room-ledger")
+if lbin=$(kith_core_bin room-ledger); then ledger_cmd=$(printf '%q kernel room-ledger --kernel %q' "$lbin" "$KITH"); fi
+ledger_pre=$(printf '%s pre --agent %q --home %q || true' "$ledger_cmd" "$agent" "$home")
 ledger_post=${ledger_pre/ pre --agent / post --agent }
 mem_pre="" mem_post=""
 if mbin=$(python3 "$KITH/lib/kith_paths.py" --bin) && [[ -n $mbin ]]; then
@@ -909,6 +927,9 @@ fi
 # `cost-ledger`), else the Python. Quoted with %q as the memory hook above is, so both launch paths write the same bytes.
 cost_hook="\"$KITH/bin/kith-cost\" tag"
 if cbin=$(kith_core_bin cost); then cost_hook=$(printf '%q kernel cost --kernel %q tag' "$cbin" "$KITH"); fi
+# The registry's SessionStart hook: the same side of `kith-sessions` as the rest of this launch (kthreads, decided above).
+sessions_hook="\"$KITH/bin/kith-sessions\" record"
+if [[ -n $kthreads ]]; then sessions_hook=$(printf '%q kernel threads --kernel %q record' "$kthreads" "$KITH"); fi
 # A built-in (scratch) keeps no long-term memory: its memory folder is not pre-approved for writes.
 [[ $p_owner == 1 ]] && { [[ $builtin == 1 ]] && writable="" || writable="$home/memory"$'\n'"$home_real/memory"; } \
   || writable=$(printf '%s\n' "$mem" "$(real "$mem")" "$shared" "$(real "$shared")" "$files" "$(real "$files")")
@@ -920,7 +941,8 @@ if [[ $p_owner == 0 && -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX && -d $KIT
   [[ $(dirname "$ob") == "$(cd "$KITH_MACHINE/outbox" && pwd -P)" && $(basename "$ob") != .* ]] && run_outbox=$ob
 fi
 [[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
-fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK=$cost_hook SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
+# The live folder (a launch without a package snapshot) may have no settings.json: an empty one then.
+fill < <([[ -f $pkg/settings.json ]] && cat "$pkg/settings.json" || echo "{}") | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK=$cost_hook SESSIONS_HOOK=$sessions_hook WRITABLE="$writable
 $learned
 $state_projects" python3 -I -c '
 import json, os, re, sys
@@ -1393,7 +1415,7 @@ fi
 # could not find it: it does not start (exit 9 is the core saying so; a traceback or a failed import is the same to a revoke).
 if [[ $p_owner != 1 && $launch -ne 1 ]]; then
   proc_rc=0
-  KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || proc_rc=$?
+  KITH_REVOKE_SEEN=$claim_seen kith_threads proc "$$" "$p_id" "$agent" 2>/dev/null || proc_rc=$?
   if [[ $proc_rc -eq 9 ]] || { [[ $proc_rc -ne 0 ]] && claims_core; }; then
     echo "kith: the Kith core cannot record this run, so ${p_id} cannot start it right now (is kith serve running?)" >&2; exit 1
   fi
@@ -1537,7 +1559,7 @@ if [[ $# -gt 0 ]]; then
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
   if [[ -n $csid ]]; then
-    claimed=$(KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" "$claim_person" "$agent") || exit 1
+    claimed=$(KITH_REVOKE_SEEN=$claim_seen kith_threads claim "$csid" "$$" "$claim_person" "$agent") || exit 1
     [[ $claimed != lock-alone || -n $r_alone ]] || lock_alone
   fi
   [[ -z $csid || -z $sid_file ]] || printf '%s\n' "$csid" > "$sid_file"
@@ -1590,7 +1612,7 @@ fi
 # The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
 # claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
 if [[ -n $csid && $csid != "${r_sid:-}" ]]; then
-  claimed=$(KITH_REVOKE_SEEN=$claim_seen python3 "$KITH/bin/kith-sessions" terminal "$csid" "$$" "$claim_person" "$agent") || exit 1
+  claimed=$(KITH_REVOKE_SEEN=$claim_seen kith_threads terminal "$csid" "$$" "$claim_person" "$agent") || exit 1
   [[ $claimed != lock-alone || -n $r_alone ]] || lock_alone
 fi
 # An interactive owner run is listed in the apps (the SessionStart hook above) and may be taken over from there, which ends

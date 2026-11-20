@@ -10,8 +10,10 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use super::core::Core;
 use super::registry::{entry, live_pid, transcript_cwd};
-use super::{Ctx, Take, claim_path, claim_waiting, read_claim, release_claims};
+use super::writer::Taker;
+use super::{Claim, Ctx, Take, claim_path, read_claim};
 
 /// What the core needs from a running host.
 pub trait Host {
@@ -34,6 +36,28 @@ impl Host for NoHost {
 pub struct Resolved {
     pub sid: String,
     pub cwd: String,
+}
+
+/// A [`Resolved`] session with what the claim said on the way.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Taken {
+    pub resolved: Resolved,
+    /// The core gave no answer and the owner's run goes on under the conversation lock alone (`r_alone=1`: bin/kith starts
+    /// the stub with `--lock-alone`).
+    pub alone: bool,
+    /// What `kith-sessions` printed to stderr on the way (a run that could not be claimed, a core not answering).
+    pub said: String,
+}
+
+impl Taken {
+    /// The shell assignments `bin/kith` evals, with `r_alone=1` when the owner's run is held by the lock alone.
+    pub fn shell(&self) -> String {
+        format!(
+            "{}{}",
+            self.resolved.shell(),
+            if self.alone { " r_alone=1" } else { "" }
+        )
+    }
 }
 
 impl Resolved {
@@ -59,7 +83,7 @@ fn present(r: Option<&Value>) -> Option<&Value> {
 }
 
 /// Python's truthiness of a JSON value.
-fn truthy(v: &Value) -> bool {
+pub(super) fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -80,18 +104,33 @@ fn has_error(r: &Value) -> bool {
 pub fn resolve(
     c: &Ctx,
     host: &dyn Host,
+    core: Option<&dyn Core>,
     agent: &str,
     thread: &str,
     claimer: i64,
     wait: Duration,
 ) -> Result<Resolved, String> {
+    resolve_taking(c, host, core, agent, thread, claimer, wait).map(|t| t.resolved)
+}
+
+/// [`resolve`] with what the claim said on the way, and whether the run goes on under the lock alone.
+pub fn resolve_taking(
+    c: &Ctx,
+    host: &dyn Host,
+    core: Option<&dyn Core>,
+    agent: &str,
+    thread: &str,
+    claimer: i64,
+    wait: Duration,
+) -> Result<Taken, String> {
     let Some(dir) = c.reg_dir() else {
         return Err("KITH_STATE is not set, so the session cannot be claimed".to_owned());
     };
+    let taker = Taker::new(c, core);
     let mut holding = false;
     let die = |holding: bool, m: String| -> String {
         if holding {
-            release_claims(c, claimer);
+            taker.release_claims(claimer);
         }
         m
     };
@@ -102,20 +141,30 @@ pub fn resolve(
     };
     // Takes the claim on sid; refuses while another writer holds it or the host is taking the session over.
     let claim = |sid: &str, holding: &mut bool| -> Result<(), String> {
-        let how = Take::new(kind);
-        let held = claim_waiting(c, sid, claimer, &how, wait).map_err(|e| e.to_string())?;
+        let how = Take {
+            agent: Some(agent),
+            ..Take::new(kind)
+        };
+        let held = taker.claim_waiting(sid, claimer, &how, wait)?;
         if let Some(h) = held {
-            return Err(format!(
-                "that session is open in another writer (pid {}, {}); close it first",
-                h.pid_text(),
-                h.kind
-            ));
+            return Err(if h.waiting {
+                "that session is busy: the app's idle agent is still stopping; try again in a moment"
+                    .to_owned()
+            } else {
+                format!(
+                    "that session is open in another writer (pid {}, {}); close it first",
+                    h.pid_text(),
+                    h.kind
+                )
+            });
         }
         *holding = true;
-        // The host ending a terminal holds its own claim until the session is imported.
-        if read_claim(&claim_path(&dir, sid, true))
-            .as_ref()
-            .is_some_and(super::Claim::is_live)
+        // The host ending a terminal holds its own claim until the session is imported (Writer mode: a queued claim,
+        // answered above).
+        if !taker.writer()
+            && read_claim(&claim_path(&dir, sid, true))
+                .as_ref()
+                .is_some_and(Claim::is_live)
         {
             return Err(
                 "that session is being taken over in the app right now; try again in a moment"
@@ -223,5 +272,9 @@ pub fn resolve(
     if !cwd.is_empty() && !std::path::Path::new(&cwd).is_dir() {
         return Err(die(holding, format!("the session's folder {cwd} is gone")));
     }
-    Ok(Resolved { sid, cwd })
+    Ok(Taken {
+        resolved: Resolved { sid, cwd },
+        alone: taker.alone(),
+        said: taker.said(),
+    })
 }

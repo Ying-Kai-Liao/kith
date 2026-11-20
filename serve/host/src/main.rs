@@ -545,7 +545,7 @@ enum KernelCmd {
         args: Vec<String>,
     },
     /// The writer claim of a Claude session and the session registry: `record`, `resolve`, `claim`, `terminal`, `proc`,
-    /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release` and `holder` (not routed from `kith` yet).
+    /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release`, `release-pid`, `holder`, `epoch`, `pick` and `latest` (`bin/kith` and `kith-core.sh` route all of them but `run`).
     // -h/--help belong to kith-sessions' own usage text, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Threads {
@@ -564,7 +564,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// The Pre/PostToolUse hook of `kernel/bin/kith-room-ledger` (not routed from the launch yet; the hook JSON is on stdin).
+    /// The Pre/PostToolUse hook of `kernel/bin/kith-room-ledger` (the launch registers it as the hook; the hook JSON is on stdin).
     #[command(name = "room-ledger", disable_help_flag = true)]
     RoomLedger {
         /// The kernel folder (default: the one this program finds).

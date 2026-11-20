@@ -45,7 +45,7 @@ pub mod threads;
 pub const ABI: u32 = 1;
 
 /// The modules this build has, as `kith kernel version` lists them. A verb in `kernel/lib/core-switched.txt` moves to
-/// the core only when its module is here (`acp`: the `run-once` verb, whose code lives in the kith-acp crate; `launch`: `kith AGENT --launch-json`).
+/// the core only when its module is here (`threads-writer`: every `kith-sessions` verb but `run`, in Files and in Writer mode; the older `threads` is the Files-mode port and is not what `kernel/bin/kith` routes to; `acp`: the `run-once` verb, whose code lives in the kith-acp crate; `launch`: `kith AGENT --launch-json`).
 pub const MODULES: &[&str] = if cfg!(unix) {
     &[
         "account",
@@ -63,8 +63,10 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         // `kernel project-id` answers a guest run (the run-socket client, project/guest.rs); the stub bin/project-id needs it.
         "project-guest",
         "readfence",
+        "room-ledger",
         "settings",
         "threads",
+        "threads-writer",
     ]
 } else {
     &[
@@ -90,7 +92,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","acp","cost","cost-ledger","delegation","engines","launch","paths","pkg","project","project-guest","readfence","settings","threads"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","acp","cost","cost-ledger","delegation","engines","launch","paths","pkg","project","project-guest","readfence","room-ledger","settings","threads","threads-writer"]}"#
         );
     }
 }
