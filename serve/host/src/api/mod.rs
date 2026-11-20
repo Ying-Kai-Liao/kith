@@ -236,8 +236,6 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         || method.starts_with("composio")
         || method == "setComposioKey"
         || method.starts_with("credential")
-        // Only signing in reads the vault; other computer tools work without a keyring.
-        || (method == "computerCall" && b["name"] == "type_login")
         // The on-computer voice needs no key.
         || (method.starts_with("voice") && !method.starts_with("voiceLocal"))
         || method == "setVoiceKey"

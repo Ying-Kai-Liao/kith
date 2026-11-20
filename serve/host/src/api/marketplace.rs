@@ -1,7 +1,7 @@
 //! Marketplace methods: connectors, credentials, Composio and skills.
 
 use super::devices::Caller;
-use super::{actor_arg, str_arg};
+use super::str_arg;
 use crate::agent::bot::Cmd;
 use crate::hub::Hub;
 use crate::market;
@@ -81,16 +81,9 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             }
             json!({"command":c.command,"args":c.args,"env":env})
         }
-        "connectorCall" => {
-            let bot = str_arg(&b, "botId")?;
-            market::requests::call(hub, bot, actor_arg(&b, bot), str_arg(&b, "name")?, &b["arguments"]).await?
-        }
         "connectorInfo" => market::connector_info(&hub.store, str_arg(&b, "registryName")?).await?,
         "connectorRequestFinish" => market::requests::finish(hub, &b).await?,
         "connectorVerify" => market::verify::verify(&hub.store, str_arg(&b, "id")?, hub.port).await?,
-        "composioCall" => {
-            json!({"result": market::composio::call(&hub.store, str_arg(&b, "botId")?, str_arg(&b, "name")?, &b["arguments"]).await?})
-        }
         "composioStatus" => market::composio::status(&hub.store)?,
         "setComposioKey" => market::composio::set_key(&hub.store, b["key"].as_str().unwrap_or_default()).await?,
         "composioToolkits" => {
