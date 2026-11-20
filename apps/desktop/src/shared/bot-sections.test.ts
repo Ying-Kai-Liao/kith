@@ -29,12 +29,11 @@ test('an hq bot on a host without kithInfo keeps Kith\'s own settings controls',
   assert.equal(botSections(house, false).kithSettings, false)
 })
 
-test('hq settings: all but Fast mode are written through to kith, Fast mode is read-only "Set in Kith"', () => {
+test('hq settings are all written through to kith', () => {
   const rows = hqSettings({ permissionMode: 'plan', callModel: null, model: 'opus', effort: null, harness: null })
   assert.deepEqual(rows.map((r) => [r.key, r.value, r.editable]), [
-    ['permission', 'plan', true], ['callModel', 'default', true], ['harness', 'claude', true], ['model', 'opus', true], ['effort', 'default', true], ['fastMode', 'Off', false],
+    ['permission', 'plan', true], ['callModel', 'default', true], ['harness', 'claude', true], ['model', 'opus', true], ['effort', 'default', true],
   ])
-  for (const r of rows.filter((r) => !r.editable)) assert.match(r.hint, /^Set in Kith/)
 })
 
 test('hq settings: nothing is editable until hq has answered, and no permission set in hq shows the default', () => {

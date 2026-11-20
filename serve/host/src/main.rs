@@ -304,22 +304,8 @@ enum McpServer {
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
         port: u16,
     },
-    /// Invite the user to connect services securely.
-    Connectors {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
     /// Share files with the user (an hq agent's way to send an image or a document in its chat).
     Files {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
-    /// Tools of the apps connected through Composio.
-    Composio {
         #[arg(long)]
         bot: String,
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
@@ -329,13 +315,6 @@ enum McpServer {
     Remote {
         #[arg(long)]
         connector: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
-    /// See and operate this computer's desktop.
-    Computer {
-        #[arg(long)]
-        bot: String,
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
         port: u16,
     },
@@ -1758,12 +1737,7 @@ async fn main() -> Result<()> {
             println!("Token rotated. Restart the host so local helpers pick it up.");
             Ok(())
         }
-        Sub::Mcp { server: McpServer::Connectors { bot, port } } => {
-            mcp::serve(bot, port, mcp::Server::Connectors).await
-        }
-        Sub::Mcp { server: McpServer::Computer { bot, port } } => mcp::serve(bot, port, mcp::Server::Computer).await,
         Sub::Mcp { server: McpServer::Files { bot, port } } => mcp::serve(bot, port, mcp::Server::Files).await,
-        Sub::Mcp { server: McpServer::Composio { bot, port } } => mcp::serve(bot, port, mcp::Server::Composio).await,
         Sub::Mcp { server: McpServer::Local { connector, port } } => mcp::serve_local(connector, port).await,
         Sub::Mcp { server: McpServer::Remote { connector, port } } => mcp::serve_remote(connector, port).await,
         Sub::Tui { url, token, port, budget } => {

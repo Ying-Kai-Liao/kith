@@ -35,5 +35,5 @@ export function slashCommands(bot: Bot | null, query: string, installedSkills: {
  * typed out, which sends.
  */
 export function returnRuns(picked: SlashCommand, draft: string): boolean {
-  return picked.action.kind !== 'skill' || draft !== `/${picked.name}`
+  return draft !== `/${picked.name}`
 }

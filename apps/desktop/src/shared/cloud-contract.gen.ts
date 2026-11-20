@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '472ee374cf6f5186e5c54ac59cac9ddeccaa63a3a648388a24c5bed684bc5e33'
+export const CONTRACT_SHA256 = '95bab5665831780e18b30ac1b25840fc714ffb1b5ec803184d546b0157c0fd14'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -491,6 +491,11 @@ export const ROUTES = {
   downloadRedirect: { method: 'GET', path: 'download/{key:rest}', pattern: /^\/download\/(.+)$/, kind: 'redirect' },
   installPage: { method: 'GET', path: 'install', pattern: /^\/install$/, kind: 'page' },
   installScript: { method: 'GET', path: 'install.sh', pattern: /^\/install\.sh$/, kind: 'redirect' },
+  docsPage: { method: 'GET', path: 'docs', pattern: /^\/docs$/, kind: 'page' },
+  agentsPage: { method: 'GET', path: 'agents', pattern: /^\/agents$/, kind: 'page' },
+  sharingPage: { method: 'GET', path: 'sharing', pattern: /^\/sharing$/, kind: 'page' },
+  privacyPage: { method: 'GET', path: 'privacy', pattern: /^\/privacy$/, kind: 'page' },
+  securityPage: { method: 'GET', path: 'security', pattern: /^\/security$/, kind: 'page' },
 } as const
 export type RouteName = keyof typeof ROUTES
 
@@ -620,6 +625,11 @@ export const paths = {
   downloadRedirect: (key: string) => `download/${key}`,
   installPage: () => `install`,
   installScript: () => `install.sh`,
+  docsPage: () => `docs`,
+  agentsPage: () => `agents`,
+  sharingPage: () => `sharing`,
+  privacyPage: () => `privacy`,
+  securityPage: () => `security`,
 }
 
 /** The code in an error answer, {error:{code,message},requestId}, and its HTTP status. unauthorized (a bad hook key), paused (a paused hook), badDeliveryId and full (its queue) come from the computer's relay, on /v1/hooks only. */

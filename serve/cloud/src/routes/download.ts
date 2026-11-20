@@ -1,9 +1,11 @@
 // The download page at https://kithbot.app/download and its one-click links under /download/*.
 // People see and share kithbot.app links; each one 302s to GitHub's latest-release redirect for a fixed asset
 // name (no version in it), so nothing here needs a redeploy for a new release. The page works without
-// JavaScript; its script only picks the main button.
+// JavaScript; its script only picks the main button. It sits in the site's shared frame (routes/site.ts), which
+// names the script's hash in the CSP.
 
 import type { Ctx } from "../api";
+import { sitePage, type SitePage } from "./site";
 
 const BASE = "https://github.com/Ying-Kai-Liao/kith/releases/latest/download/";
 const ALL_RELEASES = "https://github.com/Ying-Kai-Liao/kith/releases/latest";
@@ -35,62 +37,49 @@ document.getElementById("main").hidden=false;
 document.getElementById("main-"+os).hidden=false;
 })();`;
 
-const STYLE =
-  "body{font:16px/1.5 system-ui,sans-serif;margin:0;background:#fff;color:#111}" +
-  "main{max-width:34rem;margin:0 auto;padding:2.5rem 1.5rem}" +
-  "h1{margin:0 0 .25rem}h2{font-size:1.1rem;margin:2rem 0 .5rem}" +
-  "a.big{display:inline-block;padding:.75rem 1.5rem;border-radius:.6rem;background:#111;color:#fff;text-decoration:none;font-weight:600}" +
-  "a{color:inherit}ul{padding-left:1.2rem;margin:.25rem 0}" +
-  "code{display:block;padding:.75rem;border-radius:.5rem;background:#f1f1f1;overflow-x:auto;white-space:pre;font-size:.85rem}" +
-  "p,.sub{color:#555}[hidden]{display:none!important}" +
-  "@media(prefers-color-scheme:dark){body{background:#111;color:#eee}a.big{background:#eee;color:#111}code{background:#222}p,.sub{color:#aaa}}";
-
-let scriptHash: Promise<string> | undefined;
-const hashOfScript = () =>
-  (scriptHash ??= crypto.subtle.digest("SHA-256", new TextEncoder().encode(DOWNLOAD_SCRIPT)).then(
-    (d) => "sha256-" + btoa(String.fromCharCode(...new Uint8Array(d))),
-  ));
-
 const link = (key: string, label: string) => `<li><a href="/download/${key}">${label}</a></li>`;
 
-const HTML = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Download Kith</title><style>${STYLE}</style></head>
-<body><main>
-<h1>Download Kith</h1>
-<p class="sub">The latest desktop app.</p>
-<div id="main" hidden>
-<a id="main-mac" class="big" href="/download/mac" hidden>Download for macOS</a>
-<a id="main-linux" class="big" href="/download/linux" hidden>Download for Linux</a>
+// [hidden] has to beat .btn's display, so only the visitor's button shows: the frame's style has
+// `[hidden]{display:none!important}`.
+const STYLE = `
+.pick{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.pick p{font-size:14px;color:var(--muted)}
+.prose .pick+p+h2{margin-top:26px}
+pre code{user-select:all}
+`;
+
+export const PAGE: SitePage = {
+  path: "/download",
+  title: "Download Kith",
+  description: "Download the Kith app for macOS, or install the kith command line tool.",
+  h1: "Download Kith",
+  lede: "The Kith app for your Mac. It carries the <code>kith</code> command and the host that runs your agents.",
+  body: `<div id="main" class="pick" hidden>
+<div id="main-mac" class="pick" hidden><a class="btn" href="/download/mac">Download for macOS</a><p>Disk image (.dmg) for Apple silicon and Intel Macs.</p></div>
+<div id="main-linux" class="pick" hidden><a class="btn" href="/download/linux">Download for Linux</a><p>AppImage for x64. It is a client: your agents run on a Mac.</p></div>
 </div>
-<p id="unavailable" hidden>Kith isn't available for your device yet. Pick a download below if you're on a Mac or Linux computer.</p>
-<h2>macOS</h2>
-<p>Runs on Apple silicon and Intel Macs.</p>
+<p id="unavailable" class="note" hidden>Kith runs on a Mac. Open this page on your Mac, or pick a download below.</p>
+<h2 id="macos">macOS</h2>
+<p>Runs on Apple silicon and Intel Macs. The app updates the <code>kith</code> command when it updates itself. Claude Code, Codex and pi are separate installs: have at least one signed in.</p>
 <ul>
 ${link("mac", "Disk image (.dmg), recommended")}
 ${link("mac/zip", "Zip (.zip)")}
 </ul>
-<h2>Linux (x64)</h2>
+<h2 id="linux">Linux (x64)</h2>
+<p>The Linux app is a client. It does not include the host that runs agents, so use it to reach a Mac that does.</p>
 <ul>
 ${link("linux", "AppImage, recommended")}
 ${link("linux/deb", "Debian/Ubuntu (.deb)")}
 ${link("linux/tar.gz", "Archive (.tar.gz)")}
 </ul>
-<h2>Command line</h2>
-<code>${INSTALL}</code>
-<p><a href="/install">CLI installation guide</a></p>
-<p><a href="${ALL_RELEASES}">All releases</a></p>
-</main><script>${DOWNLOAD_SCRIPT}</script></body></html>`;
+<h2 id="cli">Command line</h2>
+<p>To install only the <code>kith</code> command on a Mac:</p>
+<pre><code>${INSTALL}</code></pre>
+<p>The <a href="/install">install guide</a> covers versions, updates and uninstalling. Every build is on GitHub under <a href="${ALL_RELEASES}">all releases</a>.</p>`,
+  style: STYLE,
+  script: DOWNLOAD_SCRIPT,
+};
 
 export async function downloadPage(_c: Ctx): Promise<Response> {
-  const hash = await hashOfScript();
-  return new Response(HTML, {
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      // Static page: a short public cache is enough.
-      "Cache-Control": "public, max-age=300",
-      "X-Content-Type-Options": "nosniff",
-      "Content-Security-Policy": `default-src 'none'; script-src '${hash}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
-    },
-  });
+  return sitePage(PAGE);
 }

@@ -1,18 +1,11 @@
-//! The composer's `/` commands, listed while the draft is just `/partial`: Fast mode runs here
-//! (`updateBot`; a new session is `S`); a skill fills in `/<id> `, which the host turns into "read
-//! this skill first" (`market::expand_command`).
+//! The composer's `/` commands, listed while the draft is just `/partial`: a skill fills in
+//! `/<id> `, which the host turns into "read this skill first" (`market::expand_command`).
+//! A new session is `S`.
 
 use crossterm::event::{KeyCode, KeyEvent};
 use serde_json::json;
 
 use super::{After, App, Editor};
-
-/// What picking a command does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SlashAction {
-    Fast,
-    Skill,
-}
 
 /// A command the list offers.
 pub struct SlashCommand {
@@ -20,35 +13,17 @@ pub struct SlashCommand {
     pub name: String,
     pub title: String,
     pub detail: String,
-    pub action: SlashAction,
 }
 
 impl SlashCommand {
     /// The row's text after `/name`.
     pub fn about(&self) -> String {
-        match self.action {
-            SlashAction::Skill if self.detail.is_empty() => self.title.clone(),
-            SlashAction::Skill => self.detail.replace('\n', " "),
-            SlashAction::Fast => format!("{} · {}", self.title, self.detail),
-        }
+        if self.detail.is_empty() { self.title.clone() } else { self.detail.replace('\n', " ") }
     }
 }
 
 impl App {
-    /// The selected bot's built-in commands; a group has none.
-    fn built_in(&self) -> Vec<SlashCommand> {
-        let Some(bot) = self.bot().filter(|b| !b.group) else { return vec![] };
-        let fast = bot.fast_shown().then(|| SlashCommand {
-            name: "fast".into(),
-            title: "Fast mode".into(),
-            detail: bot.fast_detail(),
-            action: SlashAction::Fast,
-        });
-        fast.into_iter().collect()
-    }
-
-    /// Built-in commands, then the selected bot's skills, whose name or title holds the
-    /// `/partial` being typed (none in a group).
+    /// The selected bot's skills whose name or title holds the `/partial` being typed (none in a group).
     pub fn slash_commands(&self) -> Vec<SlashCommand> {
         let Some(bot) = self.bot().filter(|b| !b.group) else { return vec![] };
         let draft = self.draft();
@@ -60,14 +35,9 @@ impl App {
                 name: id.to_owned(),
                 title: s["name"].as_str().unwrap_or(id).to_owned(),
                 detail: s["description"].as_str().unwrap_or_default().to_owned(),
-                action: SlashAction::Skill,
             })
         });
-        self.built_in()
-            .into_iter()
-            .chain(skills)
-            .filter(|c| c.name.contains(&query) || c.title.to_lowercase().contains(&query))
-            .collect()
+        skills.filter(|c| c.name.contains(&query) || c.title.to_lowercase().contains(&query)).collect()
     }
 
     /// The highlighted row of `count`: kept while the draft stays the same, else the first.
@@ -76,8 +46,8 @@ impl App {
         if *draft == self.draft().text { (*index).min(count.saturating_sub(1)) } else { 0 }
     }
 
-    /// Keys while the list is up: ↑/↓ move, Tab or Return runs the highlighted command (Return
-    /// sends a skill whose name is already typed out). Returns whether it took the key.
+    /// Keys while the list is up: ↑/↓ move, Tab or Return fills in the highlighted skill (Return
+    /// sends one whose name is already typed out). Returns whether it took the key.
     pub(super) fn slash_key(&mut self, k: KeyEvent) -> bool {
         if !k.modifiers.is_empty() {
             return false;
@@ -91,7 +61,7 @@ impl App {
             KeyCode::Up => self.slash_pick = (typed, (sel + n - 1) % n),
             KeyCode::Tab | KeyCode::Enter => {
                 let picked = &commands[sel];
-                if k.code == KeyCode::Enter && picked.action == SlashAction::Skill && typed[1..] == picked.name {
+                if k.code == KeyCode::Enter && typed[1..] == picked.name {
                     return false;
                 }
                 self.run_slash(picked);
@@ -101,27 +71,9 @@ impl App {
         true
     }
 
-    /// A draft that is just a built-in command (`/fast`) runs it instead of being sent.
-    /// Returns whether it did.
-    pub(super) fn built_in_command(&mut self, text: &str) -> bool {
-        let Some(name) = text.strip_prefix('/') else { return false };
-        let Some(command) = self.built_in().into_iter().find(|c| c.name == name) else { return false };
-        self.run_slash(&command);
-        true
-    }
-
     fn run_slash(&mut self, command: &SlashCommand) {
-        let Some((id, fast)) = self.bot().map(|b| (b.id.clone(), b.fast_mode)) else { return };
-        let fill = match command.action {
-            SlashAction::Fast => {
-                self.call("updateBot", json!({"id": id, "fastMode": !fast}), After::Nothing);
-                self.flash(if fast { "Fast mode off" } else { "Fast mode on" });
-                String::new()
-            }
-            SlashAction::Skill => format!("/{} ", command.name),
-        };
         if let Some(key) = self.draft_key() {
-            self.drafts.insert(key, Editor::with(&fill));
+            self.drafts.insert(key, Editor::with(&format!("/{} ", command.name)));
         }
     }
 
@@ -160,43 +112,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_list_offers_built_in_commands_then_the_bots_skills() {
-        let mut app =
-            app_with(&json!({"id": "b", "name": "Bot", "skills": ["pdf", "docx"], "fastModeSupport": "offered"}));
+    async fn the_list_offers_the_bots_skills() {
+        let mut app = app_with(&json!({"id": "b", "name": "Bot", "skills": ["pdf", "docx"]}));
         app.drafts.insert("b".into(), super::Editor::with("/"));
-        assert_eq!(names(&app), ["fast", "pdf", "docx"], "only skills the bot has on");
+        assert_eq!(names(&app), ["pdf", "docx"], "only skills the bot has on");
         app.drafts.insert("b".into(), super::Editor::with("/new"));
         assert!(names(&app).is_empty(), "a new session is S");
-        app.bots.get_mut("b").expect("the bot").fast_support = "unknown".into();
-        app.drafts.insert("b".into(), super::Editor::with("/"));
-        assert_eq!(names(&app), ["fast", "pdf", "docx"], "offered until the agent says otherwise");
-        app.bots.get_mut("b").expect("the bot").fast_support = "unsupported".into();
-        assert_eq!(names(&app), ["pdf", "docx"], "no Fast mode on offer");
+        app.drafts.insert("b".into(), super::Editor::with("/fast"));
+        assert!(names(&app).is_empty(), "Fast mode is gone");
     }
 
     #[tokio::test]
-    async fn arrows_pick_a_row_and_return_runs_it() {
-        let mut app = app_with(&json!({"id": "b", "name": "Bot", "skills": ["pdf"], "fastModeSupport": "offered"}));
+    async fn arrows_pick_a_row_and_return_fills_it_in() {
+        let mut app = app_with(&json!({"id": "b", "name": "Bot", "skills": ["pdf", "docx"], "fastMode": true}));
         app.drafts.insert("b".into(), super::Editor::with("/"));
         assert!(app.slash_key(key(KeyCode::Up)), "up wraps to the last row");
         assert_eq!(app.slash_selected(2), 1);
+        assert!(app.slash_key(key(KeyCode::Down)), "down wraps back");
         assert!(app.slash_key(key(KeyCode::Enter)), "Return on a skill fills it in");
         assert_eq!(app.draft().text, "/pdf ");
         assert!(names(&app).is_empty(), "the list closes once the name is done");
         app.drafts.insert("b".into(), super::Editor::with("/pdf"));
         assert!(!app.slash_key(key(KeyCode::Enter)), "a skill already typed out sends");
-        app.drafts.insert("b".into(), super::Editor::with("/fa"));
-        assert!(app.slash_key(key(KeyCode::Tab)), "a built-in command runs");
-        assert_eq!(app.draft().text, "", "and the draft clears");
-    }
-
-    #[tokio::test]
-    async fn sending_just_a_built_in_command_runs_it() {
-        let mut app = app_with(&json!({"id": "b", "name": "Bot", "fastModeSupport": "offered"}));
-        assert!(!app.built_in_command("/fast please"), "only the bare command");
-        assert!(!app.built_in_command("/new"), "reaches the agent as typed");
-        assert!(app.built_in_command("/fast"));
-        app.bots.get_mut("b").expect("the bot").fast_support = "unsupported".into();
-        assert!(!app.built_in_command("/fast"), "without Fast mode it reaches the agent");
     }
 }

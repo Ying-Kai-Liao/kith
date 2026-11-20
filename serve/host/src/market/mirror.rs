@@ -4,8 +4,8 @@
 //! proxy asks this host for them with the local API token when the agent's session starts.
 //!
 //! A file is ours when it has a `connector` key. Files without one (a service the owner wrote) are never touched, and
-//! their names count as taken when a connector gets its id. Composio apps are a separate mechanism (their tools come
-//! through `kith-composio` per bot, not through `Connector`s), so they are not mirrored.
+//! their names count as taken when a connector gets its id. Composio apps are a separate mechanism (not `Connector`s),
+//! so they are not mirrored.
 
 use super::{Connector, slug};
 use crate::LockExt;

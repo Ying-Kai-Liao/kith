@@ -157,7 +157,7 @@
       }
     },
     "Bot": {
-      "doc": "A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev.",
+      "doc": "A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev. Deprecated: fastMode, fastModeSupport and fastModeIssue. Fast mode is gone; the host always sends false, \"unsupported\" and null so an older app hides its switch, and ignores a fastMode it is sent.",
       "fields": {
         "id": "string",
         "kind": "BotKind",

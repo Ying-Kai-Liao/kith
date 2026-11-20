@@ -1,5 +1,5 @@
 //! A real host driving scripted ACP agents: Stop on an agent that ignores it, room turns
-//! that a newer group message replaced, and Fast mode across session resumes.
+//! that a newer group message replaced, and an old app's Fast mode switch, which is ignored.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -135,29 +135,23 @@ async fn a_member_busy_in_its_own_chat_still_answers_the_room() {
     std::fs::write(folder.join("release"), "").unwrap();
 }
 
-/// A final reply that starts with `speed` and quotes `word` from its prompt.
-fn speed_reply(speed: &'static str, word: &'static str) -> impl Fn(&Value) -> bool {
-    move |e: &Value| {
-        e["kind"] == "agent"
-            && e["data"]["final"] == true
-            && e["data"]["text"].as_str().is_some_and(|t| t.starts_with(speed) && t.contains(word))
-    }
-}
-
+/// Fast mode is gone: an old app's `fastMode` is accepted and ignored, and the bot always reports the fixed values
+/// that make an old app hide its switch.
 #[tokio::test]
-async fn an_agent_without_config_options_has_no_fast_mode() {
+async fn an_old_apps_fast_mode_is_ignored() {
     if python_missing() {
         return;
     }
     let host = Host::start().await;
-    let bot = host.bot("Plain", "tests/fixtures/fast_mode_agent.py").await;
-    std::fs::write(host.dir("Plain").join("plain"), "").unwrap();
-    let support = || async { common::snapshot(&host.base, &host.token).await["bots"][0]["fastModeSupport"].clone() };
-    assert_eq!(support().await, "unknown", "clients offer /fast until a session says");
-
-    host.call("send", json!({"botId": bot, "text": "one"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "one")).await;
-    assert_eq!(support().await, "unsupported");
+    let bot = host.bot("Quick", "tests/fixtures/fast_mode_agent.py").await;
+    for on in [true, false, true] {
+        let saved = host.call("updateBot", json!({"id": bot, "fastMode": on})).await;
+        assert_eq!(saved["bot"]["fastMode"], false);
+    }
+    let state = &common::snapshot(&host.base, &host.token).await["bots"][0];
+    assert_eq!(state["fastMode"], false);
+    assert_eq!(state["fastModeSupport"], "unsupported");
+    assert!(state["fastModeIssue"].is_null());
 }
 
 #[tokio::test]

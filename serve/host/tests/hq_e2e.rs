@@ -774,7 +774,6 @@ async fn the_hosts_own_copy_never_overrides_hq() {
     for (patch, command) in [
         (json!({"model": "opus"}), "kith house set model"),
         (json!({"modelOptions": {"effort": "high"}}), "kith house set effort"),
-        (json!({"fastMode": true}), "no Fast mode"),
     ] {
         let mut body = patch.clone();
         body["id"] = json!(id);

@@ -20,7 +20,7 @@ test('only the bot\'s own skills are listed, by name or title', () => {
   const bot = normalizeBot({ id: 'b', skills: ['pdf', 'code-review'], hqAgent: 'house' })
   assert.deepEqual(slashCommands(bot, '', installed).map((c) => c.name), ['pdf', 'code-review'])
   assert.deepEqual(slashCommands(bot, 'review', installed).map((c) => c.name), ['code-review'])
-  assert.deepEqual(slashCommands(bot, 'new', installed), [], 'a new session is in the bot\'s menu')
+  assert.deepEqual(slashCommands(bot, 'fast', installed), [], 'Fast mode is gone')
   assert.deepEqual(slashCommands(normalizeBot({ id: 'b', skills: ['pdf'] }), 'xl', installed), [])
   assert.deepEqual(slashCommands(normalizeBot({ id: 'b', hqAgent: 'house' }), '', []), [], 'no /fast: the CLI has no Fast mode setting')
   assert.deepEqual(slashCommands(normalizeBot({ id: 'g', kind: 'group', skills: ['pdf'] }), '', installed), [])
