@@ -343,7 +343,7 @@ jobs:
             host_core:
               # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
               # memory and summary), and the libs those programs load on every call.
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/lib/kith_facets.py,kernel/bin/kith-room-ledger,kernel/tests/kith-load-check,kernel/tests/kith-summary-check}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check,kernel/tests/kith-agent-set-check,kernel/lib/kith_facets.py,kernel/bin/kith-room-ledger,kernel/tests/kith-load-check,kernel/tests/kith-summary-check,kernel/tests/kith-json-misc-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -422,8 +422,8 @@ jobs:
               Call check|kernel/tests/kith-call-check
               Chain check|kernel/tests/kith-chain-check
               People check (kith people, kith invite, kith bot ls/invite/revoke/decide/auto-allow --json, against a stub host)|kernel/tests/kith-people-check
-              Account check (kith account add/remove/list --json, the login command returned and not run)|kernel/tests/kith-account-check
-              Accounts tombstone check (a tombstoned state.json refuses writes; kith-account exits 4)|kernel/tests/kith-accounts-tombstone-check
+              Account stub check (bin/kith-account hands the line to the kith program; with none, one line and exit 1)|kernel/tests/kith-account-stub-check
+              Accounts tombstone check (a tombstoned state.json refuses the Python readers)|kernel/tests/kith-accounts-tombstone-check
               Schedules tombstone check (a tombstoned sched state.json stops kith-sched; routine jobs are not its own)|kernel/tests/kith-sched-tombstone-check
               Schedules core check (kith-sched ls/add/rm/pause/resume/run/log ask the core once the schedules are switched; same words and --json shapes, never the Python editor)|kernel/tests/kith-sched-core-check
               Schedules tick.lock check (kith-sched holds sched/tick.lock across read, decide, record, save; a held lock starts nothing)|kernel/tests/kith-sched-tick-lock-check
@@ -906,6 +906,9 @@ jobs:
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
           # The accounts step: the account verbs and the Python readers through the core, nothing reading the tombstone.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
+          # `kith backup` is the Rust program's: the rows of these two checks that drive it skip in the kernel shards.
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-agent-set-check
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-json-misc-check
           # The retire-python gate: kernel/lib/requires-switched.txt is shipped and valid, and cutover status answers by exit code.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
           # The pkg switch and the project-id stub: the launch's pkg lookup is the core's, per verb, and project-id (a stub for the

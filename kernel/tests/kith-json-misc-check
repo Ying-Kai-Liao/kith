@@ -123,27 +123,33 @@ OUT=$(KITH_PERSON=anna "$KITH" bug list --json 2>"$T/err"); rc=$?
 check "bug list --json for a non-owner: error object, exit 1" "[ $rc = 1 ] && errobj"
 
 # ---- backup add / remove / list ----
-OUT=$("$KITH" backup list --json); rc=$?
-check "backup list --json with an empty chain" "[ $rc = 0 ] && [ \"\$(jv 'd[\"backups\"]')\" = '[]' ]"
-OUT=$("$KITH" backup add codex --json 2>"$T/err"); rc=$?
-check "backup add --json: changed, position, the new chain" \
-  "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"], d[\"entry\"], d[\"position\"], d[\"backups\"])')\" = \"(True, True, 'codex', 1, ['codex'])\" ] && [ ! -s '$T/err' ]"
-OUT=$("$KITH" backup add codex --json); rc=$?
-check "backup add --json of an entry already there: ok, changed false, exit 0 (as the text mode)" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"])')\" = '(True, False)' ]"
-OUT=$("$KITH" backup add claude:second --at 1 --agent echo --json); rc=$?
-check "backup add --json --agent --at: scoped to the agent" "[ $rc = 0 ] && [ \"\$(jv '(d[\"agent\"], d[\"position\"], d[\"backups\"])')\" = \"('echo', 1, ['claude:second', 'codex'])\" ]"
-OUT=$("$KITH" backup add claude:x --at 0 --json 2>"$T/err"); rc=$?
-check "backup add --json of a bad entry: error object, exit 2 (as the text mode), nothing on stderr" "[ $rc = 2 ] && errobj && [ ! -s '$T/err' ]"
-"$KITH" backup add claude:x --at 0 >/dev/null 2>&1; rc=$?
-check "backup add text of a bad entry exits 2 too" "[ $rc = 2 ]"
-OUT=$("$KITH" backup remove codex --json); rc=$?
-check "backup remove --json: changed, the chain without it" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"], d[\"backups\"])')\" = \"(True, True, [])\" ]"
-OUT=$("$KITH" backup remove codex --json); rc=$?
-check "backup remove --json of a missing entry: ok, changed false, exit 0 (as the text mode)" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"])')\" = '(True, False)' ]"
-OUT=$("$KITH" backup remove --json 2>"$T/err"); rc=$?
-check "backup remove --json without an id: usage error object, exit 2" "[ $rc = 2 ] && errobj"
-check "backup add text is unchanged" "[ \"\$(\"$KITH\" backup add codex)\" = 'codex is backup 1 for every agent' ]"
-"$KITH" backup remove codex >/dev/null
+if [ -n "${KITH_DIFFTEST_BIN:-}" ]; then
+  export KITH_BIN=$KITH_DIFFTEST_BIN
+  OUT=$("$KITH" backup list --json); rc=$?
+  check "backup list --json with an empty chain" "[ $rc = 0 ] && [ \"\$(jv 'd[\"backups\"]')\" = '[]' ]"
+  OUT=$("$KITH" backup add codex --json 2>"$T/err"); rc=$?
+  check "backup add --json: changed, position, the new chain" \
+    "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"], d[\"entry\"], d[\"position\"], d[\"backups\"])')\" = \"(True, True, 'codex', 1, ['codex'])\" ] && [ ! -s '$T/err' ]"
+  OUT=$("$KITH" backup add codex --json); rc=$?
+  check "backup add --json of an entry already there: ok, changed false, exit 0 (as the text mode)" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"])')\" = '(True, False)' ]"
+  OUT=$("$KITH" backup add claude:second --at 1 --agent echo --json); rc=$?
+  check "backup add --json --agent --at: scoped to the agent" "[ $rc = 0 ] && [ \"\$(jv '(d[\"agent\"], d[\"position\"], d[\"backups\"])')\" = \"('echo', 1, ['claude:second', 'codex'])\" ]"
+  OUT=$("$KITH" backup add claude:x --at 0 --json 2>"$T/err"); rc=$?
+  check "backup add --json of a bad entry: error object, exit 2 (as the text mode), nothing on stderr" "[ $rc = 2 ] && errobj && [ ! -s '$T/err' ]"
+  "$KITH" backup add claude:x --at 0 >/dev/null 2>&1; rc=$?
+  check "backup add text of a bad entry exits 2 too" "[ $rc = 2 ]"
+  OUT=$("$KITH" backup remove codex --json); rc=$?
+  check "backup remove --json: changed, the chain without it" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"], d[\"backups\"])')\" = \"(True, True, [])\" ]"
+  OUT=$("$KITH" backup remove codex --json); rc=$?
+  check "backup remove --json of a missing entry: ok, changed false, exit 0 (as the text mode)" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"])')\" = '(True, False)' ]"
+  OUT=$("$KITH" backup remove --json 2>"$T/err"); rc=$?
+  check "backup remove --json without an id: usage error object, exit 2" "[ $rc = 2 ] && errobj"
+  check "backup add text is unchanged" "[ \"\$(\"$KITH\" backup add codex)\" = 'codex is backup 1 for every agent' ]"
+  "$KITH" backup remove codex >/dev/null
+  unset KITH_BIN   # the rest of the script runs the same way with and without a program
+else
+  echo "skip the backup rows: kith backup is the Rust program's since R3 (KITH_DIFFTEST_BIN=/path/to/kith runs them; CI's host-build does)"
+fi
 
 # ---- update self --check ----
 G=$T/g; mkdir -p "$G"

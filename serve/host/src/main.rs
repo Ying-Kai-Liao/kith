@@ -496,9 +496,9 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
-    /// `kith account list|pick|out|clear|usage` (`kernel/bin/kith-account`), plus `state` and `started` for the Python readers:
+    /// `kith account list|pick|out|clear|usage`, plus `state` and `started` for the Python readers:
     /// the accounts' state in the file, or in the core once `kith migrate step accounts` moved it.
-    // -h/--help belong to the Python usage text, which this is not routed for.
+    // -h/--help belong to the usage text of `kith kernel account-state`, so clap must not answer them.
     #[command(name = "account-state", disable_help_flag = true)]
     AccountState {
         /// The kernel folder (default: the one this program finds).
@@ -507,10 +507,10 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
-    /// `kith account ...`, every verb of `kernel/bin/kith-account`: the state ones (`list|pick|out|clear|usage`) and the ones that
+    /// `kith account ...`, every verb of the command (`kernel/bin/kith-account` is a stub for it): the state ones (`list|pick|out|clear|usage`) and the ones that
     /// write the set (`add|login|remove|order|move|set|policy|pin|unpin|cross-harness|migrate|use|backup`). `add` and `remove`
     /// with `--json` return the login command and run nothing; without it the harness's own login runs.
-    // -h/--help belong to the usage text of the Python this is routed for.
+    // -h/--help belong to the usage text of `kith kernel account`, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Account {
         /// The kernel folder (default: the one this program finds).
