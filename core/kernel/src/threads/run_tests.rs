@@ -183,14 +183,15 @@ fn claude_gets_descriptors_0_to_2_and_nothing_else_and_under_the_stub_the_status
     };
     let see = script(&t, "see", &probe(""));
     assert_eq!(go(&t, &slow, &[&see]).0, 0);
-    // Under the stub: fd 9 is the status pipe (its write end), so the leaked fd 9 is the pipe now, and nothing else is there.
+    // Under the stub: fd 9 is the status pipe (its write end), so the leaked fd 9 is the pipe now, and nothing else is there (10 is
+    // left out: dash keeps the script it runs open on it).
     let stub = script(
         &t,
         "kith-stub",
         &format!(
             "fd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\n\
              [ \"$fd\" = 9 ] && echo \"status 9\" >> {o}\n\
-             for n in 7 8 10 11 12 40; do [ -e /dev/fd/$n ] && echo \"leaked $n\" >> {o}; done\n\
+             for n in 7 8 11 12 40; do [ -e /dev/fd/$n ] && echo \"leaked $n\" >> {o}; done\n\
              echo locked >&9\nexit 0\n",
             o = out.display()
         ),
@@ -278,7 +279,7 @@ fn term_reaches_the_child_and_the_wrapper_outlives_it() {
     let sleeper = script(
         &t,
         "sleeper",
-        &format!("touch {}; sleep 30\n", up.display()),
+        &format!("touch {}; exec sleep 30\n", up.display()),
     );
     let hit = std::thread::spawn(move || {
         // Only once the child runs: it is then this run, not another test's, that holds the handlers.
@@ -398,7 +399,7 @@ fn an_idle_session_is_stopped_by_its_wrapper_with_an_intent_and_a_busy_one_is_le
         &t,
         "idle",
         &format!(
-            "TRANSCRIPT={tr}; KITH_STATE={}\n{ENTRY}entry; sleep 20\n",
+            "TRANSCRIPT={tr}; KITH_STATE={}\n{ENTRY}entry; exec sleep 20\n",
             state.display()
         ),
     );

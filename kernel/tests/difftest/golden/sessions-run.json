@@ -725,7 +725,7 @@
    },
    {
     "fake": "kith-stub",
-    "script": "#!/bin/sh\n# the conversation lock's launcher as run sees it: --status-fd N before the --, then the engine as its own child\nfd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\n\"$@\"; rc=$?\n[ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"\nexit ${STUB_RC:-$rc}\n"
+    "script": "#!/bin/sh\n# the conversation lock's launcher as run sees it: --status-fd N before the --, then the engine as its own child\nfd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\ncommand -v \"$1\" >/dev/null 2>&1 || { [ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"; exit 127; }   # the same on every sh: the shell's own \"not found\" line differs (dash and bash)\n\"$@\"; rc=$?\n[ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"\nexit ${STUB_RC:-$rc}\n"
    }
   ],
   "run": [
@@ -790,7 +790,7 @@
    },
    {
     "fake": "kith-stub",
-    "script": "#!/bin/sh\n# the conversation lock's launcher as run sees it: --status-fd N before the --, then the engine as its own child\nfd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\n\"$@\"; rc=$?\n[ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"\nexit ${STUB_RC:-$rc}\n"
+    "script": "#!/bin/sh\n# the conversation lock's launcher as run sees it: --status-fd N before the --, then the engine as its own child\nfd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\ncommand -v \"$1\" >/dev/null 2>&1 || { [ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"; exit 127; }   # the same on every sh: the shell's own \"not found\" line differs (dash and bash)\n\"$@\"; rc=$?\n[ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"\nexit ${STUB_RC:-$rc}\n"
    }
   ],
   "run": [
@@ -854,7 +854,7 @@
    },
    {
     "fake": "kith-stub",
-    "script": "#!/bin/sh\n# the conversation lock's launcher as run sees it: --status-fd N before the --, then the engine as its own child\nfd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\n\"$@\"; rc=$?\n[ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"\nexit ${STUB_RC:-$rc}\n"
+    "script": "#!/bin/sh\n# the conversation lock's launcher as run sees it: --status-fd N before the --, then the engine as its own child\nfd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\ncommand -v \"$1\" >/dev/null 2>&1 || { [ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"; exit 127; }   # the same on every sh: the shell's own \"not found\" line differs (dash and bash)\n\"$@\"; rc=$?\n[ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"\nexit ${STUB_RC:-$rc}\n"
    }
   ],
   "run": [
@@ -919,7 +919,7 @@
    },
    {
     "fake": "kith-stub",
-    "script": "#!/bin/sh\n# the conversation lock's launcher as run sees it: --status-fd N before the --, then the engine as its own child\nfd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\n\"$@\"; rc=$?\n[ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"\nexit ${STUB_RC:-$rc}\n"
+    "script": "#!/bin/sh\n# the conversation lock's launcher as run sees it: --status-fd N before the --, then the engine as its own child\nfd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\ncommand -v \"$1\" >/dev/null 2>&1 || { [ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"; exit 127; }   # the same on every sh: the shell's own \"not found\" line differs (dash and bash)\n\"$@\"; rc=$?\n[ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"\nexit ${STUB_RC:-$rc}\n"
    }
   ],
   "run": [
@@ -968,12 +968,12 @@
    "KITH_TERMINAL_SESSION": "1",
    "KITH_RESUMED_FROM": "r-1",
    "STUB_WORD": "locked",
-   "FAKE_MODE": "registry"
+   "FAKE_MODE": "registry-slow"
   },
   "setup": [
    {
     "fake": "claude",
-    "script": "#!/bin/sh\necho \"argv: $*\"\necho \"env: $(env | grep -E '^(KITH_[A-Z_]*|FAKE_MODE)=' | grep -vE '^KITH_(CORE|BIN)=' | sort | tr '\\n' ' ')\"\nd=\"$KITH_STATE/live/terminal\"\nsid=11111111-1111-4111-8111-111111111111\nnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)\nentry() { mkdir -p \"$d\"; printf '{\"v\":1,\"sessionId\":\"%s\",\"agent\":\"coder\",\"cwd\":\"%s\",\"transcriptPath\":\"%s\",\"pid\":%s,\"startedAt\":\"%s\",\"recordedAt\":1}' \"$sid\" \"$HOME\" \"$HOME/.claude/projects/p/$sid.jsonl\" \"$$\" \"$now\" > \"$d/$sid.json\"; }\ncase \"$FAKE_MODE\" in\n  claim) mkdir -p \"$d\"; printf '{\"pid\": %s, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' \"$PPID\" > \"$d/s-1.claim\" ;;\n  claim-other) mkdir -p \"$d\"; printf '{\"pid\": 99999, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' > \"$d/s-2.claim\" ;;\n  registry|registry-crash) entry ;;\n  taken) entry; sleep 1; touch \"$d/$sid.taken\" ;;\n  exit3) exit 3 ;;\n  term) kill -TERM $$; sleep 5 ;;\nesac\n[ \"$FAKE_MODE\" = registry-crash ] && exit 1\nexit ${FAKE_EXIT:-0}\n"
+    "script": "#!/bin/sh\necho \"argv: $*\"\necho \"env: $(env | grep -E '^(KITH_[A-Z_]*|FAKE_MODE)=' | grep -vE '^KITH_(CORE|BIN)=' | sort | tr '\\n' ' ')\"\nd=\"$KITH_STATE/live/terminal\"\nsid=11111111-1111-4111-8111-111111111111\nnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)\nentry() { mkdir -p \"$d\"; printf '{\"v\":1,\"sessionId\":\"%s\",\"agent\":\"coder\",\"cwd\":\"%s\",\"transcriptPath\":\"%s\",\"pid\":%s,\"startedAt\":\"%s\",\"recordedAt\":1}' \"$sid\" \"$HOME\" \"$HOME/.claude/projects/p/$sid.jsonl\" \"$$\" \"$now\" > \"$d/$sid.json\"; }\ncase \"$FAKE_MODE\" in\n  claim) mkdir -p \"$d\"; printf '{\"pid\": %s, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' \"$PPID\" > \"$d/s-1.claim\" ;;\n  claim-other) mkdir -p \"$d\"; printf '{\"pid\": 99999, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' > \"$d/s-2.claim\" ;;\n  registry|registry-crash) entry ;;\n  registry-slow) entry; sleep 0.5 ;;\n  taken) entry; sleep 1; touch \"$d/$sid.taken\" ;;\n  exit3) exit 3 ;;\n  term) kill -TERM $$; sleep 5 ;;\nesac\n[ \"$FAKE_MODE\" = registry-crash ] && exit 1\nexit ${FAKE_EXIT:-0}\n"
    },
    {
     "mkdir": "home/.kith/live/terminal"
@@ -984,7 +984,7 @@
    },
    {
     "fake": "kith-stub",
-    "script": "#!/bin/sh\n# the conversation lock's launcher as run sees it: --status-fd N before the --, then the engine as its own child\nfd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\n\"$@\"; rc=$?\n[ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"\nexit ${STUB_RC:-$rc}\n"
+    "script": "#!/bin/sh\n# the conversation lock's launcher as run sees it: --status-fd N before the --, then the engine as its own child\nfd=\"\"; while [ $# -gt 0 ]; do case \"$1\" in --status-fd) fd=$2; shift 2;; --) shift; break;; *) shift;; esac; done\ncommand -v \"$1\" >/dev/null 2>&1 || { [ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"; exit 127; }   # the same on every sh: the shell's own \"not found\" line differs (dash and bash)\n\"$@\"; rc=$?\n[ -n \"$fd\" ] && [ -n \"$STUB_WORD\" ] && [ \"$STUB_WORD\" != none ] && echo \"$STUB_WORD\" >&\"$fd\"\nexit ${STUB_RC:-$rc}\n"
    }
   ],
   "run": [
@@ -1039,7 +1039,7 @@
   "setup": [
    {
     "fake": "claude",
-    "script": "#!/bin/sh\necho \"argv: $*\"\necho \"env: $(env | grep -E '^(KITH_[A-Z_]*|FAKE_MODE)=' | grep -vE '^KITH_(CORE|BIN)=' | sort | tr '\\n' ' ')\"\nd=\"$KITH_STATE/live/terminal\"\nsid=11111111-1111-4111-8111-111111111111\nnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)\nentry() { mkdir -p \"$d\"; printf '{\"v\":1,\"sessionId\":\"%s\",\"agent\":\"coder\",\"cwd\":\"%s\",\"transcriptPath\":\"%s\",\"pid\":%s,\"startedAt\":\"%s\",\"recordedAt\":1}' \"$sid\" \"$HOME\" \"$HOME/.claude/projects/p/$sid.jsonl\" \"$$\" \"$now\" > \"$d/$sid.json\"; }\ncase \"$FAKE_MODE\" in\n  claim) mkdir -p \"$d\"; printf '{\"pid\": %s, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' \"$PPID\" > \"$d/s-1.claim\" ;;\n  claim-other) mkdir -p \"$d\"; printf '{\"pid\": 99999, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' > \"$d/s-2.claim\" ;;\n  registry|registry-crash) entry ;;\n  taken) entry; sleep 1; touch \"$d/$sid.taken\" ;;\n  idle) entry; sleep 8 ;;\n  idle-busy) entry; sleep 3 ;;\n  exit3) exit 3 ;;\n  term) kill -TERM $$; sleep 5 ;;\nesac\n[ \"$FAKE_MODE\" = registry-crash ] && exit 1\nexit ${FAKE_EXIT:-0}\n"
+    "script": "#!/bin/sh\necho \"argv: $*\"\necho \"env: $(env | grep -E '^(KITH_[A-Z_]*|FAKE_MODE)=' | grep -vE '^KITH_(CORE|BIN)=' | sort | tr '\\n' ' ')\"\nd=\"$KITH_STATE/live/terminal\"\nsid=11111111-1111-4111-8111-111111111111\nnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)\nentry() { mkdir -p \"$d\"; printf '{\"v\":1,\"sessionId\":\"%s\",\"agent\":\"coder\",\"cwd\":\"%s\",\"transcriptPath\":\"%s\",\"pid\":%s,\"startedAt\":\"%s\",\"recordedAt\":1}' \"$sid\" \"$HOME\" \"$HOME/.claude/projects/p/$sid.jsonl\" \"$$\" \"$now\" > \"$d/$sid.json\"; }\ncase \"$FAKE_MODE\" in\n  claim) mkdir -p \"$d\"; printf '{\"pid\": %s, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' \"$PPID\" > \"$d/s-1.claim\" ;;\n  claim-other) mkdir -p \"$d\"; printf '{\"pid\": 99999, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' > \"$d/s-2.claim\" ;;\n  registry|registry-crash) entry ;;\n  taken) entry; sleep 1; touch \"$d/$sid.taken\" ;;\n  idle) entry; exec sleep 8 ;;\n  idle-busy) entry; sleep 3 ;;\n  exit3) exit 3 ;;\n  term) kill -TERM $$; sleep 5 ;;\nesac\n[ \"$FAKE_MODE\" = registry-crash ] && exit 1\nexit ${FAKE_EXIT:-0}\n"
    },
    {
     "mkdir": "home/.kith/live/terminal"
@@ -1097,7 +1097,7 @@
   "setup": [
    {
     "fake": "claude",
-    "script": "#!/bin/sh\necho \"argv: $*\"\necho \"env: $(env | grep -E '^(KITH_[A-Z_]*|FAKE_MODE)=' | grep -vE '^KITH_(CORE|BIN)=' | sort | tr '\\n' ' ')\"\nd=\"$KITH_STATE/live/terminal\"\nsid=11111111-1111-4111-8111-111111111111\nnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)\nentry() { mkdir -p \"$d\"; printf '{\"v\":1,\"sessionId\":\"%s\",\"agent\":\"coder\",\"cwd\":\"%s\",\"transcriptPath\":\"%s\",\"pid\":%s,\"startedAt\":\"%s\",\"recordedAt\":1}' \"$sid\" \"$HOME\" \"$HOME/.claude/projects/p/$sid.jsonl\" \"$$\" \"$now\" > \"$d/$sid.json\"; }\ncase \"$FAKE_MODE\" in\n  claim) mkdir -p \"$d\"; printf '{\"pid\": %s, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' \"$PPID\" > \"$d/s-1.claim\" ;;\n  claim-other) mkdir -p \"$d\"; printf '{\"pid\": 99999, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' > \"$d/s-2.claim\" ;;\n  registry|registry-crash) entry ;;\n  taken) entry; sleep 1; touch \"$d/$sid.taken\" ;;\n  idle) entry; sleep 8 ;;\n  idle-busy) entry; sleep 3 ;;\n  exit3) exit 3 ;;\n  term) kill -TERM $$; sleep 5 ;;\nesac\n[ \"$FAKE_MODE\" = registry-crash ] && exit 1\nexit ${FAKE_EXIT:-0}\n"
+    "script": "#!/bin/sh\necho \"argv: $*\"\necho \"env: $(env | grep -E '^(KITH_[A-Z_]*|FAKE_MODE)=' | grep -vE '^KITH_(CORE|BIN)=' | sort | tr '\\n' ' ')\"\nd=\"$KITH_STATE/live/terminal\"\nsid=11111111-1111-4111-8111-111111111111\nnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)\nentry() { mkdir -p \"$d\"; printf '{\"v\":1,\"sessionId\":\"%s\",\"agent\":\"coder\",\"cwd\":\"%s\",\"transcriptPath\":\"%s\",\"pid\":%s,\"startedAt\":\"%s\",\"recordedAt\":1}' \"$sid\" \"$HOME\" \"$HOME/.claude/projects/p/$sid.jsonl\" \"$$\" \"$now\" > \"$d/$sid.json\"; }\ncase \"$FAKE_MODE\" in\n  claim) mkdir -p \"$d\"; printf '{\"pid\": %s, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' \"$PPID\" > \"$d/s-1.claim\" ;;\n  claim-other) mkdir -p \"$d\"; printf '{\"pid\": 99999, \"procStart\": null, \"at\": \"2026-01-01T00:00:00Z\", \"kind\": \"terminal\"}' > \"$d/s-2.claim\" ;;\n  registry|registry-crash) entry ;;\n  taken) entry; sleep 1; touch \"$d/$sid.taken\" ;;\n  idle) entry; exec sleep 8 ;;\n  idle-busy) entry; sleep 3 ;;\n  exit3) exit 3 ;;\n  term) kill -TERM $$; sleep 5 ;;\nesac\n[ \"$FAKE_MODE\" = registry-crash ] && exit 1\nexit ${FAKE_EXIT:-0}\n"
    },
    {
     "mkdir": "home/.kith/live/terminal"
