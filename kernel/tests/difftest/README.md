@@ -75,13 +75,19 @@ red until the verb exists. The Python replay always runs every case.
 ### Lifecycle (M3-14 P4)
 
 `golden/lifecycle.json` (golden only, like `wake.json`) freezes `kernel/bin/kith-lifecycle sweep|status` and its `compact()` before `compact()`
-runs claude under `kith-stub` (the conversation's writer lock). All cases are `unswitched` (no Rust side). `lifecycle-old.py` runs
+runs claude under `kith-stub` (the conversation's writer lock). All cases are `needs: rust`: the Rust side is `kith kernel lifecycle` (`lifecycle-new.py` is its program). `lifecycle-old.py` runs
 the verbs unchanged and adds `compact SID WHAT`, which calls `compact()` for a session whose decision is on record, because its
 refusals (`held`, `skipped`) are what a change between the decision and the claim makes of it, which a sweep cannot reach from
 outside: compacted (rc 0), claude failed (rc 1, once per idle period), claude missing, folder gone, held by another claim, and
 skipped (a resume cleared the decision, a new turn, Claude compacted it itself, under the floor). The claude is `KITH_CLAUDE`, a
 script that logs its call and whether the claim file was there. `KITH_STUB_BIN` names no program in the frozen cases, and a fake
 `kith-stub` (logs its argv, exits 75 when `<lock dir>/<key>.busy` exists, else execs what follows `--`) in the stub cases.
+`lifecycle-new.py` does the `compact SID WHAT` setup in Python the same way (the decision on record, a claim for pid 1, a resume, a new turn,
+a compaction of Claude's own) and then runs the Rust program's hidden `compact SID`, which takes the idle period from the decision. The cases after
+`compact()` (R5 4/4) freeze the sweep itself: sleep, end (ask, schedule, helper kinds), waiting by a wait file or a queued wake, too early,
+a 5-minute cache with and without `--at-sleep`, settled and stale decisions, live and takeover claims, an unsafe id, `status`
+(unknown, outstanding work), `intent`, argparse's usage errors, and the stub's other endings (claude exit 127, a lock error). The `-h` text is not
+frozen: argparse words it by Python version.
 Re-recorded when `compact()` moved under the stub (intended; the replay does not read intended.json): the six cases that reach claude
 (`sweep-compacted`, `rc0`, `claude-failed`, `claude-failed-direct`, `claude-missing`, `sweep-twice`) gain the one stderr warning of a
 run with no stub. Added then: `under-stub` (the argv), `busy` (75: outcome `busy`, no decision, again on the next sweep),

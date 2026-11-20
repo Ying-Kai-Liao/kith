@@ -19,9 +19,9 @@ use crate::core_front::{self, CallEnd};
 use crate::kernel;
 
 /// The host on this Mac, if one answers on loopback with the owner token.
-struct Loopback {
-    kernel: PathBuf,
-    home: PathBuf,
+pub(crate) struct Loopback {
+    pub(crate) kernel: PathBuf,
+    pub(crate) home: PathBuf,
 }
 
 impl Loopback {

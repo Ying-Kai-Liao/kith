@@ -18,6 +18,8 @@ FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
   kernel/bin/kith                     # --resume: resolve + r_sid; csid: claim / terminal before claude; exec run
   kernel/bin/kith-lifecycle           # compact: take_claim for the parked child's pid, still(), then it execs claude; end
+  core/kernel/src/lifecycle/sweep.rs  # the Rust compact and end: Taker::take (lifecycle_owner) for the parked child's pid, still(), then it execs claude; end
+  core/kernel/src/lifecycle/proc.rs   # parked(): the fork that is claude (or the stub), held before its exec; reap
   kernel/bin/kith-wake                # deliver/drain: kith AGENT --resume SESSION (resolve claims), skip writer_live; take: host-door items
   serve/host/src/terminal/mod.rs      # Terminal.taking, HeldByWriter, TerminalBusy
   serve/host/src/terminal/registry.rs # liveness, started_as, terminate, pid_runs

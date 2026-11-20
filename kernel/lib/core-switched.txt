@@ -11,3 +11,4 @@ pkg	pkg
 cost	cost-ledger	cost
 room-ledger	room-ledger
 threads	threads-writer
+lifecycle	lifecycle

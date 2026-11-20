@@ -21,7 +21,7 @@ never sees them; a session the host keeps a conversation for (resolveThread know
 compactor (memory/compaction.rs while_idle) keeps those. A failed /compact is tried once per idle period. One sweep at a time
 (flock sessions/lifecycle.lock).
 """
-import argparse, fcntl, importlib.machinery, importlib.util, json, os, re, shutil, signal, sys, time
+import argparse, fcntl, importlib.machinery, importlib.util, json, os, re, shutil, signal, subprocess, sys, time
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
@@ -387,5 +387,23 @@ def main(argv):
     return 0
 
 
+def forward(argv):
+    """The Rust core answers when `lifecycle` is switched (lib/core-switched.txt) and the kith program lists the module: the same
+    decision `kith` makes for its other verbs (kith_core_bin), made once per process, here; KITH_CORE=python keeps this script. Returns
+    when this one answers. Only the command line runs it, never a loader of this file (the difftest's Python side)."""
+    kernel = str(BIN.parent)
+    env = {**os.environ, 'KITH': kernel}
+    try:
+        got = subprocess.run(['bash', '-c', '. "$KITH/lib/kith-core.sh" && kith_core_bin lifecycle'], env=env, stdin=subprocess.DEVNULL,
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return
+    prog = got.stdout.strip()
+    if got.returncode == 0 and prog:
+        # KITH_BIN names the program that was checked, as kith_core_exec does
+        os.execve(prog, [prog, 'kernel', 'lifecycle', '--kernel', kernel, *argv], {**env, 'KITH_BIN': prog})
+
+
 if __name__ == '__main__':
+    forward(sys.argv[1:])
     sys.exit(main(sys.argv[1:]))

@@ -19,6 +19,7 @@ mod hqmem;
 mod hub;
 mod kernel;
 mod launch_cmd;
+mod lifecycle_cmd;
 mod limits;
 mod market;
 mod mcp;
@@ -553,6 +554,18 @@ enum KernelCmd {
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
+    /// What Kith does with a session no process runs, as `kernel/bin/kith-lifecycle` does: `sweep [--session SID] [--at-sleep]`
+    /// (compact, sleep or end, under the writer claim), `status SID`, `intent SID WHY PID`. Routed from the script while `lifecycle` is
+    /// switched.
+    // argparse's own usage and errors (exit 2) belong to the verb, so clap must not answer -h.
+    #[command(disable_help_flag = true)]
+    Lifecycle {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
     /// The kith project of a directory (`kernel/bin/project-id` is a stub that runs this; a guest run asks the host over the run socket).
@@ -1653,6 +1666,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Threads { kernel, args } = cmd {
                 std::process::exit(threads_cmd::run(kernel, &args));
             }
+            if let KernelCmd::Lifecycle { kernel, args } = cmd {
+                std::process::exit(lifecycle_cmd::run(kernel, &args));
+            }
             if let KernelCmd::ProjectId { kernel, args } = cmd {
                 std::process::exit(project_id_cmd(kernel, &args));
             }
@@ -1739,6 +1755,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::People { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
+                    | KernelCmd::Lifecycle { .. }
                     | KernelCmd::ProjectId { .. }
                     | KernelCmd::RoomLedger { .. }
                     | KernelCmd::Pkg { .. }
