@@ -24,6 +24,7 @@ fn texts(layer: &Value, state: &str) -> Vec<String> {
 }
 
 #[tokio::test]
+#[ignore = "C5: deleted by c5-host-native-chatmem"]
 async fn moves_old_memory_once_and_keeps_the_layers_apart() {
     let mut host = Host::start().await;
     let a = host.bot("Memory A", "auto").await;
@@ -85,6 +86,7 @@ async fn moves_old_memory_once_and_keeps_the_layers_apart() {
 }
 
 #[tokio::test]
+#[ignore = "C5: deleted by c5-host-native-chatmem"]
 async fn bots_write_memory_at_once_and_the_user_keeps_control() {
     let host = Host::start().await;
     let auto = host.bot("Auto", "auto").await;
@@ -121,6 +123,7 @@ async fn bots_write_memory_at_once_and_the_user_keeps_control() {
 }
 
 #[tokio::test]
+#[ignore = "C5: deleted by c5-host-native-chatmem"]
 async fn tidying_keeps_only_what_the_user_typed_and_can_be_undone() {
     let host = Host::start().await;
     let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/memory_agent.py");
@@ -197,6 +200,7 @@ async fn tidying_keeps_only_what_the_user_typed_and_can_be_undone() {
 }
 
 #[tokio::test]
+#[ignore = "C5: deleted by c5-host-native-chatmem"]
 async fn instructions_reach_every_harness_and_survive_compaction() {
     let host = Host::start().await;
     let profile_again = "replaces any earlier bot profile";

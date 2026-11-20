@@ -433,7 +433,7 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
                     let native = members
                         .iter()
                         .find(|m| m.id == *id)
-                        .filter(|m| m.refused_native() && guest_member(hub, &m.id).is_none());
+                        .filter(|m| m.is_native() && guest_member(hub, &m.id).is_none());
                     native.inspect(|m| skip_native(hub, &lane, &conv.id, m)).is_none()
                 });
                 // Each round starts one member later, so the same bot doesn't always speak first.
@@ -479,7 +479,7 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         };
         let text = if let Some(guest) = guest_member(hub, &member.id) {
             bot_turn(hub, conv, &group, &guest).await?
-        } else if member.refused_native() {
+        } else if member.is_native() {
             // C5: the host no longer runs a host-native bot. It passes, and the room is told why; the rest of the
             // turn goes on.
             skip_native(hub, &lane, &conv.id, member);

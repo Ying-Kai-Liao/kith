@@ -198,11 +198,7 @@ impl Actor {
                 }
                 // Claude's adapter carries the summary on one of its completed updates.
                 if u["status"] == "completed" {
-                    let summary = acp::content_text(&u["summary"]);
-                    self.compacted(
-                        u["compactionId"].as_str().unwrap_or_default(),
-                        (!summary.trim().is_empty()).then_some(summary),
-                    );
+                    self.compacted();
                 }
             }
             "usage_update" => {
@@ -619,16 +615,15 @@ impl Actor {
 
     /// Persists streamed text at most every 300 ms (or immediately with `force`).
     pub(super) fn flush(&mut self, force: bool) {
-        let (hq, serving) = (self.is_hq(), self.serving.clone());
+        let serving = self.serving.clone();
         if let Seg::Open { kind, entry_id, buf, flushed, dirty } = &mut self.seg
             && *dirty
             && (force || flushed.elapsed() >= Duration::from_millis(300))
         {
             let data = match kind {
-                SegKind::Text if hq => {
+                SegKind::Text => {
                     json!({"text": buf, "final": false, "author": self.cfg.id, "answeredBy": serving})
                 }
-                SegKind::Text => json!({"text": buf, "final": false, "author": self.cfg.id}),
                 SegKind::Thought => json!({"text": buf, "author": self.cfg.id}),
             };
             self.hub.set_entry(entry_id, &data);

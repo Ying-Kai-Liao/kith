@@ -325,7 +325,7 @@ fn dispatch(hub: &Arc<Hub>) -> Result<()> {
             continue;
         }
         // C5: a host-native bot is not run; its due slot is skipped, not failed at every tick.
-        if hub.store.bot(&run.bot_id)?.is_some_and(|r| r.config.refused_native()) {
+        if hub.store.bot(&run.bot_id)?.is_some_and(|r| r.config.is_native()) {
             hub.routines.complete(
                 hub,
                 &run.id,

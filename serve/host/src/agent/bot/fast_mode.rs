@@ -2,8 +2,8 @@
 //! the agent offers (docs/features/marketplace.md, "Fast mode").
 
 use super::{Actor, NoticeStyle};
-use crate::agent::config::{FastModeSupport, fast_mode_change, fast_mode_config, fast_mode_on, fast_mode_refusal};
-use serde_json::{Value, json};
+use crate::agent::config::{FastModeSupport, fast_mode_config, fast_mode_on, fast_mode_refusal};
+use serde_json::Value;
 
 /// Where a session's config options come from.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -43,29 +43,6 @@ impl Actor {
             None => conn.fast_options.remove(sid),
         };
         self.set_fast_support(support);
-    }
-
-    /// Switches a live session's Fast mode to the bot's setting before a turn. Once the agent
-    /// refused it, asks again only after the user changes the setting.
-    pub(super) async fn sync_fast_mode(&mut self, sid: &str) {
-        // An hq agent's Fast mode is whatever hq's launch gives it; the bot's own switch isn't consulted.
-        if self.is_hq() {
-            return;
-        }
-        let on = self.cfg.fast_mode;
-        if on && matches!(self.fast_support, FastModeSupport::Refused(_)) {
-            return;
-        }
-        let Some(option) = self.conn.as_ref().and_then(|c| c.fast_options.get(sid)) else { return };
-        let (Some(config_id), Some(value)) = (option["id"].as_str(), fast_mode_change(option, on)) else { return };
-        let params = json!({"sessionId": sid, "configId": config_id, "value": value});
-        match self.session_request("session/set_config_option", params).await {
-            Ok(answer) => self.note_options(sid, &answer, Listing::Switch),
-            Err(error) => {
-                tracing::warn!(bot = %self.cfg.id, error = format!("{error:#}"), "couldn't set Fast mode");
-                self.notice(&format!("Couldn't change Fast mode: {error:#}"), NoticeStyle::Info);
-            }
-        }
     }
 
     /// The user changed the setting: a refusal no longer stands, so the next turn asks again.

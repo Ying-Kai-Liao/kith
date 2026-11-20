@@ -218,9 +218,6 @@ impl Actor {
             // Notes recalled for a thread's first message go with the turn, never into the system prefix, so the cached
             // prompt stays as it is.
             let mut prompt = recalled.map_or_else(|| text.to_owned(), |r| format!("{r}\n\n{text}"));
-            if let Some(handoff) = self.handoff.take() {
-                prompt = format!("{handoff}\n\n{prompt}");
-            }
             if let Some(intro) = self.thread_intro.take() {
                 prompt = format!("{intro}\n\n{prompt}");
             }
@@ -319,21 +316,6 @@ impl Actor {
                 tracing::warn!(mode, error = format!("{error:#}"), "couldn't set the session's permission mode");
                 current
             }
-        }
-    }
-
-    /// A non-hq bot's session starts in the bot's own permission mode, passed to the agent unchanged. Codex has its
-    /// own mode names, so it gets [`codex_mode`]'s translation. Left as it is when the agent doesn't offer the mode.
-    /// A person's bot never starts in bypass, whatever its field says.
-    pub(super) async fn set_bot_mode(&mut self, sid: &str, res: &Value) {
-        let mode = self.cfg.permission.mode_id();
-        if self.cfg.person.is_some() && mode == "bypassPermissions" {
-            return;
-        }
-        if self.cfg.backend == "codex" {
-            self.set_codex_mode(sid, res, Some(mode)).await;
-        } else {
-            self.set_claude_mode(sid, res, Some(mode)).await;
         }
     }
 

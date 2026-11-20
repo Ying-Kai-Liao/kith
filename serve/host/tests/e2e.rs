@@ -33,9 +33,16 @@ impl Drop for Host {
 async fn start_host() -> Host {
     let home = std::env::temp_dir().join(format!("kith-e2e-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&home).unwrap();
-    let (child, base) = common::serve(&home).await;
+    let agents = common::agents_env(&home);
+    let env: Vec<(&str, &str)> = agents.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let (child, base) = common::serve_env(&home, &env).await;
     let token = common::read_token(&home).trim().to_owned();
     Host { child, base, token, home }
+}
+
+/// A kith agent on the scripted agent `tests/fake_agent.py` (it asks to edit a file, then says it is done).
+async fn tester(host: &Host) -> String {
+    common::agent_bot(&host.base, &host.token, &host.home, "tester", "../fake_agent.py", "").await
 }
 
 impl Host {
@@ -106,19 +113,7 @@ async fn turn_with_approval_reaches_a_final_reply() {
         return;
     }
     let host = start_host().await;
-    let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fake_agent.py");
-    let bot = host
-        .call(
-            "createBot",
-            json!({
-                "name": "Tester", "backend": "custom", "tasks": false, "command": common::python_agent(&agent),
-                "cwd": host.home.to_string_lossy(), "permission": "ask",
-            }),
-        )
-        .await["bot"]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let bot = tester(&host).await;
 
     host.call("send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
     // Retrying with the same nonce must not queue a second turn.
@@ -146,64 +141,6 @@ async fn turn_with_approval_reaches_a_final_reply() {
     let synced = common::snapshot(&host.base, &host.token).await;
     assert_eq!(synced["bots"][0]["status"], "idle");
     assert_eq!(synced["bots"][0]["unread"], 1);
-}
-
-#[tokio::test]
-async fn sent_messages_are_the_reply() {
-    if Command::new(common::python()).arg("--version").output().is_err() {
-        eprintln!("skipping: Python not available");
-        return;
-    }
-    let host = start_host().await;
-    let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fake_agent.py");
-    let bot = host
-        .call(
-            "createBot",
-            json!({
-                "name": "Tester", "backend": "custom", "tasks": false, "command": common::python_agent(&agent),
-                "cwd": host.home.to_string_lossy(), "permission": "ask",
-            }),
-        )
-        .await["bot"]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let send = |text: &str| json!({"botId": bot, "name": "send_message", "arguments": {"text": text}});
-
-    // Between turns there's no one to talk to.
-    let idle = reqwest::Client::new()
-        .post(format!("{}/api/chatCall", host.base))
-        .bearer_auth(&host.token)
-        .json(&send("hello?"))
-        .send()
-        .await
-        .unwrap();
-    assert!(!idle.status().is_success());
-
-    host.call("send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
-    let card = host.wait_for(&bot, |e| e["kind"] == "permission" && e["data"]["status"] == "pending").await;
-    // Mid-turn (the agent waits on the approval), each message is its own chat bubble at once.
-    host.call("chatCall", send("Found it.")).await;
-    host.call("chatCall", send("Fixing the typo now.")).await;
-    let first = host.wait_for(&bot, |e| e["kind"] == "agent" && e["data"]["text"] == "Found it.").await;
-    assert_eq!(first["data"]["final"], true);
-
-    host.call("respondPermission", json!({"entryId": card["id"], "optionId": "allow"})).await;
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while common::snapshot(&host.base, &host.token).await["bots"][0]["status"] != "idle" {
-        assert!(Instant::now() < deadline, "turn didn't finish");
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    // What the agent wrote as its reply stays in the trace.
-    let history = host.call("history", json!({"botId": bot})).await;
-    let entries = history["entries"].as_array().unwrap();
-    assert!(entries.iter().any(|e| e["data"]["text"].as_str().is_some_and(|t| t.starts_with("Done"))));
-    let finals: Vec<&str> = entries
-        .iter()
-        .filter(|e| e["kind"] == "agent" && e["data"]["final"] == true)
-        .map(|e| e["data"]["text"].as_str().unwrap())
-        .collect();
-    assert_eq!(finals, ["Found it.", "Fixing the typo now."]);
 }
 
 #[tokio::test]
@@ -339,20 +276,7 @@ async fn phone_pairs_and_chats_over_the_direct_channel() {
     // Phones check themselves against it (docs/reference/compatibility.md).
     assert!(hello["protocol"].as_u64().is_some_and(|v| v >= 1));
     assert!(hello["minProtocol"].as_u64().is_some_and(|v| v >= 1));
-    let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fake_agent.py");
-    let bot = phone
-        .call(
-            2,
-            "createBot",
-            json!({
-                "name": "Tester", "backend": "custom", "tasks": false, "command": common::python_agent(&agent),
-                "cwd": host.home.to_string_lossy(), "permission": "auto",
-            }),
-        )
-        .await["bot"]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let bot = tester(&host).await;
     phone.send(json!({"id": 3, "sub": "events", "b": {"since": 0, "client": "ios"}})).await;
     assert_eq!(phone.inner().await["ev"]["type"], "hello");
     phone.call(4, "send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
@@ -372,49 +296,6 @@ async fn phone_pairs_and_chats_over_the_direct_channel() {
     let devices = host.call("devices", json!({})).await;
     assert_eq!(devices["devices"][0]["name"], "Test iPhone");
     assert_eq!(devices["devices"][0]["connected"], true);
-}
-
-#[tokio::test]
-async fn personal_workspaces_are_unique_persistent_and_optional() {
-    let host = start_host().await;
-    let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/workspace_agent.py");
-    let first = host
-        .call(
-            "createBot",
-            json!({"name": "One", "backend": "custom", "tasks": false, "command": common::python_agent(&agent)}),
-        )
-        .await;
-    let second = host.call("createBot", json!({"name": "Two", "backend": "claude", "cwd": ""})).await;
-    let first = &first["bot"];
-    let second = &second["bot"];
-    let dir = PathBuf::from(first["cwd"].as_str().unwrap());
-    assert_eq!(dir, host.home.join("bots").join(first["id"].as_str().unwrap()).join("workspace"));
-    assert!(dir.is_dir());
-    assert_ne!(first["cwd"], second["cwd"]);
-    assert_eq!(first["managedWorkspace"], true);
-    host.call("send", json!({"botId": first["id"], "text": "verify"})).await;
-    host.wait_for(first["id"].as_str().unwrap(), |e| e["kind"] == "agent" && e["data"]["final"] == true).await;
-    let execution: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("execution.json")).unwrap()).unwrap();
-    assert_eq!(
-        std::fs::canonicalize(execution["process"].as_str().unwrap()).unwrap(),
-        std::fs::canonicalize(&dir).unwrap()
-    );
-    assert_eq!(execution["session"], first["cwd"]);
-    std::fs::write(dir.join("keep.txt"), "persistent output").unwrap();
-    let renamed = host.call("updateBot", json!({"id": first["id"], "name": "Renamed", "cwd": ""})).await;
-    assert_eq!(renamed["bot"]["cwd"], first["cwd"]);
-    let project = host.home.join("project");
-    std::fs::create_dir(&project).unwrap();
-    let explicit = host.call("updateBot", json!({"id": first["id"], "cwd": project})).await;
-    assert_eq!(explicit["bot"]["managedWorkspace"], false);
-    let restored = host.call("updateBot", json!({"id": first["id"], "cwd": ""})).await;
-    assert_eq!(restored["bot"]["cwd"], first["cwd"]);
-    assert_eq!(std::fs::read_to_string(dir.join("keep.txt")).unwrap(), "persistent output");
-    host.call("deleteBot", json!({"botId": first["id"]})).await;
-    assert!(dir.join("keep.txt").is_file(), "deleting a bot must retain its files");
-    let group = host.call("createBot", json!({"name": "Group", "kind": "group", "members": [second["id"]]})).await;
-    assert_eq!(group["bot"]["cwd"], "");
-    assert_eq!(group["bot"]["managedWorkspace"], false);
 }
 
 // ---------- wire shape snapshot (docs/reference/compatibility.md) ----------
@@ -536,19 +417,7 @@ async fn wire_shape_matches_the_snapshot() {
         return;
     }
     let host = start_host().await;
-    let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fake_agent.py");
-    let bot = host
-        .call(
-            "createBot",
-            json!({
-                "name": "Tester", "backend": "custom", "tasks": false, "command": common::python_agent(&agent),
-                "cwd": host.home.to_string_lossy(), "permission": "ask",
-            }),
-        )
-        .await["bot"]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let bot = tester(&host).await;
     host.call("send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
     let card = host.wait_for(&bot, |e| e["kind"] == "permission" && e["data"]["status"] == "pending").await;
     host.call("respondPermission", json!({"entryId": card["id"], "optionId": "allow"})).await;

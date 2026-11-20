@@ -1,6 +1,6 @@
-//! One-bot-model C5: a spawned host WITHOUT `KITH_SERVE_NATIVE_FOR_TESTS` (as a release build always is) refuses a
-//! host-native row, flags it, will not make another, and exports it. The row is seeded by a host that was told to allow
-//! one, then the host restarts without the variable.
+//! One-bot-model C5: a spawned host refuses a host-native row (an agent row with no kith agent behind it), flags it,
+//! will not make another, and exports it. The row is one an old release left in serve.db: the test writes it while the
+//! host is stopped, as nothing can make one now.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::assert_is_empty)]
 
@@ -11,10 +11,9 @@ use common::host::Host;
 use serde_json::json;
 
 #[tokio::test]
-async fn a_host_without_the_test_bypass_refuses_flags_and_exports_a_native_row() {
+async fn a_host_refuses_flags_and_exports_a_native_row() {
     let mut host = Host::start().await;
-    let old = host.bot("Oldbot", "default").await;
-    host.restart_env(&[("KITH_SERVE_NATIVE_FOR_TESTS", "")]).await;
+    let old = host.native_row("Oldbot").await;
 
     // `send` is refused with the shared message and saves nothing.
     let said = host.refused("send", json!({"botId": old, "text": "hi", "clientNonce": "n1"})).await;

@@ -995,7 +995,6 @@ async fn a_bot_asking_a_host_native_room_member_is_refused() {
     }))
     .unwrap();
     let old = r.hub.create_bot(old).unwrap()["id"].as_str().unwrap().to_owned();
-    crate::store::enforce_native_in_tests(&old);
     let members = vec![old.clone(), j.bot.clone()];
     let room: crate::store::BotConfig =
         serde_json::from_value(json!({"id": "", "kind": "group", "name": "Crew", "members": members})).unwrap();

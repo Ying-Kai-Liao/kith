@@ -42,6 +42,7 @@ async fn cards(host: &Host, bot: &str) -> usize {
 }
 
 #[tokio::test]
+#[ignore = "C5: deleted by c5-host-native-chatmem"]
 async fn a_bots_own_edits_are_checked_and_kept_as_versions() {
     let host = Host::start().await;
     let bot = host.fixture_bot("Notes", "memory_files_agent.py", "").await;
@@ -86,6 +87,7 @@ async fn a_bots_own_edits_are_checked_and_kept_as_versions() {
 }
 
 #[tokio::test]
+#[ignore = "C5: deleted by c5-host-native-chatmem"]
 async fn a_note_the_bot_only_read_is_not_its_edit() {
     let host = Host::start().await;
     let bot = host.fixture_bot("Reader", "memory_files_agent.py", "").await;
@@ -102,6 +104,7 @@ async fn a_note_the_bot_only_read_is_not_its_edit() {
 }
 
 #[tokio::test]
+#[ignore = "C5: deleted by c5-host-native-chatmem"]
 async fn the_user_edits_files_over_what_they_loaded() {
     let host = Host::start().await;
     let bot = host.bot("Files", "auto").await;
@@ -151,6 +154,7 @@ async fn the_user_edits_files_over_what_they_loaded() {
 }
 
 #[tokio::test]
+#[ignore = "C5: deleted by c5-host-native-chatmem"]
 async fn a_bot_that_asks_first_writes_its_notes_too() {
     let host = Host::start().await;
     let bot = host.bot("Careful", "ask").await;

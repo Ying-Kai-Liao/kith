@@ -57,6 +57,14 @@ impl Drop for Setup {
 }
 
 impl Setup {
+    /// A second kith agent of the stub kernel (a folder under `made/`), once the host's sync made its bot: its id.
+    async fn made_agent(&self, name: &str) -> String {
+        std::fs::create_dir_all(self.home.join("made").join(name)).unwrap();
+        self.host.call("syncHqBots", json!({})).await;
+        let bot = self.host.roster().await.into_iter().find(|b| b["hqAgent"] == name).expect("the made agent's bot");
+        bot["id"].as_str().unwrap().to_owned()
+    }
+
     fn kernel(&self) -> Value {
         serde_json::from_str(&std::fs::read_to_string(self.home.join("kernel.json")).unwrap()).unwrap()
     }
@@ -123,9 +131,11 @@ async fn an_agent_asked_by_another_agent_runs_on_its_next_account_when_the_kerne
     // host has never read `house`'s accounts. The ask arrives through the same actor queue as a message.
     let kernel = json!({"set": ["claude", "claude:work"], "out": {"claude": {"out_until": now() + 3600, "reason": "rate_limit"}}});
     let s = start(&kernel).await;
-    let lead = s.host.fixture_bot("lead", "team_agent.py", "").await;
+    let lead = s.made_agent("lead").await;
 
-    s.host.reply(&lead, &format!("ASK_REPORT {}", s.bot)).await;
+    // The lead asks house (the team tool's call, as the host gets it): the lead's own agent never runs.
+    let args = json!({"botId": s.bot, "message": "REPORT"});
+    s.host.call("teamCall", json!({"botId": lead, "name": "ask_bot", "arguments": args})).await;
 
     // The lead got house's answer; an asked agent's own chat keeps it as a trace, not as a final reply.
     let trace = s.host.call("history", json!({"botId": s.bot})).await;

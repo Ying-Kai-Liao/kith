@@ -30,7 +30,7 @@ impl Actor {
     /// Takes a turn that ended out of usage to the next entry. Whether it did (the turn then runs on, and the caller
     /// leaves it alone); otherwise the turn finishes as it always did.
     pub(super) async fn failover(&mut self, done: &Done, done_tx: &mpsc::UnboundedSender<Done>) -> bool {
-        if !self.is_hq() || self.stop_requested || self.compacting.is_some() || self.turn.is_none() {
+        if self.stop_requested || self.turn.is_none() {
             return false;
         }
         let Some(Depleted { resets_at }) = self.depletion(done) else { return false };

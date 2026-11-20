@@ -45,7 +45,6 @@ pub(crate) use room_turn::session_owner;
 use crate::agent::acp::{self, Acp, Incoming};
 use crate::agent::config::FastModeSupport;
 use crate::agent::gate::{Admission, Permit};
-use crate::chat::context::{Identity, Snapshot};
 use crate::chat::group::GroupTurn;
 use crate::chat::memory;
 use crate::hub::{BotStatus, Hub};
@@ -160,10 +159,6 @@ enum Queued {
         acc: writer::Accept,
     },
     BotRequest(crate::chat::team::BotRequest, writer::Accept),
-    /// A compaction the host decided on (see `compaction`); `idle` while the user is away.
-    Compact {
-        idle: bool,
-    },
     Group(GroupTurn, writer::Accept),
 }
 
@@ -210,19 +205,11 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         routine_timed_out: false,
         routine_completion: None,
         session_fresh: false,
-        profile_resend: HashSet::new(),
-        compacting: None,
-        raw_prompt: false,
-        handoff: None,
-        compaction_notice: None,
-        applied_system: HashMap::new(),
         tidier,
         turn_text: None,
         turn_entries: Vec::new(),
         start_entries: Vec::new(),
         project_turn: None,
-        turn_memory_revision: String::new(),
-        announce: None,
         turn: None,
         off_lane: None,
         off_turn: None,
@@ -297,8 +284,6 @@ fn activity(title: &str) -> &str {
 struct SessionCaps {
     /// `session/load`: resume a session after a restart.
     load: bool,
-    /// `session/fork`: a thread starts as a copy of the main session.
-    fork: bool,
     /// `session/close`: an idle session can be released while the agent keeps running.
     close: bool,
     /// ACP `systemPrompt`: instructions on `session/new`, `load` and `fork` that the agent keeps at system level.
@@ -424,19 +409,6 @@ struct Actor {
     routine_completion: Option<RoutineCompletion>,
     /// True until the first prompt of a new ACP session has been sent.
     session_fresh: bool,
-    /// Sessions that compacted away the `<bot-profile>` their first message carried; their next prompt carries
-    /// a fresh one.
-    profile_resend: HashSet<String>,
-    /// The running turn is a compaction the host started (`Some(true)` while the user is away).
-    compacting: Option<bool>,
-    /// The next prompt goes as it is: a command such as `/compact`, with nothing put before or after it.
-    raw_prompt: bool,
-    /// What the next prompt carries from the conversation it starts over from.
-    handoff: Option<String>,
-    /// The chat line of the last compaction, which a late summary fills in.
-    compaction_notice: Option<String>,
-    /// Session -> the instructions this process last handed Claude as its system prompt.
-    applied_system: HashMap<String, String>,
     tidier: mpsc::UnboundedSender<memory::TidyEvent>,
     /// The user's words for this turn (None for a hidden turn or one not from the user); feeds memory.
     turn_text: Option<String>,
@@ -448,10 +420,6 @@ struct Actor {
     /// The project set this turn runs under and what the host owes the agent about it (see `agent::project`). None
     /// for a turn that isn't a person's message to an hq agent.
     project_turn: Option<hq::ProjectTurn>,
-    /// The memory change this turn's notice told the agent about (see `memory::change_notice`).
-    turn_memory_revision: String,
-    /// A profile update this turn carried, recorded once the agent got it.
-    announce: Option<(Snapshot, Identity)>,
     turn: Option<i64>,
     /// Where the agent may start a turn of its own (see `offturn`): the lane of the last turn on `turn_session`, none
     /// when that was a room, an ask or a routine.
@@ -686,7 +654,7 @@ impl Actor {
     /// the turn started in (see `room_turn`), whenever they land.
     fn add(&self, kind: EntryKind, turn: i64, mut data: Value) -> Option<Entry> {
         data["author"] = self.cfg.id.clone().into();
-        if kind == EntryKind::Agent && self.is_hq() {
+        if kind == EntryKind::Agent {
             data["answeredBy"] = self.serving.clone().into();
         }
         self.hub.add_entry_from(&self.lane, kind, turn, &data, self.turn_stamp())

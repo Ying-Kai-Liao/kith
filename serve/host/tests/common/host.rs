@@ -37,9 +37,18 @@ impl Host {
         Self::start_env(&[]).await
     }
 
-    /// [`Self::start`] with extra environment variables for the host.
+    /// [`Self::start`] with extra environment variables for the host (a later value wins). The host's kernel is
+    /// `kernel_agents.py`: it lists the folders of `agents_dir(home)` as kith agents and starts each on the scripted
+    /// ACP agent its `acp` file names (see [`Self::agent`]). One-bot-model C5: every bot of a test is one.
     pub async fn start_env(env: &[(&str, &str)]) -> Self {
         let home = std::env::temp_dir().join(format!("kith-memory-e2e-{}", uuid::Uuid::new_v4()));
+        let agents = super::agents_env(&home);
+        let mut vars: Vec<(&str, &str)> = agents.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        vars.extend(env.iter().copied());
+        Self::start_in(home, &vars).await
+    }
+
+    async fn start_in(home: PathBuf, env: &[(&str, &str)]) -> Self {
         let (child, base) = super::serve_env(&home, env).await;
         let token = super::read_token(&home).trim().to_owned();
         let env = env.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
@@ -102,6 +111,20 @@ impl Host {
         self.call("createBot", bot).await["bot"]["id"].as_str().unwrap().to_owned()
     }
 
+    /// A host-native row, as an old release left one in serve.db (nothing can make one now): the host restarts with it
+    /// listed, flagged and refused. Its id.
+    pub async fn native_row(&mut self, name: &str) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        let config = json!({"id": id, "name": name, "backend": "custom", "command": "unused", "cwd": "", "tasks": false});
+        self.restart(|home| {
+            let db = rusqlite::Connection::open(home.join("serve.db")).unwrap();
+            db.execute("INSERT INTO bots(id, rev, deleted, config) VALUES (?1, 1, 0, ?2)", (&id, config.to_string()))
+                .unwrap();
+        })
+        .await;
+        id
+    }
+
     pub async fn memory(&self, bot: &str) -> Value {
         self.call("memory", json!({"botId": bot})).await
     }
@@ -114,12 +137,39 @@ impl Host {
         self.refused("memoryCall", json!({"botId": bot, "name": name, "arguments": arguments})).await
     }
 
-    /// A bot running `tests/fixtures/<fixture>` with `args`.
-    pub async fn fixture_bot(&self, name: &str, fixture: &str, args: &str) -> String {
+    /// The folder of the kith agent `name` ([`Self::start_agents`]).
+    pub fn agent_dir(&self, name: &str) -> PathBuf {
+        super::agents_dir(&self.home).join(name)
+    }
+
+    /// A kith agent `name` on the scripted ACP agent `tests/fixtures/<fixture>` with `args`, as the old suites made a
+    /// bot: its messages are not tasks. Its folder is its working folder, where a fixture keeps its files.
+    pub async fn agent(&self, name: &str, fixture: &str, args: &str) -> String {
+        let id = self.task_agent(name, fixture, args).await;
+        self.call("updateBot", json!({"id": id, "tasks": false})).await;
+        id
+    }
+
+    /// [`Self::agent`] as the apps make one: its messages become tasks.
+    pub async fn task_agent(&self, name: &str, fixture: &str, args: &str) -> String {
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture);
-        let command = format!("{} {args}", super::python_agent(&script));
-        let bot = json!({"name": name, "backend": "custom", "tasks": false, "command": command, "connectors": [], "notify": false});
-        self.call("createBot", bot).await["bot"]["id"].as_str().unwrap().to_owned()
+        let dir = self.agent_dir(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("acp"), format!("{} {args}", super::python_agent(&script))).unwrap();
+        self.call("syncHqBots", json!({})).await;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Some(bot) = self.roster().await.into_iter().find(|b| b["hqAgent"] == name) {
+                return bot["id"].as_str().unwrap().to_owned();
+            }
+            assert!(Instant::now() < deadline, "the agent {name} never got a bot");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// A kith agent named `name` running `tests/fixtures/<fixture>` with `args` (messages are not tasks): its bot's id.
+    pub async fn fixture_bot(&self, name: &str, fixture: &str, args: &str) -> String {
+        self.agent(name, fixture, args).await
     }
 
     /// Sends `text` and waits for the bot's reply.

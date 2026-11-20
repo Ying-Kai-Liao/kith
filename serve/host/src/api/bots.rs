@@ -100,7 +100,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
         }
         "createBot" => {
             // C5: new agents come from `newKithAgent`; a host-native bot is no longer made. Only rooms are.
-            if b["kind"] != "group" && !crate::store::native_env_for_tests() {
+            if b["kind"] != "group" {
                 bail!("A new agent is a kith agent: use New agent. Only a room is made here.");
             }
             let mut b = b;

@@ -455,13 +455,6 @@ impl Actor {
                     }
                     continue;
                 }
-                Some(Queued::Compact { .. }) => {
-                    let Some(Queued::Compact { idle }) = self.queue.pop_front() else {
-                        unreachable!("front is a compaction")
-                    };
-                    self.start_compaction(idle, done_tx).await;
-                    continue;
-                }
                 _ => {}
             }
             // Messages sent while the agent worked go out together as its next turn
@@ -491,10 +484,6 @@ impl Actor {
             if self.limit_parks(&lane, &ids).await {
                 continue;
             }
-            // A handoff waiting in the chat starts a new conversation with this message.
-            if lane == main {
-                self.handoff = self.take_handoff();
-            }
             if let Err(e) = self.start_turn(lane, &ids, &text, false, done_tx).await {
                 self.start_failed(&e);
             }
@@ -504,7 +493,7 @@ impl Actor {
     /// Whether the owner's messages `ids` wait under a limit card instead of running now: only for an owner's kith
     /// agent over its monthly limit with ask or hold (`limits`). Tell writes its line once a month and runs.
     async fn limit_parks(&mut self, lane: &Lane, ids: &[String]) -> bool {
-        if !self.is_hq() || self.cfg.person.is_some() || ids.is_empty() {
+        if self.cfg.person.is_some() || ids.is_empty() {
             return false;
         }
         // Allowed on the card: this run goes on.
@@ -571,7 +560,7 @@ impl Actor {
         // Any other start that failed gives its wake back too (M5); one the person stopped isn't offered again now.
         // A host-native bot's refusal is final, like a Stop: its wake is dropped and its cards withdrawn, not offered
         // again (the retry would only post the same notice).
-        let final_refusal = self.cfg.refused_native();
+        let final_refusal = self.cfg.is_native();
         crate::cards::resume::not_started(&self.hub, &self.start_entries, !(stopped || final_refusal));
         self.release_turn_claim();
         self.turn = None;

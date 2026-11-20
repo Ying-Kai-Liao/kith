@@ -75,7 +75,7 @@ fn bookmark(store: &Store, bot: &str) -> i64 {
 pub fn spawn_tidier(hub: Arc<Hub>, bot_id: String) -> mpsc::UnboundedSender<TidyEvent> {
     let (tx, mut rx) = mpsc::unbounded_channel::<TidyEvent>();
     // C5: its one-shot is refused for a host-native bot, so it would only back off for ever. Events sent to it are dropped.
-    if hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.refused_native()) {
+    if hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.is_native()) {
         return tx;
     }
     let hq = hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.is_hq());
