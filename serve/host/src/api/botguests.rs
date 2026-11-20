@@ -1109,6 +1109,12 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
     // A retry of an ask already sent answers the same and sends nothing; the same nonce for anything else is refused
     // (C4). The nonce is the bot's own, across its agents and conversations.
     let chat = known.as_ref().map(|c| c.chat_bot_id.clone()).or_else(|| chat_row_of(hub, &bot.person_id, &agent));
+    // C5: no ask reaches a host-native bot's chat (an old conversation may still point at one).
+    if let Some(row) = chat.as_deref().and_then(|id| hub.store.bot(id).ok().flatten()).filter(|r| !r.deleted)
+        && let Err(e) = row.config.refuse_native()
+    {
+        return Err(BotError::err(400, Code::BadRequest, format!("{e:#}")));
+    }
     if let Some(e) = hub.store.find_bot_guest_nonce(&bot.bot_id, nonce) {
         if !is_retry(hub, &e, text, &agent, known.as_ref(), external.as_deref()) {
             return Err(BotError::err(
@@ -1246,6 +1252,10 @@ async fn ask_room(
             format!("Name the agent to ask with @ ({}).", names.join(", ")),
         ));
     };
+    // C5: a host-native member is never asked.
+    if let Err(e) = agent.refuse_native() {
+        return Err(BotError::err(400, Code::BadRequest, format!("{e:#}")));
+    }
     // Like any ask: at most what its owner holds of the agent.
     if let Some(hq) = &agent.hq_agent
         && !roles::may_use(&bot.person_id, hq).await

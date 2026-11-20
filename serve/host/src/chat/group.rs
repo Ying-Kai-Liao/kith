@@ -31,7 +31,7 @@ use crate::store::{
 };
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -428,6 +428,14 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
                 // An outside bot whose own post is the room's latest line has nothing new to read: waking it
                 // again would only spend its owner's Grok runs.
                 speakers.retain(|id| !spoke_last(hub, &lane, id));
+                // C5: a host-native member is left out of the queue, so no turn is charged for it.
+                speakers.retain(|id| {
+                    let native = members
+                        .iter()
+                        .find(|m| m.id == *id)
+                        .filter(|m| m.refused_native() && guest_member(hub, &m.id).is_none());
+                    native.inspect(|m| skip_native(hub, &lane, &conv.id, m)).is_none()
+                });
                 // Each round starts one member later, so the same bot doesn't always speak first.
                 if !speakers.is_empty() {
                     let offset = conv.queue.round as usize % speakers.len();
@@ -471,6 +479,11 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         };
         let text = if let Some(guest) = guest_member(hub, &member.id) {
             bot_turn(hub, conv, &group, &guest).await?
+        } else if member.refused_native() {
+            // C5: the host no longer runs a host-native bot. It passes, and the room is told why; the rest of the
+            // turn goes on.
+            skip_native(hub, &lane, &conv.id, member);
+            None
         } else {
             let prompt = member_prompt(hub, &group, &members, member, &lane, &basis, &stays)?;
             let (reply, answer) = oneshot::channel();
@@ -539,6 +552,10 @@ pub fn ask_agent(hub: &Arc<Hub>, room: &str, agent_id: &str) -> Result<()> {
     };
     let members = members(hub, &group);
     let Some(agent) = members.iter().find(|m| m.id == agent_id) else { bail!("{agent_id} isn't in this room") };
+    // An outside bot is a member with no hq agent of its own; it is not a native row.
+    if guest_member(hub, &agent.id).is_none() {
+        agent.refuse_native()?;
+    }
     let lane = Lane::main(room);
     // Called by `botAsk` with the membership lock held.
     let (basis, stays) = (RoomBasis::read_held(&hub.store, room), hub.store.room_stays(room));
@@ -651,6 +668,21 @@ async fn bot_turn(
         bot_notice(hub, &conv.lane, guest, notice, Some(&conv.id), what);
     }
     Ok(text)
+}
+
+/// A quiet line in the room: this member is a host-native bot, which the host no longer runs.
+/// It is said once per conversation for each such member, not once per round.
+fn skip_native(hub: &Hub, lane: &Lane, conversation: &str, member: &BotConfig) {
+    static TOLD: Mutex<BTreeSet<(String, String)>> = Mutex::new(BTreeSet::new());
+    let first = TOLD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert((conversation.to_owned(), member.id.clone()));
+    if !first {
+        return;
+    }
+    let data = json!({"notice": "nativeSkipped", "style": "info", "text": crate::store::native_refusal(&member.name)});
+    hub.add_entry(lane, EntryKind::Notice, hub.store.max_turn(&lane.chat), &data);
 }
 
 /// The bot as a notice names it.

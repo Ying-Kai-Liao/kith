@@ -119,6 +119,8 @@ impl Actor {
         hidden: bool,
         done_tx: &mpsc::UnboundedSender<Done>,
     ) -> Result<()> {
+        // C5: no turn of any kind (message, room, ask, routine, compaction) starts for a host-native bot.
+        self.cfg.refuse_native()?;
         self.start_entries = entry_ids.to_vec();
         self.writer_note_start(&lane, entry_ids, text, hidden);
         let stopping = |c: &Cmd| matches!(c, Cmd::Stop | Cmd::Shutdown);

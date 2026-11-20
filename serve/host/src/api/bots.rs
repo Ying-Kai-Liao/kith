@@ -99,6 +99,10 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             json!({"entries": entries, "folder": hub.place_folder(bot, &Lane::main(bot)).await?})
         }
         "createBot" => {
+            // C5: new agents come from `newKithAgent`; a host-native bot is no longer made. Only rooms are.
+            if b["kind"] != "group" && !crate::store::native_env_for_tests() {
+                bail!("A new agent is a kith agent: use New agent. Only a room is made here.");
+            }
             let mut b = b;
             b["id"] = "".into();
             // Only the hq sync makes a bot of an hq agent.
@@ -214,6 +218,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 return Ok(ControlFlow::Break(json!({"entry": e})));
             }
             let row = hub.store.bot(bot)?.filter(|r| !r.deleted).ok_or_else(|| anyhow!("unknown bot"))?;
+            // C5: nothing is saved or queued for a host-native bot.
+            row.config.refuse_native()?;
             // `project` / `folder`: where the place this message runs in works, set before the turn starts, so a
             // new chat, thread or task picks its folder without a reset round trip. Checked before anything is saved.
             let start_in = hub.check_change(crate::agent::folder::Change::from_args(&b)?).await?;

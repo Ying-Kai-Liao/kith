@@ -70,7 +70,9 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
         "voiceLocalSpeak" => crate::voice_local::speak(str_arg(&b, "text")?, b["voice"].as_str()).await?,
         "hello" => {
             let port = hub.port;
-            json!({
+            // C5: how many host-native rows this Mac still has (left out when none).
+            let native = hub.store.bots().map(|rows| crate::store::native_ids(&rows).len()).unwrap_or_default();
+            let mut hello = json!({
                 "hostId": hub.host_id,
                 "computerId": hub.identity.computer_id(),
                 "signKey": hub.identity.sign_pub_b64(),
@@ -93,7 +95,11 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
                 "cli": tokio::task::spawn_blocking(crate::kernel::current_cli).await?.json(),
                 // Shells out to `tailscale`: keep it off the async workers.
                 "urls": tokio::task::spawn_blocking(move || crate::service::addresses(port)).await?,
-            })
+            });
+            if native > 0 {
+                hello["nativeBots"] = native.into();
+            }
+            hello
         }
         "refreshBackends" => {
             tokio::task::spawn_blocking(backends::hydrate_path).await?;
