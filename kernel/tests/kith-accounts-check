@@ -4,7 +4,7 @@
 # signed-out skipped), the `kith account` commands and their old aliases, runs that pick and mark out on a limit, --accounts-json.
 # Fake `claude` and `codex` on PATH, a throwaway HOME and KITH_HOME: the real ~/.kith, Keychain and logins are never touched.
 #
-#   kernel/tests/kith-accounts-check     under a minute; prints each check, exits 1 when one fails
+#   KITH_BIN=/path/to/kith kernel/tests/kith-accounts-check     needs the Rust program (every `kith account` verb is its); under a minute; prints each check, exits 1 when one fails
 set -uo pipefail
 
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
