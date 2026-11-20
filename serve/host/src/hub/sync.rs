@@ -10,6 +10,10 @@ impl Hub {
         let cfg = &row.config;
         let mut v = serde_json::to_value(cfg).expect("BotConfig is plain data and always serializes");
         v["managedWorkspace"] = crate::agent::workspace::is_managed(cfg).into();
+        // A host-native row the host no longer runs (C5); left out for every other row.
+        if cfg.is_native() {
+            v["needsKithAgent"] = true.into();
+        }
         // Null where there is no switch to show.
         v["harnessMemory"] =
             (!cfg.is_group() && crate::agent::own_memory::switchable(cfg)).then_some(cfg.harness_memory).into();

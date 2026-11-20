@@ -169,8 +169,6 @@ impl Actor {
             "bot"
         } else if self.active_group.is_some() {
             "group"
-        } else if self.compacting.is_some() {
-            "compact"
         } else {
             "app"
         }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { isFlagged } from './bots/NativeBotNotice'
 import { GrantedAgentsChat } from './computers/GrantedAgentsChat'
 import { InviteJoinSheet } from './settings/InviteJoinSheet'
 import { ShareSheet } from './ShareSheet'
@@ -304,13 +305,14 @@ function ChatSplitView() {
     { title: 'Mark as Read', icon: 'bell.badge', action: () => store.markAllRead(bot.id) },
     ...(canShareAgent(store, bot) ? [{ title: 'Share access…', icon: 'person.crop.circle.badge.plus', action: () => setSharingBot({ bot, store }) }] : []),
     // Agents only: the colour lives in the profile editor; Sleep stops what the agent is running.
-    ...(isGroup(bot) ? [] : [
+    ...(isGroup(bot) || isFlagged(bot) ? [] : [
       { title: 'Colour…', icon: 'paintpalette', divider: true, action: () => setEditing({ id: crypto.randomUUID(), draft: draftOf(bot), store }) },
       { title: 'Sleep', icon: 'moon', disabled: !isWorking(bot), action: () => store.stop(bot.id) },
     ]),
     { title: 'Edit Profile…', icon: 'square.and.pencil', divider: isGroup(bot), action: () => setEditing({ id: crypto.randomUUID(), draft: draftOf(bot), store }) },
     { title: 'Copy conversation ID', icon: 'square.on.square', divider: true, action: () => window.kith.app.copy(bot.id) },
-    { title: 'New session', icon: 'arrow.counterclockwise', action: () => setNewSessionBot({ bot, store }) },
+    // A flagged native row no longer runs, so there is no session to restart.
+    ...(isFlagged(bot) ? [] : [{ title: 'New session', icon: 'arrow.counterclockwise', action: () => setNewSessionBot({ bot, store }) }]),
     { title: 'Hide from sidebar', icon: 'eye.slash', divider: true, action: () => store.setHidden(bot, true) },
     { title: 'Delete', icon: 'trash', destructive: true, action: () => setConfirmDelete({ bot, store }) },
   ] : [

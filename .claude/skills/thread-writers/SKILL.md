@@ -440,3 +440,12 @@ and `verification/rooms/` (`steer`, `warmreuse`) for what a turn reads.
 A room turn runs on an actor of its own (`hub/actors.rs`, key `bot|lane#room-<room>-<join gen>`) with a session of its own
 (`session_owner`): one writer per (agent, room, join epoch), claimed through the same `claim_for_turn` as any person's. Nothing
 is steered into a running turn, and its session is never loaded again after the next join. Drift was read; SYNC not moved.
+
+## One bot model C5, the host-native arms removed (2026-11-20) - prose only, no model row
+The host no longer starts a host-native bot (`BotConfig::refuse_native`), so the native arms of the covered host code are gone:
+`ensure_session`'s own session start (`agent/bot/session.rs`: only `ensure_hq_session` is left), the native `compose`, the
+host-started compaction and handoff turn (`Queued::Compact`, `start_compaction`, `take_handoff`; an agent's context is its own) in
+`queue.rs` / `turn.rs` / `compaction.rs`, and `writer_agent`'s `bot:<id>` name (`writer.rs`: a claim names the kith agent).
+No claim step, gate or CAS moved: `start_gate_in`, `claim_for_turn` and `release_turn_claim` are as they were, and every start
+that remains is the kith agent's. Drift was read for `queue.rs`, `turn.rs`, `session.rs`, `writer.rs` and `hub/actors.rs`
+(`api/bots.rs` only lost `createBot`'s test exception); SYNC not moved.

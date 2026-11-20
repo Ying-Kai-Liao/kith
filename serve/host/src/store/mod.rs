@@ -32,6 +32,7 @@ pub use devices::{Device, DeviceSource, PushTicket, Scope};
 #[cfg(test)]
 pub use model::Permission;
 pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, is_person_message, lane_key};
+pub use model::{native_ids, native_refusal};
 pub use peers::{PeerIn, PeerOut};
 pub use people::{Invite, Membership, PersonRow};
 pub use room_bots::RoomPoint;

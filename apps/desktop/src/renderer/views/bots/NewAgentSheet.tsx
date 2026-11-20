@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Bot } from '@shared/models'
 import { EFFORT_LEVELS, HARNESSES } from '@shared/bot-sections'
-import { engineNotRunHere, madeButFailed, newAgentDescriptionError, newAgentNameError, newAgentParams } from '@shared/new-agent'
+import { engineNotRunHere, madeButFailed, newAgentDescriptionError, newAgentNameError, newAgentParams, type NewAgentPrefill } from '@shared/new-agent'
 import { CardForm, CardSection, ChoicePicker, IconButton, Spinner, ValueRow } from '../../components/Controls'
 import { ModalHeader, Sheet, SheetPage } from '../../components/Overlay'
 import { useStore } from '../../store/context'
@@ -18,25 +18,27 @@ export const suggestedName = (typed: string) => typed.trim().toLowerCase().repla
  * "New agent": every bot is a kith agent, so it needs a name and a line about what it does before it is made.
  * `onMade` gets the new bot to open; the sheet stays open with the host's own words when kith refuses (a name taken).
  */
-export function NewAgentSheet({ open, initialName, onClose, onMade }: {
+export function NewAgentSheet({ open, initialName, prefill, onClose, onMade }: {
   open: boolean
   initialName: string
+  /** "Make a kith agent like this": a flagged row's name, description, engine and model to start from. */
+  prefill?: NewAgentPrefill
   onClose: () => void
   onMade: (bot: Bot) => void
 }) {
   return (
     <Sheet open={open} onClose={onClose} width={480}>
-      {open ? <Page initialName={initialName} onClose={onClose} onMade={onMade} /> : null}
+      {open ? <Page initialName={initialName} prefill={prefill} onClose={onClose} onMade={onMade} /> : null}
     </Sheet>
   )
 }
 
-function Page({ initialName, onClose, onMade }: { initialName: string; onClose: () => void; onMade: (bot: Bot) => void }) {
+function Page({ initialName, prefill, onClose, onMade }: { initialName: string; prefill?: NewAgentPrefill; onClose: () => void; onMade: (bot: Bot) => void }) {
   const store = useStore()
-  const [name, setName] = useState(() => suggestedName(initialName))
-  const [description, setDescription] = useState('')
-  const [harness, setHarness] = useState('')
-  const [model, setModel] = useState('')
+  const [name, setName] = useState(() => suggestedName(prefill?.name ?? initialName))
+  const [description, setDescription] = useState(prefill?.description ?? '')
+  const [harness, setHarness] = useState(prefill?.harness ?? '')
+  const [model, setModel] = useState(prefill?.model ?? '')
   const [effort, setEffort] = useState('default')
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)

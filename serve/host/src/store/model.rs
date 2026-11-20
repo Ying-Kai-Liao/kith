@@ -23,19 +23,6 @@ pub enum Permission {
     BypassPermissions,
 }
 
-impl Permission {
-    /// The mode id the agent knows it by.
-    pub fn mode_id(self) -> &'static str {
-        match self {
-            Self::Ask => "default",
-            Self::AcceptEdits => "acceptEdits",
-            Self::Plan => "plan",
-            Self::Auto => "auto",
-            Self::BypassPermissions => "bypassPermissions",
-        }
-    }
-}
-
 /// Transcript entry kinds (the `kind` column / wire field).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntryKind {
@@ -235,10 +222,43 @@ impl BotConfig {
         self.kind == BotKind::Group
     }
 
+    /// A host-native bot: an agent row with no hq agent behind it (`hq_agent` unset, empty or blank). One-bot-model C5:
+    /// the host never launches one; it is flagged (`needsKithAgent`) and can be exported to become a kith agent.
+    /// A group room has no agent either and is not native.
+    pub fn is_native(&self) -> bool {
+        !self.is_group() && self.hq_agent.as_deref().is_none_or(|a| a.trim().is_empty())
+    }
+
+    /// The agent name the core records for this bot's claims and runs: its kith agent's, or `bot:<id>` for a host-native
+    /// row (which never starts, so only an old routine row can ask). The one rule for the actor and the routine runs.
+    pub fn claim_agent(&self) -> String {
+        self.hq_agent.clone().unwrap_or_else(|| format!("bot:{}", self.id))
+    }
+
+    /// Refuses to start anything for a native bot, with the one error every path gives.
+    pub fn refuse_native(&self) -> anyhow::Result<()> {
+        if self.is_native() {
+            anyhow::bail!("{}", native_refusal(&self.name));
+        }
+        Ok(())
+    }
+
     /// Whether the user's messages to this bot are tasks (a group's never are: it's one room).
     pub fn uses_tasks(&self) -> bool {
         !self.is_group() && self.tasks != Some(false)
     }
+}
+
+/// What every refused start of a host-native bot says.
+pub fn native_refusal(name: &str) -> String {
+    format!(
+        "{name} is a host-native bot and the host no longer runs those. Make it a kith agent (New agent), then chat with that."
+    )
+}
+
+/// The ids of the rows that are host-native (see [`BotConfig::is_native`]), deleted rows left out.
+pub fn native_ids(rows: &[BotRow]) -> Vec<String> {
+    rows.iter().filter(|r| !r.deleted && r.config.is_native()).map(|r| r.config.id.clone()).collect()
 }
 
 fn null_as_empty<'de, D: serde::Deserializer<'de>>(value: D) -> Result<Vec<String>, D::Error> {
@@ -379,7 +399,6 @@ mod tests {
         );
         for mode in ["default", "acceptEdits", "plan", "auto", "bypassPermissions"] {
             let p: Permission = serde_json::from_str(&format!("\"{mode}\"")).unwrap();
-            assert_eq!(p.mode_id(), mode);
             assert_eq!(serde_json::to_string(&p).unwrap(), format!("\"{mode}\""));
         }
         assert!(serde_json::from_str::<Permission>("\"yolo\"").is_err(), "unknown modes are rejected at the boundary");

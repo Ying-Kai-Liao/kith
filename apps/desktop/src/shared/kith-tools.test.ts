@@ -9,7 +9,7 @@ test('targetBots: the owner\'s kith agents, once each, no groups or guests', () 
   const got = targetBots([
     bot({ id: '1', name: 'Zed', hqAgent: 'zed' }),
     bot({ id: '2', name: 'Zed again', hqAgent: 'zed' }),
-    bot({ id: '3', name: 'Host bot', hqAgent: null }),
+    bot({ id: '3', name: 'Native row', hqAgent: null, needsKithAgent: true }),
     bot({ id: '4', name: 'Room', kind: 'group', hqAgent: 'room' }),
     bot({ id: '5', name: 'Guest', hqAgent: 'g', botGuest: { ownerPerson: 'p' } as Bot['botGuest'] }),
     bot({ id: '6', name: 'Ann', hqAgent: 'ann' }),

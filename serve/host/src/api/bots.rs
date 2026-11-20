@@ -51,10 +51,6 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             b["rotate"].as_bool().unwrap_or(false),
         )?,
         "routineCall" => crate::routines::call(hub, str_arg(&b, "botId")?, str_arg(&b, "name")?, &b["arguments"])?,
-        "memoryCall" => {
-            let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
-            crate::chat::memory::tool_call(hub, bot, actor_arg(&b, bot), name, &b["arguments"]).await?
-        }
         "chatCall" => {
             let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
             if name == "call_person" {
@@ -99,6 +95,10 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             json!({"entries": entries, "folder": hub.place_folder(bot, &Lane::main(bot)).await?})
         }
         "createBot" => {
+            // C5: new agents come from `newKithAgent`; a host-native bot is no longer made. Only rooms are.
+            if b["kind"] != "group" {
+                bail!("A new agent is a kith agent: use New agent. Only a room is made here.");
+            }
             let mut b = b;
             b["id"] = "".into();
             // Only the hq sync makes a bot of an hq agent.
@@ -214,6 +214,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 return Ok(ControlFlow::Break(json!({"entry": e})));
             }
             let row = hub.store.bot(bot)?.filter(|r| !r.deleted).ok_or_else(|| anyhow!("unknown bot"))?;
+            // C5: nothing is saved or queued for a host-native bot.
+            row.config.refuse_native()?;
             // `project` / `folder`: where the place this message runs in works, set before the turn starts, so a
             // new chat, thread or task picks its folder without a reset round trip. Checked before anything is saved.
             let start_in = hub.check_change(crate::agent::folder::Change::from_args(&b)?).await?;
@@ -422,12 +424,9 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             hub.send_cmd(str_arg(&b, "botId")?, Cmd::NewSession)?;
             json!({})
         }
-        "memory" | "saveMemory" | "pinMemory" | "archiveMemory" | "forgetMemory" | "clearMemory" | "undoTidy"
-        | "undoDream" | "answerMemory" | "undoMemory" | "memoryFile" | "saveMemoryFile" | "deleteMemoryFile"
-        | "restoreMemoryFile" => crate::chat::memory::call(hub, method, &b).await?,
-        m if crate::chat::memory::HQ_METHODS.contains(&m) => {
+        m if crate::hqmem::HQ_METHODS.contains(&m) => {
             let (hub, method, b) = (hub.clone(), m.to_owned(), b.clone());
-            tokio::task::spawn_blocking(move || crate::chat::memory::hq_call(&hub, &method, &b)).await??
+            tokio::task::spawn_blocking(move || crate::hqmem::hq_call(&hub, &method, &b)).await??
         }
         "editHandoff" | "keepConversation" => crate::chat::handoff::call(hub, method, &b)?,
         "react" => {

@@ -48,3 +48,6 @@ src/routines/schedule_golden.rs	routines::schedule_golden::
 # claim protocol must still pass the host's Writer-mode turns (P7b).
 src/agent/bot/writer_tests.rs	agent::bot::writer::tests::
 src/terminal/core_writer_tests.rs	terminal::core_writer::tests::
+src/api/native_guard_tests.rs	api::native_guard_tests::
+src/chat/group.rs	chat::group::tests::
+src/market/requests.rs	market::requests::tests::
