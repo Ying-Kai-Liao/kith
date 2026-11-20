@@ -4,5 +4,5 @@
   "state:home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.json": "{\n  \"agent\": \"coder\",\n  \"cwd\": \"<HOME>\",\n  \"pid\": \"<MASKED>\",\n  \"recordedAt\": 1,\n  \"sessionId\": \"<UUID>\",\n  \"startedAt\": \"<TS>\",\n  \"transcriptPath\": \"<HOME>/.claude/projects/p/<UUID>.jsonl\",\n  \"v\": 1\n}\n",
   "step0.exit": "1\n",
   "step0.stderr": "Resume it as coder with: kith coder --resume <UUID>\n",
-  "step0.stdout": "argv: \nenv: FAKE_MODE=registry-crash KITH_CORE=python KITH_HOME=<KITH_HOME> KITH_IDLE_POLL=1000 KITH_RESUMED_FROM=r-1 KITH_SERVE_DIR=<HOME>/.kith/serve KITH_SERVE_PORT=1 KITH_STATE=<HOME>/.kith KITH_TERMINAL_SESSION=1 \n"
+  "step0.stdout": "argv: \nenv: FAKE_MODE=registry-crash KITH_HOME=<KITH_HOME> KITH_IDLE_POLL=1000 KITH_RESUMED_FROM=r-1 KITH_SERVE_DIR=<HOME>/.kith/serve KITH_SERVE_PORT=1 KITH_STATE=<HOME>/.kith KITH_TERMINAL_SESSION=1 \n"
 }

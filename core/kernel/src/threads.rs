@@ -23,6 +23,11 @@ pub(crate) mod os;
 pub mod pick;
 pub mod registry;
 pub mod resolve;
+pub mod run;
+#[cfg(test)]
+mod run_tests;
+// The unsafe half of `run` (fork, sigaction, waitpid); it allows `unsafe` itself.
+pub(crate) mod runproc;
 pub mod spool;
 #[cfg(test)]
 mod tests;

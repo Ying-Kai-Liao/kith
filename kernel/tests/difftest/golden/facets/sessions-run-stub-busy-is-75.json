@@ -4,5 +4,5 @@
   "state:home/.kith/live/terminal/": "<empty dir>\n",
   "step0.exit": "75\n",
   "step0.stderr": "",
-  "step0.stdout": "argv: \nenv: KITH_CORE=python KITH_HOME=<KITH_HOME> KITH_IDLE_POLL=1000 KITH_RESUMED_FROM=r-1 KITH_SERVE_DIR=<HOME>/.kith/serve KITH_SERVE_PORT=1 KITH_STATE=<HOME>/.kith KITH_TERMINAL_SESSION=1 \n"
+  "step0.stdout": "argv: \nenv: KITH_HOME=<KITH_HOME> KITH_IDLE_POLL=1000 KITH_RESUMED_FROM=r-1 KITH_SERVE_DIR=<HOME>/.kith/serve KITH_SERVE_PORT=1 KITH_STATE=<HOME>/.kith KITH_TERMINAL_SESSION=1 \n"
 }
