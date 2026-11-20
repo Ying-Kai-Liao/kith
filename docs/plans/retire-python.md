@@ -298,6 +298,12 @@ Rules for every step.
    rewrite cannot be theirs. What the rewritten job runs depends on section 5: under option A it is `kith-uv run --no-project -- <kith> <verb>` (the exact line is fixed by the test in section 5; still behind the launcher, so Full Disk Access holds on the external-disk Mac); a job that ran without
    `kith-uv` would lose that access. Before R4 a golden freezes what every `kith-auth` call an old host makes prints and exits
    with. A stub lives one release (the window, 3.1); this is the verb-level twin of `kith_tombstone.py`.
+   **One exception, decided for `dev.kith.cost` (architect, 2026-11-21):** the plist is written by hand (no installer owns it), so
+   no Rust install action can rewrite it before the delete. `kernel/bin/kith-cost` is therefore one file that is valid as `sh` and as
+   Python (`kith-uv run --script` hands it to Python, which re-runs the same file under `/bin/sh`, which execs the program): the chain
+   is launchd -> kith-uv -> python -> sh -> kith, and the installed plist keeps working with nobody editing it. This makes rewriting
+   the plist a gate that must pass *before the stub itself is removed* (R9); `kith doctor` reports any launchd plist that names a
+   kernel script. `kernel/tests/kith-cost-stub-check` holds the file to both languages.
 4. **Tag before the first deletion.** `git tag python-kernel-final` on the last commit that has every Python file. Undo of any
    step is "install the previous release folder", and "restore from the tag" for a source checkout.
 5. **A Python module is deleted only in the step that removes its last importer** (architect MUST 5). The import graph (1.3a) decides the order; a module that is imported cannot be stubbed, so it moves with its importers.
@@ -361,8 +367,12 @@ R7 follows R5 because the run path's last exec is `kith-sessions run`. R9 is las
 `kernel/bin/project-id` is an `sh` stub that execs `kith kernel project-id` on the first program whose `kernel version` lists the new
 module `project-guest` (exit 3 and one line when none), the `project-id` line of `core-switched.txt` is gone, the host answers a
 guest's `--info` in process, and a guest run gets `KITH_BIN` and read access to that program (`launch/settings.rs` `link_chain`;
-the sandbox would otherwise keep the stub from starting it). `kith_runsocket.py` stays until `kith-memory` is ported (R7). The
-other R2 pieces (`cost` tag/record, `pkg`, `kith-room-ledger`) are separate PRs.
+the sandbox would otherwise keep the stub from starting it). `kith_runsocket.py` stays until `kith-memory` is ported (R7). other R2 pieces are separate PRs. `cost` done (flow/retire-python-ports-cost-delete): every verb of `kith kernel cost` is in Rust
+(`tag`, `record`, the text reports, bare `kith cost`), `kernel/bin/kith-cost` is the sh-and-Python stub above, the `cost` line of
+`core-switched.txt` and `kith_cost_ported` are gone, the bash launch's SessionStart hook is `kith kernel cost tag` on a program with
+the module `cost-ledger` and the stub otherwise (`kith_cost_bin`), `spent` and `limit` in the Rust launch never run the stub, and
+`KITH_CORE=python` changes nothing. Rollback is the previous release only. Without a program the bash launch skips an owner's at-limit
+hold (the owner sees the stub's line); a guest is refused. `pkg` and `kith-room-ledger` are separate PRs.
 
 ### 2.2 What "switched" must mean, by module
 

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# kith-doctor-jobs-check — the jobs check warns about a launchd plist whose program is a kernel script (<kernel>/bin/<script>):
+# a later release turns the script into a forwarding stub and then removes it (retire-python R9), so the job has to be rewritten
+# before that. A job that runs something else gets no such line. launchctl is faked (nothing is loaded here).
+#
+#   kernel/tests/kith-doctor-jobs-check     a second or two; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-doctor-jobs-check.XXXXXX")
+trap 'rm -rf "$T"' EXIT
+export KITH_HOME=$T/kith HOME=$T/home
+LA=$HOME/Library/LaunchAgents
+mkdir -p "$LA" "$T/share/kernel/bin"
+: > "$T/share/kernel/bin/kith-cost"
+: > "$T/other-tool"
+
+python3 - "$LA" "$T/share/kernel/bin/kith-cost" "$T/other-tool" <<'PY'
+import plistlib, sys
+la, script, other = sys.argv[1:]
+plistlib.dump({'Label': 'dev.kith.cost', 'ProgramArguments': ['/usr/bin/env', 'uv', script, 'sync']}, open(la + '/dev.kith.cost.plist', 'wb'))
+plistlib.dump({'Label': 'dev.kith.monitor', 'ProgramArguments': [other, 'run']}, open(la + '/dev.kith.monitor.plist', 'wb'))
+PY
+
+cat > "$T/run.py" <<'PY'
+import importlib.machinery, importlib.util, os, subprocess, sys
+loader = importlib.machinery.SourceFileLoader('kith_doctor', os.path.join(sys.argv[1], 'bin', 'kith-doctor'))
+spec = importlib.util.spec_from_loader('kith_doctor', loader)
+doc = importlib.util.module_from_spec(spec)
+sys.argv = ['kith-doctor']
+loader.exec_module(doc)
+doc.run = lambda *a, cwd=None, timeout=None: subprocess.CompletedProcess(a, 1, '', '')
+doc.jobs()
+PY
+
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+out=$(python3 -I "$T/run.py" "$KERNEL" 2>&1)
+check "a job that runs a kernel script is warned about, naming the script" "grep -q 'dev.kith.cost: runs the kernel script .*kernel/bin/kith-cost' <<<\"\$out\""
+check "a job that runs another program gets no such line" "! grep -q 'dev.kith.monitor: runs the kernel script' <<<\"\$out\""
+
+echo
+if [ "$fail" = 0 ]; then echo "all checks passed"; else echo "check(s) failed"; exit 1; fi

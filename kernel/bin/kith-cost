@@ -1,4 +1,12 @@
 #!/bin/sh
+''':'
+# Two languages in one file, on purpose. The launchd job dev.kith.cost (written by hand, no installer owns it) runs
+# `kith-uv run --quiet --script <kernel>/bin/kith-cost sync`, and uv runs a script as Python. The chain is
+# launchd -> kith-uv -> python -> /bin/sh -> kith. Line 2 is a no-op `:` to sh and opens a triple-quoted string to Python; the
+# string holds the whole sh part, and the Python after it re-runs this same file under /bin/sh. So the installed plist keeps
+# working with nobody editing it. Rules for this file: the sh part never has three single quotes in a row, the Python part has no single quote but the one in its last comment, and every
+# path through it ends in exec or exit before the line that closes the string. R9 (deleting this stub) must first rewrite the
+# plist (retire-python plan, rule 3).
 # kith-cost: this script moved to the kith program (`kith kernel cost`, core/kernel/src/cost/). It stays at this path for the
 # callers that run the file: the SessionStart hook of a run that started with the old hook path, adapters/harness.py (`record`),
 # the host, older hosts, other kernel tools. The usage text is `kith kernel cost -h`. Same stdout, stderr and exit codes as the
@@ -69,3 +77,16 @@ if [ -z "$bin" ]; then
   exit 3
 fi
 exec "$bin" kernel cost --kernel "$kernel" "$@"
+
+exit 3
+'''
+import os
+import sys
+
+if __name__ == "__main__":
+    try:
+        os.execv("/bin/sh", ["/bin/sh", os.path.abspath(__file__)] + sys.argv[1:])
+    except OSError as e:
+        print("kith-cost: cannot run /bin/sh: %s" % e, file=sys.stderr)
+        sys.exit(3)
+# ' sh never gets here; this quote ends the one the line of three quotes above opens for it, so `sh -n` parses the whole file

@@ -449,6 +449,10 @@ def jobs():
         if missing:
             bad(f'{label}: runs {missing[0]}, which is not there (reinstall the job)')
             continue
+        # A kernel script as the job's program stops working when its stub is removed (retire-python R9): it has to be rewritten first.
+        named = [a for a in argv if re.search(r'/kernel/bin/[^/]+$', a)]
+        if named:
+            warn(f'{label}: runs the kernel script {named[0]}; a later release replaces it with a forwarding stub and then removes it, so this job needs rewriting before that')
         info = run('launchctl', 'print', f'gui/{uid}/{label}').stdout
         if not info:
             bad(f'{label}: not loaded (launchctl bootstrap gui/{uid} {f})')
