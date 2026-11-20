@@ -81,8 +81,7 @@ pub fn routines(buf: &mut Buffer, area: Rect, app: &App, l: &RoutineList) {
             .find(|x| x["id"].as_str() == Some(b.backend.as_str()))
             .map_or(&*b.backend, |x| s(x, "name"));
         let model = b.model.as_deref().unwrap_or("default model");
-        let fast = if b.fast_mode { " · fast" } else { "" };
-        put(buf, inner.x, inner.y, inner.width, &format!("{agent} · {model}{fast}"), t.text.patch(t.panel));
+        put(buf, inner.x, inner.y, inner.width, &format!("{agent} · {model}"), t.text.patch(t.panel));
         rput(buf, inner.right(), inner.y, "i edits", t.dim.patch(t.panel));
         let first = b.description.lines().find(|l| !l.trim().is_empty()).unwrap_or("No standing instructions");
         let room = usize::from(inner.width);

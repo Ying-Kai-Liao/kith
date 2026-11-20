@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = 'cad1d542d4bd84ba41d8d251b7d36a11ef9378bc0a1fc82bba75a2f09f5300f0'
+export const CONTRACT_SHA256 = '15dbde169b01dba72070adde5c9306aa4603cbeaaba4f228e4d108f861666205'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -186,7 +186,7 @@ export interface BotGuestRef {
   ownerName?: string | null
 }
 
-/** A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev. */
+/** A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev. Deprecated: fastMode, fastModeSupport and fastModeIssue. Fast mode is gone; the host always sends false, "unsupported" and null so an older app hides its switch, and ignores a fastMode it is sent. */
 export interface Bot {
   id: string
   kind: BotKind

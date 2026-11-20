@@ -156,7 +156,6 @@ pub(crate) async fn handshake(
         adapter: adapter(&init),
         loaded: HashMap::new(),
         started: Instant::now(),
-        fast_options: HashMap::new(),
         reports_compaction: false,
         usage: HashMap::new(),
         call_sessions: HashMap::new(),

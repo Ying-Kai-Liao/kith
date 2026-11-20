@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "cad1d542d4bd84ba41d8d251b7d36a11ef9378bc0a1fc82bba75a2f09f5300f0";
+pub const CONTRACT_SHA256: &str = "15dbde169b01dba72070adde5c9306aa4603cbeaaba4f228e4d108f861666205";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -601,7 +601,7 @@ pub struct BotGuestRef {
     pub owner_name: Option<String>,
 }
 
-/// A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev.
+/// A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev. Deprecated: fastMode, fastModeSupport and fastModeIssue. Fast mode is gone; the host always sends false, "unsupported" and null so an older app hides its switch, and ignores a fastMode it is sent.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Bot {

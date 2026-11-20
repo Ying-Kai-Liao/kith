@@ -56,7 +56,7 @@ export function BotEditorView({ draft: initial }: { draft: BotDraft }) {
 
 /**
  * Which settings a form shows: all of them (a new bot, the editor sheet), what changes often
- * (instructions, model, fast mode: the inspector's Details tab) or the rest (its Settings tab).
+ * (instructions, model: the inspector's Details tab) or the rest (its Settings tab).
  */
 export type FormPart = 'all' | 'often' | 'rarely'
 
@@ -128,7 +128,7 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
       <AutoTextArea className="field-box" value={draft.description} placeholder="e.g. Reviews PRs. Never pushes without asking." minRows={3} maxRows={8} onChange={(v) => set('description', v)} />
     </Field>
   )
-  // hq is the one source of an hq bot's permission, model, effort and Fast mode: one set of rows replaces Kith's own.
+  // hq is the one source of an hq bot's permission, model and effort: one set of rows replaces Kith's own.
   // A kith agent's model, effort and harness are the CLI's (`kith <agent> set …`); a room has none of them.
   const model = kith ? [<HqSettings key="hq" kith={kith} inSheet={part === 'often'} />] : []
 

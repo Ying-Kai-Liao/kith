@@ -2,7 +2,6 @@
 //! nothing of Kith's goes in with it — no instructions of its own, no `chat`/`memory`/`team`/`routines` servers,
 //! no memory snapshot, no tidying. The agent's reply is its turn's text.
 
-use super::fast_mode::Listing;
 use super::launch::{launch_commands, start_agent};
 use super::{Actor, NoticeStyle, Profile};
 use crate::agent::acp::Incoming;
@@ -675,7 +674,6 @@ impl Actor {
                             let holds = reservation.take().map(|r| r.commit(&self.hub.store)).unwrap_or_default();
                             conn.profiles.insert(sid.clone(), Profile { digest: digest.clone(), holds });
                         }
-                        self.note_options(&sid, &res, Listing::Session);
                         if launch.other_engine().is_none() {
                             self.set_claude_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str))
                                 .await;
@@ -716,7 +714,6 @@ impl Actor {
         }
         // The model and effort are hq's (launch-json): the host sets neither again. The permission mode is set once,
         // below, because the adapter starts every session in "default".
-        self.note_options(&sid, &res, Listing::Session);
         if backup.is_none() {
             hq::tag_session(&self.hub.store, &sid, launch.account_id.as_deref());
         }

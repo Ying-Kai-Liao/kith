@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "472ee374cf6f5186e5c54ac59cac9ddeccaa63a3a648388a24c5bed684bc5e33";
+pub const CONTRACT_SHA256: &str = "95bab5665831780e18b30ac1b25840fc714ffb1b5ec803184d546b0157c0fd14";
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -743,6 +743,11 @@ pub mod path {
     }
     pub const INSTALL_PAGE: &str = "/install";
     pub const INSTALL_SCRIPT: &str = "/install.sh";
+    pub const DOCS_PAGE: &str = "/docs";
+    pub const AGENTS_PAGE: &str = "/agents";
+    pub const SHARING_PAGE: &str = "/sharing";
+    pub const PRIVACY_PAGE: &str = "/privacy";
+    pub const SECURITY_PAGE: &str = "/security";
 }
 
 /// The code in an error answer, {error:{code,message},requestId}, and its HTTP status. unauthorized (a bad hook key), paused (a paused hook), badDeliveryId and full (its queue) come from the computer's relay, on /v1/hooks only.

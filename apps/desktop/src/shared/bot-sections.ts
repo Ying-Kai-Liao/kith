@@ -18,7 +18,7 @@ export interface BotSections {
    */
   harnessMemoryTab: boolean
   /**
-   * Kith's own permission, model, effort and Fast mode controls. hq is the one source for an hq bot's settings (the
+   * Kith's own permission, model and effort controls. hq is the one source for an hq bot's settings (the
    * host ignores its stored copy), so they go and the `hqSettings` rows take their place. A host that predates the
    * `kithInfo` call can't serve those, so the controls stay there.
    */
@@ -88,7 +88,7 @@ function callModelName(id: string): string {
 }
 
 export interface HqSetting {
-  key: 'permission' | 'callModel' | 'harness' | 'model' | 'effort' | 'fastMode'
+  key: 'permission' | 'callModel' | 'harness' | 'model' | 'effort'
   label: string
   /** What hq reports, or plain words when it has nothing. */
   value: string
@@ -118,7 +118,7 @@ export const SET_IN_KITH = 'Set in Kith'
 /**
  * The settings of an hq bot, once, read from hq (`info` is `kith <agent> --info-json`; null while it loads or failed).
  * The permission mode and the call model have hq settings to write to (`kith <agent> set permission|call-model`); the
- * model and effort are the agent package's own, and hq has no Fast mode.
+ * model and effort are the agent package's own.
  */
 export function hqSettings(info: Pick<KithInfo, 'permissionMode' | 'callModel' | 'model' | 'effort'> & { harness?: string | null; callModelDefault?: string | null } | null): HqSetting[] {
   return [
@@ -147,7 +147,6 @@ export function hqSettings(info: Pick<KithInfo, 'permissionMode' | 'callModel' |
       value: info ? (info.effort ?? 'default') : '…',
       hint: 'How hard the agent thinks. Kept by Kith for this agent.',
     },
-    { key: 'fastMode', label: 'Fast mode', editable: false, value: 'Off', hint: `${SET_IN_KITH}: hq has no Fast mode.` },
   ]
 }
 

@@ -2,7 +2,7 @@ import KithKit
 
 /// A command in the composer's `/` list.
 struct SlashCommand: Identifiable, Equatable {
-    enum Action: Hashable { case fast, skill(String) }
+    enum Action: Hashable { case skill(String) }
 
     /// What follows the `/`.
     let name: String
@@ -15,9 +15,9 @@ struct SlashCommand: Identifiable, Equatable {
     var id: Action { action }
 }
 
-/// The composer's `/` commands, listed while the draft is just `/partial`: Fast mode runs here
-/// through the host's `updateBot` (a new session is in the bot's menu); a skill fills in `/<id> `, and the host turns that message into "read this skill first"
-/// (`host/src/market/skills.rs` `expand_command`). docs/features/marketplace.md, "Commands".
+/// The composer's `/` commands, listed while the draft is just `/partial`: a skill fills in `/<id> `, and the host turns
+/// that message into "read this skill first" (`host/src/market/skills.rs` `expand_command`).
+/// docs/features/marketplace.md, "Commands".
 enum SlashCommands {
     /// The command name being typed after a leading `/`, before any space.
     static func query(_ draft: String) -> String? {
@@ -25,26 +25,14 @@ enum SlashCommands {
         return String(draft.dropFirst())
     }
 
-    /// Built-in commands, then the bot's skills, whose name or title holds `query` (none in a group).
+    /// The bot's skills whose name or title holds `query` (none in a group).
     static func list(for bot: Bot?, query: String, skills: [InstalledSkill]) -> [SlashCommand] {
         guard let bot, !bot.isGroup else { return [] }
         let own = skills.filter { bot.skills.contains($0.id) }.map {
             SlashCommand(name: $0.id, icon: "book.pages", title: $0.name, detail: $0.description, warning: false, action: .skill($0.id))
         }
-        return (builtIn(bot) + own).filter {
+        return own.filter {
             query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) || $0.title.localizedCaseInsensitiveContains(query)
         }
-    }
-
-    /// A draft that is just a built-in command (`/fast`): sending it runs the command.
-    static func builtIn(for bot: Bot?, draft: String) -> SlashCommand? {
-        guard let bot, let name = query(draft.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
-        return builtIn(bot).first { $0.name == name }
-    }
-
-    private static func builtIn(_ bot: Bot) -> [SlashCommand] {
-        guard !bot.isGroup, bot.fastModeShown else { return [] }
-        return [SlashCommand(name: "fast", icon: "bolt", title: "Fast mode", detail: bot.fastModeDetail,
-                             warning: bot.fastModeState == .refused, action: .fast)]
     }
 }

@@ -23,15 +23,7 @@ impl Hub {
             v["sharedMemory"] = crate::chat::memory::shared(cfg).into();
             v["memoryRev"] = self.store.memory_rev().into();
         }
-        let rt = if cfg.is_group() {
-            // A group has no agent: Fast mode belongs to its members.
-            crate::hub::Runtime {
-                fast_mode: crate::agent::config::FastModeSupport::default(),
-                ..self.group_runtime(cfg)
-            }
-        } else {
-            self.bot_runtime(&cfg.id)
-        };
+        let rt = if cfg.is_group() { self.group_runtime(cfg) } else { self.bot_runtime(&cfg.id) };
         // Every place it works in at once; `workingChat`/`workingThread` name one of them.
         let lanes: Vec<Value> =
             self.working_lanes(cfg).iter().map(|l| json!({"chat": l.chat, "thread": l.thread})).collect();
@@ -43,8 +35,11 @@ impl Hub {
         v["activity"] = rt.activity.into();
         v["startedAt"] = rt.started_at.into();
         v["workingChat"] = rt.lane.as_ref().map(|l| l.chat.clone()).into();
-        v["fastModeSupport"] = rt.fast_mode.as_str().into();
-        v["fastModeIssue"] = rt.fast_mode.issue().into();
+        // Fast mode is gone, but the fields are part of the contract: old apps read "unsupported" and hide the
+        // switch.
+        v["fastMode"] = false.into();
+        v["fastModeSupport"] = "unsupported".into();
+        v["fastModeIssue"] = Value::Null;
         v["workingThread"] = rt.lane.and_then(|l| l.thread).into();
         v["unread"] = self.store.unread(&cfg.id, row.read_rev, ReadScope::All).into();
         let preview = last.as_ref().map(|l| match &l.author {

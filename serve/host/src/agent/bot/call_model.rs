@@ -3,7 +3,6 @@
 //! (the adapter has no `session/set_model`) before the prompt, so the conversation, its cache and its tools carry over and
 //! nothing relaunches. The adapter keeps the effort level consistent with the model it switches to.
 
-use super::fast_mode::Listing;
 use super::{Actor, Conn, NoticeStyle};
 use serde_json::{Value, json};
 
@@ -66,8 +65,7 @@ impl Actor {
         let target = wanted.clone().unwrap_or(started_on);
         let params = json!({"sessionId": sid, "configId": config_id, "value": target});
         match self.session_request("session/set_config_option", params).await {
-            Ok(answer) => {
-                self.note_options(sid, &answer, Listing::Switch);
+            Ok(_) => {
                 if let Some(conn) = self.conn.as_mut() {
                     match wanted {
                         Some(model) => conn.call_sessions.insert(sid.to_owned(), model),

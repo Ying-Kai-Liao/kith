@@ -473,23 +473,4 @@ mod tests {
         assert!(app.bots["b"].computer);
         assert!(FIELDS.contains(&Field::Computer));
     }
-
-    #[test]
-    fn fast_mode_survives_loading_the_editor() {
-        let mut app = test_app();
-        app.upsert_bot(&json!({"id":"b", "fastMode":true}));
-        assert!(app.bots["b"].fast_mode);
-    }
-
-    #[test]
-    fn a_refused_fast_mode_reads_its_reason() {
-        let mut app = test_app();
-        app.upsert_bot(
-            &json!({"id":"b", "fastMode":true, "fastModeSupport":"refused", "fastModeIssue":"requires extra usage"}),
-        );
-        assert!(app.bots["b"].fast_shown());
-        assert!(app.bots["b"].fast_refusal().is_some_and(|why| why.contains("requires extra usage")));
-        app.upsert_bot(&json!({"id":"g", "kind":"group", "fastModeSupport":"offered"}));
-        assert!(!app.bots["g"].fast_shown());
-    }
 }
