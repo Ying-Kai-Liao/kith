@@ -3,6 +3,8 @@
  * name and a one-line description up front; the host and kith have the last word on both.
  */
 
+import { HARNESSES } from './bot-sections.ts'
+
 /** The name rules the host enforces: 2-31 chars, lowercase letters, digits and dashes, starting with a letter, not "kith". */
 export function newAgentNameError(name: string): string | null {
   const n = name.trim()
@@ -32,6 +34,22 @@ export interface NewAgentForm {
   model: string
   /** `''` or `default` is the agent's own. */
   effort: string
+}
+
+/** What "Make a kith agent like this" fills in from a flagged native row. The name is the row's own: the form turns it into a valid one. */
+export interface NewAgentPrefill {
+  name: string
+  description: string
+  harness: string
+  model: string
+}
+
+/** A flagged row's name, description, engine and model. An engine kith can't run (a registry agent, a custom command) is left at kith's default. */
+export function prefillOf(bot: { name: string; description: string; backend: string; model?: string | null }): NewAgentPrefill {
+  const harness = HARNESSES.some((h) => h.id === bot.backend) ? bot.backend : ''
+  // The description is one line in kith: the first line of the row's standing instructions, without ": " (kith's own rule).
+  const description = (bot.description.split(/\r?\n/).find((l) => l.trim()) ?? '').trim().replace(/^-+\s*/, '').replace(/: /g, ' - ')
+  return { name: bot.name, description, harness, model: harness ? (bot.model ?? '') : '' }
 }
 
 /** The `newKithAgent` params: optional picks are left out when untouched. */
