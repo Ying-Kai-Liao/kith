@@ -217,7 +217,13 @@ impl Hub {
         crate::chat::memory::import_old_memory(self);
         self.routines.restore(&self.store)?;
         crate::market::turn_on_installed_once(&self.store)?;
-        for row in self.store.bots()? {
+        let rows = self.store.bots()?;
+        // C5: host-native rows stay listed and readable, but nothing runs them; say how many there are.
+        let native = crate::store::native_ids(&rows);
+        if !native.is_empty() {
+            tracing::warn!(count = native.len(), ids = ?native, "host-native bots are no longer run; each needs to become a kith agent");
+        }
+        for row in rows {
             if row.deleted {
                 self.routines.disable_bot(&self.store, &row.config.id)?;
             } else if !row.config.is_group() {

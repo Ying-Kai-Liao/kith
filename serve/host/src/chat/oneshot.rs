@@ -47,6 +47,7 @@ impl Usage {
 /// Claude gets a real system prompt, no tools, no settings and no saved session; an agent with ACP
 /// `systemPrompt` gets the instructions there, other harnesses inline. None of them may remember the job.
 pub async fn one_shot(hub: &Arc<Hub>, cfg: &BotConfig, system: &str, user: &str) -> Result<String> {
+    cfg.refuse_native()?;
     if cfg.is_hq() {
         bail!("{} is an hq agent: the host runs no background jobs as it", cfg.name);
     }
@@ -55,6 +56,7 @@ pub async fn one_shot(hub: &Arc<Hub>, cfg: &BotConfig, system: &str, user: &str)
 
 /// [`one_shot`] with what the job used, for a job whose cost goes in a ledger (the thread summaries).
 pub async fn one_shot_reply(hub: &Arc<Hub>, cfg: &BotConfig, system: &str, user: &str) -> Result<Reply> {
+    cfg.refuse_native()?;
     if cfg.is_hq() {
         bail!("{} is an hq agent: the host runs no background jobs as it", cfg.name);
     }

@@ -31,7 +31,10 @@ pub use conversations::{Charge, ConvState, Conversation, EndedWhy};
 pub use devices::{Device, DeviceSource, PushTicket, Scope};
 #[cfg(test)]
 pub use model::Permission;
+#[cfg(test)]
+pub use model::enforce_native_in_tests;
 pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, is_person_message, lane_key};
+pub use model::{native_env_for_tests, native_ids, native_refusal};
 pub use peers::{PeerIn, PeerOut};
 pub use people::{Invite, Membership, PersonRow};
 pub use room_bots::RoomPoint;

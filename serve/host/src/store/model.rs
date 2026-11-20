@@ -235,10 +235,71 @@ impl BotConfig {
         self.kind == BotKind::Group
     }
 
+    /// A host-native bot: an agent row with no hq agent behind it (`hq_agent` unset, empty or blank). One-bot-model C5:
+    /// the host never launches one; it is flagged (`needsKithAgent`) and can be exported to become a kith agent.
+    /// A group room has no agent either and is not native.
+    pub fn is_native(&self) -> bool {
+        !self.is_group() && self.hq_agent.as_deref().is_none_or(|a| a.trim().is_empty())
+    }
+
+    /// [`Self::is_native`] and the host really refuses it (a debug test build may let an old suite run one).
+    pub fn refused_native(&self) -> bool {
+        self.is_native() && !native_allowed_for_tests(&self.id)
+    }
+
+    /// Refuses to start anything for a native bot, with the one error every path gives.
+    pub fn refuse_native(&self) -> anyhow::Result<()> {
+        if self.refused_native() {
+            anyhow::bail!("{}", native_refusal(&self.name));
+        }
+        Ok(())
+    }
+
     /// Whether the user's messages to this bot are tasks (a group's never are: it's one room).
     pub fn uses_tasks(&self) -> bool {
         !self.is_group() && self.tasks != Some(false)
     }
+}
+
+/// The old suites run host-native bots against fake agents; until they move to kith agents (later C5 steps) a debug
+/// build lets them, and only them: a release build has no such way. `KITH_SERVE_NATIVE_FOR_TESTS` is what a spawned test
+/// host is given; in this crate's own unit tests every native bot runs unless it was named by [`enforce_native_in_tests`]
+/// (the refusal tests do).
+pub fn native_allowed_for_tests(id: &str) -> bool {
+    #[cfg(test)]
+    return cfg!(debug_assertions)
+        && !ENFORCED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|e| e == id);
+    #[cfg(not(test))]
+    return {
+        let _ = id;
+        native_env_for_tests()
+    };
+}
+
+/// Whether this is a debug build that was told to let the old suites make and run host-native bots.
+pub fn native_env_for_tests() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("KITH_SERVE_NATIVE_FOR_TESTS").is_some_and(|v| !v.is_empty())
+}
+
+/// Unit tests: the host refuses this bot as a release build would.
+#[cfg(test)]
+pub fn enforce_native_in_tests(id: &str) {
+    ENFORCED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(id.to_owned());
+}
+
+#[cfg(test)]
+static ENFORCED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// What every refused start of a host-native bot says.
+pub fn native_refusal(name: &str) -> String {
+    format!(
+        "{name} is a host-native bot and the host no longer runs those. Make it a kith agent (New agent), then chat with that."
+    )
+}
+
+/// The ids of the rows that are host-native (see [`BotConfig::is_native`]), deleted rows left out.
+pub fn native_ids(rows: &[BotRow]) -> Vec<String> {
+    rows.iter().filter(|r| !r.deleted && r.config.is_native()).map(|r| r.config.id.clone()).collect()
 }
 
 fn null_as_empty<'de, D: serde::Deserializer<'de>>(value: D) -> Result<Vec<String>, D::Error> {
