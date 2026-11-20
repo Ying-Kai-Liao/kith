@@ -493,6 +493,12 @@ export class BotStore extends BotSync {
     return { agent: res.agent, bot }
   }
 
+  /** Writes a flagged native row out as a folder and returns where (owner only). Again overwrites the bundle in place. */
+  async exportHostBot(botId: string): Promise<string> {
+    const res = await this.withLink((c) => c.call<{ path: string }>('exportHostBot', { botId }, 60_000))
+    return res.path
+  }
+
   /** The roster's bot for kith agent `agent`, asking the host to look now and waiting a few seconds for its event. */
   async waitForAgentBot(agent: string): Promise<Bot | null> {
     const find = () => [...this.bots.values()].find((b) => b.hqAgent === agent && b.kind !== 'group') ?? null
@@ -679,9 +685,9 @@ export class BotStore extends BotSync {
 
   async save(draft: BotDraft) {
     const client = await this.ready()
-    const res = draft.id
-      ? await client.call<{ bot: Bot }>('updateBot', { ...draft, model: draft.model ?? null })
-      : await client.call<{ bot: Bot }>('createBot', draft)
+    // The host makes no host-native bot any more: a new agent is `newKithAgent`, a new room is `createGroup`.
+    if (!draft.id) throw new Error('Make an agent with New agent')
+    const res = await client.call<{ bot: Bot }>('updateBot', { ...draft, model: draft.model ?? null })
     this.bots.set(res.bot.id, res.bot)
     this.onRosterChanged?.()
     this.changed()

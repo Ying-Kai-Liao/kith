@@ -65,6 +65,8 @@ export interface Bot {
   hqAgent?: string | null
   /** The bot of an agent that ships with Kith (scratch): reached through Quick chat, sorted last in the roster. */
   builtin?: boolean
+  /** A host-native row the host no longer runs (one-bot-model C5): it is flagged, exported, or remade as a kith agent. Absent from an older host. */
+  needsKithAgent?: boolean
   autoName: boolean
   /** Each burst of the user's chat is a task with its own thread and session; false keeps one conversation. */
   tasks: boolean
@@ -149,6 +151,7 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
     memoryRev: raw.memoryRev ?? 0,
     hqAgent: raw.hqAgent || null,
     ...(raw.builtin === true ? { builtin: true } : {}),
+    ...(raw.needsKithAgent === true && raw.kind !== 'group' ? { needsKithAgent: true } : {}),
     autoName: raw.autoName ?? false,
     // A host sends `tasks` only when it's off; one without tasks never marks a message as one.
     tasks: raw.kind !== 'group' && raw.tasks !== false,
@@ -170,6 +173,8 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
 }
 
 export const isGroup = (b: Bot) => b.kind === 'group'
+/** A host-native row the host refuses to run. Never a room, and never a row from a host that doesn't say. */
+export const needsKithAgent = (b: Pick<Bot, 'kind' | 'needsKithAgent'>) => b.kind !== 'group' && b.needsKithAgent === true
 export const isWorking = (b: Bot) => b.status === 'working' || b.status === 'needsInput'
 export const needsInput = (b: Bot) => b.status === 'needsInput'
 /** Working right now in this chat's main conversation (`thread == null`) or in that thread. */

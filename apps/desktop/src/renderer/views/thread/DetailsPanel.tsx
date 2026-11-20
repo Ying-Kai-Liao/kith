@@ -13,6 +13,7 @@ import { AccessTab } from '../bots/kith/AccessTab'
 import { KithDetails, KithHeader } from '../bots/kith/KithDetails'
 import { useKithInfo } from '../bots/kith/use-kith'
 import { MemoryCard } from '../bots/MemoryView'
+import { isFlagged, NativeBotNotice } from '../bots/NativeBotNotice'
 import { RoutinesView } from '../routines/RoutinesView'
 import { MacChatButton } from './MacChatButton'
 import { BotGuestAvatar } from '../../components/kith'
@@ -67,7 +68,7 @@ export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTa
     <div className="details-panel">
       <div className="details-drag" />
       <div className="details-actions">
-        {bot && !group ? (
+        {bot && !group && !isFlagged(bot) ? (
           <button className="details-template press" title="Create template" onClick={share}>
             <Icon name="square.and.arrow.up" size={12} weight="medium" /> Create template
           </button>
@@ -76,7 +77,7 @@ export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTa
       </div>
       <div className="details-scroll">
         {bot ? <Identity bot={bot} kith={kith} /> : null}
-        {bot ? (
+        {bot && !isFlagged(bot) ? (
           <div className="details-call">
             <button className="call-capsule" disabled={!onCall || !!callBlocked} title={callBlocked ?? (onCall ? 'Start a voice call' : 'A call is running')} onClick={() => onCall?.()}>
               <Icon name="phone.fill" size={12} weight="medium" /> {onCall ? 'Call' : 'In call'}
@@ -87,6 +88,8 @@ export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTa
           <MemberRoomInfo room={bot} />
         ) : bot && group ? (
           <GroupMembersList group={bot} editGroup={editGroup} addMember={addMember} addPerson={addPerson} />
+        ) : isFlagged(bot) ? (
+          <NativeBotNotice bot={bot} />
         ) : (
           <>
             <TabChoice label="Conversation details" selection={shownTab} options={tabs} onChange={setTab} />
