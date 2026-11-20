@@ -10,5 +10,6 @@ account-state	account-state	accounts
 pkg	pkg
 cost	cost-ledger	cost
 room-ledger	room-ledger
+# `threads` also sends bin/kith's last exec (`kith-sessions run`) to `kernel threads run`, when the program lists `threads-run` too.
 threads	threads-writer
 lifecycle	lifecycle

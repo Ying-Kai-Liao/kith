@@ -1620,4 +1620,10 @@ fi
 # pass through). One-shots above stay exec.
 [[ $p_owner == 1 && $harness == claude ]] && export KITH_TERMINAL_SESSION=1
 [[ -n $r_sid ]] && export KITH_RESUMED_FROM=$r_from
+# The same side as the claims above (kthreads, decided once) and a program that lists `threads-run`: `kith kernel threads run`, which
+# forks and waits exactly as the Python `run` does. An older program, or the Python side (KITH_CORE=python, `threads` unswitched),
+# runs the Python, which stays the rollback.
+if [[ -n $kthreads && ${_kith_core_ver:-} == *'"threads-run"'* ]]; then
+  exec "$kthreads" kernel threads --kernel "$KITH" run "$agent" -- ${stub[@]+"${stub[@]}"} claude "${args[@]}"
+fi
 exec python3 "$KITH/bin/kith-sessions" run "$agent" -- ${stub[@]+"${stub[@]}"} claude "${args[@]}"

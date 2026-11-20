@@ -339,3 +339,74 @@ async fn a_record_the_core_takes_leaves_the_spool_empty() {
     let left = std::fs::read_dir(rig.state.join("live/terminal/inbox")).map_or(0, |d| d.flatten().count());
     assert_eq!(left, 0, "the core took the record, so the spool is empty");
 }
+
+/// `kith kernel threads run` in Writer mode, as `bin/kith` ends a launch: the shell takes the terminal's claim for its own pid
+/// (a row in the core), execs into the Rust wrapper, and the engine runs as the wrapper's CHILD (fork and wait, not an exec in
+/// place), so the claim stays the live shell's until the engine is gone; then the wrapper gives the row back and ends with the
+/// engine's exit code. No claim file appears at any point.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_writer_mode_launch_through_run_holds_the_row_until_the_engine_is_gone() {
+    let rig = Rig::start().await;
+    let sid = "22222222-2222-4222-8222-222222222222";
+    let seen = rig.state.join("engine-saw");
+    let go = rig.state.join("engine-go");
+    let engine = rig.state.join("claude");
+    // The engine says whose child it is, waits for the test to have looked at the core, then exits 3.
+    std::fs::write(
+        &engine,
+        format!(
+            "#!/bin/sh\necho \"$PPID\" > \"{s}\"\nn=0; while [ ! -e \"{g}\" ] && [ $n -lt 600 ]; do n=$((n+1)); sleep 0.1; done\nexit 3\n",
+            s = seen.display(),
+            g = go.display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let (bin, kernel) = (env!("CARGO_BIN_EXE_kith"), Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel"));
+    // The core may answer `waiting` for a moment after the holder's hello: the claim is retried, as in the first test.
+    let script = format!(
+        "n=0; until \"{bin}\" kernel threads --kernel \"{k}\" terminal {sid} $$ '' coder; do n=$((n+1)); [ $n -gt 200 ] && exit 99; sleep 0.3; done; exec \"{bin}\" kernel threads --kernel \"{k}\" run coder -- \"{e}\" hello",
+        k = kernel.display(),
+        e = engine.display()
+    );
+    let mut shell = Command::new("sh")
+        .arg("-c")
+        .arg(&script)
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("HOME", &rig.state)
+        .env("KITH_STATE", &rig.state)
+        .env("KITH_SERVE_PORT", "1")
+        .env("KITH_IDLE_POLL", "1000")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let end = Instant::now() + WAIT;
+    while !seen.exists() {
+        assert!(Instant::now() < end, "the engine never started");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    // The engine is the wrapper's child, and the wrapper is the shell's own pid: the one the claim names.
+    assert_eq!(std::fs::read_to_string(&seen).unwrap().trim(), shell.id().to_string());
+    let row = rig.core("claim.list", &serde_json::json!({}))["live"].to_string();
+    assert!(row.contains(sid), "the claim is a live row in the core while the engine runs: {row}");
+    assert!(row.contains(&shell.id().to_string()), "and it is the shell's pid, which `run` kept: {row}");
+    assert!(rig.claim_files().is_empty(), "Writer mode writes no claim file: {:?}", rig.claim_files());
+    std::fs::write(&go, "").unwrap();
+    let ended = loop {
+        if let Some(s) = shell.try_wait().unwrap() {
+            break s;
+        }
+        assert!(Instant::now() < end, "the wrapper never ended");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(ended.code(), Some(3), "the engine's exit code passes through");
+    // Gone from the live rows (the row stays in `recent`, as ended).
+    let after = rig.core("claim.list", &serde_json::json!({}))["live"].to_string();
+    assert!(!after.contains(sid), "the wrapper gave the row back: {after}");
+}
