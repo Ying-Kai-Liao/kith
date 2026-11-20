@@ -135,10 +135,22 @@ export STUB_SETTINGS=$T/settings.json
 
 tty() { script -q /dev/null "$@" >"$T/tty.out" 2>&1 < <(sleep 20); }   # a terminal for the interactive run; stdout/err captured to a file
 
-# the SessionStart hook list keeps kith-cost first and adds kith-sessions
+# the SessionStart hook list keeps the cost tag (kith-cost, or `kith kernel cost --kernel K tag` once the program has it) first and adds kith-sessions
 rm -rf "$REG"; (cd "$T/work/a" && STUB_SID=run1 tty "$KERNEL/bin/kith" designer)
 cmds=$(python3 -c 'import json; print("|".join(h["hooks"][0]["command"].rsplit("/",1)[-1] for h in json.load(open("'$T/settings.json'"))["hooks"]["SessionStart"]))')
-[[ $cmds == *"kith-cost\" tag|kith-sessions\" record"* ]] && ok "settings: kith-cost tag then kith-sessions record" || bad "hook list" "$cmds"
+# which form is the bash terminal launch's to write: the core's when the program has the cost-ledger module, else the Python's
+# and the registry's hook likewise: `kith kernel threads --kernel K record` when the program has the threads-writer module (R5)
+want_cost='kith-cost" tag'; want_rec='kith-sessions" record'
+if [[ -n ${KITH_BIN:-} && -x ${KITH_BIN} ]]; then
+  "$KITH_BIN" kernel version 2>/dev/null | grep -q '"cost-ledger"' && want_cost='kernel tag'
+  "$KITH_BIN" kernel version 2>/dev/null | grep -q '"threads-writer"' && want_rec='kernel record'
+fi
+want="$want_cost|$want_rec"
+[[ $cmds == *"$want"* ]] && ok "settings: the cost tag hook ($want) then kith-sessions record" || bad "hook list" "$cmds"
+# the rollback writes the Python's
+rm -rf "$REG"; (cd "$T/work/a" && KITH_CORE=python STUB_SID=run1 tty "$KERNEL/bin/kith" designer)
+cmds=$(python3 -c 'import json; print("|".join(h["hooks"][0]["command"].rsplit("/",1)[-1] for h in json.load(open("'$T/settings.json'"))["hooks"]["SessionStart"]))')
+[[ $cmds == *'kith-cost" tag|kith-sessions" record'* ]] && ok "settings: KITH_CORE=python keeps the kith-cost tag hook" || bad "hook list (KITH_CORE=python)" "$cmds"
 [[ -f $REG/run1.json ]] && ok "interactive run: registered" || bad "interactive run: registered"
 is "interactive: claude's cwd" "$(sed -n 1p $T/stub.out)" "$T/work/a"
 is "interactive: flag set for the hook" "$(sed -n 4p $T/stub.out)" 1

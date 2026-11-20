@@ -1,4 +1,4 @@
-"""ACP fixture using the real built-in stdio chat MCP, including resumed sessions."""
+"""ACP fixture using the host's stdio files MCP server of its launch (a kith agent's `_meta`), including resumed sessions."""
 import json
 import os
 import subprocess
@@ -13,7 +13,7 @@ def send(value):
 def prompt(message):
     params = message['params']
     session = sessions[params['sessionId']]
-    tool = next(server for server in session['mcpServers'] if server['name'] == 'chat')
+    tool = session['_meta']['claudeCode']['options']['mcpServers']['kith-files']
     with subprocess.Popen([tool['command'], *tool['args']], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=os.environ.copy()) as mcp:
         sequence = 0
         def request(method, arguments):

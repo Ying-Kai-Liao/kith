@@ -61,8 +61,8 @@ terminal, proc, sweep, release, latest, pick).
   later; the core refuses at send with `was stopped; ask anew` (`asks-to-after-end-python-sends`, step 1, `ask.to`).
 - `--end --person P`: the core also ends the asks of P's bots when the revoke order is used (`ask.revokeEverywhere`), which Python's
   `--end --person` does only for the persons it is given.
-- `--end --session`: the core walks the subtree below the session's asks (`asks/mod.rs` `end_tree`); Python leaves a child ask (`r2` in
-  `asks-end-usage`, step 1) open. That case goes red on the switch.
+- `--end --session`: Python's `--end` also ends the asks below the session's (36463f8b, a stopped ask ends the asks below it), so `asks-end-usage` was
+  re-recorded at M3-12 (`r2` is `stopped` and `ended r1 r2` is printed); the core's `end_tree` walks the same subtree (`asks/mod.rs`), no difference left.
 - `end_tree` sets `ended_ms` on answered and delivered asks too, so `ask.to` refuses a follow-up to answered `h1`/`h2` with "was stopped"
   (for an ask that was answered and not stopped: "was ended"); Python keeps them `answered` with no `ended_at`.
 
@@ -72,19 +72,36 @@ files with one masked name are an error), and `unswitched` (text saying why the 
 with `--rust` skips an `unswitched` case and prints `skip  NAME  (not switched: ...)`; `--require-switched` replays it, so it is
 red until the verb exists. The Python replay always runs every case.
 
+### Lifecycle (M3-14 P4)
+
+`golden/lifecycle.json` (golden only, like `wake.json`) freezes `kernel/bin/kith-lifecycle sweep|status` and its `compact()` before `compact()`
+runs claude under `kith-stub` (the conversation's writer lock). All cases are `needs: rust`: the Rust side is `kith kernel lifecycle` (`lifecycle-new.py` is its program). `lifecycle-old.py` runs
+the verbs unchanged and adds `compact SID WHAT`, which calls `compact()` for a session whose decision is on record, because its
+refusals (`held`, `skipped`) are what a change between the decision and the claim makes of it, which a sweep cannot reach from
+outside: compacted (rc 0), claude failed (rc 1, once per idle period), claude missing, folder gone, held by another claim, and
+skipped (a resume cleared the decision, a new turn, Claude compacted it itself, under the floor). The claude is `KITH_CLAUDE`, a
+script that logs its call and whether the claim file was there. `KITH_STUB_BIN` names no program in the frozen cases, and a fake
+`kith-stub` (logs its argv, exits 75 when `<lock dir>/<key>.busy` exists, else execs what follows `--`) in the stub cases.
+`lifecycle-new.py` does the `compact SID WHAT` setup in Python the same way (the decision on record, a claim for pid 1, a resume, a new turn,
+a compaction of Claude's own) and then runs the Rust program's hidden `compact SID`, which takes the idle period from the decision. The cases after
+`compact()` (R5 4/4) freeze the sweep itself: sleep, end (ask, schedule, helper kinds), waiting by a wait file or a queued wake, too early,
+a 5-minute cache with and without `--at-sleep`, settled and stale decisions, live and takeover claims, an unsafe id, `status`
+(unknown, outstanding work), `intent`, argparse's usage errors, and the stub's other endings (claude exit 127, a lock error). The `-h` text is not
+frozen: argparse words it by Python version.
+Re-recorded when `compact()` moved under the stub (intended; the replay does not read intended.json): the six cases that reach claude
+(`sweep-compacted`, `rc0`, `claude-failed`, `claude-failed-direct`, `claude-missing`, `sweep-twice`) gain the one stderr warning of a
+run with no stub. Added then: `under-stub` (the argv), `busy` (75: outcome `busy`, no decision, again on the next sweep),
+`no-stub-required` (`KITH_REQUIRE_STUB=1`: `failed` with the reason, claude not run), `bad-session-id` (an id outside `a-z0-9._-`).
+
 ### project-id (M5-2)
 
 `golden/project-id.json` (also in `corpus/`) freezes `kernel/bin/project-id` before `kith kernel project-id` replaces it: 19 cases of the
 bare form (git and non-git folders, paths with spaces and non-ASCII names, symlinks to a folder and to a repo, a remote written five
 ways, a worktree and a detached HEAD, nested aliases with the longest winning, a remote beating a path), `--list`, `--info`,
 `--children [--all]`, `--where`, `--root`, `--register` (parent, home, bare `--home`, existing entries keeping their fields) and
-its usage errors, with loops and a missing parent in the seeded `projects.json`. They run the Python as `program.old` and
-`kith kernel project-id` as `program.new`, so the Rust side is compared directly, whatever `core-switched.txt` says. `project-id` is switched since
-M5-9 (`kernel/tests/kith-pkg-pid-switch-check` reads which side the launch asked); `pkg` the same.
+its usage errors, with loops and a missing parent in the seeded `projects.json`. They were run against the Python as `program.old` and `kith kernel project-id` as `program.new`; the Python is gone (R2), `program.old` is the stub `bin/project-id` (the same program, so a re-record proves nothing) and the frozen facets are the Python's. `kernel/tests/kith-pkg-pid-switch-check` reads which program the launch asked.
 A malformed `projects.json` (`pid-malformed-projects`) is `unswitched` too: Python tracebacks, Rust prints one stderr line, both exit 1; JSON that Python accepts and serde rejects (`NaN`, `Infinity`) falls under the same difference (an intended difference; the golden replay does not read intended.json).
-Not ported: the guest branch (`KITH_RUN_TOKEN` and `KITH_RUN_SOCKET` set: the host answers over the run socket). The core refuses there
-with exit 2, so `pid-guest-branch-stays-python` is `unswitched` (Python replay only). Whoever switches the verb keeps guest calls on
-Python (`runauth.rs` `project_args` and the run-tokens property tests ask the Python).
+The guest branch (`KITH_RUN_TOKEN` set, the token alone: the core answers over `KITH_CORE_RUN_SOCKET`) is ported (`core/kernel/src/project/guest.rs`); `pid-guest-branch` is the unreachable-socket case, byte for byte what the Python printed. A fake host cannot run in a difftest case, so the protocol itself (the request line, the relayed words and codes, every way the socket fails) is `kernel/tests/kith-project-id-guest-check`, recorded against the Python before the port.
 
 ### Package resolve (M5-3)
 
@@ -175,8 +192,13 @@ subagent `.meta.json`), a hand-written `cost.db`, the bridge's `state.json`, an 
 periods, the forecast and the limit's month. Cases pin it with `TZ`, including Sydney across the daylight-saving start (a month's midnight keeps
 the offset of "now", as the Python does), New York, Lord Howe, December and February. `tag` and `record` keep the real clock.
 
-Not covered (no Rust side yet, `kith kernel cost` exits 2): `today|week|month|all`, `agents`, `agent NAME` as text, `people`, `session`, `csv`,
-and the hooks `tag` / `record`. A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
+R2 added the rest: `cost-text-*` (`today|week|month|all`, `agents`, `agent NAME` as text, `people`, `session`, `csv`, the usage errors),
+`cost-tag-*` (the SessionStart hook: every env variable, empty-but-set values, replays, an old ledger, odd stdin) and `cost-record-*`
+(`adapters/harness.py`'s row). The text reports start their periods from the real clock (Python's `since_of` ignores `KITH_COST_NOW`), so
+the cases that depend on it (`cost-text-relative-*`) seed rows with sqlite's `strftime('now', '-N days')` and mask days and times; the fixed-date
+cases use `all`. Tag/record error texts after `kith-cost tag: ` are masked (`<E>`): Python's exception wording is not frozen, one stderr line
+and exit 0 are. Left out on purpose: reports on a NULL project, a model-less row in `agent NAME`, NULL output tokens (the Python
+raises a traceback; the core prints a line). A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
 that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`). This is the one intended
 difference of the `cost` switch (`kernel/lib/core-switched.txt`, `kernel/tests/kith-cost-switch-check`): the Python raises, the core does not.
 
@@ -289,8 +311,11 @@ escapes), ledgers as they are found (missing, empty, corrupt, not an object, ent
 `ledger.lock` or the ledger itself being a folder, the ledger folder being a file), the state folder (a file, or derived from the
 home), homes and agents (missing home, `.`, `""`, trailing slash, ids), and eight hooks at once on one ledger (the lock).
 The cases are `needs: rust` with `program` set (`sh w.sh py KERNEL` against `sh w.sh rs BIN KERNEL`, which runs the Python or
-`kith kernel room-ledger --kernel KERNEL`), not `unswitched`: the Rust side exists, only the switch (a `room-ledger` line in
-`lib/core-switched.txt`; the hook is registered in `launch/settings.rs`) is not made. `w.sh`: the second word of a run line is a file
+`kith kernel room-ledger --kernel KERNEL`). Switched since R2: the launch registers the Rust call as the hook when the
+`room-ledger` line is there and the program lists the module (`launch/settings.rs`, `kith_core_bin` in the bash launch), and
+`kernel/bin/kith-room-ledger` is a stub. The Python is gone, so `corpus/room-ledger.json`'s old side (`py`) is that stub forwarding to the
+same program (a re-record proves nothing); `golden/room-ledger.json` and its facets are the Python's record, replayed on the Rust side only
+(`--golden ... --rust`). The `room-ledger` line no longer rolls anything back: it only picks the program hook over the stub. `w.sh`: the second word of a run line is a file
 in `e/` of `KEY=VALUE` lines exported first (`-` for none) and the third a file in `in/` for stdin (`par`: eight runs at once on
 `in/p1..p8`). Every run exits 0 and prints nothing, so the facts are the files: the ledger (parsed, so key order and spacing are not
 compared; the unit tests of `core/kernel/src/room_ledger` hold the exact bytes), its `.lock`, and the leftovers (`.tmpPID`, ignored).
@@ -340,6 +365,11 @@ Git noise: `.git/index`, `.git/objects/*`, `.git/hooks/*` and `.git/config` are 
 `stepN.stdout` / `stepN.json`, `stepN.stderr`, `state:<path under the side root>` and `fakes`. A difference that
 matches no entry fails. An entry that matches no difference in the cases that ran is reported as `STALE` and fails the
 run, so the list shrinks when a difference goes away. Every entry needs a reason (a ticket, a B-step of the plan).
+
+An entry may carry `same_after`: `{"old": [[pattern, replacement]..], "new": [..]}`. It then excuses only the difference those
+rewrites explain: each side must have something to rewrite (so each side still shows which form it took), and the two texts must be
+equal once rewritten. Use it when a case masks two forms to two tokens (the SessionStart hook of the session registry:
+`<SESSIONSHOOK-PYTHON>` on OLD, `<SESSIONSHOOK-RUST>` on NEW); a second difference in the same facet still fails.
 
 ## Self-test
 

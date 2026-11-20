@@ -286,12 +286,20 @@ extension BotStore {
         }
     }
 
-    func acknowledgeVisibleConversations(_ botId: String, entry: Entry? = nil) {
+    /// The conversations on screen this event lands in, read once the batch it came in is applied (`flushAcks`): a
+    /// catch-up of a chat on screen is one read receipt, not one per message.
+    func noteVisibleConversations(_ botId: String, entry: Entry? = nil) {
         guard connection == .online else { return }
-        for scope in Set(readingViews.values) where scope.botId == botId {
+        for scope in readingViews.values where scope.botId == botId {
             if let entry, (!entry.isChat || entry.threadId != scope.thread) { continue }
-            markRead(botId, thread: scope.thread)
+            pendingAcks.insert(scope)
         }
+    }
+
+    func flushAcks() {
+        let acks = pendingAcks
+        pendingAcks = []
+        for scope in acks { markRead(scope.botId, thread: scope.thread) }
     }
 
     /// The main chat on screen (or the thread on `thread`) is read; the host ignores it
@@ -484,11 +492,39 @@ extension BotStore {
 
     public func save(_ draft: BotDraft) async throws -> Bot {
         let client = try await ready()
+        // The host makes no host-native bot any more: a new agent is `newKithAgent`, a new room is `createGroup`.
+        guard draft.id != nil else { throw HostError.http(400, "Make an agent with New agent") }
         // A kith agent's engine, model and tools are kith's: never send them as changes.
         let draft = draft.id.flatMap { bots[$0] }.map { draft.keepingKithOwned(from: $0) } ?? draft
-        let bot = draft.id == nil ? try await client.createBot(draft) : try await client.updateBot(draft)
+        let bot = try await client.updateBot(draft)
         bots[bot.id] = bot
         return bot
+    }
+
+    /// Makes a kith agent and returns its bot: the host's answer, or the roster's once it has it (the host syncs the
+    /// roster itself, so this waits a few seconds at most). Nil when none came (its engine isn't one the host runs).
+    public func newKithAgent(_ form: NewAgent.Form) async throws -> (agent: String, bot: Bot?) {
+        let client = try await ready()
+        let answer = try await client.newKithAgent(form.params)
+        if let bot = answer.bot { bots[bot.id] = bot }
+        if let bot = answer.bot ?? bots[answer.botId ?? ""] { return (answer.agent, bot) }
+        return (answer.agent, await waitForAgentBot(answer.agent))
+    }
+
+    /// The roster's bot for kith agent `agent`, asking the host to look now and waiting a few seconds for its event.
+    public func waitForAgentBot(_ agent: String) async -> Bot? {
+        let find = { self.bots.values.first { $0.hqAgent == agent && !$0.isGroup } }
+        if let client = try? await ready() { _ = try? await client.call("syncHqBots", Empty(), timeout: 60) as Empty }
+        for _ in 0..<10 {
+            if let bot = find() { return bot }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        return find()
+    }
+
+    /// Where a flagged row's export bundle landed.
+    public func exportHostBot(_ botId: String) async throws -> String {
+        try await ready().exportHostBot(botId: botId)
     }
 
     public func listDirs(_ path: String?, showHidden: Bool = false) async throws -> DirListing {
@@ -516,7 +552,7 @@ extension BotStore {
 
     public func loadOlder(_ botId: String) async {
         guard let client, !historyComplete.contains(botId) else { return }
-        let first: Int64 = chat(botId).first(where: { $0.seq > 0 && $0.seq != Int64.max })?.seq ?? Int64.max
+        let first = Self.oldestWindowSeq(allEntries(botId)) ?? Int64.max
         let older: [Entry]
         do {
             older = try await client.history(botId: botId, beforeSeq: first, limit: 100)
@@ -526,5 +562,16 @@ extension BotStore {
         }
         if older.count < 100 { historyComplete.insert(botId) }
         for e in older { upsert(e) }
+    }
+
+    /// Where the main chat held is unbroken from: its oldest synced entry, leaving out the roots of threads whose
+    /// replies are held. A catch-up brings such a root however far back it is (a task card with fresh replies), and
+    /// paging from it would skip every message between it and the window for good. Only roots held: the oldest.
+    /// The overlap paging may fetch again is harmless (`upsert` goes by id).
+    /// `upTo`: only main-chat entries synced at that rev count.
+    static func oldestWindowSeq(_ all: [Entry], upTo rev: Int64 = .max) -> Int64? {
+        let roots = Set(all.compactMap(\.threadId))
+        let main = all.filter { $0.threadId == nil && $0.seq > 0 && $0.seq != .max && $0.rev <= rev }
+        return (main.filter { !roots.contains($0.id) }.map(\.seq).min()) ?? main.map(\.seq).min()
     }
 }

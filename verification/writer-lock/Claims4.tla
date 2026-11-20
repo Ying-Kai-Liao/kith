@@ -33,8 +33,11 @@
 (* P's turns of source ask or wake), one owner O whose take-over claims are *)
 (* never revoked. The lock is "a process of another claim is writing".      *)
 (*                                                                          *)
-(* Source: origin/rust-rebuild cf308ebc (the one sha for this module and    *)
-(* the skill's table).                                                      *)
+(* Source: origin/rust-rebuild 1720d27e (M3-12 re-sync; the one sha for     *)
+(* this module and the skill's table; the code of cf308ebc plus M3-10c to   *)
+(* M3-10f, M2-23, K2 and the kill re-send, read change by change), re-read  *)
+(* at f9b5e509 (2026-11-17: the M3 core writer, the claims step, rule K,    *)
+(* L-clear; results4.md): no action changed, rule K is CoreRestart.         *)
 (*                                                                          *)
 (* Two places where the model is not the code, on purpose:                  *)
 (*  - TakeOver also cancels the live turn (ts claimed/running -> cancelled) *)
@@ -74,6 +77,48 @@
 (*   stucklog      the Err path only logs: no stop, no kill                *)
 (*   parkterm      terminal_live: park only while a terminal claim lives   *)
 (*                                                                          *)
+(* M3-12 (K2, end_gone / recorded_gone, claims.rs): `ending -> ended` waits *)
+(* for the recorded pid AND the process group it led. A holder spawn's stub *)
+(* leads its group and the engine runs in it; with the holder down nobody   *)
+(* sweeps that group (a live holder sweeps the tree before it records the   *)
+(* stub's exit, holder.rs reap), so a stub killed alone leaves an engine    *)
+(* that still writes and holds no lock: `orphan`. The daemon's re-sent kill *)
+(* (kill_resend.rs) and the next hello's end_groups reach a dead leader's   *)
+(* group (procstart::orphan_group), which is HKill here.                    *)
+(*   orphan        the code: StubDies (holder down) makes an orphan; the    *)
+(*                 claim stays `ending` until the group is gone             *)
+(*   pidonly       the pre-K2 end_gone: the pid gone is enough              *)
+(*                                                                          *)
+(* HostHolder (M3 cutover design 2026-11-14, 1.1/1.3/1.7): in writer mode  *)
+(* the host runs its warm processes under kith-stub --resident and plays    *)
+(* the holder: a host restart is a holder crash the group survives, with a  *)
+(* new instance (`kith-serve-host/<pid>-<stamp>`), and the next hello's     *)
+(* Meet stops the old instance's claims to `ending` and re-sends the kill   *)
+(* (the warm_procs row is what a revoke's kill finds). That is the `fix`    *)
+(* reading with HMode survive (c4-hostholder, the revoke and take-over mix  *)
+(* on). The broken variant:                                                 *)
+(*   hostconst     one constant instance: a restarted host reads the old    *)
+(*                 claim as its own and reports it done (the code before    *)
+(*                 B5; now kith-serve-host/<pid>-<start>) while the old     *)
+(*                 engine still writes under the old stub's lock: fails     *)
+(*                 WriterHasClaim                                           *)
+(*                                                                          *)
+(* Rule K (design 2026-11-16-core-queued-runner, conversations/reconcile.rs *)
+(* reconcile_with): a core restart's step 5 leaves the host's own claims    *)
+(* alone while they can still be the host's: `claimed` (the host's redeem   *)
+(* or stop decides it) and `running` on a process that is alive. A running  *)
+(* one whose process is gone is reconciled as Meet does. In the HostHolder  *)
+(* reading every claim here is the host's. One CoreRestart (`cr`), bounded *)
+(* apart from HCrash's MaxHC, so a core restart and a host crash can both   *)
+(* happen in one behaviour.                                                 *)
+(*   corekeep      the code: K with the alive probe                         *)
+(*   corekeepdead  K without the probe: a running claim stays running on a  *)
+(*                 process that is gone. Passes: Meet (different_holder)    *)
+(*                 still ends it; the probe makes the end prompt, it is not *)
+(*                 what P3 rests on                                         *)
+(*   corenokeep    the old step 5: every live host claim is reconciled      *)
+(*                 (fails CoreKeepsLive, the rule K property)               *)
+(*                                                                          *)
 (* Variant (default "fix" = the code at origin/rust-rebuild cf308ebc):      *)
 (*   nofence       claim does not refuse an ask/wake turn of a stopped ask  *)
 (*   fencecancel   the caller cancels a turn claim_in refused (stopped ask  *)
@@ -100,18 +145,20 @@ VARIABLES
   nextC, nTO,              \* claim counter, take-overs asked
   ts, ms,                  \* turn rows: state; the revoke epoch its may check read (-1 = not checked)
   rev, aSt,                \* revoke epoch of P; the ask's state
-  hUp, hc, synced          \* holder up, crashes, the core has met this instance
+  hUp, hc, synced, cr      \* holder up, crashes, the core has met this instance; core restarts
 
 claimV == <<cs, ct, ck, cp, nextC>>
 procV  == <<pr, ex, sp, kp, km>>
 turnV  == <<ts, ms>>
-hV     == <<hUp, hc, synced>>
+hV     == <<hUp, hc, synced, cr>>
 vars   == <<claimV, procV, turnV, rev, aSt, nTO, hV>>
 
 Live(c)   == cs[c] \in {"claimed", "running", "ending"}
 AnyLive   == \E c \in Claims : Live(c)
 Warm      == Variant \in {"lockstuck", "stuckdrop", "stucklog"}
-Alive(c)  == pr[c] \in {"stub", "writing", "locked", "stuck", "stuckx"}
+Orph      == Variant \in {"orphan", "pidonly"}
+Alive(c)  == pr[c] \in {"stub", "writing", "locked", "stuck", "stuckx", "orphan"}
+Writes(c) == pr[c] \in {"writing", "orphan"}   \* an orphan engine writes but holds no lock
 Held(c)   == pr[c] \in {"writing", "locked", "stuck", "stuckx"}   \* the stub holds the conversation's lock
 Writing   == \E c \in Claims : Held(c)
 TermLive  == \E c \in Claims : ck[c] = "tw" /\ cs[c] \in {"claimed", "running", "ending"}   \* person_writer_live_in: a queued take-over is not live
@@ -124,7 +171,7 @@ Init ==
   /\ kp = [c \in Claims |-> FALSE] /\ km = [c \in Claims |-> FALSE]
   /\ ts = [t \in Turns |-> "new"] /\ ms = [t \in Turns |-> -1]
   /\ rev = 0 /\ aSt = "open" /\ nTO = 0
-  /\ hUp = TRUE /\ hc = 0 /\ synced = TRUE
+  /\ hUp = TRUE /\ hc = 0 /\ synced = TRUE /\ cr = 0
 
 ---------------------------------------------------------------------------
 (* Turns *)
@@ -228,6 +275,14 @@ Busy(c) ==   \* the stub finds the lock taken: exits, the holder keeps `busy`
   /\ pr' = [pr EXCEPT ![c] = "dead"] /\ ex' = [ex EXCEPT ![c] = IF hUp THEN "busy" ELSE "none"]
   /\ UNCHANGED <<claimV, sp, kp, km, turnV, rev, aSt, nTO, hV>>
 
+StubDies(c) ==   \* the stub is killed alone while the holder is down: its engine runs on in the group, the lock is free
+  /\ Orph /\ ~hUp /\ pr[c] = "writing" /\ pr' = [pr EXCEPT ![c] = "orphan"]
+  /\ UNCHANGED <<claimV, ex, sp, kp, km, turnV, rev, aSt, nTO, hV>>
+
+OrphanExit(c) ==   \* the orphan engine ends by itself; nobody reports it (no holder)
+  /\ pr[c] = "orphan" /\ pr' = [pr EXCEPT ![c] = "dead"]
+  /\ UNCHANGED <<claimV, ex, sp, kp, km, turnV, rev, aSt, nTO, hV>>
+
 EngineExit(c) ==   \* the engine ends its turn; the holder keeps the report until acked
   /\ pr[c] = "writing" /\ pr' = [pr EXCEPT ![c] = "dead"]
   /\ ex' = [ex EXCEPT ![c] = IF hUp THEN "done" ELSE "none"]
@@ -299,7 +354,7 @@ HKill(c) ==   \* the holder kills the group and keeps the exit
   /\ UNCHANGED <<claimV, sp, kp, turnV, rev, aSt, nTO, hV>>
 
 EndGone(c) ==   \* ending -> ended once the recorded process is confirmed gone
-  /\ cs[c] = "ending" /\ cp[c] /\ (pr[c] = "dead" \/ Variant = "endearly")
+  /\ cs[c] = "ending" /\ cp[c] /\ (pr[c] = "dead" \/ Variant = "endearly" \/ (Variant = "pidonly" /\ pr[c] = "orphan"))
   /\ cs' = [cs EXCEPT ![c] = "ended"]
   /\ UNCHANGED <<ct, ck, cp, nextC, procV, turnV, rev, aSt, nTO, hV>>
 
@@ -309,30 +364,44 @@ HCrash ==
   /\ hUp /\ hc < MaxHC /\ hUp' = FALSE /\ hc' = hc + 1 /\ synced' = FALSE
   /\ sp' = [c \in Claims |-> FALSE] /\ km' = [c \in Claims |-> FALSE] /\ ex' = [c \in Claims |-> "none"]
   /\ pr' = IF HMode = "die" THEN [c \in Claims |-> IF Alive(c) THEN "dead" ELSE pr[c]] ELSE pr
-  /\ UNCHANGED <<claimV, kp, turnV, rev, aSt, nTO>>
+  /\ UNCHANGED <<claimV, kp, turnV, rev, aSt, nTO, cr>>
 
 HUp ==
   /\ ~hUp /\ hUp' = TRUE
-  /\ UNCHANGED <<claimV, procV, turnV, rev, aSt, nTO, hc, synced>>
+  /\ UNCHANGED <<claimV, procV, turnV, rev, aSt, nTO, hc, synced, cr>>
 
 Meet ==   \* different_holder: the new instance lists nothing, so every live non-external claim is released
   /\ hUp /\ ~synced /\ synced' = TRUE
   /\ cs' = [c \in Claims |->
         IF ~Live(c) THEN cs[c]
+        ELSE IF Variant = "hostconst" THEN "ended"   \* the host's one constant instance: the old claim reads as "ours", reported done
         ELSE IF cs[c] = "claimed" THEN "ended"
         ELSE IF cs[c] = "running" THEN "ending"
         ELSE IF cp[c] THEN "ending" ELSE "ended"]
   /\ ts' = [t \in Turns |-> IF ts[t] \in {"claimed", "running"} THEN "queued" ELSE ts[t]]
   /\ kp' = [c \in Claims |-> IF Variant # "nokillresend" /\ cs[c] \in {"running", "ending"} /\ cp[c] THEN TRUE ELSE kp[c]]
   /\ km' = [c \in Claims |-> IF Warm /\ pr[c] \in {"locked", "stuck", "stuckx"} THEN TRUE ELSE km[c]]   \* step 7 ends the old instance's groups
-  /\ UNCHANGED <<ct, ck, cp, nextC, pr, ex, sp, ms, rev, aSt, nTO, hUp, hc>>
+  /\ UNCHANGED <<ct, ck, cp, nextC, pr, ex, sp, ms, rev, aSt, nTO, hUp, hc, cr>>
+
+CoreRestart ==   \* step 5 after a core restart (reconcile_with): rule K for the host's claims
+  /\ Variant \in {"corekeep", "corekeepdead", "corenokeep"} /\ cr = 0 /\ cr' = 1
+  /\ LET keep(c) == Variant # "corenokeep"
+                    /\ (cs[c] = "claimed" \/ (cs[c] = "running" /\ (Alive(c) \/ Variant = "corekeepdead")))
+         go(c)   == Live(c) /\ ~keep(c)
+     IN /\ cs' = [c \in Claims |->
+               IF ~go(c) THEN cs[c]
+               ELSE IF cs[c] = "running" THEN "ending"
+               ELSE IF cp[c] THEN "ending" ELSE "ended"]
+        /\ ts' = [t \in Turns |-> IF \E c \in Claims : go(c) /\ cs[c] = "running" /\ ct[c] = t THEN "queued" ELSE ts[t]]
+        /\ kp' = [c \in Claims |-> IF go(c) /\ cp[c] THEN TRUE ELSE kp[c]]
+  /\ UNCHANGED <<ct, ck, cp, nextC, pr, ex, sp, km, ms, rev, aSt, nTO, hUp, hc, synced>>
 
 ---------------------------------------------------------------------------
 Next ==
   \/ \E t \in Turns : MayCheck(t) \/ TurnArrive(t) \/ Park(t) \/ Unpark(t) \/ Claim(t) \/ FenceCancel(t)
-  \/ \E c \in Claims : Spawn(c) \/ SpawnedRep(c) \/ Redeem(c) \/ StubLock(c) \/ RedeemOK(c) \/ GiveBack(c) \/ Stuck(c) \/ Busy(c) \/ EngineExit(c) \/ Report(c)
+  \/ \E c \in Claims : Spawn(c) \/ SpawnedRep(c) \/ Redeem(c) \/ StubLock(c) \/ RedeemOK(c) \/ GiveBack(c) \/ Stuck(c) \/ Busy(c) \/ EngineExit(c) \/ StubDies(c) \/ OrphanExit(c) \/ Report(c)
                        \/ PromoteTW(c) \/ SendKill(c) \/ HKill(c) \/ EndGone(c)
-  \/ AskStop \/ Revoke \/ TakeOver \/ HCrash \/ HUp \/ Meet
+  \/ AskStop \/ Revoke \/ TakeOver \/ HCrash \/ HUp \/ Meet \/ CoreRestart
 
 Fairness ==
   /\ \A t \in Turns : WF_vars(Unpark(t)) /\ WF_vars(Claim(t)) /\ WF_vars(FenceCancel(t))
@@ -354,9 +423,9 @@ OneLive == Cardinality({c \in Claims : Live(c)}) <= 1
 \* end_stuck_claim (c4-stuckdrop) broke no lock property, only StuckHasClaim.
 OneHolder == Cardinality({c \in Claims : Held(c)}) <= 1
 \* One process writes at a time.
-OneWriter == Cardinality({c \in Claims : pr[c] = "writing"}) <= 1
+OneWriter == Cardinality({c \in Claims : Writes(c)}) <= 1
 \* A writing process's claim is the writer (running, or ending until it is gone): never ended while it writes.
-WriterHasClaim == \A c \in Claims : pr[c] = "writing" => cs[c] \in {"running", "ending"}
+WriterHasClaim == \A c \in Claims : Writes(c) => cs[c] \in {"running", "ending"}
 \* After the ask stopped, no ask or wake turn of it is claimed or running (a stopped child runs again otherwise).
 StoppedNeverRuns == aSt = "stopped" => \A t \in Auto : ts[t] \notin {"claimed", "running"}
 \* After a revoke, none of the person's turns is claimed or running.
@@ -379,6 +448,9 @@ StuckEnds == \A c \in Claims : (pr[c] \in {"stuck", "stuckx"}) ~> (pr[c] = "dead
 \* stopped ask (both are refused for ever; P3Strict says that is a leak). The `nextC = MaxClaims` escape is only the bound
 \* of the model (a turn that waits when the claim numbers ran out); it hides no stuck state: P3Strict has it too, and
 \* c4-epochcancel / c4-fencecancel pass with it, so a fix is shown by cancelling, not by the escape.
+CoreKeepsLive ==   \* rule K: a core restart never takes a running claim on a live process
+  [][cr' = cr + 1 => \A c \in Claims : (cs[c] = "running" /\ Alive(c)) => cs'[c] = "running"]_vars
+
 P3 == \A t \in Turns :
         (ts[t] = "queued" /\ ms[t] = rev /\ ~Fenced(t)) ~> (ts[t] \in {"done", "cancelled"} \/ nextC = MaxClaims)
 P3Strict == \A t \in Turns :

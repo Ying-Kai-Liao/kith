@@ -28,6 +28,9 @@ public struct Bot: Codable, Identifiable, Hashable, Sendable {
     public var project: String?
     /// The kith agent this bot is; only on bots made from a kith agent (host sends it, camelCase).
     public var hqAgent: String?
+    /// A host-native row the host no longer runs (one-bot-model C5): flagged, exported, or remade as a kith agent.
+    /// False from an older host.
+    public var needsKithAgent: Bool = false
     /// Where the bot's own chat works; nil for a group or an older host.
     public var folder: PlaceFolder?
     /// `ask` or `auto`.
@@ -80,6 +83,8 @@ public struct Bot: Codable, Identifiable, Hashable, Sendable {
     public var botGuest: BotGuestInfo?
 
     public var isGroup: Bool { kind == "group" }
+    /// A native row the host refuses to run. Never a room: rooms have no kith agent either.
+    public var isFlagged: Bool { !isGroup && needsKithAgent }
     public var isWorking: Bool { status == "working" || status == "needsInput" }
     /// Working right now in this chat's main conversation (`thread == nil`) or in that thread.
     public func isWorking(in chat: String, thread: String?) -> Bool {
@@ -588,6 +593,7 @@ extension Bot {
         managedWorkspace = try c.decodeIfPresent(Bool.self, forKey: .managedWorkspace) ?? false
         project = try c.decodeIfPresent(String.self, forKey: .project)
         hqAgent = try c.decodeIfPresent(String.self, forKey: .hqAgent)
+        needsKithAgent = try c.decodeIfPresent(Bool.self, forKey: .needsKithAgent) ?? false
         folder = try? c.decodeIfPresent(PlaceFolder.self, forKey: .folder)
         permission = try c.decodeIfPresent(String.self, forKey: .permission) ?? "auto"
         model = try c.decodeIfPresent(String.self, forKey: .model)

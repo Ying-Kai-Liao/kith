@@ -91,7 +91,7 @@ pub fn env(store: &Store, backend: &str) -> Result<Vec<(String, String)>> {
 }
 
 /// Names of the saved keys (values never leave the host).
-fn saved_env(store: &Store, backend: &str) -> Result<Vec<String>> {
+pub(crate) fn saved_env(store: &Store, backend: &str) -> Result<Vec<String>> {
     Ok(env(store, backend)?.into_iter().map(|(k, _)| k).collect())
 }
 

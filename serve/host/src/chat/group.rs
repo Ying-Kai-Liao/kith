@@ -19,21 +19,25 @@
 //! Threads work the same way inside a group: the room turn runs in the thread's lane and
 //! only sees the thread.
 
+use super::room_input::{readable, unanswered_note, unreadable};
+use super::room_turn::{Level, RoomBasis};
 use crate::agent::bot::Cmd;
 use crate::hub::Hub;
 use crate::remote::push::{self, AlertKind};
 use crate::store::RoomPoint;
 use crate::store::{
-    BotConfig, BotGuest, BotKind, BotState, Charge, ConvState, Conversation, EndedWhy, Entry, EntryKind, Lane, Store,
-    is_person_message, now_ms,
+    BotConfig, BotGuest, BotKind, BotState, Charge, ConvState, Conversation, EndedWhy, Entry, EntryKind, Lane, Stay,
+    Store, is_person_message, now_ms,
 };
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
+/// How long a room member's turn may take before the room moves on without it.
+pub const ASK_TIMEOUT: Duration = Duration::from_secs(600);
 /// Agent turns one person message may cause, rounds included, unless the person sets another (`send` `budget`).
 pub const DEFAULT_BUDGET: i64 = 10;
 /// The most a person can grant in one message.
@@ -54,6 +58,13 @@ pub struct GroupTurn {
     pub epoch: u64,
     /// The conversation this turn belongs to, named on the reply it stores (`data.conversation`).
     pub conversation: Option<String>,
+    /// The room as this turn's prompt was composed for it (rooms with people): who is in, the gen, the level. The actor
+    /// checks it again when the turn starts and runs the turn under it (`agent::bot::room_turn`). `None` for a turn
+    /// no conversation composed (an outside bot's ask): owner level, and refused if a person is in the room by then.
+    pub basis: Option<RoomBasis>,
+    /// Who wrote the message that opened the conversation: a person's id, or `owner`. A room turn spends that person's
+    /// cap (the owner's is none).
+    pub author: String,
     /// The reply the room sees, or `None` for a pass.
     pub reply: oneshot::Sender<Result<Option<String>>>,
 }
@@ -361,6 +372,23 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
             bail!("group deleted");
         };
         let members = members(hub, &group);
+        // The room as this step finds it: its people decide who may answer, what they read and how they run.
+        let basis = RoomBasis::read(&hub.store, &group_id);
+        let stays = hub.store.room_stays(&group_id);
+        if basis.level() == Level::Room || !stays.is_empty() {
+            let trigger = since_last_user_message(hub, conv)?;
+            if let Some(why) = unreadable(hub, &basis, &stays, &trigger, &conv.opened_by) {
+                if let Some(text) = why {
+                    let mut next = conv.queue.current.iter().chain(conv.queue.waiting.first());
+                    let speaker = next
+                        .find_map(|id| members.iter().find(|m| m.id == *id))
+                        .or_else(|| responders(&members, &trigger, true).into_iter().next());
+                    unanswered_note(hub, &lane, speaker, &trigger, &text);
+                }
+                end(hub, &conv.id, ConvState::Ended, EndedWhy::Quiet)?;
+                break;
+            }
+        }
         // Members an outside bot's unprompted post woke join the end of the queue.
         let woken = MENTIONS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&conv.id);
         for id in woken.into_iter().flatten() {
@@ -392,14 +420,24 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
                     break;
                 }
                 let since_user = since_last_user_message(hub, conv)?;
-                let mut speakers: Vec<String> =
-                    responders(&members, &since_user).into_iter().map(|m| m.id.clone()).collect();
+                let mut speakers: Vec<String> = responders(&members, &since_user, basis.level() == Level::Room)
+                    .into_iter()
+                    .map(|m| m.id.clone())
+                    .collect();
                 // The person message this round answers: an outside bot that joined after it never saw it.
                 let trigger = since_user.first().map_or(0, |e| e.seq);
                 speakers.retain(|id| sees(hub, &group_id, id, trigger));
                 // An outside bot whose own post is the room's latest line has nothing new to read: waking it
                 // again would only spend its owner's Grok runs.
                 speakers.retain(|id| !spoke_last(hub, &lane, id));
+                // C5: a host-native member is left out of the queue, so no turn is charged for it.
+                speakers.retain(|id| {
+                    let native = members
+                        .iter()
+                        .find(|m| m.id == *id)
+                        .filter(|m| m.is_native() && guest_member(hub, &m.id).is_none());
+                    native.inspect(|m| skip_native(hub, &lane, &conv.id, m)).is_none()
+                });
                 // Each round starts one member later, so the same bot doesn't always speak first.
                 if !speakers.is_empty() {
                     let offset = conv.queue.round as usize % speakers.len();
@@ -443,16 +481,28 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         };
         let text = if let Some(guest) = guest_member(hub, &member.id) {
             bot_turn(hub, conv, &group, &guest).await?
+        } else if member.is_native() {
+            // C5: the host no longer runs a host-native bot. It passes, and the room is told why; the rest of the
+            // turn goes on.
+            skip_native(hub, &lane, &conv.id, member);
+            None
         } else {
-            let prompt = member_prompt(hub, &group, &members, member, &lane)?;
+            let prompt = member_prompt(hub, &group, &members, member, &lane, &basis, &stays)?;
             let (reply, answer) = oneshot::channel();
-            let turn =
-                GroupTurn { lane: lane.clone(), prompt, epoch: conv.epoch, conversation: Some(conv.id.clone()), reply };
+            let turn = GroupTurn {
+                lane: lane.clone(),
+                prompt,
+                epoch: conv.epoch,
+                conversation: Some(conv.id.clone()),
+                basis: Some(basis.clone()),
+                author: conv.opened_by.clone(),
+                reply,
+            };
             if hub.send_cmd(&member.id, Cmd::Group(turn)).is_err() {
                 None
             } else {
                 // A failed, cancelled or overdue member turn counts as a pass; its error shows in the room.
-                match tokio::time::timeout(crate::chat::team::ASK_TIMEOUT, answer).await {
+                match tokio::time::timeout(ASK_TIMEOUT, answer).await {
                     Ok(Ok(Ok(Some(text)))) => Some(text),
                     _ => None,
                 }
@@ -504,15 +554,23 @@ pub fn ask_agent(hub: &Arc<Hub>, room: &str, agent_id: &str) -> Result<()> {
     };
     let members = members(hub, &group);
     let Some(agent) = members.iter().find(|m| m.id == agent_id) else { bail!("{agent_id} isn't in this room") };
+    // An outside bot is a member with no hq agent of its own; it is not a native row.
+    if guest_member(hub, &agent.id).is_none() {
+        agent.refuse_native()?;
+    }
     let lane = Lane::main(room);
-    let prompt = member_prompt(hub, &group, &members, agent, &lane)?;
+    // Called by `botAsk` with the membership lock held.
+    let (basis, stays) = (RoomBasis::read_held(&hub.store, room), hub.store.room_stays(room));
+    let prompt = member_prompt(hub, &group, &members, agent, &lane, &basis, &stays)?;
     let (reply, answer) = oneshot::channel();
     let epoch = hub.store.lane_epoch(&lane);
     let conversation = hub.store.newest_conversation(&lane).map(|c| c.id);
-    hub.send_cmd(agent_id, Cmd::Group(GroupTurn { lane, prompt, epoch, conversation, reply }))?;
+    // An outside bot's ask names no basis: it runs at owner level, and starts only while nobody is in the room.
+    let turn = GroupTurn { lane, prompt, epoch, conversation, basis: None, author: "owner".into(), reply };
+    hub.send_cmd(agent_id, Cmd::Group(turn))?;
     // The turn is skipped once nobody holds its reply, so something has to.
     tokio::spawn(async move {
-        let _ = tokio::time::timeout(crate::chat::team::ASK_TIMEOUT, answer).await;
+        let _ = tokio::time::timeout(ASK_TIMEOUT, answer).await;
     });
     Ok(())
 }
@@ -612,6 +670,21 @@ async fn bot_turn(
         bot_notice(hub, &conv.lane, guest, notice, Some(&conv.id), what);
     }
     Ok(text)
+}
+
+/// A quiet line in the room: this member is a host-native bot, which the host no longer runs.
+/// It is said once per conversation for each such member, not once per round.
+fn skip_native(hub: &Hub, lane: &Lane, conversation: &str, member: &BotConfig) {
+    static TOLD: Mutex<BTreeSet<(String, String)>> = Mutex::new(BTreeSet::new());
+    let first = TOLD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert((conversation.to_owned(), member.id.clone()));
+    if !first {
+        return;
+    }
+    let data = json!({"notice": "nativeSkipped", "style": "info", "text": crate::store::native_refusal(&member.name)});
+    hub.add_entry(lane, EntryKind::Notice, hub.store.max_turn(&lane.chat), &data);
 }
 
 /// The bot as a notice names it.
@@ -804,11 +877,17 @@ fn since_last_user_message(hub: &Hub, conv: &Conversation) -> Result<Vec<Entry>>
 
 /// Who answers: the members @-mentioned since the user's last message, or everyone
 /// when nobody (or `@all` / `@everyone`) is.
-fn responders<'a>(members: &'a [BotConfig], messages: &[Entry]) -> Vec<&'a BotConfig> {
+///
+/// In a room with people (`with_people`) only a member somebody @-mentions answers, never everyone: no mention starts
+/// nothing, and `@all` is not a mention (rule 6; the author is not asked to pay for a whole room).
+pub(crate) fn responders<'a>(members: &'a [BotConfig], messages: &[Entry], with_people: bool) -> Vec<&'a BotConfig> {
     let texts: Vec<&str> = messages.iter().filter_map(|e| e.data["text"].as_str()).collect();
-    let everyone = texts.iter().any(|t| mentions(t, "all") || mentions(t, "everyone"));
     let named: Vec<&BotConfig> =
         members.iter().filter(|m| texts.iter().any(|t| handles(&m.name).iter().any(|h| mentions(t, h)))).collect();
+    if with_people {
+        return named;
+    }
+    let everyone = texts.iter().any(|t| mentions(t, "all") || mentions(t, "everyone"));
     if everyone || named.is_empty() { members.iter().collect() } else { named }
 }
 
@@ -834,7 +913,15 @@ fn mentions(text: &str, handle: &str) -> bool {
         .any(|(i, _)| lower[i + needle.len()..].chars().next().is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_')))
 }
 
-fn member_prompt(hub: &Hub, group: &BotConfig, members: &[BotConfig], me: &BotConfig, lane: &Lane) -> Result<String> {
+fn member_prompt(
+    hub: &Hub,
+    group: &BotConfig,
+    members: &[BotConfig],
+    me: &BotConfig,
+    lane: &Lane,
+    basis: &RoomBasis,
+    stays: &[Stay],
+) -> Result<String> {
     let peers: Vec<&BotConfig> = members.iter().filter(|m| m.id != me.id).collect();
     let peer_names = if peers.is_empty() {
         "just the user".to_owned()
@@ -866,11 +953,13 @@ fn member_prompt(hub: &Hub, group: &BotConfig, members: &[BotConfig], me: &BotCo
     let mut header = format!("[Group chat: \"{}\" - with {peer_names}]", group.name);
     if let Some(root) = lane.thread.as_deref().and_then(|r| hub.store.entry(r)) {
         header = format!("[Group chat: \"{}\", in a thread - with {peer_names}]", group.name);
-        if seen == 0 {
+        if seen == 0 && !readable(hub, basis, stays, vec![root.clone()]).is_empty() {
             lines.push(format!("(thread started on) {}", line(hub, group, &root, me)));
         }
     }
-    for e in hub.store.messages_after(lane, seen, HISTORY_LINES)? {
+    // Only what this turn may read: with people in the room, what every one of them can see; at owner level, nothing
+    // written while any person was there (rule 3).
+    for e in readable(hub, basis, stays, hub.store.messages_after(lane, seen, HISTORY_LINES)?) {
         lines.push(line(hub, group, &e, me));
     }
     out.push(header);
@@ -982,7 +1071,7 @@ mod tests {
         hub.add_entry(&main, EntryKind::User, 3, &guest).unwrap();
         let members = [bot("a", "a"), bot("b", "b")];
         let who = |since: &[Entry]| -> Vec<String> {
-            responders(&members, since).into_iter().map(|m| m.id.clone()).collect()
+            responders(&members, since, false).into_iter().map(|m| m.id.clone()).collect()
         };
         assert_eq!(who(&since_last_user_message(hub, &conv).unwrap()), ["a"], "the stray @b wakes nobody");
         // A reply of this conversation does pick who answers next.
@@ -997,7 +1086,7 @@ mod tests {
     fn mentions_pick_responders_and_no_mention_means_everyone() {
         let members = [bot("a", "Alice Chen"), bot("b", "Bob"), bot("c", "尼采課")];
         let ids = |m: &[BotConfig], text: &str| -> Vec<String> {
-            responders(m, &[said(text)]).into_iter().map(|b| b.id.clone()).collect()
+            responders(m, &[said(text)], false).into_iter().map(|b| b.id.clone()).collect()
         };
         assert_eq!(ids(&members, "hi all"), ["a", "b", "c"]);
         assert_eq!(ids(&members, "@bob can you look"), ["b"]);
@@ -1012,8 +1101,10 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    /// A host with agent bots `a` and `b` (the scripted fixture agent) and a group of both.
+    /// A host with kith agents `a` and `b` (a stand-in kernel, the scripted fixture agent) and a group of both.
     struct Room {
+        /// The stand-in kernel is the process's one (`hq::TEST_KERNEL_BIN`): held for the test, as the api rig does.
+        _one: tokio::sync::MutexGuard<'static, ()>,
         hub: Arc<Hub>,
         dir: PathBuf,
         group: String,
@@ -1024,15 +1115,34 @@ mod tests {
 
     impl Room {
         fn new() -> Self {
+            // Another test may hold the kernel (each test has its own runtime, so waiting on this thread is fine).
+            let one = loop {
+                match crate::remote::account::ONE_AT_A_TIME.try_lock() {
+                    Ok(guard) => break guard,
+                    Err(_) => std::thread::sleep(Duration::from_millis(20)),
+                }
+            };
+            *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap() =
+                Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/kernel_agents.py"));
             let dir = std::env::temp_dir().join(format!("kith-group-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
+            // A bot guest's ask is checked against its owner's grants (kith-auth); here it holds every agent.
+            let auth = dir.join("kith-auth");
+            std::fs::write(&auth, "#!/bin/sh\necho '{\"allowed\": true, \"owner\": false}'\n").unwrap();
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            *crate::remote::account::TEST_BIN.lock().unwrap() = Some(auth);
             let store = Store::open(&dir.join("test.db")).unwrap();
             let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/team_agent.py");
             for id in ["a", "b"] {
                 let cwd = dir.join(id);
                 std::fs::create_dir_all(&cwd).unwrap();
+                // The stand-in kernel puts an agent named `<test folder>.<id>` in `<tmp>/<test folder>/<id>`.
+                let name = format!("{}.{id}", dir.file_name().unwrap().to_string_lossy());
                 let cfg: BotConfig = serde_json::from_value(json!({
-                    "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false,
+                    "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false, "hqAgent": name,
                     "command": crate::shell::python(&agent), "notify": false,
                 }))
                 .unwrap();
@@ -1055,7 +1165,7 @@ mod tests {
                 )
                 .unwrap();
             let group = group["id"].as_str().unwrap().to_owned();
-            Self { hub, dir, group, bg: format!("bg-{}", uuid::Uuid::new_v4()) }
+            Self { _one: one, hub, dir, group, bg: format!("bg-{}", uuid::Uuid::new_v4()) }
         }
 
         async fn send(&self, text: &str, thread: Option<&str>) -> Entry {
@@ -1100,7 +1210,9 @@ mod tests {
 
         async fn shutdown(self) {
             self.hub.shutdown().await;
-            let _ = std::fs::remove_dir_all(self.dir);
+            let _ = std::fs::remove_dir_all(&self.dir);
+            *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            *crate::remote::account::TEST_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         }
     }
 

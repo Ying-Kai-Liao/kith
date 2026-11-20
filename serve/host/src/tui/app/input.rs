@@ -108,9 +108,6 @@ impl App {
                 if text.is_empty() && files.is_empty() {
                     return;
                 }
-                if files.is_empty() && self.built_in_command(&text) {
-                    return;
-                }
                 if let Some(m) = &self.mismatch {
                     // The draft stays; it sends once the update is done.
                     let why = mismatch_text(m, &self.host);

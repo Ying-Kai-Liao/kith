@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Model-checks "the schedule fire protocol" (Fire.tla) with TLC, one command, no global install.
+# Model-checks "the schedule fire protocol" (Fire.tla), the M4-5 handover (Handover.tla, variants h-*) and who runs a fired turn
+# (HostRuns.tla, variants hr-*) with TLC, one command, no global install.
 #
 #   verification/schedule-fire/run.sh                  every row of checks.tsv: variant x property, expected pass/fail
 #   verification/schedule-fire/run.sh --smoke                       only the rows named in smoke.txt (CI when nothing the model covers changed)
@@ -74,23 +75,29 @@ setup() {
   JAVA=$(find_java)
 }
 
-# compose VARIANT KIND NAME -> a cfg on stdout: base.consts with the variant's overrides, then the property.
+# A variant named h-* checks Handover.tla (base.handover.consts), hr-* HostRuns.tla (base.hostruns.consts); every other one
+# checks Fire.tla (base.consts).
+module_of() { case $1 in h-*) echo Handover ;; hr-*) echo HostRuns ;; *) echo Fire ;; esac; }
+base_of() { case $1 in h-*) echo "$HERE/base.handover.consts" ;; hr-*) echo "$HERE/base.hostruns.consts" ;; *) echo "$HERE/base.consts" ;; esac; }
+
+# compose VARIANT KIND NAME -> a cfg on stdout: the base consts with the variant's overrides, then the property.
 compose() {
   local v=$1 kind=$2 name=$3 set=$HERE/variants/$1.set
   [[ -f $set ]] || { echo "run.sh: no variants/$v.set" >&2; exit 2; }
   echo CONSTANTS
-  awk -F' *= *' 'NR==FNR { if ($0 ~ /^[A-Za-z]/) o[$1]=$0; next } /^[A-Za-z]/ { print ($1 in o) ? o[$1] : $0 }' "$set" "$HERE/base.consts"
+  awk -F' *= *' 'NR==FNR { if ($0 ~ /^[A-Za-z]/) o[$1]=$0; next } /^[A-Za-z]/ { print ($1 in o) ? o[$1] : $0 }' "$set" "$(base_of "$v")"
   echo "SPECIFICATION Spec"
   echo "$kind $name"
 }
 
 run_tlc() {   # run_tlc VARIANT KIND NAME -> TLC's output on stdout
   local work; work=$(mktemp -d "${TMPDIR:-/tmp}/kith-verify.XXXXXX")
-  compose "$1" "$2" "$3" > "$work/Fire.cfg"
+  local m; m=$(module_of "$1")
+  compose "$1" "$2" "$3" > "$work/$m.cfg"
   # TLC unpacks its standard modules into java.io.tmpdir; parallel runs must not share one.
   mkdir -p "$work/tmp"
   ( cd "$HERE" && "$JAVA" -Djava.io.tmpdir="$work/tmp" -XX:+UseParallelGC -Xmx512m -cp "$JAR" tlc2.TLC -workers 1 -deadlock \
-      -metadir "$work/states" -config "$work/Fire.cfg" Fire.tla 2>&1 ) || true
+      -metadir "$work/states" -config "$work/$m.cfg" "$m.tla" 2>&1 ) || true
   rm -rf "$work"
 }
 
@@ -138,6 +145,7 @@ fi
 setup
 echo "tla2tools $TLA_VERSION, java $(java_major "$JAVA") ($JAVA)"
 jobs=$(( $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) > 4 ? 4 : $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) ))
+jobs=${VERIFY_JOBS:-$jobs}   # VERIFY_JOBS=1: one TLC at a time (a busy Mac)
 res=$(mktemp "${TMPDIR:-/tmp}/kith-verify-res.XXXXXX")
 start=$(date +%s)
 rows \

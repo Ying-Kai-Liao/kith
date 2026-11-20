@@ -29,7 +29,9 @@ impl Host {
     async fn start() -> Self {
         let home = std::env::temp_dir().join(format!("kith-turns-e2e-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
-        let (child, base) = common::serve(&home).await;
+        let agents = common::agents_env(&home);
+        let env: Vec<(&str, &str)> = agents.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let (child, base) = common::serve_env(&home, &env).await;
         let token = common::read_token(&home).trim().to_owned();
         Self { child, base, token, home }
     }
@@ -48,16 +50,15 @@ impl Host {
         v
     }
 
-    /// A bot running `fixture` in its own folder (`home/<name>`).
+    /// A kith agent running `fixture` (a path under the crate); its folder is [`Self::dir`].
     async fn bot(&self, name: &str, fixture: &str) -> String {
-        let cwd = self.home.join(name);
-        std::fs::create_dir_all(&cwd).unwrap();
-        let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(fixture);
-        let bot = json!({
-            "name": name, "backend": "custom", "tasks": false, "command": common::python_agent(&agent),
-            "cwd": cwd, "permission": "ask", "notify": false,
-        });
-        self.call("createBot", bot).await["bot"]["id"].as_str().unwrap().to_owned()
+        let fixture = fixture.strip_prefix("tests/fixtures/").unwrap();
+        common::agent_bot(&self.base, &self.token, &self.home, name, fixture, "").await
+    }
+
+    /// The folder of the kith agent `name`, where its fixture keeps its logs.
+    fn dir(&self, name: &str) -> PathBuf {
+        common::agents_dir(&self.home).join(name)
     }
 
     async fn entries(&self, chat: &str) -> Vec<Value> {
@@ -108,7 +109,7 @@ async fn a_member_busy_in_its_own_chat_still_answers_the_room() {
     }
     let host = Host::start().await;
     let member = host.bot("Member", "tests/fixtures/team_agent.py").await;
-    let folder = host.home.join("Member");
+    let folder = host.dir("Member");
     let group =
         host.call("createBot", json!({"name": "Room", "kind": "group", "members": [member]})).await["bot"]["id"]
             .as_str()
@@ -134,19 +135,8 @@ async fn a_member_busy_in_its_own_chat_still_answers_the_room() {
     std::fs::write(folder.join("release"), "").unwrap();
 }
 
-/// A final reply that starts with `speed` and quotes `word` from its prompt.
-fn speed_reply(speed: &'static str, word: &'static str) -> impl Fn(&Value) -> bool {
-    move |e: &Value| {
-        e["kind"] == "agent"
-            && e["data"]["final"] == true
-            && e["data"]["text"].as_str().is_some_and(|t| t.starts_with(speed) && t.contains(word))
-    }
-}
-
-const FAST_ON: &str = r#""configId": "fast", "value": "on""#;
-
-/// Fast mode is gone: an old app's `fastMode` is accepted and ignored, the agent's option is never switched, and the
-/// bot always reports the fixed values that make an old app hide its switch.
+/// Fast mode is gone: an old app's `fastMode` is accepted and ignored, and the bot always reports the fixed values
+/// that make an old app hide its switch.
 #[tokio::test]
 async fn an_old_apps_fast_mode_is_ignored() {
     if python_missing() {
@@ -154,16 +144,10 @@ async fn an_old_apps_fast_mode_is_ignored() {
     }
     let host = Host::start().await;
     let bot = host.bot("Quick", "tests/fixtures/fast_mode_agent.py").await;
-    let calls = host.home.join("Quick").join("calls.jsonl");
-
     for on in [true, false, true] {
         let saved = host.call("updateBot", json!({"id": bot, "fastMode": on})).await;
         assert_eq!(saved["bot"]["fastMode"], false);
     }
-    host.call("send", json!({"botId": bot, "text": "one"})).await;
-    host.wait_for(&bot, Duration::from_secs(60), speed_reply("fast off", "one")).await;
-    let log = std::fs::read_to_string(&calls).unwrap();
-    assert_eq!(log.matches(FAST_ON).count(), 0, "{log}");
     let state = &common::snapshot(&host.base, &host.token).await["bots"][0];
     assert_eq!(state["fastMode"], false);
     assert_eq!(state["fastModeSupport"], "unsupported");

@@ -67,3 +67,10 @@ test("a send's RPC response newer than since doesn't set the floor", () => {
   assert.equal(floors.get('b'), undefined)
   assert.equal(isOutsideLoadedWindow(floors.get('b'), false, entry('routine', 1000, { rev: 8 })), false)
 })
+
+test("an old thread root held for its fresh replies isn't the floor, unless only roots are held", () => {
+  const list = [entry('root', 10), entry('a', 200), entry('b', 210), entry('reply', 300, { threadId: 'root' })]
+  assert.equal(mainChatFloor(list), 200)
+  assert.equal(snapshotFloors(new Map([['b', list]]), 7).get('b'), 200)
+  assert.equal(mainChatFloor([entry('root', 10), entry('reply', 300, { threadId: 'root' })]), 10)
+})

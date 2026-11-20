@@ -1,0 +1,18 @@
+{
+ "a": {
+  "v": 1,
+  "sessionId": "s-1",
+  "agent": "house",
+  "cwd": "/tmp",
+  "pid": null
+ },
+ "b": {
+  "v": 1,
+  "sessionId": "s-1",
+  "agent": "house",
+  "cwd": "/tmp",
+  "pid": null,
+  "recordedAt": 0
+ },
+ "winner": "b"
+}

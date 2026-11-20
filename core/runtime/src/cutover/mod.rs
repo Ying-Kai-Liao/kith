@@ -17,7 +17,8 @@
 //! - `step`: refuse when the module says it is not ready (`step_refusal`, before anything is written) or unless dependencies
 //!   are switched; take the old store's writer lock (`source_lock`, held to the end); `VACUUM INTO` snapshot (recorded, reused on resume); record
 //!   `stepping`; `import`; `same_answer` must be empty or the step fails and stays `stepping` (Python is still the writer;
-//!   re-run to resume, or roll back); write the marker (`marker.rs`); record `switched`; put the tombstones. The tombstone comes AFTER the record so a
+//!   re-run to resume, or roll back); write the marker (`marker.rs`); record `switched`; put the tombstones (a module that
+//!   puts one earlier, in `before_tombstone` -- `claims`, `transcripts` -- has it already, and `reread` runs after it). The tombstone comes AFTER the record so a
 //!   crash between them is repaired by running `step` again (the import cannot be re-run once its sources are gone, and
 //!   need not be).
 //! - `rollback`: refuse while a dependent is switched, or while a claim/take is live (any claim not ended, or the module's
@@ -52,6 +53,9 @@ pub(crate) mod modules;
 pub(crate) mod same_answer;
 pub(crate) mod secrets_back;
 pub(crate) mod state;
+pub(crate) mod status;
+#[cfg(test)]
+mod status_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod tombstone;
@@ -194,12 +198,28 @@ pub(crate) trait Module {
     fn before_tombstone(&self, _env: &Env) -> Result<()> {
         Ok(())
     }
+    /// [`Module::before_tombstone`] with the core in hand, run right after it and before the marker: a module whose
+    /// `before_tombstone` already put its tombstone (`claims`, `transcripts`: the old readers fail closed from then on)
+    /// re-reads its sources into core.db here, under the same locks. Default: nothing.
+    fn reread(&self, _env: &Env, _core: &mut Core) -> Result<()> {
+        Ok(())
+    }
     /// Under the source lock, for a switched (or stepping-with-marker) record whose source is still a real file with no copy
     /// kept at the switch: is it exactly what the switch imported (`Imported`: finish only the tombstone, the core's newer
     /// rows stay), a file written since (`Changed`: import again), or a state no import can be told safe (`Refuse`)? Default:
     /// `Changed`, the old behaviour.
     fn switched_file(&self, _env: &Env, _db: &rusqlite::Connection) -> Result<SwitchedFile> {
         Ok(SwitchedFile::Changed)
+    }
+    /// Runs in `rollback` under the lifetime lock, before the live check: settles what a stopped world left behind (a claim whose
+    /// process is gone) so the check counts only what is really live. Default: nothing.
+    fn before_rollback(&self, _env: &Env, _core: &mut Core) -> Result<()> {
+        Ok(())
+    }
+    /// Runs when a `stepping` module's step is cancelled (`rollback` of a step that never switched): undoes what a refused or
+    /// crashed step already put in place before the marker (a file the old readers fail closed on). Default: nothing.
+    fn cancel_step(&self, _env: &Env) -> Result<Vec<String>> {
+        Ok(Vec::new())
     }
     /// The lock the old store's writers take, held by `rollback` from before the rolling-back record to the end: a
     /// refusal at the lock then writes nothing (no record, no secret restored). Default: none.
@@ -269,7 +289,8 @@ pub(crate) fn step(
     opts: Opts,
 ) -> Result<Vec<String>> {
     let m = find(reg, name)?;
-    if let Some(why) = m.step_refusal(env)
+    let refusal = m.step_refusal(env);
+    if let Some(why) = &refusal
         && !(opts.dry_run && m.dry_run_despite_refusal())
     {
         return Err(Error::Refused(format!("cutover: {name}: {why}")));
@@ -286,7 +307,8 @@ pub(crate) fn step(
             "cutover: {name} is part-way through a rollback; finish it first (kith rollback {name})"
         )));
     }
-    for dep in m.depends_on() {
+    // A dry run that looks past a refusal says it, and stops short of the dependency check: the refusal is the reason.
+    for dep in m.depends_on().iter().filter(|_| refusal.is_none()) {
         if phase_of(env, dep)? != Some(Phase::Switched) {
             return Err(Error::Refused(format!(
                 "cutover: {name} needs {dep} switched first (kith migrate step {dep})"
@@ -313,6 +335,7 @@ pub(crate) fn step(
             "dry run: {name} is {}; nothing was changed",
             cur.map_or("not switched", |s| s.phase.word())
         ));
+        lines.extend(refusal);
         return Ok(lines);
     }
     let mut core = lock(env)?;
@@ -466,6 +489,7 @@ pub(crate) fn step(
         lines.push(format!("{name}: same answer as the old store"));
         // Before the marker and the switched record: a refusal here leaves the module stepping, so a rerun imports again.
         m.before_tombstone(env)?;
+        m.reread(env, &mut core)?;
         let digest = m.digest(env, core.conn())?;
         let seed = m.seed(env, core.conn())?;
         marker::write(&mut core, name, at, &digest, seed.as_deref())?;
@@ -517,11 +541,13 @@ pub(crate) fn rollback(
     if cur.phase == Phase::Stepping {
         // Nothing was tombstoned and Python never stopped writing; the imported rows stay (a re-step is idempotent).
         // A crash repair (S1) leaves a marker on a Stepping module; none must outlive the record.
+        lines.extend(m.cancel_step(env)?);
         marker::clear(&mut core, name)?;
         state::clear(&env.layout, name)?;
         lines.push(format!("{name}: an unfinished step was cancelled"));
         return Ok(lines);
     }
+    m.before_rollback(env, &mut core)?;
     let mut live = m.live(env, &core)?;
     if m.guards_claims() {
         let n: i64 = core.conn().query_row(
@@ -676,17 +702,63 @@ pub(crate) fn run(
     kernel: &std::path::Path,
     args: &[String],
 ) -> Result<Vec<String>> {
+    lines_of(run_outcome(paths, kernel, args)?)
+}
+
+/// Like [`run`], with the exit code and the stderr lines: the `status` variants answer by exit code (`status.rs`).
+pub(crate) fn run_outcome(
+    paths: &kith_kernel::paths::Paths,
+    kernel: &std::path::Path,
+    args: &[String],
+) -> Result<status::Outcome> {
     let env = Env::with_paths(paths).with_ctx(crate::authority::call::ctx_from(
         paths,
         kernel.to_path_buf(),
     ));
-    run_with(&registry(), &env, args)
+    run_outcome_with(&registry(), &env, args)
+}
+
+/// An outcome that says no, as the error the line-returning callers (the daemon's step, the tests) expect.
+fn lines_of(o: status::Outcome) -> Result<Vec<String>> {
+    if o.code == 0 {
+        Ok(o.out)
+    } else {
+        Err(Error::Refused(
+            o.err
+                .into_iter()
+                .chain(o.out)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ))
+    }
 }
 
 pub(crate) fn run_with(reg: &[Box<dyn Module>], env: &Env, args: &[String]) -> Result<Vec<String>> {
+    lines_of(run_outcome_with(reg, env, args)?)
+}
+
+pub(crate) fn run_outcome_with(
+    reg: &[Box<dyn Module>],
+    env: &Env,
+    args: &[String],
+) -> Result<status::Outcome> {
+    // `status` with arguments is the gate's question (MODULE, --json, --require); bare `status` stays as it was.
+    if let [verb, rest @ ..] = args
+        && verb == "status"
+        && !rest.is_empty()
+    {
+        return status::run(reg, env, rest);
+    }
+    Ok(status::Outcome {
+        out: run_lines(reg, env, args)?,
+        ..Default::default()
+    })
+}
+
+fn run_lines(reg: &[Box<dyn Module>], env: &Env, args: &[String]) -> Result<Vec<String>> {
     let usage = || {
         Error::BadParams(
-            "usage: cutover step MODULE [--dry-run] [--force] | rollback MODULE [--force] | status | check MODULE | modules"
+            "usage: cutover step MODULE [--dry-run] [--force] | rollback MODULE [--force] | status [MODULE] [--json] [--require FILE] | check MODULE | modules"
                 .into(),
         )
     };
@@ -709,4 +781,10 @@ pub(crate) fn run_with(reg: &[Box<dyn Module>], env: &Env, args: &[String]) -> R
         ("modules", []) => Ok(reg.iter().map(|m| m.name().to_owned()).collect()),
         _ => Err(usage()),
     }
+}
+
+/// Whether the authority switch is taken. A switch file that cannot be read counts as taken: the caller uses this to
+/// refuse more, never less (a run token's person unknown to core.db is let through only before the authority switch).
+pub(crate) fn authority_switched(layout: &Layout) -> bool {
+    state::read(layout, "authority").map_or(true, |s| s.is_some_and(|s| s.phase == Phase::Switched))
 }

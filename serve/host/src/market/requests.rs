@@ -426,7 +426,22 @@ mod tests {
 
     #[tokio::test]
     async fn signing_in_completes_the_card_and_sends_its_messages_again() {
+        // This one runs turns, so the bot is a kith agent (stand-in kernel); its folder is `<dir>/bot`.
+        let _one = loop {
+            match crate::remote::account::ONE_AT_A_TIME.try_lock() {
+                Ok(guard) => break guard,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(20)).await,
+            }
+        };
+        *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap() =
+            Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/kernel_agents.py"));
         let (hub, dir) = fixture();
+        std::fs::create_dir_all(dir.join("bot")).unwrap();
+        let mut cfg = hub.store.bot("bot").unwrap().unwrap().config;
+        cfg.hq_agent =
+            Some(crate::store::AgentName::new(format!("{}.bot", dir.file_name().unwrap().to_string_lossy())).unwrap());
+        hub.store.save_bot(&cfg).unwrap();
+        hub.send_cmd("bot", Cmd::Reconfigure(Box::new(cfg))).unwrap();
         let lane = Lane::main("bot");
         let user =
             |text: &str| hub.add_entry(&lane, EntryKind::User, 1, &json!({"text":text,"status":"sent"})).unwrap().id;
@@ -438,7 +453,7 @@ mod tests {
         assert_eq!(cards[0].data["connectionRequest"]["entryIds"], json!([first, second]));
         agent_signed_in(&hub, "fixture").unwrap();
         assert_eq!(hub.store.entry(&cards[0].id).unwrap().data["connectionRequest"]["status"], "ready");
-        let prompts = dir.join("prompts.jsonl");
+        let prompts = dir.join("bot/prompts.jsonl");
         let sent = tokio::time::timeout(std::time::Duration::from_secs(20), async {
             while !std::fs::read_to_string(&prompts).is_ok_and(|p| p.contains("alpha-7") && p.contains("bravo-9")) {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -447,6 +462,7 @@ mod tests {
         sent.await.expect("both messages go out again");
         hub.shutdown().await;
         let _ = std::fs::remove_dir_all(dir);
+        *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     #[tokio::test]

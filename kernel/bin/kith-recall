@@ -87,10 +87,13 @@ def thread_command(cmd, argv):
 
 
 def ask_host(argv, token, sock_path):
-    """A guest run (the host gave it KITH_RUN_TOKEN and KITH_RUN_SOCKET) never reads the index and never trusts
-    KITH_PERSON: the host decides who is asking from the token and runs recall for it. One JSON line each way. A host
-    that is gone, restarted or says no is an empty answer, not a traceback."""
+    """A guest run (the host gave it KITH_RUN_TOKEN, and KITH_CORE_RUN_SOCKET for the core's run socket) never reads the
+    index and never trusts KITH_PERSON: the core decides who is asking from the token and runs recall for it. One JSON
+    line each way. A core that is gone, restarted or says no, and a run with no core socket, is an empty answer, not a
+    traceback and never the owner's path."""
     empty = '[]' if '--json' in argv else 'nothing recalled'
+    if not sock_path:
+        print(empty); return 0
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(40)
@@ -118,8 +121,8 @@ def ask_host(argv, token, sock_path):
 def main(argv):
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip()); return 0
-    token, sock_path = os.environ.get('KITH_RUN_TOKEN'), os.environ.get('KITH_RUN_SOCKET')
-    if token and sock_path:
+    token, sock_path = os.environ.get('KITH_RUN_TOKEN'), os.environ.get('KITH_CORE_RUN_SOCKET')
+    if token:
         if argv[0] in ('index', 'summarise', 'forget'):   # a guest never reads the index or changes threads
             print('kith recall: %s is not available in this run' % argv[0], file=sys.stderr); return 2
         return ask_host(argv, token, sock_path)

@@ -1,0 +1,11 @@
+\* The design of Handover.tla (see its header for what each switch means): H1 tick.lock, H2 anchor, H3 live skip, H4 per-job
+\* rollback (the fixed form). A variant's .set file (variants/h-*.set) overrides lines here. MaxMin 3: 4 did not finish in 20 minutes.
+MaxMin = 3
+TickLock = TRUE
+Anchor = "anchor"
+LiveSkip = TRUE
+Rollback = "perjobfrom"
+CoreSpan = TRUE
+OldTick = FALSE
+OldWait = TRUE
+ShaCheck = TRUE

@@ -6,7 +6,7 @@ Same path as place folders (`place-folders.md`): kernel JSON, host API, apps.
 
 All methods are `POST /api/<method>` (loopback bearer token) or the same call over a phone's E2E channel. They are
 read-only and none is in `LOCAL_ONLY` (`api/devices.rs`): a paired phone with the Control scope may read and search
-a kith bot's memory. These are the agent's own files, not Kith's bot memory (`memory`, `memoryCall`).
+a kith bot's memory. These are the agent's own files, not Kith's bot memory (the host's old `memory` methods are gone).
 
 ## `kithInfo { botId, refresh?: bool }`
 
@@ -42,7 +42,7 @@ Passed through as is: read the keys you know and ignore the rest. Only `memory.d
 ```
 
 Values to know: `schedules[].source` says where a job comes from (`kith` = kith-sched, `launchd` = the agent's own LaunchAgent, whose `id` is its Label and `last_status` is always null); apps may ignore it.
-Also: `schedules[].last_status` is `"running"`, `"done"` or null (never ok/failed), and `package.version`
+Also: `schedules[].last_status` is `"running"`, `"done"` or null on the files; once the schedules are the core's it is the core's word for the newest run (`running`, `queued`, `done`, `failed`, `cancelled`) or null, and `package.version`
 is a fingerprint hash such as `393def5f55`, not a semver number. `errors` names the parts kith could not read (for example `cost`), so a page can say so instead of showing nothing.
 
 ## `kithMemoryFile { botId, path }`

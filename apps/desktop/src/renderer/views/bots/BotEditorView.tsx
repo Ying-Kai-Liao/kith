@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ProjectInfo } from '@shared/place-folders'
 import { draftOf, type BotDraft, type DirListing } from '@shared/models'
-import { AgentIcon } from '../../components/AgentIcon'
 import { avatarImage, CREW, SPARES, type AvatarImage } from '@shared/crew'
 import { CrewPortrait, LiveBot } from '../../components/Avatar'
-import { CardSection, ChoicePicker, DropdownMenu, IconButton, Pill, SearchField, Spinner, ValueRow } from '../../components/Controls'
+import { CardSection, DropdownMenu, IconButton, Pill, SearchField, Spinner, ValueRow } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { ModalHeader, Sheet, SheetPage, useDismiss } from '../../components/Overlay'
 import { HStack, IconSlot, VStack } from '../../components/Stack'
@@ -13,9 +12,7 @@ import { paletteValue, parseColor } from '@shared/living-bots'
 import { AVATAR_PALETTE } from '../../lib/theme'
 import { useStore } from '../../store/context'
 import { botSections, permissionMenu, permissionMode } from '@shared/bot-sections'
-import { useAgentModels } from './agent-models'
-import { AgentModelPicker } from './AgentModelPicker'
-import { errorText, fillDefaults, isValid, lastPathComponent, normalized, usePlugins, type Plugins } from './drafts'
+import { errorText, isValid, lastPathComponent, normalized, usePlugins, type Plugins } from './drafts'
 import { FormSheet } from '../marketplace/pieces'
 import { SkillSheet, type SkillRef } from '../marketplace/SkillSheet'
 import { AutoTextArea, Field, SwitchRow } from './parts'
@@ -23,21 +20,15 @@ import { useKithInfo } from './kith/use-kith'
 import { HqSettings } from './kith/HqSettings'
 import './bots.css'
 
-/** Create or edit a bot in a modal: the settings form plus Close / Save. */
+/** Edit a bot in a modal: the settings form plus Close / Save. */
 export function BotEditorView({ draft: initial }: { draft: BotDraft }) {
   const store = useStore()
   const dismiss = useDismiss()
   const plugins = usePlugins(store)
-  const isNew = !initial.id
-  const [draft, setDraft] = useState(() => (isNew ? fillDefaults(store, initial, { connectors: [], skills: [] }) : initial))
+  const [draft, setDraft] = useState(initial)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const online = store.connection.kind === 'online'
-
-  // A new bot's connectors and skills start on once the computer has listed them.
-  useEffect(() => {
-    if (isNew && plugins) setDraft((d) => fillDefaults(store, d, plugins))
-  }, [isNew, plugins, store])
 
   const save = () => {
     if (!isValid(draft) || saving || !online) return
@@ -45,10 +36,7 @@ export function BotEditorView({ draft: initial }: { draft: BotDraft }) {
     setError(null)
     store
       .save(normalized(draft))
-      .then((bot) => {
-        dismiss()
-        if (isNew) store.setSelection(bot.id)
-      })
+      .then(() => dismiss())
       .catch((e: unknown) => setError(errorText(e)))
       .finally(() => setSaving(false))
   }
@@ -56,8 +44,8 @@ export function BotEditorView({ draft: initial }: { draft: BotDraft }) {
   return (
     <SheetPage>
       <ModalHeader
-        title={isNew ? 'New agent' : 'Settings'}
-        trailing={saving ? <Spinner /> : <IconButton title={isNew ? 'Create' : 'Save'} icon="checkmark" disabled={!isValid(draft) || saving || !online} onClick={save} />}
+        title="Settings"
+        trailing={saving ? <Spinner /> : <IconButton title="Save" icon="checkmark" disabled={!isValid(draft) || saving || !online} onClick={save} />}
       />
       <div className="bot-editor-body">
         <BotSettingsForm draft={draft} onChange={setDraft} error={error} plugins={plugins} />
@@ -119,10 +107,6 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
   const [viewingSkill, setViewingSkill] = useState<SkillRef | null>(null)
   const set = <K extends keyof BotDraft>(key: K, value: BotDraft[K]) => onChange((d) => ({ ...d, [key]: value }))
   const mode = permissionMode(draft.permission)
-  // Options belong to one model.
-  const setModel = useCallback((model: string | null) => onChange((d) => (d.model === model ? d : { ...d, model, modelOptions: {} })), [onChange])
-  const setModelOptions = useCallback((modelOptions: Record<string, string>) => onChange((d) => ({ ...d, modelOptions })), [onChange])
-  const models = useAgentModels(draft.backend)
   const saved = draft.id ? (store.bots.get(draft.id) ?? null) : null
   // Kith's project list for the default-project menu; without Kith it stays empty and the menu offers None.
   const [projects, setProjects] = useState<ProjectInfo[] | null>(null)
@@ -132,12 +116,10 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
     return () => { live = false }
   }, [store])
 
-  const backends = store.hello?.backends ?? []
-  const backend = backends.find((b) => b.id === draft.backend)
   // An hq bot's Details and Settings tabs sit beside the Kith sections, which show the same facts: those cards go.
   // The editor sheet has no Kith sections, so it keeps everything.
   const kith = useKithInfo(draft.id ?? '')
-  const shown = botSections(saved?.hqAgent, part === 'all' || kith?.unsupported ? null : (kith?.info ?? null), !kith || kith.unsupported)
+  const shown = botSections(part === 'all' || kith?.unsupported ? null : (kith?.info ?? null), !kith || kith.unsupported)
   const connectors = plugins?.connectors ?? []
   const skills = plugins?.skills ?? []
 
@@ -146,36 +128,9 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
       <AutoTextArea className="field-box" value={draft.description} placeholder="e.g. Reviews PRs. Never pushes without asking." minRows={3} maxRows={8} onChange={(v) => set('description', v)} />
     </Field>
   )
-  // hq is the one source of an hq bot's permission, model and effort: one set of rows replaces Kith's own.
-  // A kith agent's model, effort and harness are the CLI's (`kith <agent> set …`): never the host-native pickers, whose edits the host would drop.
-  const model = kith ? [<HqSettings key="hq" kith={kith} inSheet={part === 'often'} />] : [
-    <AgentModelPicker key="model" backend={draft.backend} models={models} selection={draft.model} onChange={setModel} options={draft.modelOptions ?? {}} onOptionsChange={setModelOptions} />,
-  ]
-
-  const agent = shown.backendPicker ? (
-    <VStack key="agent" gap={8}>
-      <ValueRow label="Agent">
-        <ChoicePicker
-          selection={draft.backend}
-          options={[
-            ...backends.map((b) => ({ id: b.id, label: b.available ? b.name : `${b.name} (not installed)`, leading: <AgentIcon registry={b.registry ?? b.id} size={14} /> })),
-            { id: 'custom', label: 'Custom command', leading: <AgentIcon registry="custom" size={14} /> },
-          ]}
-          onChange={(id) => set('backend', id)}
-        />
-      </ValueRow>
-      {backend && !backend.available ? <Text size="caption" tone="attention">{backend.installHint}</Text> : null}
-      {draft.backend === 'custom' ? (
-        <input
-          className="field-box fade-in bot-command"
-          value={draft.command ?? ''}
-          placeholder="ACP command, e.g. my-agent --acp"
-          spellCheck={false}
-          onChange={(e) => set('command', e.target.value || null)}
-        />
-      ) : null}
-    </VStack>
-  ) : null
+  // hq is the one source of an hq bot's permission, model, effort and Fast mode: one set of rows replaces Kith's own.
+  // A kith agent's model, effort and harness are the CLI's (`kith <agent> set …`); a room has none of them.
+  const model = kith ? [<HqSettings key="hq" kith={kith} inSheet={part === 'often'} />] : []
 
   if (part === 'often') {
     return (
@@ -183,13 +138,11 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
         <div className="bot-form-content">
           {bare ? (
             <>
-              {agent}
               {model}
             </>
           ) : (
             <CardSection title="About">
               {shown.instructions ? instructions : null}
-              {agent}
               {model}
             </CardSection>
           )}
@@ -223,7 +176,6 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
           <ValueRow label="Computer">
             <Text truncate>{store.hostName}</Text>
           </ValueRow>
-          {part === 'all' ? agent : null}
           {part === 'all' ? model : null}
           <ValueRow
             label="Workspace"

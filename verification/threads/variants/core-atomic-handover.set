@@ -1,0 +1,10 @@
+CoreWriter = TRUE
+ClaudeForks = FALSE
+Terminals = {"t1"}
+MaxSends = 1
+OffTurnWakes = FALSE
+WrapperDies = FALSE
+OwnerNoAnswer = FALSE
+StartTerminalBorn = FALSE
+HeldLaunch = TRUE
+HandoverAtomic = TRUE

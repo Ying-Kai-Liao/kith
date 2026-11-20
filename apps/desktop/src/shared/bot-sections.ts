@@ -4,12 +4,12 @@ import type { KithInfo } from './kith-info.ts'
  * Which of Kith's own cards an hq bot's page still shows. The Kith sections (serve-bot-details) carry
  * the same facts, read from the agent's package, so each fact shows once and Kith's copy wins.
  * A card goes only once Kith has the fact on screen: while the details load, fail or are missing,
- * every card stays, and a plain bot (no `hqAgent`) always shows all of them.
+ * every card stays. Every bot is a kith agent but a room, and a room shows no host-native picker either.
  */
 export interface BotSections {
   /** "Standing instructions": Kith's About shows the agent's role. */
   instructions: boolean
-  /** The host-native agent (backend) picker. Never for an hq bot: the harness is `kith <agent> set harness`, a row of `HqSettings`. */
+  /** The host-native agent (backend) picker. Always false: the harness is `kith <agent> set harness`, a row of `HqSettings`. Kept so the sections stay one shape. */
   backendPicker: boolean
   /**
    * The harness's own notes tab in Memory. For an hq bot it is Claude Code's MEMORY.md of the bot's working
@@ -28,11 +28,9 @@ export interface BotSections {
 export const ALL_SECTIONS: BotSections = { instructions: true, backendPicker: true, harnessMemoryTab: true, kithSettings: true }
 
 export function botSections(
-  hqAgent: string | null | undefined,
   info: Pick<KithInfo, 'description' | 'role' | 'harness' | 'errors'> | null,
   unsupportedHost = false,
 ): BotSections {
-  if (!hqAgent) return ALL_SECTIONS
   const kithSettings = unsupportedHost
   if (!info) return { ...ALL_SECTIONS, backendPicker: false, harnessMemoryTab: false, kithSettings }
   return {

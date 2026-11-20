@@ -51,6 +51,7 @@ fn key_account(home: &Path) -> String {
 /// sealed. Without this the item stays in the login keychain of the machine that ran the tests.
 #[allow(dead_code)]
 pub fn forget_home(home: &Path) {
+    let _ = std::fs::remove_dir_all(agents_dir(home));
     // Best effort; the service name is the core's (secrets/keystore.rs).
     let account = key_account(home);
     #[cfg(target_os = "macos")]
@@ -90,10 +91,74 @@ impl Drop for Reaper {
     }
 }
 
+/// Where the kith agents of the test host `home` live: a folder beside the host's data folder, not in it (a folder
+/// inside the host's data is its secrets, and a run may not send those).
+#[allow(dead_code)]
+pub fn agents_dir(home: &Path) -> std::path::PathBuf {
+    let mut name = home.file_name().unwrap_or_default().to_os_string();
+    name.push("-agents");
+    home.with_file_name(name)
+}
+
+/// The variables that make a test host's kernel `tests/fixtures/kernel_agents.py`: it lists the folders of
+/// [`agents_dir`] as kith agents, and each starts on the scripted ACP agent its `acp` file names (see
+/// `host::Host::agent`). One-bot-model C5: every bot of a test is a kith agent.
+#[allow(dead_code)]
+pub fn agents_env(home: &Path) -> Vec<(&'static str, String)> {
+    let agents = agents_dir(home);
+    std::fs::create_dir_all(&agents).expect("the agents' folder");
+    let fixtures = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let agents_text = agents.to_string_lossy().into_owned();
+    let acp = format!("{} '{}'", python_agent(&fixtures.join("acp_dispatch.py")), agents_text);
+    vec![
+        ("KITH_KERNEL_BIN", fixtures.join("kernel_agents.py").to_string_lossy().into_owned()),
+        ("STUB_AGENTS_HOME", agents_text),
+        ("KITH_SERVE_HQ_ACP_COMMAND", acp),
+    ]
+}
+
+/// A kith agent `name` on the scripted ACP agent `tests/fixtures/<fixture>` with `args` for a host started with
+/// [`agents_env`]: writes its folder, has the host sync, and returns the id of its bot (messages are not tasks).
+#[allow(dead_code)]
+pub async fn agent_bot(base: &str, token: &str, home: &Path, name: &str, fixture: &str, args: &str) -> String {
+    let script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture);
+    let dir = agents_dir(home).join(name);
+    std::fs::create_dir_all(&dir).expect("the agent's folder");
+    std::fs::write(dir.join("acp"), format!("{} {args}", python_agent(&script))).expect("the agent's command");
+    let post = |method: &'static str, body: serde_json::Value| async move {
+        let res = reqwest::Client::new()
+            .post(format!("{base}/api/{method}"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+            .expect(method);
+        let ok = res.status().is_success();
+        let body: serde_json::Value = res.json().await.expect(method);
+        assert!(ok, "{method} failed: {body}");
+        body
+    };
+    post("syncHqBots", serde_json::json!({})).await;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let seen = snapshot(base, token).await;
+        if let Some(bot) = seen["bots"].as_array().into_iter().flatten().find(|b| b["hqAgent"] == name) {
+            let id = bot["id"].as_str().expect("a bot id").to_owned();
+            post("updateBot", serde_json::json!({"id": id, "tasks": false})).await;
+            return id;
+        }
+        assert!(Instant::now() < deadline, "the agent {name} never got a bot");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// [`serve`] with extra environment variables for the host.
 pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
     let deadline = Instant::now() + Duration::from_secs(30);
+    // The host's log, appended across restarts: a start that is too slow shows where it spent its time.
+    let log_path = host_log(home);
     loop {
+        let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path).expect("the host's log file");
         let port = std::net::TcpListener::bind("127.0.0.1:0").expect("free port").local_addr().expect("port").port();
         let base = format!("http://127.0.0.1:{port}");
         let mut child = Reaper(Some(
@@ -115,8 +180,9 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 .env("KITH_SERVE_MIN_FREE_MEMORY_PERCENT", "0")
                 .env("KITH_SERVE_MAX_SWAP_USED_GB", "0")
                 .envs(env.iter().map(|(k, v)| (*k, if *k == "KITH_STATE" { short_link(v) } else { (*v).to_owned() })))
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                // The log goes to stdout (tracing's default), a panic to stderr: both to the file.
+                .stdout(log.try_clone().expect("the host's log file"))
+                .stderr(log)
                 .spawn()
                 .expect("start the host"),
         ));
@@ -126,14 +192,76 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 if !env.iter().any(|(k, _)| *k == "KITH_SERVE_CHANNELS") {
                     assert_channels_off(&base).await;
                 }
+                assert_quick_start(&log_path, env);
                 let child = child.0.take().unwrap();
                 return (child, base);
             }
-            assert!(Instant::now() < deadline, "host didn't start");
+            assert!(Instant::now() < deadline, "host didn't start{}", log_tail(&log_path));
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        assert!(Instant::now() < deadline, "host didn't start");
+        assert!(Instant::now() < deadline, "host didn't start{}", log_tail(&log_path));
     }
+}
+
+/// Where a test host's output goes: beside its machine state (short; in /tmp on Unix, in the home's `machine-state`
+/// folder elsewhere), not among the files a test reads.
+fn host_log(home: &Path) -> std::path::PathBuf {
+    let dir = machine_state(home);
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("host-output.log")
+}
+
+/// The end of the host's log, for a failure message.
+fn log_tail(path: &Path) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().collect();
+    format!("; the host's log ({}):\n{}", path.display(), lines[lines.len().saturating_sub(40)..].join("\n"))
+}
+
+/// How long a test host may spend in its own start-up (from `serve` to listening, less the wait for the host lock). A
+/// healthy one takes about a second even on a busy CI runner; a start that does more (a hash of the whole debug binary, a
+/// wait on the core) is a bug, and it fails here with the phases instead of as a flaky "host didn't start" under load.
+const QUICK_START: Duration = Duration::from_secs(10);
+
+/// The host's own start-up time, from its last `start-up` and `kith-serve listening` lines, is under [`QUICK_START`]. A
+/// host that logged no such line fails too (the guard must not turn itself off), unless `RUST_LOG` chose what it logs.
+fn assert_quick_start(path: &Path, env: &[(&str, &str)]) {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let field = |marker: &str, name: &str| -> Option<u64> {
+        let line = strip_ansi(text.lines().rev().find(|l| l.contains(marker))?);
+        line.split_whitespace().find_map(|w| w.strip_prefix(name)?.strip_prefix('=')?.parse().ok())
+    };
+    let (Some(total), Some(lock)) =
+        (field("kith-serve listening", "start_up_ms"), field("start-up: the host lock", "lock_ms"))
+    else {
+        let filtered = std::env::var_os("RUST_LOG").is_some() || env.iter().any(|(k, _)| *k == "RUST_LOG");
+        assert!(filtered, "the host logged no start-up time{}", log_tail(path));
+        return;
+    };
+    let ms = total.saturating_sub(lock);
+    assert!(
+        Duration::from_millis(ms) < QUICK_START,
+        "the host took {ms} ms to start, not counting {lock} ms for the host lock (at most {} s){}",
+        QUICK_START.as_secs(),
+        log_tail(path)
+    );
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Whether the host answering at `base` is the one for `home`. `/health` alone is not proof: another

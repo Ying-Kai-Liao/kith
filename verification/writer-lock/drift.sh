@@ -8,12 +8,10 @@
 # set SYNC below to the commit you checked (and in .claude/skills/writer-lock/SKILL.md).
 set -euo pipefail
 
-# Where the models were PINNED, not confirmed: Holder.tla was derived from rust-rebuild 73a03656 (M0d #663/#669 and
-# holder_link.rs, M0c); WriterLock4.tla models the design, not code. Files that changed in the covered paths since
-# are listed below as drift on purpose: nobody has re-read them against the models yet. Move SYNC only after that
-# re-read (skill, "When you change covered code"). The claim code proper (the stub's lock held across the engine's
-# life, claim ids on the wire, the core's claim transaction) is M3; add its files to FILES as they land.
-SYNC=73a03656ad207a7abc854136eda0ab848a2ab591
+# Confirmed at f9b5e509 (2026-11-17, the re-sync before the claims step): every covered change since the last pin (1720d27e)
+# was read against the models (verification/writer-lock/results4.md, "Added by the re-sync before the claims step"). Move SYNC
+# only after the next re-read (skill, "When you change covered code").
+SYNC=f9b5e509f476bb88f6203a125ae863369ba03aa9
 
 FILES=(
   core/stub                           # the start stub: the writer lock (fd CLOEXEC, kept to the engine's exit), redeem, the engine as its child
@@ -26,6 +24,17 @@ FILES=(
   core/runtime/src/wake/queue.rs      # (M3-10b1, Claims4.tla) give_back / release: a wake given back after a stop
   core/runtime/src/wake/turns.rs      # (M3-10c, Claims4.tla) the wake's turn: start_in parks terminal_live, a run's end closes its turn
   core/runtime/src/import/claims.rs  # (M3-10b3) the claim files into core.db: only live claimers, never a second live row on a conversation
+  core/runtime/src/kill_resend.rs     # (M3-12, Claims4 SendKill) the daemon's own tick re-sends the kill of `ending` claims; victims and the dead leader's group
+  core/runtime/src/hostclaim.rs       # (M3-12, M3-10f) the host's claim rows: one claims-API call each, refusals as data
+  core/runtime/src/hostclaim_tests.rs # (M3-12) the same, real-core tests: a claim left ending, a hello under the host's instance name
+  core/runtime/src/holder_link_tests.rs # (M3-12) the holder link's tests (the link itself is holder_link.rs)
+  core/kernel/src/procstart.rs        # (M3-12, K2) orphan_group, same_process, comparable, claim_victims: what "the process is gone" means
+  core/procstart                      # (M3-12) the stamp crate behind it (Linux b<boot_id>:<ticks>, unknown cross-form)
+  core/runtime/src/cutover/modules/claims.rs # (#1010) the claims step: files imported as external rows, tombstone then files re-read then marker and Switched, rollback refuses live claims
+  core/kernel/src/threads/writer.rs   # (R5) the takers' side of claim.external in Rust: revokeSeen only from KITH_REVOKE_SEEN, the agent with every claim, proc never held when down
+  kernel/bin/kith-sessions            # (R5) the Python twin of the takers (core_take, read_epoch, proc_claim): still the rollback and `run`
+  serve/host/src/agent/bot/writer.rs  # adopt_once: the host's adopt (Claims4 Meet), done only once it went through, retried with a growing wait
+  serve/host/src/terminal             # (M3-12, M3-10f, P6-P9) core_writer.rs, warm_stub.rs, core_holders.rs, core_claims.rs, core_strays.rs: in Writer mode the core row and the stub's lock are the writer (no claim file); claim.rs, sync.rs, registry.rs the Files mode
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

@@ -1,9 +1,9 @@
 // Builds the host the app bundles: node tools/native-host.mjs. macOS: build/native/kith-serve,
-// build/native/kith-tts (arm64) and build/native/kith/ (bin/kith, bin/kith-stub + share/kith/kernel, the release
+// build/native/kith-tts (arm64) and build/native/kith/ (bin/kith, bin/kith-stub, bin/kith-holder + share/kith/kernel, the release
 // layout; universal). `fast` (the sandbox runs of tools/dev.mjs): the host's `dev-app` profile for this
 // Mac's architecture only, since that build never leaves the Mac that made it. KITH_HOST_NATIVE_ONLY=1
 // does the same for the release profile (CI's unsigned build: its runner has no x86_64 target). Windows:
-// build/native/kith-serve.exe and kith-servew.exe (runs it at sign-in), plus the computer-use
+// build/native/kith-serve.exe and kith-servew.exe (runs it at sign-in), build/native/kith/bin/kith-stub.exe and kith-holder.exe, plus the computer-use
 // driver the host starts from beside itself. Linux apps use the installed host, so there's
 // nothing to do there.
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
@@ -33,6 +33,15 @@ if (process.platform === 'win32') {
   build(target)
   copyFileSync(built(target, 'kith-serve.exe'), join(out, 'kith-serve.exe'))
   copyFileSync(built(target, 'kith-servew.exe'), join(out, 'kith-servew.exe'))
+  // The conversation lock's launcher and the process holder, in the macOS layout (Resources/kith/bin) where the core's
+  // `beside_this` looks (kith/bin beside kith-serve.exe). There is no kith.exe here, so no check-bin-dir.sh.
+  const bin = join(out, 'kith/bin')
+  rmSync(join(out, 'kith'), { recursive: true, force: true })
+  mkdirSync(bin, { recursive: true })
+  for (const name of ['kith-stub', 'kith-holder']) {
+    build(target, '-p', name)
+    copyFileSync(built(target, `${name}.exe`), join(bin, `${name}.exe`))
+  }
   run(process.execPath, [join(root, '../packaging/cua-driver/fetch.mjs'), 'windows-x86_64', out])
 } else {
   const native = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
@@ -56,6 +65,11 @@ if (process.platform === 'win32') {
   // The conversation lock's launcher, beside kith where `kith <agent>` looks for it; without it every run goes unlocked.
   for (const target of targets) build(target, '-p', 'kith-stub')
   run('lipo', ['-create', '-output', join(kith, 'bin/kith-stub'), ...targets.map((t) => built(t, 'kith-stub'))])
+  // The process holder Writer mode connects to: the host's core finds it in this folder too (Resources/kith/bin).
+  for (const target of targets) build(target, '-p', 'kith-holder')
+  run('lipo', ['-create', '-output', join(kith, 'bin/kith-holder'), ...targets.map((t) => built(t, 'kith-holder'))])
+  // Fails here, before signing and notarizing, if the CLI folder lacks a helper.
+  run('sh', [join(root, '../../scripts/check-bin-dir.sh'), join(kith, 'bin')])
   // The kernel's VERSION is the app's version: the app installs this copy as its CLI (Resources/kith-install.sh).
   // A release build names it in KITH_APP_VERSION (the tag; electron-builder gets the same through extraMetadata).
   const version = process.env.KITH_APP_VERSION || JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version

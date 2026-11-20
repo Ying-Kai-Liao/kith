@@ -9,6 +9,9 @@ use serde_json::{Map, Value, json};
 
 use super::{Ctx, iso_utc, os, write_json};
 
+/// The marker in the registry folder once the `transcripts` module is stepped: the core writes `<sid>.json` from then on.
+pub const TOMBSTONE: &str = "registry.tombstone";
+
 /// The one-shot kinds `bin/kith` labels a run with (`KITH_RUN_KIND`).
 pub const ONE_SHOTS: [&str; 3] = ["ask", "schedule", "helper"];
 
@@ -95,9 +98,62 @@ fn claude_pid(c: &Ctx, sid: &str) -> Option<i64> {
     (named != 0).then_some(named)
 }
 
+/// A kith-stub above `pid` (claude runs under the conversation lock): the stub is what a claim and the host's intents name,
+/// not claude, so its pid and start time go in the record (`launcher_of`).
+pub(super) fn launcher_of(pid: Option<i64>) -> Vec<(&'static str, Value)> {
+    let Some(pid) = pid else { return Vec::new() };
+    let (parent, _) = os::ps_row(pid);
+    if parent <= 1 {
+        return Vec::new();
+    }
+    let (_, comm) = os::ps_row(parent);
+    if Path::new(comm.trim()).file_name().and_then(|n| n.to_str()) != Some("kith-stub") {
+        return Vec::new();
+    }
+    vec![
+        ("launcher", json!(parent)),
+        (
+            "launcherStart",
+            os::proc_start(parent).map_or(Value::Null, Value::from),
+        ),
+    ]
+}
+
+/// The registry record of a hook, with its path: `None` for a session that is not listed (not a listable run, no session
+/// id, no state folder).
+pub(super) struct Built {
+    pub sid: String,
+    pub path: PathBuf,
+    pub entry: Value,
+}
+
 /// `record`: the `SessionStart` hook (stdin: the hook's JSON). Writes the registry file for a listable session, nothing
 /// otherwise. Never fails the session: an error is returned for the caller to print, and the exit code stays 0.
+///
+/// The Files-mode write only: once the registry is the core's the caller uses [`super::spool::record`].
 pub fn record(c: &Ctx, stdin: &str) -> Result<(), String> {
+    let Some(b) = build(c, stdin)? else {
+        return Ok(());
+    };
+    let d = c.reg_dir().unwrap_or_default();
+    // Once the transcripts are the core's (the step writes this marker) the core is the registry's only writer.
+    if d.join(TOMBSTONE).exists() {
+        return Err(format!(
+            "the session registry is the core's ({TOMBSTONE}); not written here"
+        ));
+    }
+    write_entry(&d, &b)
+}
+
+/// The write of Files mode: under the registry's per-sid lock (not had within 1 s: the write goes on as before, fail
+/// open), through a temp file and a rename.
+pub(super) fn write_entry(d: &Path, b: &Built) -> Result<(), String> {
+    let _held = sid_lock(d, &b.sid);
+    write_json(&b.path, &b.entry, true).map_err(|e| e.to_string())
+}
+
+/// What the hook would write, without writing it.
+pub(super) fn build(c: &Ctx, stdin: &str) -> Result<Option<Built>, String> {
     let hook: Value = serde_json::from_str(stdin).map_err(|e| e.to_string())?;
     let text = |k: &str| {
         hook.get(k)
@@ -112,10 +168,10 @@ pub fn record(c: &Ctx, stdin: &str) -> Result<(), String> {
             .unwrap_or_default()
     });
     let (Some(sid), Some(d)) = (sid, d) else {
-        return Ok(());
+        return Ok(None);
     };
     if !listable(c, &cwd) {
-        return Ok(());
+        return Ok(None);
     }
     let path = d.join(format!("{sid}.json"));
     let mut started = iso_utc();
@@ -160,7 +216,52 @@ pub fn record(c: &Ctx, stdin: &str) -> Result<(), String> {
             .filter(|_| kind.as_deref() != Some("terminal"))
             .and_then(os::proc_start)),
     );
-    write_json(&path, &Value::Object(entry), true).map_err(|e| e.to_string())
+    for (k, v) in launcher_of(pid) {
+        put(k, v);
+    }
+    // The order key of the registry's records (kernel/lib/kith_registry.py, the transcripts contract): nanoseconds since the epoch.
+    let ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX));
+    put("recordedAt", json!(ns));
+    Ok(Some(Built {
+        sid,
+        path,
+        entry: Value::Object(entry),
+    }))
+}
+
+/// The registry's per-sid lock (transcripts contract A8; `kith_registry.sid_lock`, the core's settle takes it too): an
+/// exclusive flock on `<reg>/locks/<sid>.lock` (folder 0700, file 0600, never deleted), waited for at most 1 s. `None`
+/// when it was not had (held past the wait, a sid that is no file name, or no way to open it).
+pub(super) fn sid_lock(reg: &Path, sid: &str) -> Option<std::fs::File> {
+    use fs2::FileExt;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    if sid.is_empty()
+        || sid.len() > 64
+        || !sid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        return None;
+    }
+    let dir = reg.join("locks");
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).ok()?;
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(dir.join(format!("{sid}.lock")))
+        .ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while f.try_lock_exclusive().is_err() {
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    Some(f)
 }
 
 /// A registry file's content, `{}` when it is missing or damaged.

@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "54712c01874595d9ab8587f9999a6efca93e2c59b246057b23fc047a53519458"
+    public static let sha256 = "15dbde169b01dba72070adde5c9306aa4603cbeaaba4f228e4d108f861666205"
 }
 
 extension HostContract {
@@ -350,8 +350,9 @@ extension HostContract {
         public var analytics: JSONValue?
         public var urls: JSONValue?
         public var cli: JSONValue?
+        public var nativeBots: Int64?
 
-        public init(hostId: String, computerId: String, signKey: String, boxKey: String, name: String, version: String, `protocol`: Int64, minProtocol: Int64, os: String, rev: Int64, store: StoreHealth, grantedAgents: [GrantedAgent]? = nil, cloud: String? = nil, device: Device? = nil, home: String? = nil, backends: JSONValue? = nil, screen: JSONValue? = nil, analytics: JSONValue? = nil, urls: JSONValue? = nil, cli: JSONValue? = nil) {
+        public init(hostId: String, computerId: String, signKey: String, boxKey: String, name: String, version: String, `protocol`: Int64, minProtocol: Int64, os: String, rev: Int64, store: StoreHealth, grantedAgents: [GrantedAgent]? = nil, cloud: String? = nil, device: Device? = nil, home: String? = nil, backends: JSONValue? = nil, screen: JSONValue? = nil, analytics: JSONValue? = nil, urls: JSONValue? = nil, cli: JSONValue? = nil, nativeBots: Int64? = nil) {
             self.hostId = hostId
             self.computerId = computerId
             self.signKey = signKey
@@ -372,6 +373,7 @@ extension HostContract {
             self.analytics = analytics
             self.urls = urls
             self.cli = cli
+            self.nativeBots = nativeBots
         }
     }
 
@@ -461,6 +463,7 @@ extension HostContract {
         public var tasks: Bool?
         public var hqAgent: String?
         public var builtin: Bool?
+        public var needsKithAgent: Bool?
         public var project: String?
         public var person: String?
         public var createdAt: Int64
@@ -483,7 +486,7 @@ extension HostContract {
         public var lastAt: Int64
         public var botGuest: BotGuestRef?
 
-        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, builtin: Bool? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastSummary: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
+        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, builtin: Bool? = nil, needsKithAgent: Bool? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastSummary: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
             self.id = id
             self.kind = kind
             self.members = members
@@ -514,6 +517,7 @@ extension HostContract {
             self.tasks = tasks
             self.hqAgent = hqAgent
             self.builtin = builtin
+            self.needsKithAgent = needsKithAgent
             self.project = project
             self.person = person
             self.createdAt = createdAt
@@ -1026,6 +1030,114 @@ extension HostContract {
         }
     }
 
+    /// One stay of a person in a group room: open while leftGen is null. A gen is the seq of the join or leave line in the room's main lane.
+    public struct RoomPerson: Codable, Hashable, Sendable {
+        public var person: String
+        public var joinedGen: Int64
+        public var leftGen: Int64?
+
+        public init(person: String, joinedGen: Int64, leftGen: Int64? = nil) {
+            self.person = person
+            self.joinedGen = joinedGen
+            self.leftGen = leftGen
+        }
+    }
+
+    /// The people of a group room, every stay oldest first, and the room's gen (its newest join or leave, 0 for none). enabled says whether people in rooms are turned on at this host.
+    public struct RoomPeople: Codable, Hashable, Sendable {
+        public var enabled: Bool
+        public var gen: Int64
+        public var people: [RoomPerson]
+
+        public init(enabled: Bool, gen: Int64, people: [RoomPerson]) {
+            self.enabled = enabled
+            self.gen = gen
+            self.people = people
+        }
+    }
+
+    /// What making an invite answers: its id and links, when it lapses, and the person it is for.
+    public struct CreatedInvite: Codable, Hashable, Sendable {
+        public var inviteId: String
+        public var link: String
+        public var appLink: String
+        public var kithLink: String
+        public var webLink: String?
+        public var pageLink: String?
+        public var expiresAt: Int64
+        public var personId: String
+
+        public init(inviteId: String, link: String, appLink: String, kithLink: String, webLink: String? = nil, pageLink: String? = nil, expiresAt: Int64, personId: String) {
+            self.inviteId = inviteId
+            self.link = link
+            self.appLink = appLink
+            self.kithLink = kithLink
+            self.webLink = webLink
+            self.pageLink = pageLink
+            self.expiresAt = expiresAt
+            self.personId = personId
+        }
+    }
+
+    /// What adding or taking out a room's person did: the room's gen after it, and whether anything changed (a repeat changes nothing and takes no new gen).
+    public struct RoomPersonChange: Codable, Hashable, Sendable {
+        public var gen: Int64
+        public var changed: Bool
+
+        public init(gen: Int64, changed: Bool) {
+            self.gen = gen
+            self.changed = changed
+        }
+    }
+
+    /// One of a room's agents as a person is shown it: the member bot's id (a reply's author is this id) and its live name. Nothing else of the bot.
+    public struct MyRoomAgent: Codable, Hashable, Sendable {
+        public var id: String
+        public var name: String
+
+        public init(id: String, name: String) {
+            self.id = id
+            self.name = name
+        }
+    }
+
+    /// A group room a person is in right now: they have an open stay and are still granted every agent in it. agents are the names of the room's agents; agentList is the same agents with the bot id each reply is authored by (absent from a host before it, then the app has only the names); ownerName is the owner's display name (absent the same way, then the app says "the owner"); stay is the gen of their open stay, which send in the room must carry (a post written in an earlier stay is refused).
+    public struct MyRoom: Codable, Hashable, Sendable {
+        public var id: String
+        public var name: String
+        public var agents: [String]
+        public var agentList: [MyRoomAgent]?
+        public var ownerName: String?
+        public var stay: Int64
+
+        public init(id: String, name: String, agents: [String], agentList: [MyRoomAgent]? = nil, ownerName: String? = nil, stay: Int64) {
+            self.id = id
+            self.name = name
+            self.agents = agents
+            self.agentList = agentList
+            self.ownerName = ownerName
+            self.stay = stay
+        }
+    }
+
+    /// The group rooms a person is in right now.
+    public struct MyRooms: Codable, Hashable, Sendable {
+        public var rooms: [MyRoom]
+
+        public init(rooms: [MyRoom]) {
+            self.rooms = rooms
+        }
+    }
+
+    /// Whether leaving a room changed anything (false: they had already left).
+    public struct RoomLeft: Codable, Hashable, Sendable {
+        public var left: Bool
+
+        public init(left: Bool) {
+            self.left = left
+        }
+    }
+
     /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
     public struct BotProof: Codable, Hashable, Sendable {
         public var state: BotGuestState
@@ -1275,10 +1387,11 @@ extension HostContract {
         public var folder: String?
         public var clear: Bool?
         public var budget: Int64?
+        public var stay: Int64?
         public var engine: String?
         public var engineModel: String?
 
-        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil, engine: String? = nil, engineModel: String? = nil) {
+        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil, stay: Int64? = nil, engine: String? = nil, engineModel: String? = nil) {
             self.botId = botId
             self.text = text
             self.clientNonce = clientNonce
@@ -1291,6 +1404,7 @@ extension HostContract {
             self.folder = folder
             self.clear = clear
             self.budget = budget
+            self.stay = stay
             self.engine = engine
             self.engineModel = engineModel
         }
@@ -1798,6 +1912,67 @@ extension HostContract {
         }
     }
 
+    /// What `createInvite` takes.
+    public struct CreateInviteParams: Codable, Hashable, Sendable {
+        public var agents: [String: String]
+        public var name: String?
+        public var personId: String?
+        public var rooms: [String]?
+
+        public init(agents: [String: String], name: String? = nil, personId: String? = nil, rooms: [String]? = nil) {
+            self.agents = agents
+            self.name = name
+            self.personId = personId
+            self.rooms = rooms
+        }
+    }
+
+    /// What `addRoomPerson` takes.
+    public struct AddRoomPersonParams: Codable, Hashable, Sendable {
+        public var room: String
+        public var person: String
+
+        public init(room: String, person: String) {
+            self.room = room
+            self.person = person
+        }
+    }
+
+    /// What `removeRoomPerson` takes.
+    public struct RemoveRoomPersonParams: Codable, Hashable, Sendable {
+        public var room: String
+        public var person: String
+
+        public init(room: String, person: String) {
+            self.room = room
+            self.person = person
+        }
+    }
+
+    /// What `roomPeople` takes.
+    public struct RoomPeopleParams: Codable, Hashable, Sendable {
+        public var room: String
+
+        public init(room: String) {
+            self.room = room
+        }
+    }
+
+    /// What `myRooms` takes.
+    public struct MyRoomsParams: Codable, Hashable, Sendable {
+        public init() {
+        }
+    }
+
+    /// What `leaveRoom` takes.
+    public struct LeaveRoomParams: Codable, Hashable, Sendable {
+        public var room: String
+
+        public init(room: String) {
+            self.room = room
+        }
+    }
+
     /// Each method's name, as called.
     public enum Method: String, CaseIterable, Sendable {
         case hello
@@ -1849,13 +2024,19 @@ extension HostContract {
         case botLeave
         case peerAgents
         case peerRevokes
+        case createInvite
+        case addRoomPerson
+        case removeRoomPerson
+        case roomPeople
+        case myRooms
+        case leaveRoom
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic]
+    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople]
 
     /// What an invited person may call.
-    public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation]
+    public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation, .myRooms, .leaveRoom]
 
     /// What an invited person's unproven device may call.
     public static let unprovenMethods: [Method] = [.proveInvite]
@@ -1917,6 +2098,14 @@ extension HostContract {
         case "PeerAgents": _ = try d.decode(PeerAgents.self, from: data)
         case "HandleRevoke": _ = try d.decode(HandleRevoke.self, from: data)
         case "HandleRevokes": _ = try d.decode(HandleRevokes.self, from: data)
+        case "RoomPerson": _ = try d.decode(RoomPerson.self, from: data)
+        case "RoomPeople": _ = try d.decode(RoomPeople.self, from: data)
+        case "CreatedInvite": _ = try d.decode(CreatedInvite.self, from: data)
+        case "RoomPersonChange": _ = try d.decode(RoomPersonChange.self, from: data)
+        case "MyRoomAgent": _ = try d.decode(MyRoomAgent.self, from: data)
+        case "MyRoom": _ = try d.decode(MyRoom.self, from: data)
+        case "MyRooms": _ = try d.decode(MyRooms.self, from: data)
+        case "RoomLeft": _ = try d.decode(RoomLeft.self, from: data)
         case "BotProof": _ = try d.decode(BotProof.self, from: data)
         case "BotAsked": _ = try d.decode(BotAsked.self, from: data)
         case "BotPosted": _ = try d.decode(BotPosted.self, from: data)
@@ -1977,6 +2166,12 @@ extension HostContract {
         case "BotLeaveParams": _ = try d.decode(BotLeaveParams.self, from: data)
         case "PeerAgentsParams": _ = try d.decode(PeerAgentsParams.self, from: data)
         case "PeerRevokesParams": _ = try d.decode(PeerRevokesParams.self, from: data)
+        case "CreateInviteParams": _ = try d.decode(CreateInviteParams.self, from: data)
+        case "AddRoomPersonParams": _ = try d.decode(AddRoomPersonParams.self, from: data)
+        case "RemoveRoomPersonParams": _ = try d.decode(RemoveRoomPersonParams.self, from: data)
+        case "RoomPeopleParams": _ = try d.decode(RoomPeopleParams.self, from: data)
+        case "MyRoomsParams": _ = try d.decode(MyRoomsParams.self, from: data)
+        case "LeaveRoomParams": _ = try d.decode(LeaveRoomParams.self, from: data)
         default: return false
         }
         return true

@@ -1,0 +1,653 @@
+#!/usr/bin/env bash
+# kith-sessions-core-check — the kernel's writer-claim takers (kith-sessions, kith-wake, the compaction's writer_free) in their
+# two modes (M3 P5; designs/2026-11-14-m3-cutover section 1.6). A fake `kith` program stands in for the core (a JSON file is its
+# store, a `down` file makes it not answer), and the mode is the claims tombstone, a marker in live/terminal/ (kernel/lib/kith_claims.py).
+# The two switches are separate on purpose (the TEST_CORE lesson of #973): "a core answers" is one thing, "the claims are switched"
+# another, and the cases that matter are the crossed ones.
+#
+#   Files mode (no marker; the default, today's behaviour):
+#     F1 core up:   claim files are written and read, the core is never asked (no call at all)
+#     F2 core down: the same, and the sweep works from the files
+#   Writer mode (marker):
+#     W1 core up:   no claim file; claim, a second writer refused (held), release, the busy line kith-wake's HELD pattern knows
+#     W2 core down: the owner's run goes on (stub lock alone) with one line and no file, marked lock-alone for the stub's clear; a person's run, the epoch read, proc and
+#                   the sweep fail closed; kith-wake reads the session as held
+#     W3 the app's idle agent: waiting is retried for KITH_CLAIM_WAIT, then "session is busy"
+#     W4 a session id the stub cannot lock: the owner's run goes on unclaimed with a line (KITH_REQUIRE_STUB=1 or a person: refused)
+#     W5 a person's claim needs the epoch read before the may check; a revoke after it refuses the claim
+#     W6 the sweep: a person's runs in several conversations end, the owner's does not
+#     W7 proc makes a claim of its own per process; a core that cannot take it is exit 9
+#     W8 kith-wake: a live claim is a writer, a dead one is not, one claim.list serves a tick
+#     W9 claim files left from before the switch are never read: they neither block nor crash
+#     W10 the compaction's writer_free reads no files
+#     W11 the launcher's proc gate: with the marker any failure of proc stops a person's run
+#     W12 the step's race: a taker that looked before the marker and linked after it takes its file back and claims in the core
+#     W13 Writer mode is either source: the module's switch file alone (not `stepping`) counts, a marker alone counts
+#   The session registry's Writer mode (registry.tombstone, kernel/lib/kith_registry.py), R1-R6 below: the hook spools first, a
+#   settling answer removes its entry, anything else keeps it; Files mode writes the file and drains the spool.
+#   core_front.rs lists the rows (CORE_CALL_METHODS): the fake refuses any method outside the real list.
+# Throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-sessions-core-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sc.XXXXXX"); T=$(cd "$T" && pwd -P)
+SLEEPERS=()
+trap 'kill "${SLEEPERS[@]}" 2>/dev/null; [ -n "${KEEP:-}" ] || rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_MACHINE=$T/state FAKE_DIR=$T/fake KITH_CLAIM_WAIT=0
+unset KITH_PERSON KITH_AGENT HQ_STATE HQ_HOME CARGO_TARGET_DIR KITH_DEV_BIN KITH_REQUIRE_STUB KITH_REVOKE_SEEN KITH_SERVE_DIR KITH_SERVE_PORT
+mkdir -p "$HOME" "$KITH_STATE/live/terminal" "$FAKE_DIR" "$KITH_HOME/agents/house/role"
+REG=$KITH_STATE/live/terminal
+SK=$KERNEL/bin/kith-sessions
+WAKE=$KERNEL/bin/kith-wake
+
+# The methods core-call allows: the real list, read from the host source.
+export FAKE_ALLOWED=$(python3 -I - "$KERNEL/../serve/host/src/core_front.rs" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+body = re.search(r'const CORE_CALL_METHODS: &\[&str\] =\s*&\[(.*?)\];', src, re.S).group(1)
+print(' '.join(re.findall(r'"([^"]+)"', body)))
+PY
+)
+# session.record (the registry's Writer mode) joins that list with the core side (transcripts P1). Until it is there the fake allows it
+# too, with a note, so these cases run; once it is, the real list covers it.
+case " $FAKE_ALLOWED " in *" session.record "*) ;; *) echo "note session.record is not in CORE_CALL_METHODS yet (transcripts P1); the fake allows it"; FAKE_ALLOWED="$FAKE_ALLOWED session.record";; esac
+cat > "$T/fakekith" <<'PY'
+#!/usr/bin/env python3
+"""The core, as far as the claim rows go: one writer per conversation, a dead claimer is free, a person's claim needs the epoch."""
+import json, os, re, sys
+d = os.environ['FAKE_DIR']
+a = sys.argv[1:]
+if a[:2] == ['memory', 'hook']:
+    print('usage: kith memory hook --phase'); sys.exit(0)
+if a[:2] != ['kernel', 'core-call']:
+    sys.exit(2)
+method, params = a[2], json.loads(sys.stdin.read() or '{}')
+if method not in os.environ['FAKE_ALLOWED'].split():
+    print(f'core-call: {method} is not one of the allowed', file=sys.stderr); sys.exit(2)
+if os.path.exists(d + '/down'):
+    print('no core daemon answers', file=sys.stderr); sys.exit(3)
+if method == 'session.record':   # the registry row: what to answer is the `answer` file (default recorded)
+    with open(d + '/calls', 'a') as f:
+        f.write(method + ' ' + json.dumps(params, sort_keys=True) + '\n')
+    if set(params) != {'record'} or not isinstance(params['record'], dict):
+        print('session.record: params are {"record": {...}}', file=sys.stderr); sys.exit(4)
+    ans = open(d + '/answer').read().strip() if os.path.exists(d + '/answer') else 'recorded'
+    if ans == 'exit3':
+        print('no core daemon answers', file=sys.stderr); sys.exit(3)
+    if ans == 'exit4':
+        print('session.record: rejected', file=sys.stderr); sys.exit(4)
+    if ans == 'hang':
+        import time; time.sleep(30)
+    if ans in ('invalid', 'not-serving'):
+        print(json.dumps({'refused': ans, 'why': 'fake ' + ans})); sys.exit(0)
+    print(json.dumps({'outcome': ans})); sys.exit(0)
+store = json.load(open(d + '/store.json')) if os.path.exists(d + '/store.json') else {'claims': [], 'epoch': {}, 'convs': {}, 'n': 0}
+with open(d + '/calls', 'a') as f:
+    f.write(method + ' ' + json.dumps(params, sort_keys=True) + '\n')
+ALLOWED = {'claim.external': {'conversation', 'pid', 'started', 'person', 'agent', 'engine', 'revokeSeen'},
+           'claim.release': {'pid', 'started', 'conversation'}, 'claim.sweepPerson': {'persons'},
+           'claim.epoch': {'person'}, 'claim.list': set()}
+def bad(why):
+    print(why, file=sys.stderr); sys.exit(4)
+if set(params) - ALLOWED[method]:
+    bad(f'{method}: unknown param {sorted(set(params) - ALLOWED[method])}')
+def alive(c):
+    try:
+        os.kill(c['pid'], 0); return True
+    except OSError:
+        return False
+def save():
+    json.dump(store, open(d + '/store.json', 'w'))
+def live():
+    return [c for c in store['claims'] if c['state'] in ('claimed', 'ending') and alive(c)]
+def out(v):
+    print(json.dumps(v)); sys.exit(0)
+if method == 'claim.epoch':
+    out({'epoch': store['epoch'].get(params.get('person') or 'owner', 0)})
+if method == 'claim.list':
+    out({'live': [{'claimId': c['id'], 'conversation': c['conv'], 'state': c['state'], 'kind': 'external', 'person': c['person'],
+                   'pid': c['pid'], 'started': c['started']} for c in live()], 'recent': []})
+if method == 'claim.release':
+    ended = []
+    for c in store['claims']:
+        if c['state'] == 'claimed' and c['person'] == 'owner' and c['pid'] == params['pid'] and c['started'] == params['started'] \
+                and params.get('conversation', c['conv']) == c['conv']:
+            c['state'] = 'ended'; ended.append(c['id'])
+    save(); out({'ended': ended})
+if method == 'claim.sweepPerson':
+    if any(p in ('', 'owner') for p in params['persons']):
+        bad('the owner is never swept')
+    kill = []
+    for p in params['persons']:
+        store['epoch'][p] = store['epoch'].get(p, 0) + 1
+    for c in store['claims']:
+        if c['person'] in params['persons'] and c['state'] in ('claimed', 'ending'):
+            c['state'] = 'ending'; kill.append({'claimId': c['id'], 'pid': c['pid'], 'started': c['started']})
+    save(); out({'kill': kill})
+# claim.external
+conv, person = params['conversation'], params.get('person') or 'owner'
+if not re.fullmatch(r'[a-z0-9._-]{1,128}', conv) or conv in ('.', '..'):
+    bad('claim: session id cannot be locked')
+if person != 'owner' and 'revokeSeen' not in params:
+    bad('claim: revokeSeen is required')
+if params.get('revokeSeen', store['epoch'].get(person, 0)) != store['epoch'].get(person, 0):
+    out({'refused': 'revoked', 'why': 'revoked after the may check'})
+if conv not in store['convs'] and not params.get('agent'):
+    bad('claim: agent is required')
+w = d + '/waiting'
+left = int(open(w).read() or 0) if os.path.exists(w) else 0
+if left > 0:
+    open(w, 'w').write(str(left - 1)); out({'refused': 'waiting', 'why': 'idle agent stopping'})
+mine = [c for c in live() if c['conv'] == conv]
+if mine:
+    c = mine[0]
+    if c['state'] == 'claimed' and c['pid'] == params['pid'] and c['started'] == params['started']:
+        out({'claimId': c['id'], 'again': True})
+    out({'refused': 'held', 'why': 'has a writer', 'holder': {'claimId': c['id'], 'kind': 'external', 'pid': c['pid']}})
+store['convs'][conv] = {'agent': params.get('agent'), 'engine': params.get('engine', 'claude')}
+store['n'] += 1
+store['claims'].append({'id': store['n'], 'conv': conv, 'pid': params['pid'], 'started': params['started'], 'person': person, 'state': 'claimed'})
+save(); out({'claimId': store['n'], 'generation': 1})
+PY
+chmod +x "$T/fakekith"
+export KITH_BIN=$T/fakekith
+"$T/fakekith" memory hook --help >/dev/null 2>&1; echo '{}' | "$T/fakekith" kernel core-call claim.list --params-stdin >/dev/null 2>&1; rm -f "$FAKE_DIR/calls" "$FAKE_DIR/store.json"
+
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
+check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi; }
+down() { touch "$FAKE_DIR/down"; }
+up() { rm -f "$FAKE_DIR/down"; }
+calls() { cat "$FAKE_DIR/calls" 2>/dev/null; }
+ncalls() { grep -c "^$1 " "$FAKE_DIR/calls" 2>/dev/null || echo 0; }
+reset() { rm -f "$FAKE_DIR/calls" "$FAKE_DIR/store.json" "$FAKE_DIR/waiting" "$FAKE_DIR/down"; rm -f "$REG"/*.claim "$REG"/*.lock; }
+sleeper() { sleep 300 >/dev/null 2>&1 & SLEEPERS+=($!); printf -v "$1" %s "$!"; disown; }
+files_mode() { rm -f "$REG/claims.tombstone"; }
+writer_mode() { printf '{"kith_tombstone": 1, "module": "claims"}\n' > "$REG/claims.tombstone"; }
+SKR() { python3 "$SK" "$@"; }
+
+# ---- Files mode ---------------------------------------------------------------------------------------------------
+files_mode; reset
+sleeper P1; sleeper P2
+SKR claim f1 "$P1" >/dev/null 2>&1; rc=$?
+check "F1 core up, no marker: the claim is a file" "[ $rc -eq 0 ] && [ -f $REG/f1.claim ] && grep -q '\"pid\": $P1' $REG/f1.claim"
+check "F1 the core was not asked at all" "[ -z \"\$(calls)\" ]"
+out=$(SKR claim f1 "$P2" 2>&1); rc=$?
+check "F1 a second writer is refused by the file" "[ $rc -ne 0 ] && grep -q 'held by terminal\\|held by oneshot' <<<\"$out\""
+SKR proc "$P1" sam house >/dev/null 2>&1
+check "F1 proc is a proc-<pid>.claim file" "[ -f $REG/proc-$P1.claim ] && [ -z \"\$(calls)\" ]"
+down
+reset; down
+SKR claim f2 "$P1" >/dev/null 2>&1; rc=$?
+check "F2 core down, no marker: the same, the file" "[ $rc -eq 0 ] && [ -f $REG/f2.claim ]"
+SKR claim f3 "$P2" sam house >/dev/null 2>&1
+out=$(SKR sweep sam 2>&1)
+check "F2 the sweep works from the files with no core" "grep -q 'swept 1' <<<\"$out\" && ! kill -0 $P2 2>/dev/null"
+check "F2 the core was not asked" "[ -z \"\$(calls)\" ]"
+up
+
+# ---- Writer mode, core up -------------------------------------------------------------------------------------------
+writer_mode; reset
+sleeper P1; sleeper P2
+SKR claim w1 "$P1" "" house >"$T/out" 2>&1; rc=$?
+check "W1 core up, marker: the claim is a core row" "[ $rc -eq 0 ] && grep -q '^claim.external' <(calls) && [ ! -e $REG/w1.claim ]"
+check "W1 the claim names the process and the agent" "grep -q '\"agent\": \"house\"' $FAKE_DIR/calls && grep -q '\"pid\": $P1' $FAKE_DIR/calls"
+out=$(SKR claim w1 "$P2" "" house 2>&1); rc=$?
+check "W1 a second writer is refused: busy, held by external" "[ $rc -ne 0 ] && grep -q 'that session is busy: held by external (pid $P1)' <<<\"$out\""
+check "W1 kith-wake's HELD pattern knows the line" "grep -Eq 'open in another|being taken over|answering in that thread|session is busy' <<<\"$out\""
+mkdir -p "$HOME/.claude/projects/p" && echo '{"cwd": "/tmp"}' > "$HOME/.claude/projects/p/w1.jsonl"
+out=$(SKR resolve house w1 "$P2" 2>&1); rc=$?
+check "W1 resolve refuses the same way (open in another writer)" "[ $rc -ne 0 ] && grep -q 'open in another writer' <<<\"$out\""
+RELOUT=$(bash -c "python3 '$SK' claim w2 \$\$ '' house && python3 '$SK' release w2; echo rc=\$?" 2>&1)
+check "W1 release by the launcher gives the claim back (exit 0 only when one was)" "grep -q 'rc=0' <<<\"$RELOUT\""
+RELOUT=$(bash -c "python3 '$SK' release w2; echo rc=\$?" 2>&1)
+check "W1 a release of nothing exits 1 and touches nothing" "grep -q 'rc=1' <<<\"$RELOUT\""
+SKR claim w2 "$P2" "" house >/dev/null 2>&1
+check "W1 the given-back conversation is free" "[ $? -eq 0 ]"
+SKR terminal w3 "$P1" "" house >/dev/null 2>&1
+check "W1 terminal claims the same way" "[ $? -eq 0 ] && [ ! -e $REG/w3.claim ]"
+
+# ---- Writer mode, core down ----------------------------------------------------------------------------------------
+reset; down
+out=$(SKR claim w4 "$P1" "" house 2>&1); rc=$?
+check "W2 switched, core down: the owner's run goes on (stub lock alone) with one line" "[ $rc -eq 0 ] && grep -q 'not answering' <<<\"$out\" && grep -q 'conversation lock alone' <<<\"$out\""
+check "W2 and no claim file is written (no fallback to the files)" "[ ! -e $REG/w4.claim ] && ! ls $REG/*.claim 2>/dev/null | grep -q ."
+# L-clear (designs/2026-11-16-offturn-lock-alone): the run on the lock alone is marked for bin/kith, which passes --lock-alone to the stub
+said=$(SKR claim w4a "$P1" "" house 2>/dev/null); said_t=$(SKR terminal w4b "$P1" "" house 2>/dev/null)
+check "W2 claim and terminal print lock-alone on stdout (bin/kith: kith-stub --lock-alone)" "[ \"$said\" = lock-alone ] && [ \"$said_t\" = lock-alone ]"
+echo '{"cwd": "/tmp"}' > "$HOME/.claude/projects/p/w4c.jsonl"
+said=$(SKR resolve house w4c "$P2" 2>/dev/null)
+check "W2 resolve adds r_alone=1" "grep -q \"r_sid='w4c'.* r_alone=1\" <<<\"$said\""
+up; reset
+said=$(SKR claim w4d "$P1" "" house 2>/dev/null); said_t=$(SKR resolve house w4c "$P2" 2>/dev/null)
+check "W1 a run the core answered is not marked: nothing is cleared" "[ -z \"$said\" ] && grep -q \"r_sid='w4c'\" <<<\"$said_t\" && ! grep -q r_alone <<<\"$said_t\""
+reset; down
+out=$(KITH_REVOKE_SEEN=sam:0 SKR claim w5 "$P1" sam house 2>&1); rc=$?
+check "W2 a person's run refuses when no core answers" "[ $rc -ne 0 ] && grep -q \"not answering, so sam's run cannot be claimed\" <<<\"$out\""
+check "W2 a person's line matches kith-wake's HELD pattern" "grep -Eq 'open in another|being taken over|answering in that thread|session is busy' <<<\"$out\""
+out=$(python3 -I - "$KERNEL/bin" <<'PY' 2>&1
+import importlib.machinery, importlib.util, os, sys
+l = importlib.machinery.SourceFileLoader('ks', sys.argv[1] + '/kith-sessions'); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(m)
+print('lifecycle', m.take_claim('lc1', os.getpid(), 'oneshot', lifecycle_owner=True))
+PY
+)
+check "W2 the lifecycle's background claim is held (not taken) while no core answers" "grep -q \"lifecycle {'pid': 0\" <<<\"\$out\"" 
+out=$(KITH_REVOKE_SEEN=sam:0 SKR terminal w5 "$P1" sam house 2>&1); rc=$?
+check "W2 so does a person's terminal run" "[ $rc -ne 0 ]"
+out=$(SKR epoch sam 2>&1); rc=$?
+check "W2 the epoch read fails (the launcher stops there)" "[ $rc -ne 0 ] && grep -q 'not answering' <<<\"$out\""
+out=$(SKR sweep sam 2>&1); rc=$?
+check "W2 the sweep is exit 3, never the files" "[ $rc -eq 3 ] && grep -q 'moved to the core' <<<\"$out\""
+KITH_REVOKE_SEEN=sam:0 SKR proc "$P1" sam house >/dev/null 2>&1; rc=$?
+check "W2 proc for a person is exit 9" "[ $rc -eq 9 ]"
+out=$(python3 - "$WAKE" "$KITH_STATE" <<'PY' 2>&1
+import importlib.machinery, importlib.util, sys
+l = importlib.machinery.SourceFileLoader('kw', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('kw', l)); l.exec_module(m)
+c = m.writer_live('anything')
+print('LIVE' if c else 'FREE', (c or {}).get('kind'))
+PY
+)
+check "W2 kith-wake reads a session as held when no core answers (the wake waits)" "grep -q 'LIVE unknown' <<<\"$out\""
+up
+
+# the other cross: marker absent, core up, was F1. Marker gone again, switched off, files are back:
+files_mode; reset
+SKR claim w6 "$P1" >/dev/null 2>&1
+check "F1 (again) removing the marker is the rollback: files again, the core not asked" "[ -f $REG/w6.claim ] && [ -z \"\$(calls)\" ]"
+
+# ---- Writer mode: the idle agent ------------------------------------------------------------------------------------
+writer_mode; reset
+echo 2 > "$FAKE_DIR/waiting"
+out=$(KITH_CLAIM_WAIT=5 SKR claim w7 "$P1" "" house 2>&1); rc=$?
+check "W3 a waiting answer is retried within KITH_CLAIM_WAIT" "[ $rc -eq 0 ] && [ \"\$(ncalls claim.external)\" -ge 3 ]"
+reset; echo 99 > "$FAKE_DIR/waiting"
+out=$(KITH_CLAIM_WAIT=0 SKR claim w8 "$P1" "" house 2>&1); rc=$?
+check "W3 with no wait it is refused as a busy session (the wake is offered again, not failed)" "[ $rc -ne 0 ] && grep -q 'that session is busy' <<<\"$out\" && grep -Eq 'session is busy' <<<\"$out\""
+out=$(KITH_CLAIM_WAIT=1 SKR terminal w8 "$P1" "" house 2>&1); rc=$?
+check "W3 an interactive terminal waits that long too" "[ $rc -ne 0 ] && [ \"\$(ncalls claim.external)\" -ge 3 ]"
+rm -f "$FAKE_DIR/waiting"
+
+# ---- a session id the lock cannot take --------------------------------------------------------------------------------
+reset
+out=$(SKR claim 'Bad/Id' "$P1" "" house 2>&1); rc=$?
+check "W4 the owner's run on such an id goes on unclaimed with a line" "[ $rc -eq 0 ] && grep -q 'cannot be locked' <<<\"$out\" && [ -z \"\$(calls)\" ]"
+out=$(KITH_REQUIRE_STUB=1 SKR claim 'Bad/Id' "$P1" "" house 2>&1); rc=$?
+check "W4 KITH_REQUIRE_STUB=1 refuses it" "[ $rc -ne 0 ] && grep -q 'cannot be locked' <<<\"$out\""
+out=$(KITH_REVOKE_SEEN=sam:0 SKR claim 'Bad/Id' "$P1" sam house 2>&1); rc=$?
+check "W4 a person's run on such an id is refused, and no core call was made" "[ $rc -ne 0 ] && [ -z \"\$(calls)\" ]"
+out=$(echo '{"conversation":"A..","pid":'$P1',"started":"x"}' | "$T/fakekith" kernel core-call claim.external --params-stdin 2>&1); rc=$?
+check "W4 the core row refuses it too (exit 4)" "[ $rc -eq 4 ]"
+
+# ---- a person's claim and the epoch -----------------------------------------------------------------------------------
+reset
+out=$(SKR epoch sam 2>&1)
+check "W5 epoch prints PERSON:N" "[ \"$out\" = 'sam:0' ]"
+out=$(SKR claim w9 "$P1" sam house 2>&1); rc=$?
+check "W5 a person's claim without the epoch is refused by the core" "[ $rc -ne 0 ] && grep -q 'refused the claim' <<<\"$out\""
+KITH_REVOKE_SEEN=sam:0 SKR claim w9 "$P1" sam house >/dev/null 2>&1
+check "W5 with the epoch read before the may check it is taken, naming the person" "[ $? -eq 0 ] && grep -q '\"person\": \"sam\"' $FAKE_DIR/calls && grep -q '\"revokeSeen\": 0' $FAKE_DIR/calls"
+SKR sweep sam >/dev/null 2>&1
+out=$(KITH_REVOKE_SEEN=sam:0 SKR claim w10 "$P2" sam house 2>&1); rc=$?
+check "W5 a revoke after the epoch was read refuses the claim" "[ $rc -ne 0 ] && grep -q 'refused the claim (revoked)' <<<\"$out\""
+out=$(KITH_REVOKE_SEEN=ann:0 SKR claim w10 "$P2" sam house 2>&1); rc=$?
+check "W5 an epoch read for someone else is not sent" "[ $rc -ne 0 ] && ! grep -q '\"revokeSeen\": 0, \"startd' $FAKE_DIR/calls"
+
+# ---- the sweep ------------------------------------------------------------------------------------------------------------
+reset
+sleeper S1; sleeper S2; sleeper S3
+KITH_REVOKE_SEEN=sam:0 SKR claim c1 "$S1" sam house >/dev/null 2>&1
+KITH_REVOKE_SEEN=sam:0 SKR claim c2 "$S2" sam house >/dev/null 2>&1
+SKR claim c3 "$S3" "" house >/dev/null 2>&1
+out=$(SKR sweep sam 2>&1); rc=$?
+check "W6 the sweep ends a person's runs in every conversation" "[ $rc -eq 0 ] && grep -q 'swept 2' <<<\"$out\" && ! kill -0 $S1 2>/dev/null && ! kill -0 $S2 2>/dev/null"
+check "W6 the owner's run is untouched" "kill -0 $S3 2>/dev/null"
+check "W6 the sweep made no claim file" "! ls $REG/*.claim 2>/dev/null | grep -q ."
+
+# ---- proc ---------------------------------------------------------------------------------------------------------------
+reset
+sleeper Q1
+KITH_REVOKE_SEEN=sam:0 SKR proc "$Q1" sam house >/dev/null 2>&1; rc=$?
+check "W7 proc takes a claim on its own per-process key" "[ $rc -eq 0 ] && grep -Eq '\"conversation\": \"proc-$Q1-[a-z0-9.-]+\"' $FAKE_DIR/calls && grep -q '\"engine\": \"proc\"' $FAKE_DIR/calls"
+check "W7 and writes no proc claim file" "[ ! -e $REG/proc-$Q1.claim ]"
+
+# ---- kith-wake ----------------------------------------------------------------------------------------------------------
+reset
+sleeper W1
+KITH_REVOKE_SEEN= SKR claim x1 "$W1" "" house >/dev/null 2>&1
+out=$(python3 - "$WAKE" <<'PY' 2>&1
+import importlib.machinery, importlib.util, sys, os, time
+l = importlib.machinery.SourceFileLoader('kw', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('kw', l)); l.exec_module(m)
+print('x1', bool(m.writer_live('x1')))
+print('free', bool(m.writer_live('nobody')))
+print('x1-again', bool(m.writer_live('x1')))
+PY
+)
+check "W8 a live claim is a writer, an unclaimed session is free" "grep -q '^x1 True' <<<\"$out\" && grep -q '^free False' <<<\"$out\""
+check "W8 one claim.list serves the lookups of a tick" "[ \"\$(ncalls claim.list)\" -eq 1 ]"
+kill "$W1" 2>/dev/null; wait "$W1" 2>/dev/null
+out=$(python3 - "$WAKE" <<'PY' 2>&1
+import importlib.machinery, importlib.util, sys
+l = importlib.machinery.SourceFileLoader('kw', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('kw', l)); l.exec_module(m)
+print('x1', bool(m.writer_live('x1')))
+PY
+)
+check "W8 a claim whose process is gone is not a writer" "grep -q '^x1 False' <<<\"$out\""
+
+# ---- old claim files ------------------------------------------------------------------------------------------------------
+reset
+sleeper O1
+OSTART=$(python3 -I -c "import sys; sys.path.insert(0, sys.argv[1]); import kith_procstart; print(kith_procstart.start_stamp(int(sys.argv[2])))" "$KERNEL/lib" "$O1")
+printf '{"pid": %s, "procStart": "%s", "kind": "terminal"}' "$O1" "$OSTART" > "$REG/old1.claim"
+printf 'not json' > "$REG/old1.takeover.claim"
+printf '{"pid": %s, "procStart": "%s", "kind": "terminal", "person": "sam"}' "$O1" "$OSTART" > "$REG/old2.claim"
+SKR claim old1 "$S3" "" house >/dev/null 2>&1; rc=$?
+check "W9 claim files from before the switch neither block nor crash" "[ $rc -eq 0 ] && grep -q old1 $FAKE_DIR/calls && [ \"\$(cat $REG/old1.takeover.claim)\" = 'not json' ]"
+out=$(SKR sweep sam 2>&1)
+check "W9 the sweep does not read them either (the old file's holder lives)" "kill -0 $O1 2>/dev/null"
+
+# ---- the compaction's check ---------------------------------------------------------------------------------------------
+out=$(python3 - "$KERNEL/bin/kith-lifecycle" "$O1" <<'PY' 2>&1
+import importlib.machinery, importlib.util, sys
+l = importlib.machinery.SourceFileLoader('klc', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('klc', l)); l.exec_module(m)
+ks = m.sessions_mod()
+e = {'sessionId': 'old1', 'pid': 0}
+print('writer_mode', ks.writer_mode())
+print('free', m.writer_free(ks, e))   # old1.claim names a live pid, but the files are not the claims any more
+PY
+)
+check "W10 the compaction's writer_free reads no claim files in Writer mode" "grep -q 'writer_mode True' <<<\"$out\" && grep -q 'free True' <<<\"$out\""
+files_mode
+out=$(python3 - "$KERNEL/bin/kith-lifecycle" <<'PY' 2>&1
+import importlib.machinery, importlib.util, sys
+l = importlib.machinery.SourceFileLoader('klc', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('klc', l)); l.exec_module(m)
+ks = m.sessions_mod()
+print('free', m.writer_free(ks, {'sessionId': 'old1', 'pid': 0}))
+PY
+)
+check "W10 and in Files mode it still does (the old file's holder lives)" "grep -q 'free False' <<<\"$out\""
+
+# ---- the launcher's proc gate (bin/kith): with the marker, any failure of proc stops a person's run -------------------------
+reset
+python3 - "$KERNEL/bin/kith" > "$T/gate.sh" <<'PY'
+import sys
+s = open(sys.argv[1]).read()
+a = s.index('if [[ $p_owner != 1 && $launch -ne 1 ]]; then')
+b = s.index('# Another harness: the same run')
+f = s.index('claims_core() {')
+# bin/kith's kith_threads (lib/kith-core.sh) runs the Python here: the stand-in kith-sessions below is what is under test
+print('kith_threads() { python3 "$KITH/bin/kith-sessions" "$@"; }\n' + s[f:s.index('\n}\n', f) + 3] + s[a:b])
+PY
+mkdir -p "$T/gk/bin"
+gate() {   # gate <proc exit code> <owner 0|1>: runs the launcher's block against a stand-in kith-sessions
+  printf 'import sys\nsys.exit(%s)\n' "$1" > "$T/gk/bin/kith-sessions"
+  KITH=$T/gk p_owner=${2:-0} launch=0 p_id=sam agent=house claim_seen=sam:0 bash "$T/gate.sh" >/dev/null 2>&1
+}
+touch "$REG/claims.tombstone"
+gate 1; rc1=$?; gate 9; rc9=$?; gate 0; rc0=$?; gate 1 1; rco=$?
+check "W11 marker: proc exit 1 (a traceback) stops a person's run" "[ $rc1 -ne 0 ] && [ $rc9 -ne 0 ] && [ $rc0 -eq 0 ]"
+check "W11 the owner's run is not gated" "[ $rco -eq 0 ]"
+rm -f "$REG/claims.tombstone"
+gate 1; rcf=$?; gate 9; rcf9=$?
+check "W11 no marker (Files): only exit 9 stops it, as before" "[ $rcf -eq 0 ] && [ $rcf9 -ne 0 ]"
+
+# ---- W12: a taker that read Files mode, then the marker landed, then it linked (the step's race, ClaimsStep.tla) -------------------
+files_mode; reset; up
+sleeper PR
+race_out=$(KITH_REVOKE_SEEN=sam:0 python3 - "$SK" "$PR" <<'PY' 2>&1
+import importlib.machinery, importlib.util, os, sys
+l = importlib.machinery.SourceFileLoader('ks', sys.argv[1]); ks = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(ks)
+looks = []
+def flip():   # the first look says Files; the marker lands right after it
+    looks.append(1)
+    if len(looks) == 1:
+        return False
+    open(os.path.join(os.environ['KITH_STATE'], 'live/terminal/claims.tombstone'), 'w').write('{}')
+    return True
+ks.writer_mode = flip
+print('claim', ks.take_claim('race1', int(sys.argv[2]), agent='house'))
+looks.clear(); os.unlink(os.path.join(os.environ['KITH_STATE'], 'live/terminal/claims.tombstone'))
+print('proc', ks.proc_claim(int(sys.argv[2]), 'sam', 'house'))
+PY
+)
+check "W12 the taker's file is taken back and the claim is the core's" "[ ! -e $REG/race1.claim ] && grep -q '^claim.external.*race1' $FAKE_DIR/calls && grep -q 'claim None' <<<\"$race_out\""
+check "W12 a person's proc claim file is taken back too, and the core holds proc-<pid>-<start>" "[ ! -e $REG/proc-$PR.claim ] && grep -q '^claim.external.*proc-$PR-' $FAKE_DIR/calls"
+files_mode
+
+# ---- W13: either source says Writer ---------------------------------------------------------------------------------------
+reset; up; files_mode
+mkdir -p "$KITH_MACHINE/core/cutover"
+sleeper PS
+printf 'state=stepping\nat=1\n' > "$KITH_MACHINE/core/cutover/claims.switch"
+SKR claim sw1 "$PS" >/dev/null 2>&1
+check "W13 a switch file that says stepping is not Writer mode (files, no call)" "[ -f $REG/sw1.claim ] && [ -z \"\$(calls)\" ]"
+reset; printf 'state=switched\nat=1\n' > "$KITH_MACHINE/core/cutover/claims.switch"
+SKR claim sw2 "$PS" >/dev/null 2>&1
+check "W13 a switch file that says switched is Writer mode with no marker (a call, no file)" "[ ! -e $REG/sw2.claim ] && grep -q '^claim.external.*sw2' $FAKE_DIR/calls"
+reset; printf 'state=rolling-back\nat=1\n' > "$KITH_MACHINE/core/cutover/claims.switch"
+SKR claim sw3 "$PS" >/dev/null 2>&1
+check "W13 rolling-back is still Writer mode (a half-done rollback is not the files')" "[ ! -e $REG/sw3.claim ] && grep -q '^claim.external.*sw3' $FAKE_DIR/calls"
+rm -f "$KITH_MACHINE/core/cutover/claims.switch"; reset
+writer_mode
+SKR claim sw4 "$PS" >/dev/null 2>&1
+check "W13 the marker alone is Writer mode, as before" "[ ! -e $REG/sw4.claim ] && grep -q '^claim.external.*sw4' $FAKE_DIR/calls"
+check "W13 the marker is a tombstone kith_tombstone.py refuses (exit 3, names the rollback)" "writer_mode; python3 -I \"$KERNEL/lib/kith_tombstone.py\" $REG/claims.tombstone >$T/tomb.out 2>&1; [ \$? -eq 3 ] && grep -q 'kith rollback claims' $T/tomb.out"
+files_mode
+
+# ---- R: the session registry's Writer mode (kernel/lib/kith_registry.py; transcripts P2) ---------------------------------
+#   R1 an answer that settles it (recorded, older) deletes the hook's own spool entry, and no <sid>.json is written
+#   R2 refused:invalid deletes it too (dropped, one line); not-serving, exit 3/4, no daemon and a timeout keep it
+#   R3 the entry is inbox/<sid>.<recordedAt>.<pid>.json, 0600 in a 0700 folder; two hooks of one session leave two entries
+#   R4 Files mode: the file as today plus recordedAt, no call; the inbox drained (newer moves in, older goes)
+#   R5 the marker landing after the first look: the file is written and the Writer steps run too
+#   R6 Writer mode is either source (registry.tombstone, or transcripts.switch past stepping); caps says registry-core
+#   R7 the shared validator fixtures (kernel/tests/fixtures/registry-records, A9), R8 the per-sid lock (A8), arrival ties (A6)
+#   R9 the shared order cases (kernel/tests/fixtures/registry-order, A10), R10 full-match safe_id, old dot-temps, a failed spool
+files_mode; reset; up
+INBOX=$REG/inbox
+reg_files() { rm -f "$REG/registry.tombstone" "$KITH_MACHINE/core/cutover/transcripts.switch"; }
+reg_writer() { printf '{"kith_tombstone": 1, "module": "transcripts"}\n' > "$REG/registry.tombstone"; }
+answer() { echo "$1" > "$FAKE_DIR/answer"; }
+hook() {   # hook SID: the SessionStart hook of an owner's terminal run
+  env -u KITH_HIDE_SESSION -u KITH_RUN_KIND KITH_AGENT=house KITH_TERMINAL_SESSION=1 python3 "$SK" record \
+    <<<"{\"session_id\": \"$1\", \"cwd\": \"/tmp\", \"transcript_path\": \"/tmp/$1.jsonl\", \"source\": \"startup\"}"
+}
+perm() { python3 -c 'import os, sys; print(format(os.stat(sys.argv[1]).st_mode & 0o777, "o"))' "$1"; }   # stat -f/-c differ by OS
+nin() { ls "$INBOX" 2>/dev/null | grep -c "^$1\\." ; }
+rreset() { reset; rm -rf "$INBOX" "$FAKE_DIR/answer"; rm -f "$REG"/r*.json "$REG"/d*.json; }
+
+reg_writer; rreset
+hook r1 2>"$T/err"
+check "R1 Writer mode, recorded: session.record was called with the record and recordedAt" "grep -q '^session.record .*\"sessionId\": \"r1\"' $FAKE_DIR/calls && grep -Eq '\"recordedAt\": [0-9]{18,}' $FAKE_DIR/calls"
+check "R1 the spool entry is gone and no registry file was written" "[ \"\$(nin r1)\" -eq 0 ] && [ ! -e $REG/r1.json ]"
+answer older; hook r1b 2>/dev/null
+check "R1 older settles it too: entry gone, no file" "[ \"\$(nin r1b)\" -eq 0 ] && [ ! -e $REG/r1b.json ]"
+answer invalid; hook r2 2>"$T/err"
+check "R2 refused:invalid: the entry is deleted and the record dropped with a line" "[ \"\$(nin r2)\" -eq 0 ] && [ ! -e $REG/r2.json ] && grep -q 'refused the record' $T/err"
+answer not-serving; hook r2a 2>"$T/err"
+check "R2 refused:not-serving keeps the entry (fail open, a line)" "[ \"\$(nin r2a)\" -eq 1 ] && [ ! -e $REG/r2a.json ] && grep -q 'kept for the core' $T/err"
+answer exit3; hook r2b 2>/dev/null; rc=$?
+check "R2 exit 3 (no answer) keeps it and the hook still exits 0" "[ $rc -eq 0 ] && [ \"\$(nin r2b)\" -eq 1 ] && [ ! -e $REG/r2b.json ]"
+answer exit4; hook r2c 2>/dev/null
+check "R2 exit 4 (a rejected call) keeps it" "[ \"\$(nin r2c)\" -eq 1 ]"
+rm -f "$FAKE_DIR/answer"; down; hook r2d 2>/dev/null; up
+check "R2 no daemon keeps it" "[ \"\$(nin r2d)\" -eq 1 ] && [ ! -e $REG/r2d.json ]"
+answer hang; t0=$SECONDS; hook r2e 2>/dev/null; took=$((SECONDS - t0))
+check "R2 a hung core: the hook gives up within the hook's 5 s and keeps the entry" "[ $took -le 5 ] && [ \"\$(nin r2e)\" -eq 1 ]"
+pkill -f "$T/fakekith" 2>/dev/null
+f=$(ls "$INBOX" | grep '^r2a\.')
+check "R3 the entry is <sid>.<recordedAt>.<pid>.json with the record in it" "[[ $f =~ ^r2a\\.[0-9]{18,}\\.[0-9]+\\.json$ ]] && grep -q '\"sessionId\": \"r2a\"' $INBOX/$f"
+check "R3 file 0600, folder 0700, no temp file left" "[ \"\$(perm $INBOX/$f)\" = 600 ] && [ \"\$(perm $INBOX)\" = 700 ] && ! ls -A $INBOX | grep -q '^\\.'"
+answer not-serving; hook r3 2>/dev/null; hook r3 2>/dev/null
+check "R3 two hooks of the same session leave two entries" "[ \"\$(nin r3)\" -eq 2 ]"
+
+reg_files; rreset
+mkdir -p -m 700 "$INBOX"
+printf '{"v": 1, "sessionId": "da", "recordedAt": 100, "agent": "old"}' > "$REG/da.json"
+printf '{"v": 1, "sessionId": "da", "recordedAt": 200, "agent": "spooled"}' > "$INBOX/da.200.1.json"
+printf '{"v": 1, "sessionId": "db", "recordedAt": 300, "agent": "file"}' > "$REG/db.json"
+printf '{"v": 1, "sessionId": "db", "recordedAt": 200, "agent": "spooled"}' > "$INBOX/db.200.1.json"
+printf '{"v": 1, "sessionId": "dc", "recordedAt": 5, "agent": "spooled"}' > "$INBOX/dc.5.1.json"
+printf '{"v": 1, "sessionId": "dd", "agent": "nostamp"}' > "$REG/dd.json"; touch -t 200001010000 "$REG/dd.json"
+printf '{"v": 1, "sessionId": "dd", "recordedAt": %s, "agent": "spooled"}' "$(date +%s)000000000" > "$INBOX/dd.1.1.json"
+printf '{"v": 1, "sessionId": "dg", "agent": "nostamp"}' > "$REG/dg.json"
+printf '{"v": 1, "sessionId": "dg", "recordedAt": 946684800000000000, "agent": "spooled"}' > "$INBOX/dg.1.1.json"
+printf '{"v": 1, "sessionId": "other", "recordedAt": 9}' > "$INBOX/de.9.1.json"
+printf '[1, 2]' > "$INBOX/dh.9.1.json"
+printf '{"v": 2, "sessionId": "di", "recordedAt": 9}' > "$INBOX/di.9.1.json"
+printf '{"v": 1, "sessionId": "dj", "recordedAt": 9, "person": "ann"}' > "$INBOX/dj.9.1.json"
+printf '{"sessionId": "dk", "recordedAt": 9}' > "$INBOX/dk.9.1.json"
+printf '{"v": 1, "sessionId": "dl", "recordedAt": 9, "agent": "file"}' > "$REG/dl.json"
+printf '{"v": 2, "sessionId": "dl", "recordedAt": 99}' > "$INBOX/dl.99.1.json"
+printf 'half' > "$INBOX/.df.9.1.json.tmp"
+printf 'half' > "$INBOX/.dz.9.1.json.tmp"; touch -t 200001010000 "$INBOX/.dz.9.1.json.tmp"
+hook r4 2>"$T/err"
+check "R4 Files mode: the file is written with recordedAt, the core not asked" "grep -Eq '\"recordedAt\": [0-9]{18,}' $REG/r4.json && grep -q '\"sessionId\": \"r4\"' $REG/r4.json && [ -z \"\$(calls)\" ]"
+check "R4 the drain: a newer entry replaces the file, one with no file is put in place" "grep -q spooled $REG/da.json && grep -q spooled $REG/dc.json"
+check "R4 A1: a file with no recordedAt orders by its mtime (an older mtime loses, a newer one keeps the file)" "grep -q spooled $REG/dd.json && grep -q nostamp $REG/dg.json && [ ! -e $INBOX/dg.1.1.json ]"
+check "R4 A5: entries the core would refuse (not an object, v 2, a person key, no v) are deleted, never placed" "[ ! -e $REG/dh.json ] && [ ! -e $REG/di.json ] && [ ! -e $REG/dj.json ] && [ ! -e $REG/dk.json ] && grep -q file $REG/dl.json"
+check "R4 an older entry is deleted and the file kept; a misnamed one is deleted; a young temp file is left, an old one (A10) deleted" "grep -q file $REG/db.json && [ ! -e $INBOX/db.200.1.json ] && [ ! -e $INBOX/de.9.1.json ] && [ ! -e $REG/other.json ] && [ -e $INBOX/.df.9.1.json.tmp ] && [ ! -e $INBOX/.dz.9.1.json.tmp ] && [ \"\$(ls $INBOX)\" = '' ]"
+check "R4 a moved entry is 0600" "[ \"\$(perm $REG/da.json)\" = 600 ]"
+
+# R7 the shared validator fixtures (contract A9; the core runs the same files): a file is the record of the sid its name names
+fx_out=$(python3 - "$KERNEL/lib" "$KERNEL/tests/fixtures/registry-records" <<'PY' 2>&1
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1]); import kith_registry as r
+root, wrong, n = Path(sys.argv[2]), [], 0
+for want, sub in ((True, 'valid'), (False, 'invalid')):
+    for f in sorted((root / sub).glob('*.json')):
+        n += 1
+        try:
+            rec = json.loads(f.read_text())
+        except ValueError:
+            rec = None
+        if r.valid(rec, f.stem) is not want:
+            wrong.append(f'{sub}/{f.name}')
+print('wrong:', ' '.join(wrong)) if wrong else print(f'fixtures ok {n}')
+PY
+)
+check "R7 every fixture in kernel/tests/fixtures/registry-records is taken (valid/) or refused (invalid/) as the core does ($fx_out)" "[[ '$fx_out' == 'fixtures ok '* ]] && [ ${fx_out#fixtures ok } -ge 15 ]"
+
+# R8 the per-sid lock (A8) and the one order key's arrival (A6)
+rreset; reg_files
+lock_out=$(python3 - "$KERNEL/lib" "$KITH_STATE" <<'PY' 2>&1
+import fcntl, json, os, sys, time
+sys.path.insert(0, sys.argv[1]); import kith_registry as r
+state = sys.argv[2]; reg = r.reg_dir(state); ib = r.inbox(state); ib.mkdir(mode=0o700, parents=True, exist_ok=True)
+def put(p, rec): p.write_text(json.dumps(rec))
+put(ib / 'lk.9.1.json', {'v': 1, 'sessionId': 'lk', 'recordedAt': 9, 'agent': 'spooled'})
+lock = reg / 'locks' / 'lk.lock'
+with r.sid_lock(state, 'lk') as held:
+    assert held, 'the lock is free'
+    assert oct(os.stat(reg / 'locks').st_mode & 0o777) == '0o700' and oct(os.stat(lock).st_mode & 0o777) == '0o600', 'modes'
+    pid = os.fork()
+    if pid == 0:   # another drainer while the lock is held: it waits about 1 s, then skips the entry
+        t0 = time.monotonic(); m = r.drain(state); took = time.monotonic() - t0
+        os._exit(0 if m == 0 and 0.8 <= took < 3 and (ib / 'lk.9.1.json').exists() else 1)
+    _, st = os.waitpid(pid, 0)
+    assert st == 0, 'a held lock: the drain waited ~1 s and skipped the entry'
+assert lock.exists(), 'the lock file is never deleted'
+assert r.drain(state) == 1 and json.loads((reg / 'lk.json').read_text())['agent'] == 'spooled', 'free again: drained'
+assert lock.exists()
+# a tie on (recordedAt, procStart): the later arrival wins, so an inbox entry (after the file) and the later name of two
+put(reg / 'tie.json', {'v': 1, 'sessionId': 'tie', 'recordedAt': 7, 'agent': 'file'})
+put(ib / 'tie.7.1.json', {'v': 1, 'sessionId': 'tie', 'recordedAt': 7, 'agent': 'first'})
+put(ib / 'tie.7.2.json', {'v': 1, 'sessionId': 'tie', 'recordedAt': 7, 'agent': 'second'})
+r.drain(state)
+assert json.loads((reg / 'tie.json').read_text())['agent'] == 'second' and not os.listdir(ib), 'arrival breaks a tie'
+# names (A9): a dot-name and a non-.json name are left; a .json name that is no spool name, or has an unsafe sid, goes
+for n in ('.x.1.1.json', 'note.txt', 'odd.json', 'bad_sid.1.1.json'):
+    (ib / n).write_text('{}')
+r.drain(state)
+assert sorted(os.listdir(ib)) == ['.x.1.1.json', 'note.txt'], sorted(os.listdir(ib))
+assert r.order_key({'recordedAt': 5, 'procStart': 'b'}) > r.order_key({'recordedAt': 5, 'procStart': 'a'}, arrival=9)
+print('lock ok')
+PY
+)
+check "R8 A8: the drain takes locks/<sid>.lock (0700/0600, kept), waits ~1 s for a held one and skips; A6: arrival breaks ties; A9: names ($lock_out)" "[ '$lock_out' = 'lock ok' ]"
+
+# R9 the shared order cases (contract A10; the core runs the same files): order_key picks each file's winner
+ord_out=$(python3 - "$KERNEL/lib" "$KERNEL/tests/fixtures/registry-order" "$T" <<'PY' 2>&1
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1]); import kith_registry as r
+wrong, n = [], 0
+for f in sorted(Path(sys.argv[2]).glob('*.json')):
+    c, n = json.loads(f.read_text()), n + 1
+    keys = {}
+    for side in ('a', 'b'):
+        path = None
+        if side in c.get('mtime', {}):
+            path = Path(sys.argv[3]) / f'order-{side}.json'
+            path.write_text(json.dumps(c[side])); ns = c['mtime'][side]; os.utime(path, ns=(ns, ns))
+        keys[side] = r.order_key(c[side], path, c.get('arrival', {}).get(side, 0))
+    got = 'a' if keys['a'] > keys['b'] else 'b' if keys['b'] > keys['a'] else 'tie'
+    if got != c['winner']:
+        wrong.append(f'{f.name}:{got}')
+print('wrong: ' + ' '.join(wrong)) if wrong else print(f'order ok {n}')
+PY
+)
+check "R9 every case in kernel/tests/fixtures/registry-order picks its winner ($ord_out)" "[[ '$ord_out' == 'order ok '* ]] && [ ${ord_out#order ok } -ge 14 ]"
+
+# R10 A10: safe_id is a full match; a drain deletes inbox dot-temps older than 5 minutes and leaves younger ones; a hook
+# whose spool write fails still calls the core
+r10_out=$(python3 - "$KERNEL/lib" "$KITH_STATE" <<'PY' 2>&1
+import os, sys, time
+sys.path.insert(0, sys.argv[1]); import kith_registry as r
+assert r.safe_id('abc') and not r.safe_id('abc\n') and not r.safe_id('a' * 65)
+ib = r.inbox(sys.argv[2]); ib.mkdir(mode=0o700, parents=True, exist_ok=True)
+old, young = ib / '.o.1.1.json.tmp', ib / '.y.1.1.json.tmp'
+old.write_text('half'); young.write_text('half'); t = time.time() - 301; os.utime(old, (t, t))
+r.drain(sys.argv[2])
+assert not old.exists() and young.exists(), sorted(os.listdir(ib))
+young.unlink()
+print('r10 ok')
+PY
+)
+check "R10 A10: safe_id refuses a trailing newline; the drain deletes dot-temps older than 5 min, not younger ($r10_out)" "[ '$r10_out' = 'r10 ok' ]"
+reg_writer; rreset
+mkdir -p "$REG"; : > "$INBOX"   # a file where the inbox folder goes: the spool write fails
+hook r10 2>"$T/err"
+check "R10 a spool write that fails still calls session.record (one line), and the hook exits 0" "grep -q '^session.record .*\"sessionId\": \"r10\"' $FAKE_DIR/calls && grep -q 'no spool entry' $T/err"
+rm -f "$INBOX"; reg_files
+
+rreset; reg_files
+race_out=$(env -u KITH_HIDE_SESSION -u KITH_RUN_KIND KITH_AGENT=house KITH_TERMINAL_SESSION=1 python3 - "$SK" <<'PY' 2>&1
+import importlib.machinery, importlib.util, io, os, sys
+l = importlib.machinery.SourceFileLoader('ks', sys.argv[1]); ks = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(ks)
+reg = ks.registry_lib()
+looks = []
+real = reg.switched
+def flip(state):   # the first look says Files; the step's marker lands right after it
+    looks.append(1)
+    if len(looks) == 1:
+        return False
+    open(os.path.join(state, 'live/terminal/registry.tombstone'), 'w').write('{}')
+    return real(state)
+reg.switched = flip
+sys.stdin = io.StringIO('{"session_id": "r5", "cwd": "/tmp", "transcript_path": "/tmp/r5.jsonl"}')
+ks.record()
+print('looks', len(looks))
+PY
+)
+check "R5 the marker after the first look: the file is written and the core is called too" "[ -f $REG/r5.json ] && grep -q '^session.record .*\"sessionId\": \"r5\"' $FAKE_DIR/calls && [ \"\$(nin r5)\" -eq 0 ]"
+
+rreset; reg_files; mkdir -p "$KITH_MACHINE/core/cutover"
+printf 'state=stepping\nat=1\n' > "$KITH_MACHINE/core/cutover/transcripts.switch"
+hook r6 2>/dev/null
+check "R6 transcripts.switch saying stepping is Files mode (a file, no call)" "[ -f $REG/r6.json ] && [ -z \"\$(calls)\" ]"
+printf 'state=switched\nat=1\n' > "$KITH_MACHINE/core/cutover/transcripts.switch"
+hook r6b 2>/dev/null
+check "R6 switched, no marker: Writer mode (a call, no file)" "[ ! -e $REG/r6b.json ] && grep -q '^session.record .*r6b' $FAKE_DIR/calls"
+printf 'state=switched\nat=1\n' > "$KITH_MACHINE/core/cutover/claims.switch"; rm -f "$KITH_MACHINE/core/cutover/transcripts.switch"
+hook r6c 2>/dev/null
+check "R6 the claims switch alone is not the registry's (a file)" "[ -f $REG/r6c.json ]"
+rm -f "$KITH_MACHINE/core/cutover/claims.switch"
+check "R6 caps prints registry-core on its own line" "[ \"\$(python3 '$SK' caps)\" = registry-core ]"
+reg_files; rreset
+
+echo
+[ $fail -eq 0 ] && echo "all checks passed" || echo "some checks FAILED"
+exit $fail

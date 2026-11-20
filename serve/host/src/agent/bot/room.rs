@@ -80,8 +80,8 @@ impl Actor {
         let text = self.hub.gate.waiting_text();
         let lane = self.queue.iter().find_map(|q| match q {
             Queued::User { lane, .. } => Some(lane.clone()),
-            Queued::Group(turn) => Some(turn.lane.clone()),
-            _ => None,
+            Queued::Group(turn, _) => Some(turn.lane.clone()),
+            Queued::Routine(..) => None,
         });
         self.hub.set_runtime(&self.rt, |r| {
             r.status = BotStatus::Working;

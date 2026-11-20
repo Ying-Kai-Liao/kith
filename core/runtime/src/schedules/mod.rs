@@ -1,25 +1,37 @@
 //! Schedules in the core (M4-2; docs/plans/runtime-design.md section 2, core-design section 9): an index over the
 //! agents' `jobs.json` files joined with the run state in core.db (`sched_tick`, `sched_fires`, `sched_runs`).
 //!
-//! - Definitions stay in `<agent>/jobs.json` (architect, 2026-11-04): they version and sync with the agent. This module
-//!   only READS them, where they live, under the same `<machine>/sched/<agent>.jobs.lock` that `kith-sched` writes under.
-//!   It never writes a jobs.json, and until M4-5 `kith-sched` is the only writer of both the file and its state files.
-//! - Run state is core.db's. Nothing here writes it but the import (`import/schedules.rs`); firing is M4-3.
+//! - Definitions stay in `<agent>/jobs.json` (architect, 2026-11-04): they version and sync with the agent. The index and
+//!   the fire only READ them, where they live, under the same `<machine>/sched/<agent>.jobs.lock` that `kith-sched` writes
+//!   under. Two things write one, both through `jobs_io` (one writer, the exclusive lock): the routine import (cutover) and
+//!   `kith schedule add|rm|pause|resume` once the schedules are switched (`edit.rs`; `kith-sched` hands those verbs to the
+//!   core then, and until the switch it is the only writer of both the file and its state files).
+//! - Run state is core.db's. Two things here write it: the import (`import/schedules.rs`) and the fire (`fire.rs`, M4-3: the
+//!   tick, run now, the webhook entry), which the cutover module (M4-5a) will start, but nothing runs on a clock yet.
 //! - A thing that is wrong with one agent is said about that agent (`problems`), never a failure of the listing: an agent
 //!   folder that is not mounted, a jobs.json that is missing or malformed.
 //! - `next` is the cron rule's, which lives in the kernel (`core/kernel/src/schedule/`, M4-1). Until that is wired in,
 //!   [`NoRule`] answers, and a row's `next` is `null` with a note; the wiring is one `Rule` impl and one argument.
 
+pub(crate) mod anchor;
 mod call;
+pub(crate) mod jobs_io;
 // The fire decides with the authority tables, which are Unix only for now.
 #[cfg(unix)]
+mod edit;
+#[cfg(all(test, unix))]
+mod edit_tests;
+#[cfg(unix)]
 mod fire;
+#[cfg(unix)]
+pub(crate) use fire::{owner_in, watermark_in};
 #[cfg(all(test, unix))]
 mod fire_tests;
 #[cfg(unix)]
 mod hooks;
 #[cfg(all(test, unix))]
 mod hooks_tests;
+mod running;
 #[cfg(unix)]
 mod sync;
 // The import it is tested with is Unix-only for now (like the authority one).

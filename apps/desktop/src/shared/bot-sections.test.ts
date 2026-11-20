@@ -7,31 +7,26 @@ import { parseKithInfo } from './kith-info.ts'
 const house = parseKithInfo(JSON.parse(readFileSync(new URL('./test-support/kith-house-info.json', import.meta.url), 'utf8')))!
 
 test('an hq bot with Kith details hides the cards Kith repeats', () => {
-  assert.deepEqual(botSections('house', house), {
+  assert.deepEqual(botSections(house), {
     instructions: false, backendPicker: false, harnessMemoryTab: false, kithSettings: false,
   })
 })
 
-test('a plain bot keeps every card, whatever Kith says', () => {
-  assert.deepEqual(botSections(null, house), ALL_SECTIONS)
-  assert.deepEqual(botSections(undefined, house), ALL_SECTIONS)
-})
-
-test('an hq bot keeps every card until Kith details are on screen, except the harness notes tab', () => {
-  assert.deepEqual(botSections('house', null), { ...ALL_SECTIONS, backendPicker: false, harnessMemoryTab: false, kithSettings: false })
+test('a bot keeps every card until Kith details are on screen, except the harness notes tab', () => {
+  assert.deepEqual(botSections(null), { ...ALL_SECTIONS, backendPicker: false, harnessMemoryTab: false, kithSettings: false })
 })
 
 test('a card stays when Kith could not read what it repeats', () => {
   const partial = { ...house, harness: null, errors: { role: 'unreadable' } }
-  assert.deepEqual(botSections('house', partial), {
+  assert.deepEqual(botSections(partial), {
     instructions: true, backendPicker: false, harnessMemoryTab: false, kithSettings: false,
   })
 })
 
 test('an hq bot on a host without kithInfo keeps Kith\'s own settings controls', () => {
-  assert.equal(botSections('house', null, true).kithSettings, true)
-  assert.equal(botSections('house', house, true).kithSettings, true)
-  assert.equal(botSections('house', house, false).kithSettings, false)
+  assert.equal(botSections(null, true).kithSettings, true)
+  assert.equal(botSections(house, true).kithSettings, true)
+  assert.equal(botSections(house, false).kithSettings, false)
 })
 
 test('hq settings are all written through to kith', () => {

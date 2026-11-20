@@ -5,6 +5,8 @@
 #     resolves that link and finds the stub beside the real program;
 #   - `kith serve start` puts kith-stub beside kith-serve (install_helper), where a run started by the host with no KITH_BIN
 #     finds it.
+# kith-holder (the process holder Writer mode connects to) travels the same way, beside kith and kith-stub in every package;
+# scripts/check-bin-dir.sh, which release.yml runs on the tarball and the Mac app's CLI folder, fails a bin folder without it.
 # Every path a user gets kith by is checked: install.sh, the release tarball, Homebrew's formula, the Mac app's CLI folder,
 # `kith serve start` from a checkout and the runs the host starts (the Homebrew, app-build and host-site checks read the files
 # that do it; their programs run in release.yml and the Rust jobs).
@@ -38,13 +40,15 @@ echo "$@" >> "$STUB_NOTE"
 while [ "$1" != -- ]; do shift; done; shift
 exec "$@"
 S
-chmod 755 "$d/bin/kith" "$d/bin/kith-stub"
+printf '#!/bin/sh\necho "kith-holder 0.1.0"\n' > "$d/bin/kith-holder"
+chmod 755 "$d/bin/kith" "$d/bin/kith-stub" "$d/bin/kith-holder"
 echo 0.1.0 > "$d/share/kith/kernel/VERSION"
 cp "$ROOT/install.sh" "$d/share/kith/install.sh"
 tar -C "$T/rel" -czf "$T/rel/kith-0.1.0-darwin-arm64.tar.gz" kith-0.1.0-darwin-arm64
 KITH_INSTALL_TARBALL=$T/rel/kith-0.1.0-darwin-arm64.tar.gz sh "$ROOT/scripts/install.sh" >/dev/null 2>&1
 check "install.sh: the stub is in the version folder, only kith is linked into ~/.local/bin" \
   '[ -x "$M/cli/0.1.0/bin/kith-stub" ] && [ -L "$HOME/.local/bin/kith" ] && [ ! -e "$HOME/.local/bin/kith-stub" ]'
+check "install.sh: the holder is in the version folder too" '[ -x "$M/cli/0.1.0/bin/kith-holder" ] && [ ! -e "$HOME/.local/bin/kith-holder" ]'
 
 # a locked run from that install: kernel/bin/kith resolves the link, and REQUIRE_STUB would refuse if the stub was not found
 mkdir -p "$HOME/kith/agents/designer/role" "$M" "$T/claude"
@@ -59,7 +63,7 @@ check "a run from the install is locked: the stub got it, with the conversation'
 check "no 'no kith-stub' line, no refusal" '! grep -qi "kith-stub program\|cannot be locked" "$T/out"'
 
 # kith serve start: install_helper copies the stub beside the host, replaces it when it changed
-eval "$(sed -n '/^install_helper()/,/^}/p; /^install_stub()/p' "$KERNEL/bin/kith-serve")"
+eval "$(sed -n '/^install_helper()/,/^}/p; /^install_stub()/p; /^install_holder()/p' "$KERNEL/bin/kith-serve")"
 BIN=$T/serve/bin/kith-serve
 install_stub "$d/bin/kith-stub" >/dev/null 2>&1
 check "kith serve: kith-stub lands beside kith-serve" '[ -x "$T/serve/bin/kith-stub" ] && cmp -s "$d/bin/kith-stub" "$T/serve/bin/kith-stub"'
@@ -68,32 +72,48 @@ install_stub "$T/new-stub" >/dev/null 2>&1
 check "kith serve: a changed stub replaces it" 'cmp -s "$T/new-stub" "$T/serve/bin/kith-stub"'
 install_stub "$T/none" >/dev/null 2>&1
 check "kith serve: no built stub leaves the old one" 'cmp -s "$T/new-stub" "$T/serve/bin/kith-stub"'
+install_holder "$d/bin/kith-holder" >/dev/null 2>&1
+check "kith serve: kith-holder lands beside kith-serve" '[ -x "$T/serve/bin/kith-holder" ] && cmp -s "$d/bin/kith-holder" "$T/serve/bin/kith-holder"'
 
 # release tarball: scripts/package-release.sh carries the stub beside kith when KITH_STUB_BIN names one, and the release workflow
 # names it (a tarball without it would ship unlocked installs to Homebrew and install.sh alike)
 mkdir -p "$T/pack"
 printf '#!/bin/sh\necho kith\n' > "$T/pack/kith"; chmod 755 "$T/pack/kith"
-KITH_STUB_BIN=$d/bin/kith-stub sh "$ROOT/scripts/package-release.sh" 0.1.0 arm64 "$T/pack/kith" "$T/pack/out" >"$T/pack.log" 2>&1
+KITH_STUB_BIN=$d/bin/kith-stub KITH_HOLDER_BIN=$d/bin/kith-holder sh "$ROOT/scripts/package-release.sh" 0.1.0 arm64 "$T/pack/kith" "$T/pack/out" >"$T/pack.log" 2>&1
 listing=$(tar -tzf "$T/pack/out/kith-0.1.0-darwin-arm64.tar.gz" 2>/dev/null)   # (not piped into grep -q: pipefail + SIGPIPE)
 case $'\n'$listing$'\n' in *$'/bin/kith-stub\n'*) packed=1 ;; *) packed=0 ;; esac
 check "package-release.sh: the tarball holds bin/kith-stub" '[ $packed = 1 ]'
 [ $packed = 1 ] || tail -n 5 "$T/pack.log"
+case $'\n'$listing$'\n' in *$'/bin/kith-holder\n'*) held=1 ;; *) held=0 ;; esac
+check "package-release.sh: the tarball holds bin/kith-holder" '[ $held = 1 ]'
+mkdir -p "$T/unpack" && tar -C "$T/unpack" -xzf "$T/pack/out/kith-0.1.0-darwin-arm64.tar.gz" 2>/dev/null
+check "check-bin-dir.sh passes the packed bin folder" 'sh "$ROOT/scripts/check-bin-dir.sh" "$T/unpack/kith-0.1.0-darwin-arm64/bin"'
+rm -f "$T/unpack/kith-0.1.0-darwin-arm64/bin/kith-holder"
+check "check-bin-dir.sh fails a bin folder without kith-holder" '! sh "$ROOT/scripts/check-bin-dir.sh" "$T/unpack/kith-0.1.0-darwin-arm64/bin"'
+check "release.yml builds and packs kith-holder, and checks the tarball's and the app's bin folders" \
+  'grep -q "cargo build --release --locked -p kith-holder --target" "$ROOT/.github/workflows/release.yml" && grep -q "KITH_HOLDER_BIN: serve/host/target/\${{ matrix.target }}/release/kith-holder" "$ROOT/.github/workflows/release.yml" && grep -q "scripts/check-bin-dir.sh smoke/kith-\*/bin" "$ROOT/.github/workflows/release.yml" && grep -q "check-bin-dir.sh \"\$app/Contents/Resources/kith/bin\"" "$ROOT/.github/workflows/release.yml"'
 check "release.yml builds the stub for both CPUs and packs it" \
   'grep -q "cargo build --release --locked -p kith-stub --target" "$ROOT/.github/workflows/release.yml" && grep -q "KITH_STUB_BIN: serve/host/target/\${{ matrix.target }}/release/kith-stub" "$ROOT/.github/workflows/release.yml"'
 # Homebrew: the formula installs it from that tarball, unconditionally (brew links bin/kith and bin/kith-stub side by side)
 check "Homebrew formula installs bin/kith-stub and tests for it" \
   'grep -q "^    bin.install \"bin/kith-stub\"" "$ROOT/packaging/homebrew/kith.rb" && grep -q "assert_predicate bin/\"kith-stub\"" "$ROOT/packaging/homebrew/kith.rb"'
+check "Homebrew formula installs bin/kith-holder and tests for it" \
+  'grep -q "^    bin.install \"bin/kith-holder\"" "$ROOT/packaging/homebrew/kith.rb" && grep -q "assert_predicate bin/\"kith-holder\"" "$ROOT/packaging/homebrew/kith.rb"'
 # The Mac app: its bundled CLI folder (Resources/kith, bin/kith + bin/kith-stub) is installed by install.sh from a folder
 # (KITH_INSTALL_DIR, what Resources/kith-install.sh does), and the build lipos the stub into that folder
 rm -rf "$M" "$HOME/.local/bin/kith" "$HOME/.local/bin/hq"
 app=$T/app-kith; mkdir -p "$app/share"; cp -R "$d/bin" "$app/bin"; cp -R "$d/share/kith" "$app/share/kith"
 KITH_INSTALL_DIR=$app sh "$ROOT/scripts/install.sh" >/dev/null 2>&1
 check "the app's CLI folder installs with its stub (install.sh from a folder)" '[ -x "$M/cli/0.1.0/bin/kith-stub" ] && [ -L "$HOME/.local/bin/kith" ]'
+check "the app's CLI folder installs with its holder" '[ -x "$M/cli/0.1.0/bin/kith-holder" ]'
 check "the app build lipos kith-stub into build/native/kith/bin" \
   'grep -q "join(kith, .bin/kith-stub.)" "$ROOT/apps/desktop/tools/native-host.mjs" && grep -q "from: build/native/kith\$" "$ROOT/apps/desktop/electron-builder.yml"'
+check "the app build lipos kith-holder into build/native/kith/bin" 'grep -q "join(kith, .bin/kith-holder.)" "$ROOT/apps/desktop/tools/native-host.mjs"'
 # kith serve start from a checkout: builds the stub next to kith-serve's build and installs it beside the host
 check "kith serve builds and installs kith-stub from a checkout" \
   'grep -q -- "-p kith-stub" "$KERNEL/bin/kith-serve" && grep -q "install_stub \"\$(dirname \"\$built\")/kith-stub\"" "$KERNEL/bin/kith-serve"'
+check "kith serve builds and installs kith-holder from a checkout" \
+  'grep -q -- "-p kith-holder" "$KERNEL/bin/kith-serve" && grep -q "install_holder \"\$(dirname \"\$built\")/kith-holder\"" "$KERNEL/bin/kith-serve"'
 # Runs the host starts: serve/host names the stub (KITH_STUB_BIN) in every empty environment it builds; its unit test
 # (kernel.rs, the bundle layout) runs in the Rust jobs. The three sites are checked here so a new one is not forgotten.
 check "host-started runs get KITH_STUB_BIN (resume, channel run, ask, kernel commands)" \

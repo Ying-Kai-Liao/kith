@@ -1,0 +1,12 @@
+{
+  "fakes": "",
+  "state:home/.claude/projects/p/lc-sknewturn.jsonl": "{\"type\": \"user\", \"timestamp\": \"<TS>\", \"message\": {\"content\": \"do the thing\"}}\n{\"type\": \"assistant\", \"timestamp\": \"<TS>\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"shall I go on with plan B?\"}], \"usage\": {\"input_tokens\": 10, \"cache_read_input_tokens\": 150000, \"cache_creation_input_tokens\": 5}}}\n{\"type\": \"user\", \"timestamp\": \"<TS>\", \"message\": {\"content\": \"back\"}}\n",
+  "state:home/.kith/live/terminal/lc-sknewturn.claim.lock": "",
+  "state:home/.kith/live/terminal/lc-sknewturn.json": "{\n  \"agent\": \"designer\",\n  \"cwd\": \"<HOME>/work\",\n  \"kind\": \"terminal\",\n  \"pid\": null,\n  \"sessionId\": \"lc-sknewturn\",\n  \"startedAt\": \"<TS>\",\n  \"transcriptPath\": \"<HOME>/.claude/projects/p/lc-sknewturn.jsonl\",\n  \"v\": 1\n}\n",
+  "state:home/.kith/sessions/decisions/lc-sknewturn.json": "{\n  \"at\": \"<MASKED>\",\n  \"compacted\": false,\n  \"decision\": \"compact\",\n  \"idleSince\": 1767225600.0\n}\n",
+  "state:home/claude-fake": "#!/bin/sh\n# claude -p --resume SID /compact: logs the call and whether the writer claim file is there, then compacts (or fails, or waits).\nsid=$3\nprintf 'claude %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/live/terminal/$sid.claim\" ] && echo \"claim held\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/fail\" ] && exit 1\nnow=<TS>\nf=$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"'$now'\"}' \\\n  '{\"type\":\"user\",\"isCompactSummary\":true,\"timestamp\":\"'$now'\",\"message\":{\"content\":\"This session is being continued...\"}}' \\\n  '{\"type\":\"user\",\"timestamp\":\"'$now'\",\"message\":{\"content\":\"<command-name>/compact</command-name>\"}}' >> \"$f\"\n",
+  "state:home/work/": "<empty dir>\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "skipped\n"
+}

@@ -7,31 +7,12 @@ use crate::store::BotConfig;
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// ACP's `systemPrompt`: the bot's instructions added to the agent's own.
 pub(crate) fn system_prompt(system: &str) -> Value {
     json!({"mode": "append", "content": [{"type": "text", "text": system}]})
-}
-
-/// Claude's `_meta`: the bot's instructions appended to Claude Code's own system prompt, and its options. The
-/// per-session parts of Claude Code's prompt (working directory, git status) move to the first message, so a
-/// bot's chat, threads and routines share one cached system prompt.
-pub(super) fn claude_meta(cfg: &BotConfig, system: &str) -> Value {
-    json!({"systemPrompt": {"append": system, "excludeDynamicSections": true}, "claudeCode": claude_options(cfg)})
-}
-
-/// Claude Code's own memory and its auto-tidy stay off, so Kith's is the bot's one memory, unless the user kept
-/// them on; then Claude Code sets both itself ([design](../../../../docs/design/bot-memory.md#claude-codes-own-memory)).
-fn claude_options(cfg: &BotConfig) -> Value {
-    // The bot's replies and memory are Kith's own tools, which follow the bot's permission inside Kith: the
-    // user's Claude Code auto-mode classifier mustn't refuse them (it blocked a reply naming the user's daughter).
-    let mut settings = json!({"permissions": {"allow": ["mcp__chat", "mcp__memory"]}});
-    if !crate::agent::own_memory::kept(cfg) {
-        settings["autoMemoryEnabled"] = false.into();
-        settings["autoDreamEnabled"] = false.into();
-    }
-    json!({"options": {"settings": settings}})
 }
 
 /// Shell commands that may start the bot's agent over ACP, best first.
@@ -120,6 +101,16 @@ fn split_variant<'a>(res: &Value, model: &'a str) -> (&'a str, Vec<(&'a str, &'a
 /// Spawns an ACP agent and completes the `initialize` handshake.
 pub(crate) async fn start_agent(command: &str, cwd: &str, env: &[(String, String)], budget: Duration) -> Result<Conn> {
     let (acp, rx) = Acp::spawn(command, cwd, env)?;
+    handshake(acp, rx, budget).await
+}
+
+/// The `initialize` handshake of an agent already spawned (by [`start_agent`], or under a resident stub: Writer mode). A failed
+/// one stops the process.
+pub(crate) async fn handshake(
+    acp: Arc<Acp>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<acp::Incoming>,
+    budget: Duration,
+) -> Result<Conn> {
     let init = tokio::time::timeout(
         budget,
         acp.request(
@@ -154,7 +145,6 @@ pub(crate) async fn start_agent(command: &str, cwd: &str, env: &[(String, String
     };
     let sessions = SessionCaps {
         load: init["agentCapabilities"]["loadSession"].as_bool().unwrap_or(false),
-        fork: init["agentCapabilities"]["sessionCapabilities"]["fork"].is_object(),
         close: init["agentCapabilities"]["sessionCapabilities"]["close"].is_object(),
         system_prompt: init["agentCapabilities"]["sessionCapabilities"]["systemPrompt"].is_object(),
         additional_directories: init["agentCapabilities"]["sessionCapabilities"]["additionalDirectories"].is_object(),
@@ -173,6 +163,7 @@ pub(crate) async fn start_agent(command: &str, cwd: &str, env: &[(String, String
         call_refused: HashSet::new(),
         profiles: HashMap::new(),
         run_grant: None,
+        writer: None,
     })
 }
 
@@ -209,28 +200,6 @@ mod tests {
         // Cursor's Auto: `default[]` with variants, `default` without.
         let auto = json!({"models": {"availableModels": [{"modelId": "default"}]}});
         assert_eq!(split_variant(&auto, "default[]"), ("default", vec![]));
-    }
-
-    #[test]
-    fn claude_codes_memory_is_off_in_any_folder_unless_the_user_kept_it() {
-        let bot = |kept: Value| -> BotConfig {
-            serde_json::from_value(
-                json!({"id": "a", "name": "B", "backend": "claude", "cwd": "/work/app", "harnessMemory": kept}),
-            )
-            .unwrap()
-        };
-        let settings = |cfg: &BotConfig| claude_options(cfg)["options"]["settings"].clone();
-        // `null`: a client sending back a bot that had no switch.
-        for off in [json!(false), Value::Null] {
-            let off = settings(&bot(off));
-            assert_eq!(off["autoMemoryEnabled"], false, "a project folder too");
-            assert_eq!(off["autoDreamEnabled"], false);
-        }
-        let kept = settings(&bot(json!(true)));
-        assert!(
-            kept.get("autoMemoryEnabled").is_none() && kept.get("autoDreamEnabled").is_none(),
-            "Claude Code decides"
-        );
     }
 
     #[tokio::test]

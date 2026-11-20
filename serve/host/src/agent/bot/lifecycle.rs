@@ -64,7 +64,6 @@ impl Actor {
             return;
         }
         self.idle_checked = Instant::now();
-        self.tend_idle();
         if !self.queue.is_empty() {
             return;
         }
@@ -138,7 +137,6 @@ impl Actor {
         let unused = self.at_rest()
             && self.conn.is_none()
             && self.deferred.is_empty()
-            && self.compacting.is_none()
             && self.parked_prompts.is_empty()
             && self.files.is_idle()
             && self.admission.is_none()
@@ -151,7 +149,7 @@ impl Actor {
             return false;
         }
         let (Some(own), Some(rx)) = (self.own_tx.upgrade(), self.cmd_rx.as_mut()) else { return false };
-        let retired = self.hub.retire_actor(&self.cfg.id, &self.home, &own, rx);
+        let retired = self.hub.retire_actor(&self.rt, &own, rx);
         if retired {
             tracing::info!(bot = %self.cfg.id, place = %self.rt, "retiring an unused actor");
         }
@@ -162,11 +160,12 @@ impl Actor {
         self.turn.is_none()
             && self.queue.is_empty()
             && self.perms.is_empty()
-            && self.active_request.is_none()
             && self.active_group.is_none()
             && self.active_routine.is_none()
             && self.routine_completion.is_none()
             && self.cancel_deadline.is_none()
+            // Writer mode: a parked start, a claim, or an end still going keeps the process (and its lock) where it is.
+            && self.writer.idle()
     }
 
     /// A routine run's session is spent once the run is. When it was the only session open and nothing waits, the
@@ -202,9 +201,12 @@ impl Actor {
             Ok(_) => {
                 tracing::info!(bot = %self.cfg.id, session = sid, "closed a session");
                 conn.loaded.remove(sid);
+                // The engine let it go: its `loaded` marker may go with the row (writer.rs `sync_warm`).
+                if let Some(proc) = conn.writer.as_mut() {
+                    proc.closed.insert(sid.to_owned());
+                }
                 conn.usage.remove(sid);
                 conn.profiles.remove(sid);
-                self.applied_system.remove(sid);
             }
             Err(error) => {
                 tracing::warn!(bot = %self.cfg.id, session = sid, error = format!("{error:#}"), "couldn't close a session");

@@ -120,6 +120,31 @@ fn the_tool_list_follows_the_environment() {
         ]
     );
     assert_eq!(names(&Env::with(&[("KITH_PERSON", "")])).len(), 3);
+    // a room person (the turns of a group room with people) may run a door, never ask a helper
+    assert_eq!(
+        names(&Env::with(&[("KITH_PERSON", "room-g1-4")])),
+        ["approve", "request_access", "report_bug", "run_door"]
+    );
+}
+
+#[test]
+fn a_room_persons_helper_call_is_refused() {
+    let root = world("room-helper");
+    let k = kernel(&root, "", "echo ran");
+    let mut env = guest(&root, &root.join("no-host"));
+    env.set("KITH_PERSON", "room-g1-4");
+    let said = said(
+        &serve(
+            &env,
+            &k,
+            &[call(
+                1,
+                "ask_helper",
+                &json!({"agent": "other", "task": "t"}),
+            )],
+        )[0],
+    );
+    assert_eq!(said, "A room's turns can't ask helpers yet.");
 }
 
 #[test]
@@ -283,6 +308,37 @@ fn a_waiting_answer_parks_the_ask_that_started_the_run() {
     serve(&env, &root, &[ask(2)]);
     assert!(!root.join(".kith/live/ask").exists());
     h.join().unwrap();
+}
+
+#[test]
+fn park_waits_for_the_ask_box_lock_and_skips_an_ended_ask() {
+    use fs2::FileExt as _;
+    let root = world("park-lock");
+    let mut env = guest(&root, &root.join("no-host"));
+    env.set("KITH_ASK_ID", "ask-8");
+    let boxed = root.join(".kith/live/ask");
+    std::fs::create_dir_all(&boxed).unwrap();
+    let lock = std::fs::File::create(boxed.join(".lock")).unwrap();
+    lock.lock_exclusive().unwrap();
+    let (e, r) = (env.clone(), root.clone());
+    let t = std::thread::spawn(move || super::decide::park(&e, &r));
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(
+        !boxed.join("ask-8.parked").exists(),
+        "park wrote while the lock was held"
+    );
+    drop(lock);
+    t.join().unwrap();
+    assert!(boxed.join("ask-8.parked").is_file());
+    // an ended ask gets no marker: an end already removed it and nothing is left to resume
+    std::fs::remove_file(boxed.join("ask-8.parked")).unwrap();
+    std::fs::write(
+        boxed.join("ask-8.reg"),
+        "{\"state\": \"stopped\", \"ended_at\": 5}",
+    )
+    .unwrap();
+    super::decide::park(&env, &root);
+    assert!(!boxed.join("ask-8.parked").exists());
 }
 
 #[test]
@@ -696,6 +752,49 @@ fn run_door_runs_a_ticked_prepared_door_and_tells_how_it_ended() {
     let log = std::fs::read_to_string(root.join("py.log")).unwrap();
     assert!(log.contains("\"person\":\"guest\"") && log.contains("\"agent\":\"front\""));
     assert!(log.contains("\"act\":\"run\""));
+}
+
+/// Rule 11: a room person's door is checked and claimed for the people the host named for the turn (`KITH_ROOM_MEMBERS`, as the
+/// launch reads them) and carries the turn's start gen (`KITH_ROOM_GEN`). Nobody else's door takes either from the environment: a
+/// bot guest's group turn has the member list too.
+#[test]
+fn run_door_passes_a_room_persons_basis_and_gen_and_no_one_elses() {
+    let root = world("door-room");
+    let ok = "{\"ok\": true, \"real\": \"/files/people/guest/proj\", \"ready\": true, \"downloads\": \"d\"}\n";
+    fake_python(&root, ok, "{}", "{\"code\": 0, \"tail\": \"t\"}\n");
+    let call_door = |person: &str| {
+        let mut env = guest(&root, &root.join("no-host"));
+        env.set("KITH_PERSON", person);
+        env.set("KITH_ROOM_MEMBERS", "Ann, ben,");
+        env.set("KITH_ROOM_GEN", "7");
+        let r = serve(
+            &env,
+            &root,
+            &[call(
+                1,
+                "run_door",
+                &json!({"door": "render", "path": "/files/people/guest/proj"}),
+            )],
+        );
+        said(&r[0])
+    };
+    let log = || std::fs::read_to_string(root.join("py.log")).unwrap();
+    assert_eq!(
+        call_door("room-g1-4"),
+        "render ended. Its output, last lines:\nt"
+    );
+    assert!(
+        log().contains("\"basis\":[\"ann\",\"ben\"]") && log().contains("\"gen\":7"),
+        "{}",
+        log()
+    );
+    std::fs::remove_file(root.join("py.log")).unwrap();
+    call_door("guest");
+    assert!(
+        log().contains("\"basis\":[]") && log().contains("\"gen\":null"),
+        "{}",
+        log()
+    );
 }
 
 #[test]

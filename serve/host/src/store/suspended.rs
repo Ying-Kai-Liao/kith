@@ -103,6 +103,12 @@ impl Store {
     /// Removal: what a revoke kept goes for good.
     pub fn forget_suspended(&self, person: &str) -> Result<()> {
         let c = self.db.locked();
+        // The room parts of their invites go first: they name the invites by the person's rows.
+        c.execute(
+            "DELETE FROM invite_rooms WHERE invite_id IN
+             (SELECT invite_id FROM invites WHERE person_id = ?1 UNION SELECT invite_id FROM suspended_invites WHERE person_id = ?1)",
+            [person],
+        )?;
         for table in ["suspended_devices", "suspended_memberships", "suspended_invites"] {
             c.execute(&format!("DELETE FROM {table} WHERE person_id = ?1"), [person])?;
         }
@@ -134,6 +140,18 @@ impl Store {
         out.sort();
         out.dedup();
         Ok(out)
+    }
+
+    /// Whether a revoke set `person` aside on this host (something is kept for them), in one read. A revoke leaves the
+    /// people mirror as it stands, so a reader of a live event that must stop at once asks this beside the mirror.
+    pub fn is_suspended(&self, person: &str) -> bool {
+        let c = self.db.locked();
+        ["suspended_devices", "suspended_memberships", "suspended_invites"].iter().any(|table| {
+            c.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE person_id = ?1)"), [person], |r| {
+                r.get::<_, bool>(0)
+            })
+            .unwrap_or(true)
+        })
     }
 
     /// Everyone something is kept for.

@@ -1,0 +1,19 @@
+{
+  "fakes": "claude -p --resume lc-ok /compact\nclaim held\n",
+  "state:home/.claude/projects/p/lc-ok.jsonl": "{\"type\": \"user\", \"timestamp\": \"<TS>\", \"message\": {\"content\": \"do the thing\"}}\n{\"type\": \"assistant\", \"timestamp\": \"<TS>\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"shall I go on with plan B?\"}], \"usage\": {\"input_tokens\": 10, \"cache_read_input_tokens\": 150000, \"cache_creation_input_tokens\": 5}}}\n{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"<TS>\"}\n{\"type\":\"user\",\"isCompactSummary\":true,\"timestamp\":\"<TS>\",\"message\":{\"content\":\"This session is being continued...\"}}\n{\"type\":\"user\",\"timestamp\":\"<TS>\",\"message\":{\"content\":\"<command-name>/compact</command-name>\"}}\n",
+  "state:home/.kith/live/terminal/lc-ok.claim.lock": "",
+  "state:home/.kith/live/terminal/lc-ok.json": "{\n  \"agent\": \"designer\",\n  \"cwd\": \"<HOME>/work\",\n  \"kind\": \"terminal\",\n  \"pid\": null,\n  \"sessionId\": \"lc-ok\",\n  \"startedAt\": \"<TS>\",\n  \"transcriptPath\": \"<HOME>/.claude/projects/p/lc-ok.jsonl\",\n  \"v\": 1\n}\n",
+  "state:home/.kith/sessions/decisions/lc-ok.json": "{\n  \"at\": \"<MASKED>\",\n  \"compacted\": true,\n  \"compactedAt\": \"<MASKED>\",\n  \"decision\": \"compact\",\n  \"idleSince\": 1767225600.0\n}\n",
+  "state:home/.kith/sessions/lifecycle.lock": "",
+  "state:home/claude-fake": "#!/bin/sh\n# claude -p --resume SID /compact: logs the call and whether the writer claim file is there, then compacts (or fails, or waits).\nsid=$3\nprintf 'claude %s\\n' \"$*\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/live/terminal/$sid.claim\" ] && echo \"claim held\" >> \"$DIFFTEST_FAKELOG\"\n[ -f \"$KITH_STATE/fail\" ] && exit 1\nnow=<TS>\nf=$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"timestamp\":\"'$now'\"}' \\\n  '{\"type\":\"user\",\"isCompactSummary\":true,\"timestamp\":\"'$now'\",\"message\":{\"content\":\"This session is being continued...\"}}' \\\n  '{\"type\":\"user\",\"timestamp\":\"'$now'\",\"message\":{\"content\":\"<command-name>/compact</command-name>\"}}' >> \"$f\"\n",
+  "state:home/work/": "<empty dir>\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "kith-lifecycle: no kith-stub program beside kith, so this conversation cannot be locked; this compaction of lc-ok is not locked against another run of the conversation\n",
+  "step0.stdout": "lc-ok compact compacted\n",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"decision\": {\n    \"at\": \"<MASKED>\",\n    \"compacted\": true,\n    \"compactedAt\": \"<MASKED>\",\n    \"decision\": \"compact\",\n    \"idleSince\": 1767225600.0\n  },\n  \"ended\": \"crash\",\n  \"outstanding\": [],\n  \"session\": \"lc-ok\"\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": ""
+}

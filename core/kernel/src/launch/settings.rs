@@ -140,6 +140,15 @@ pub struct Input<'a> {
     pub kith_bin: Option<&'a str>,
     /// `kith_bin` when it also knows `kernel readfence` (the Rust read fence), else None: the fence stays the Python hook.
     pub fence_bin: Option<&'a str>,
+    /// `kith_bin` when `room-ledger` is switched and it lists the `room-ledger` module (see `assemble::ledger_hook_bin`), else
+    /// None: the hooks then name `bin/kith-room-ledger`, which is a stub that forwards to a program that has the module.
+    pub ledger_bin: Option<&'a str>,
+    /// `kith_bin` when `cost` is switched and it has the `cost-ledger` module (see `assemble::cost_hook_bin`), else None: the
+    /// `SessionStart` hook then stays `bin/kith-cost tag`.
+    pub cost_bin: Option<&'a str>,
+    /// `kith_bin` when `threads` is switched and it has the `threads-writer` module (see `assemble::threads_hook_bin`), else
+    /// None: the registry's `SessionStart` hook then stays `bin/kith-sessions record`.
+    pub threads_bin: Option<&'a str>,
     /// `claude plugin list --json` (`[]` when it failed).
     pub plugins_json: &'a str,
     /// The owner at their own terminal: their plugins stay as their settings have them.
@@ -259,23 +268,6 @@ pub fn prepare_folders(p: &Paths, f: &Folders, member: &Member) -> std::io::Resu
 
 fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
-}
-
-/// The python3 the read fence hook runs, by absolute path: the first executable `python3` in an absolute directory of the
-/// launching PATH, else `/usr/bin/python3`. A bare `python3` would be looked up on the PATH of the hook's run, which a
-/// guest's shell can change.
-fn python3_abs(env: &dyn Fn(&str) -> Option<String>) -> String {
-    use std::os::unix::fs::PermissionsExt as _;
-    env("PATH")
-        .into_iter()
-        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
-        .filter(|d| d.is_absolute())
-        .map(|d| d.join("python3"))
-        .find(|c| fs::metadata(c).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
-        .map_or_else(
-            || "/usr/bin/python3".to_owned(),
-            |c| c.to_string_lossy().into_owned(),
-        )
 }
 
 /// `shlex.quote`.
@@ -536,9 +528,18 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     let builtin = i.src_pkg.starts_with(i.kernel.join("agents"));
 
     // Memory checks and the room ledger
+    // The Rust hook when the program has it, else the stub at the old path (it forwards, or does nothing: a hook never fails).
+    // Quoted as bash's %q does, so both launch paths write the same bytes.
+    let ledger_cmd = match i.ledger_bin.filter(|b| !b.is_empty()) {
+        Some(bin) => format!(
+            "{} kernel room-ledger --kernel {}",
+            bash_q(bin),
+            bash_q(&kernel)
+        ),
+        None => bash_q(&format!("{kernel}/bin/kith-room-ledger")),
+    };
     let ledger_pre = format!(
-        "{} pre --agent {} --home {} || true",
-        bash_q(&format!("{kernel}/bin/kith-room-ledger")),
+        "{ledger_cmd} pre --agent {} --home {} || true",
         bash_q(i.agent),
         bash_q(&f.home)
     );
@@ -771,9 +772,29 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     let sm = st.as_object_mut().ok_or_else(|| bad("settings"))?;
     {
         let hooks = obj(sm, "hooks")?;
-        list(hooks, "SessionStart")?.push(json!({"hooks": [{"type": "command", "command": format!("\"{kernel}/bin/kith-cost\" tag"), "timeout": 10}]}));
-        // Lists the session in the apps when it is a listable terminal run; never fails the session.
-        list(hooks, "SessionStart")?.push(json!({"hooks": [{"type": "command", "command": format!("\"{kernel}/bin/kith-sessions\" record"), "timeout": 5}]}));
+        // The ledger's writer: the Rust `kith kernel cost tag` when the program has it and `cost` is switched, else the Python.
+        let cost_hook = match i.cost_bin.filter(|b| !b.is_empty()) {
+            Some(bin) => format!(
+                "{} kernel cost --kernel {} tag",
+                bash_q(bin),
+                bash_q(&kernel)
+            ),
+            None => format!("\"{kernel}/bin/kith-cost\" tag"),
+        };
+        list(hooks, "SessionStart")?
+            .push(json!({"hooks": [{"type": "command", "command": cost_hook, "timeout": 10}]}));
+        // Lists the session in the apps when it is a listable terminal run; never fails the session. The Rust `kith kernel
+        // threads record` when the program has it and `threads` is switched, else the Python, as the ledger's hook above.
+        let sessions_hook = match i.threads_bin.filter(|b| !b.is_empty()) {
+            Some(bin) => format!(
+                "{} kernel threads --kernel {} record",
+                bash_q(bin),
+                bash_q(&kernel)
+            ),
+            None => format!("\"{kernel}/bin/kith-sessions\" record"),
+        };
+        list(hooks, "SessionStart")?
+            .push(json!({"hooks": [{"type": "command", "command": sessions_hook, "timeout": 5}]}));
         for (event, cmd) in [
             ("PreToolUse", &mem_pre),
             ("PostToolUse", &mem_post),
@@ -1183,6 +1204,27 @@ struct GuestCtx<'a> {
     pkg: &'a str,
 }
 
+/// `path`, then where each link on it points (up to 16), then its real path, so a sandbox that reads links as links before it
+/// follows them can open the whole way to the file. A path that is not a link is just itself.
+fn link_chain(path: &Path) -> Vec<String> {
+    let mut chain = vec![s(path)];
+    let mut at = path.to_path_buf();
+    for _ in 0..16 {
+        let Ok(to) = fs::read_link(&at) else { break };
+        at = if to.is_absolute() {
+            to
+        } else {
+            at.parent().map(|p| p.join(&to)).unwrap_or(to)
+        };
+        chain.push(s(&at));
+    }
+    let real = s(&realpath(path));
+    if !chain.contains(&real) {
+        chain.push(real);
+    }
+    chain
+}
+
 /// Anyone but the owner: the OS sandbox around Bash and every process it starts, read limits, and the write rules (W).
 fn guest_sandbox(
     i: &Input<'_>,
@@ -1243,6 +1285,16 @@ fn guest_sandbox(
     if let Some(sock) = env("KITH_RUN_SOCKET") {
         socks.extend(both(&sock));
     }
+    // The core's run socket (recall, memory search and project-id are answered there): the one file of `<machine>/core` a guest
+    // may reach. The folder stays on the deny list and nothing else in it is opened (owner.sock, owner.token, the core's database).
+    socks.extend(
+        machine_both
+            .iter()
+            .flat_map(|m| both(&format!("{m}/core/run.sock"))),
+    );
+    if let Some(sock) = env("KITH_CORE_RUN_SOCKET") {
+        socks.extend(both(&sock));
+    }
     let socks = dedup(socks);
     let allow_write = dedup(allow_write);
 
@@ -1263,6 +1315,12 @@ fn guest_sandbox(
         if !d.is_empty() {
             allow.extend(both(&d));
         }
+    }
+    // The kith program, so a guest's `project-id` (the stub at bin/project-id runs `kith kernel project-id`, which asks the host)
+    // can start it: the file and each link on the way to it (~/.local/bin/kith -> ~/.kith/cli/current/bin/kith -> the release).
+    // The launch gives the run KITH_BIN with this same path.
+    if let Some(bin) = i.kith_bin.filter(|b| !b.is_empty()) {
+        allow.extend(link_chain(Path::new(bin)));
     }
     if !i.ctmp.is_empty() {
         allow.push(i.ctmp.to_owned());
@@ -1383,7 +1441,7 @@ fn guest_sandbox(
             }
         }
     }
-    // The file tools stay inside the same folders through a PreToolUse hook (lib/kith_readfence.py), not through
+    // The file tools stay inside the same folders through a PreToolUse hook (`kith kernel readfence`), not through
     // permissions.blockReadsOutsideWorkingDirectories: that setting makes Claude Code ask for every Bash command it cannot
     // trace (a cd followed by an export), whatever a hook says, and each ask was a card to the owner. Bash is fenced by the
     // sandbox below.
@@ -1401,16 +1459,18 @@ fn guest_sandbox(
         .map(|r| format!("--root {}", shquote(r)))
         .collect::<Vec<_>>()
         .join(" ");
-    // The Rust hook (`kith kernel readfence`) when the launch knows a kith binary, else the Python one. A hook that cannot
-    // run (a missing script) still prints the refusal through `|| out=`.
-    let program = match i.fence_bin.filter(|b| !b.is_empty()) {
-        Some(bin) => format!("{} kernel readfence", shquote(bin)),
-        None => format!(
-            "{} -I {}/lib/kith_readfence.py",
-            shquote(&python3_abs(i.env)),
-            shquote(g.kernel)
-        ),
+    // The program that answers `kernel readfence`: the launch picks one that has it (the running program at worst), so none
+    // here means a caller built the input by hand. A guest never starts without its read fence.
+    let Some(bin) = i.fence_bin.filter(|b| !b.is_empty()) else {
+        return refuse(
+            3,
+            format!(
+                "kith: no kith program with `kernel readfence`; not running {} for {}",
+                i.agent, i.member.id
+            ),
+        );
     };
+    let program = format!("{} kernel readfence", shquote(bin));
     let fence = format!(
         "out=$({program} {root_args}) || out={}; printf %s \"$out\"",
         shquote(refused)

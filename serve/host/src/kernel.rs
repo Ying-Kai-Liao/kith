@@ -8,6 +8,8 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use kith_kernel::helpers::executable;
+
 /// The kernel's command, relative to the kernel folder. The only place that names it: change it here when
 /// the kernel's entry point is renamed.
 pub const KERNEL_ENTRY: &str = "bin/kith";
@@ -235,30 +237,19 @@ pub fn current_cli() -> Cli {
 #[cfg(not(test))]
 const STUB_ENV: &str = "KITH_STUB_BIN";
 
-fn executable(p: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-    #[cfg(not(unix))]
-    {
-        p.is_file()
-    }
-}
-
-/// [`STUB_ENV`]'s program for a host at `exe` with `kith` first on PATH, symlinks resolved before looking beside either.
+/// [`STUB_ENV`]'s program for a host at `exe` with `kith` first on PATH, symlinks resolved before looking beside either:
+/// beside the host or in the Mac app's CLI folder (`kith_kernel::helpers::beside`), else beside the `kith` on PATH.
 pub fn find_stub(exe: Option<&Path>, kith: Option<&Path>) -> Option<PathBuf> {
     let name = if cfg!(windows) { "kith-stub.exe" } else { "kith-stub" };
-    let beside = exe.and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(Path::to_path_buf));
-    let from_kith = kith.and_then(|k| k.canonicalize().ok()).and_then(|k| k.parent().map(Path::to_path_buf));
-    let mut places: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = beside {
-        places.push(dir.join(name));
-        places.push(dir.join("kith/bin").join(name)); // the Mac app: Resources/kith-serve, Resources/kith/bin/kith-stub
-    }
-    places.extend(from_kith.map(|d| d.join(name)));
-    places.into_iter().find(|p| executable(p))
+    let from_kith = kith.and_then(|k| k.canonicalize().ok()).and_then(|k| k.parent().map(|d| d.join(name)));
+    exe.and_then(|e| kith_kernel::helpers::beside(e, name)).or_else(|| from_kith.filter(|p| executable(p)))
+}
+
+/// `kith-holder` (the process holder Writer mode connects to) for a host at `exe`. Unlike the stub there is no PATH
+/// step: the holder's one user is the core inside this host, which looks only where `kith_kernel::helpers::beside`
+/// does, so a holder found anywhere else would be one the core never connects to.
+pub fn find_holder(exe: &Path) -> Option<PathBuf> {
+    kith_kernel::helpers::beside(exe, if cfg!(windows) { "kith-holder.exe" } else { "kith-holder" })
 }
 
 /// `(KITH_STUB_BIN, program)` for a process the host starts, resolved once: an explicit `KITH_STUB_BIN` that runs wins.
@@ -329,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn the_stub_is_found_beside_the_host_in_the_app_bundle_and_through_the_kith_link() {
+    fn the_stub_and_holder_are_found_beside_the_host_in_the_app_bundle_and_through_the_kith_link() {
         let t = std::env::temp_dir().join(format!("kith-stub-find-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&t);
         // The app: Resources/kith-serve (the service runs it), Resources/kith/bin/{kith,kith-stub}.
@@ -340,6 +331,12 @@ mod tests {
         assert_eq!(
             find_stub(Some(&res.join("kith-serve")), None),
             Some(res.join("kith/bin/kith-stub").canonicalize().unwrap())
+        );
+        assert_eq!(find_holder(&res.join("kith-serve")), None, "no holder in this bundle yet");
+        stub_at(&res.join("kith/bin/kith-holder"));
+        assert_eq!(
+            find_holder(&res.join("kith-serve")),
+            Some(res.join("kith/bin/kith-holder").canonicalize().unwrap())
         );
         // A service copy with the stub beside it wins over the bundle layout.
         let svc = t.join("serve/bin");
@@ -361,6 +358,9 @@ mod tests {
                 find_stub(Some(&t.join("lone-serve")), Some(&local.join("kith"))),
                 Some(cli.join("kith-stub").canonicalize().unwrap())
             );
+            // The holder has no PATH step: the core inside this host would never look there.
+            stub_at(&cli.join("kith-holder"));
+            assert_eq!(find_holder(&t.join("lone-serve")), None);
             // A stub that is not executable is not a stub.
             std::fs::set_permissions(
                 cli.join("kith-stub"),

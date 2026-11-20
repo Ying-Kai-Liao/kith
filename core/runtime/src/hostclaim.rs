@@ -6,17 +6,22 @@
 //! | answer | meaning |
 //! |---|---|
 //! | `{refused: "held", why}` | a writer holds the conversation (claimed, running or ending): the turn stays queued or parks |
+//! | `{refused: "paused", why}` | a schedule turn's job is paused: the core has cancelled the turn already |
 //! | `{refused: "stopped", why}` | the conversation's ask was stopped: the core has cancelled the turn already |
 //! | `{refused: "revoked", why}` | the person's revoke epoch moved after the caller's may check: the caller cancels the turn |
 //! | `{refused: "waiting", why}` | the claims wait for this generation's reconcile |
 //! | `{refused: "notWaiting", why}` | the turn is not waiting for that person (cancelled, expired, claimed) |
+//! | `{refused: "budget", why}` | the turn's per-message budget is spent (R-f): the caller drops the item with the note's line |
 //! | `{refused: "other", why}` | any other refusal (an unknown conversation) |
 //!
 //! A conversation is the Claude session id the host names its claim files by.
 
 use serde_json::{Value, json};
 
+use crate::conversations::basis::{self, Basis, Chain, Level};
 use crate::conversations::claims::{self, Kind, NewClaim, NewTurn, Redeemed, Reported};
+use crate::conversations::sched_run;
+use crate::conversations::warm::{self, WarmProc};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -54,12 +59,81 @@ fn int(p: &Value, key: &str) -> Result<i64> {
         .ok_or_else(|| bad(&format!("{key} is required")))
 }
 
+/// The room fields of `hostclaim.enqueue` (R-a, R-b, R-f, R-g): `None` for a plain turn, which is an owner-level one with
+/// no budget. A turn is a room turn when it names `basis`, `room` or `level`.
+fn basis_of(p: &Value) -> Result<Option<Basis>> {
+    let level = match word(p, "level") {
+        None | Some("owner") => Level::Owner,
+        Some("room") => Level::Room,
+        Some(_) => return Err(bad("level is owner or room")),
+    };
+    let listed: Vec<&str> = match p.get("basis") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(v) => v
+            .as_array()
+            .ok_or_else(|| bad("basis is a list of people"))?
+            .iter()
+            .map(|w| w.as_str().ok_or_else(|| bad("basis is a list of people")))
+            .collect::<Result<_>>()?,
+    };
+    let touched = !listed.is_empty()
+        || level == Level::Room
+        || [
+            "room",
+            "joinEpoch",
+            "gen",
+            "author",
+            "budget",
+            "budgetFrom",
+            "key",
+        ]
+        .iter()
+        .any(|k| p.get(*k).is_some_and(|v| !v.is_null()));
+    if !touched {
+        return Ok(None);
+    }
+    let epochs = p.get("epochs").and_then(Value::as_object);
+    let mut people = Vec::new();
+    for who in listed {
+        let seen = epochs
+            .and_then(|e| e.get(who))
+            .and_then(Value::as_i64)
+            .ok_or_else(|| bad(&format!("epochs names no revoke epoch for {who}")))?;
+        people.push((who.to_owned(), seen));
+    }
+    let chain = match (
+        p.get("budget").and_then(Value::as_i64),
+        p.get("budgetFrom").and_then(Value::as_i64),
+    ) {
+        (None, None) => Chain::None,
+        (Some(n), None) => Chain::Root(n),
+        (None, Some(from)) => Chain::Follow(from),
+        (Some(_), Some(_)) => {
+            return Err(bad(
+                "budget opens a chain and budgetFrom follows one: send one of them",
+            ));
+        }
+    };
+    Ok(Some(Basis {
+        people,
+        room: word(p, "room").map(str::to_owned),
+        room_gen: p.get("gen").and_then(Value::as_i64),
+        level,
+        join_epoch: p.get("joinEpoch").and_then(Value::as_i64),
+        author: word(p, "author").map(str::to_owned),
+        chain,
+        key: word(p, "key").map(str::to_owned),
+    }))
+}
+
 /// A refusal of the claims API as data (see the table above); any other error stays an error.
 fn refusal(e: Error) -> Result<Value> {
     let (kind, why) = match &e {
         Error::Stopped(w) => ("stopped", w.clone()),
         Error::Refused(w) if w.contains("has a writer") => ("held", w.clone()),
+        Error::Refused(w) if w.contains("turn budget of the chain") => ("budget", w.clone()),
         Error::Refused(w) if w.contains("was revoked") => ("revoked", w.clone()),
+        Error::Refused(w) if w.contains("is paused") => ("paused", w.clone()),
         Error::Refused(w) if w.contains("wait for the reconcile") => ("waiting", w.clone()),
         Error::Refused(w) if w.contains("is not waiting for") => ("notWaiting", w.clone()),
         Error::Refused(w) => ("other", w.clone()),
@@ -79,10 +153,12 @@ fn claim_json(c: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "started": c.get::<_, Option<String>>(6)?,
         // Which holder the claim went to: the host tells its own claims from another instance's by it, not by memory.
         "holderInstance": c.get::<_, Option<String>>(7)?,
+        // The turn the claim runs (null for a terminal or external claim): the host resumes only a claim of the turn it names.
+        "turn": c.get::<_, Option<i64>>(8)?,
     }))
 }
 
-const SHOW: &str = "SELECT claim_id, conversation, state, kind, person, pid, pid_started, holder_instance FROM claims";
+const SHOW: &str = "SELECT claim_id, conversation, state, kind, person, pid, pid_started, holder_instance, turn FROM claims";
 
 pub(crate) fn call(core: &mut Core, method: &str, params: &Value) -> Result<Value> {
     call_at(core, method, params, now_ms())
@@ -97,6 +173,21 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
                 need(p, "agent")?,
                 need(p, "engine")?,
             );
+            if let Some(room) = word(p, "room") {
+                // R-g: the conversation of one (agent, room, join epoch); a second one is refused.
+                return match basis::ensure_room(
+                    core,
+                    id,
+                    agent,
+                    engine,
+                    room,
+                    int(p, "joinEpoch")?,
+                    now,
+                ) {
+                    Ok(()) => Ok(json!({ "conversation": id })),
+                    Err(e) => refusal(e),
+                };
+            }
             let tx = core.claim_tx()?;
             // The same insert `enqueue_turn_in` makes; a row that exists keeps its agent and engine.
             tx.execute(
@@ -106,7 +197,54 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
             tx.commit()?;
             Ok(json!({ "conversation": id }))
         }
+        "hostclaim.proc" => {
+            let pid = u32::try_from(int(p, "pid")?).map_err(|_| bad("pid"))?;
+            let w = WarmProc {
+                pid,
+                started: need(p, "started")?,
+                instance: need(p, "instance")?,
+                person: word(p, "person").unwrap_or_default(),
+                agent: word(p, "agent").unwrap_or_default(),
+                conversation: word(p, "conversation"),
+                revoke_seen: p.get("revokeSeen").and_then(Value::as_i64),
+            };
+            match warm::register(core, &w) {
+                Ok(()) => Ok(json!({ "registered": true })),
+                Err(e) => refusal(e),
+            }
+        }
+        "hostclaim.procGone" => {
+            let pid = u32::try_from(int(p, "pid")?).map_err(|_| bad("pid"))?;
+            Ok(
+                json!({ "gone": warm::gone(core, pid, need(p, "started")?, word(p, "conversation"))? }),
+            )
+        }
+        "hostclaim.adopt" => {
+            let a = warm::adopt(core, need(p, "instance")?, now)?;
+            Ok(json!({
+                "ended": a.ended,
+                "kill": a.kill.iter().map(|k| json!({
+                    "claimId": k.claim_id, "pid": k.pid, "started": k.started,
+                })).collect::<Vec<_>>(),
+            }))
+        }
         "hostclaim.epoch" => Ok(json!({ "epoch": claims::revoke_epoch(core, person(p)?)? })),
+        "hostclaim.claim" if word(p, "kind") == Some("scheduleRun") => {
+            // A cron job's turn run by `kith-sched run-turn` (`conversations::sched_run`): the claim has no process until the run
+            // attaches itself (`claim.attach`).
+            match sched_run::claim_run(
+                core,
+                need(p, "conversation")?,
+                person(p)?,
+                int(p, "turn")?,
+                word(p, "holderInstance"),
+                int(p, "revokeSeen")?,
+                now,
+            ) {
+                Ok(c) => Ok(json!({ "claimId": c.claim_id, "generation": c.generation })),
+                Err(e) => refusal(e),
+            }
+        }
         "hostclaim.claim" => {
             let kind = match need(p, "kind")? {
                 "terminal" => Kind::Terminal,
@@ -148,7 +286,11 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
                 deadline: p.get("deadline").and_then(Value::as_i64),
                 revoke_seen: int(p, "revokeSeen")?,
             };
-            match claims::enqueue_turn(core, &t, now) {
+            let queued = match basis_of(p)? {
+                Some(b) => basis::enqueue(core, &t, &b, now),
+                None => claims::enqueue_turn(core, &t, now),
+            };
+            match queued {
                 Ok(id) => Ok(json!({ "turn": id })),
                 Err(e) => refusal(e),
             }
@@ -191,6 +333,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
         }
         "hostclaim.settle" => {
             let ended = claims::end_gone(core, &crate::gate::System, now)?;
+            warm::settle(core, &crate::gate::System)?;
             Ok(json!({ "ended": ended }))
         }
         "hostclaim.show" => {
@@ -225,6 +368,25 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
             tx.commit()?;
             Ok(json!({ "cancelled": !done.is_empty() }))
         }
+        "hostclaim.strays" => {
+            // Turns a host enqueued (they carry its key) that wait: the host cancels those it has no item for. The core's own
+            // turns (a schedule's fire, a wake's) carry no key and are never listed.
+            let mut st = core.conn().prepare(
+                "SELECT id, conversation, enq_key FROM turns
+                 WHERE enq_key IS NOT NULL AND state IN ('queued', 'parked') ORDER BY id",
+            )?;
+            let turns = st
+                .query_map([], |r| {
+                    Ok(json!({
+                        "turn": r.get::<_, i64>(0)?,
+                        "conversation": r.get::<_, String>(1)?,
+                        "key": r.get::<_, String>(2)?,
+                    }))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(json!({ "turns": turns }))
+        }
+        "hostclaim.queued" => queued(core),
         "hostclaim.park" => match claims::park(core, int(p, "turn")?, need(p, "reason")?, now) {
             Ok(parked) => Ok(json!({ "parked": parked })),
             Err(e) => refusal(e),
@@ -244,6 +406,62 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
             "kith-core: no method {method}"
         ))),
     }
+}
+
+/// `hostclaim.queued`: the turns the core queued that no host began (a schedule's fire), for the host's runner (design
+/// 2026-11-16-core-queued-runner, `HostRuns.tla` `MayPull`). Only unkeyed turns: a keyed one belongs to the host run that
+/// enqueued it, and the strays sweep cancels it when that run is gone. `redeemedBefore` is any claim of the turn having
+/// been redeemed (`running_at`): its prompt may have reached an engine, so the host cancels it instead of running it again
+/// (`SkipRedeemed`). Every schedule turn in this core.db was fired on this Mac, for an agent the index lists here.
+fn queued(core: &Core) -> Result<Value> {
+    let owner = owner_id(core);
+    let mut st = core.conn().prepare(
+        "SELECT t.id, t.conversation, c.agent, c.engine, t.person, t.prompt, t.deadline, t.parked_reason,
+                EXISTS (SELECT 1 FROM claims k WHERE k.turn = t.id AND k.running_at IS NOT NULL),
+                (SELECT f.job FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1),
+                (SELECT f.settings FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1)
+         FROM turns t JOIN conversations c ON c.id = t.conversation
+         WHERE t.enq_key IS NULL AND t.source = 'schedule' AND t.state IN ('queued', 'parked')
+         ORDER BY t.id",
+    )?;
+    let turns = st
+        .query_map([], |r| {
+            let person: String = r.get(4)?;
+            Ok(json!({
+                "turn": r.get::<_, i64>(0)?,
+                "conversation": r.get::<_, String>(1)?,
+                "agent": r.get::<_, String>(2)?,
+                "engine": r.get::<_, String>(3)?,
+                "job": r.get::<_, Option<String>>(9)?,
+                // `{model, effort, harness}` fixed when the turn was fired (null for a turn fired before they were kept: the run
+                // reads the job's current values).
+                "settings": r
+                    .get::<_, Option<String>>(10)?
+                    .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
+                // null when the owner can't be read: the host says so instead of letting every run expire quietly.
+                "owner": owner.as_deref().map(|o| o == person),
+                "person": person,
+                "prompt": r.get::<_, String>(5)?,
+                "deadline": r.get::<_, Option<i64>>(6)?,
+                "parkedReason": r.get::<_, Option<String>>(7)?,
+                "redeemedBefore": r.get::<_, bool>(8)?,
+            }))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(json!({ "turns": turns }))
+}
+
+/// The owner's id in the authority tables (the person a job with none runs as); `None` when they cannot be read.
+#[cfg(unix)]
+fn owner_id(core: &Core) -> Option<String> {
+    crate::authority::tables_within(core.conn())
+        .ok()
+        .and_then(|auth| crate::schedules::owner_in(&auth))
+}
+
+#[cfg(not(unix))]
+fn owner_id(_core: &Core) -> Option<String> {
+    None
 }
 
 #[cfg(unix)]
@@ -281,7 +499,7 @@ fn turn(core: &mut Core, p: &Value, now: i64) -> Result<Value> {
         person: person(p)?,
         turn: Some(int(p, "turn")?),
         holder_instance: word(p, "holderInstance"),
-        account: None,
+        account: word(p, "account"),
         process: None,
         revoke_seen: int(p, "revokeSeen")?,
     };

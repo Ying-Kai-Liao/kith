@@ -194,6 +194,15 @@ def report(c, period):
     print()
 
 
+def cost_person(env):
+    """Whom a run is written down for. A room's run (room-<id>, the turns of a group room with people) is the cost of whoever
+    asked: KITH_COST_PERSON names them, `owner` is the owner's own (written as none). Anyone else's is KITH_PERSON."""
+    who = env('KITH_COST_PERSON')
+    if who:
+        return None if who == 'owner' else who
+    return env('KITH_PERSON') or None
+
+
 def tag(c):
     """SessionStart hook: the session on stdin is a run of $KITH_AGENT. Never fails the session."""
     try:
@@ -204,7 +213,7 @@ def tag(c):
                       'person, provider, account, account_id) values (?,?,?,?,?,?,?,?,?,?,?,?)', (
                 hook['session_id'], env('KITH_AGENT'), env('KITH_AGENT_VERSION'), env('KITH_MODEL') or None,
                 env('KITH_EFFORT') or None, env('KITH_VIA', 'terminal'), env('KITH_PROJECT') or None,
-                dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S'), env('KITH_PERSON') or None,
+                dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S'), cost_person(env),
                 env('KITH_PROVIDER') or None, env('KITH_ACCOUNT') or None, env('KITH_ACCOUNT_ID') or None))
             c.commit()
     except Exception as e:  # noqa: BLE001 — cost tracking must never block a run
@@ -222,7 +231,7 @@ def record(c):
         c.execute('insert or ignore into runs (session, agent, version, model, effort, via, project, started, '
                   'person, provider, account, account_id) values (?,?,?,?,?,?,?,?,?,?,?,?)', (
             r['session'], env('KITH_AGENT'), env('KITH_AGENT_VERSION'), r.get('model'), env('KITH_EFFORT') or None,
-            env('KITH_VIA', 'terminal'), env('KITH_PROJECT') or None, now[:19], env('KITH_PERSON') or None,
+            env('KITH_VIA', 'terminal'), env('KITH_PROJECT') or None, now[:19], cost_person(env),
             env('KITH_PROVIDER') or None, env('KITH_ACCOUNT') or None, env('KITH_ACCOUNT_ID') or None))
         c.commit()
     except Exception as e:  # noqa: BLE001 — cost tracking must never block a run

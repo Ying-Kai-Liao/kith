@@ -1,0 +1,2 @@
+\* run-turn attaches to the turn's current claim instead of the check-and-set on its own claim
+AttachCAS = FALSE

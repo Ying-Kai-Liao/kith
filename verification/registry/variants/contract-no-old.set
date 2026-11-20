@@ -1,0 +1,7 @@
+K1 = "new"
+K2 = "new"
+K3 = "new"
+ProjectRule = "row"
+MissingKey = "oldest"
+ExportRule = "different"
+FileWrite = "blind"

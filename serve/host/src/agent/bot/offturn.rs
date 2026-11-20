@@ -1,5 +1,5 @@
 //! A turn the agent started by itself. Claude Code wakes an agent when a background task finishes, with no host turn
-//! running: the agent calls `send_file` or `send_message` and writes its reply, and all of it used to vanish ("no turn
+//! running: the agent calls `send_file` and writes its reply, and all of it used to vanish ("no turn
 //! is running"). The host now opens an off-turn turn in the lane of the session's last turn, so the work lands where
 //! the person was talking, and ends it after a quiet period through the normal finish path.
 
@@ -41,7 +41,7 @@ pub(super) fn wakes(actor: &Actor, u: &Value) -> bool {
 }
 
 impl Actor {
-    /// Makes sure a turn is running for `send_file` and `send_message`: the one that is, or an off-turn turn in the
+    /// Makes sure a turn is running for `send_file`: the one that is, or an off-turn turn in the
     /// lane of the session's last turn. Why not, when it can't.
     pub(super) async fn ensure_turn(&mut self) -> Result<()> {
         if self.turn.is_some() {
@@ -64,14 +64,33 @@ impl Actor {
         ensure!(self.hub.store.bot(&self.cfg.id)?.is_some_and(|bot| !bot.deleted), "bot was deleted");
         // The same check a turn start makes, under the thread's lock, which is also where the lane is marked working.
         let (rt, begin_lane) = (self.rt.clone(), lane.clone());
-        crate::terminal::start_gate(&self.hub, &lane, move |hub| {
+        // Writer mode: the engine is already writing, so anything that keeps it from the session (the gate, a begin, a sync, a reload)
+        // stops its process. A process without a stub is a Files or Shadow one: it fails as it always did.
+        let writer = self.conn.as_ref().is_some_and(|c| c.writer.is_some());
+        let gate = crate::terminal::start_gate(&self.hub, &lane, move |hub| {
             hub.set_runtime(&rt, |r| {
                 r.status = BotStatus::Working;
                 r.lane = Some(begin_lane);
             });
         })
-        .await?;
-        if let Err(error) = self.claim_for_turn(&sid, &lane).await {
+        .await;
+        if let Err(error) = gate {
+            if writer {
+                self.writer_kill_process().await;
+            }
+            return Err(error.into());
+        }
+        let claimed = match self.writer_claim(&sid, &lane, true).await {
+            Ok(true) => Ok(()),
+            Ok(false) => self.claim_for_turn(&sid, &lane).await,
+            Err(error) => {
+                if writer {
+                    self.writer_kill_process().await;
+                }
+                Err(error)
+            }
+        };
+        if let Err(error) = claimed {
             self.hub.set_runtime(&self.rt, |r| {
                 r.status = BotStatus::Idle;
                 r.lane = None;
@@ -93,9 +112,7 @@ impl Actor {
         self.plan_card = None;
         self.last_text = None;
         self.last_agent = None;
-        self.sent.clear();
         self.files.summary = None;
-        self.hub.team.start_turn(&self.rt, None);
         self.hub.set_runtime(&self.rt, |r| {
             r.activity = "Working…".into();
             r.started_at = Some(now_ms());

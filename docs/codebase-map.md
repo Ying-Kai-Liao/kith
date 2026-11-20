@@ -10,7 +10,8 @@ reasons behind it are in [architecture.md](architecture.md); commands are in the
 kith/                               this repo (public): README, docs/, install.sh, .claude-plugin/
   docs/                             architecture.md (the model), this map, how-hq-runs.html (+ .architecture.json,
                                     its source) and img/how-hq-runs-{light,dark}.png (the README's picture)
-                                    ci.md (CI jobs, path filters, the merge queue)
+                                    ci.md (CI jobs, path filters, the merge queue),
+                                    rooms-people.md (owner's runbook for people in rooms)
 kith/kernel/                        the code: what kith is (bin/, lib/, adapters/, PROTOCOL.md, services/)
 kith/agents/                        the agents folder, $KITH_AGENTS: your private repo (<you>/hq-agents), each agent's life
   <name>/                           one agent
@@ -165,7 +166,13 @@ JSON answer back → `git fetch` the branch, `scp` `.kith-out/` to `./kith-out/<
 **A scheduled job** → launchd runs `kith-sched tick` every minute → for each `jobs.json` job whose cron time fell since
 the last tick (at most a day back) and that isn't still running: `kith <agent> "task + scheduled note"` detached, with
 `--permission-mode` from `KITH_SCHED_PERMISSION_MODE` when set (else the agent's mode, else kith's default) → output in
-`~/.kith/logs/sched/runs/<agent>/`, delivery by `kith-send`.
+`~/.kith/logs/sched/runs/<agent>/`, delivery by `kith-send`. Once `kith kernel cutover step schedules` has moved the schedules to
+the core, the core fires the turn and the host runs it: it claims the turn and starts `kith-sched run-turn <agent> <job> --turn N
+--claim C` detached, which builds the same run, records its own pid on the claim (`claim.attach`) and `exec`s `kith <agent> task`.
+The step only goes through when the gate holds (`cutover/modules/schedules_gate.rs`: the build runs fired turns, launchd runs this
+`kith` and a `kith-sched` that takes `tick.lock`, and no `kith-sched tick` that started before the step is still running); the
+checklist behind `RUNS_FIRED_TURNS` is on the flag, and `serve/host/tests/schedules_cutover_e2e.rs` runs the step, the host, the
+core daemon and the real `kith-sched` as processes (host-build runs it).
 
 **Cost** → Claude Code writes transcripts → `kith-cost sync` (every 6 h, and before each report) → `cost.db`;
 `runs` (from the hook) and `kith:` subagent types attribute requests to agents.

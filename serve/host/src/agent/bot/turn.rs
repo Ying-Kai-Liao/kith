@@ -1,10 +1,10 @@
 //! Starting a turn and wrapping it up: final reply, notices, replies to waiters, alerts and memory.
 
-use super::{Actor, Cmd, Conn, Done, Instructions, NoticeStyle, Queued, Seg};
+use super::{Actor, Cmd, Done, NoticeStyle, Queued, Seg};
 use crate::agent::acp::{self, Incoming};
 use crate::analytics::{self, TurnOutcome, TurnSource};
 use crate::channels::text::used_pct;
-use crate::chat::context::{self, Snapshot};
+
 use crate::chat::memory;
 use crate::chat::tasks::TaskState;
 use crate::hub::BotStatus;
@@ -15,72 +15,21 @@ use serde_json::json;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-/// Leads a `<bot-profile>` sent again after a compaction, so the agent drops an older copy it may still hold.
-const PROFILE_AGAIN: &str = "Your context was summarized. This is your full, current profile and memory; it replaces any earlier bot profile in this conversation.";
-
 impl Actor {
     /// The group room the current turn is in: memory loads for that room (a bot's own chat and threads are none).
     pub(super) fn memory_room(&self) -> Option<String> {
         self.active_group.as_ref().map(|g| g.lane.chat.clone())
     }
 
-    /// This session's frozen instructions (reads memory files when re-rendering).
-    pub(super) async fn snapshot(&self, session: &str) -> Result<Snapshot> {
-        let (hub, cfg, session, room) = (self.hub.clone(), self.cfg.clone(), session.to_owned(), self.memory_room());
-        crate::watchdog::blocking("bot-context", move || context::resolve(&hub.store, &cfg, &session, room.as_deref()))
-            .await?
-    }
-
-    /// The prompt for `text` in session `sid`: what the agent should hear first (its profile, a handoff, a thread's
-    /// start, a memory change) and after (a profile update, how to share files).
-    async fn compose(&mut self, sid: &str, text: &str) -> Result<String> {
-        if self.is_hq() {
-            let recalled = self.first_message_recall(text).await;
-            let moved = self.project_context().await;
-            let recalled = match (moved, recalled) {
-                (Some(m), Some(r)) => Some(format!("{m}\n\n{r}")),
-                (m, r) => m.or(r),
-            };
-            return Ok(self.compose_hq(text, recalled));
-        }
-        let instructions = self.conn.as_ref().map_or(Instructions::FirstMessage, Conn::instructions);
-        let mut snapshot = self.snapshot(sid).await?;
-        let remind_files = !snapshot.system.contains("send_file");
-        let mut prompt = text.to_owned();
-        if let Some(handoff) = self.handoff.take() {
-            prompt = format!("{handoff}\n\n{prompt}");
-        }
-        // A compaction may have dropped the profile the session's first message carried.
-        let resend = instructions == Instructions::FirstMessage && self.profile_resend.remove(sid);
-        if self.session_fresh || resend {
-            // The instructions reaching the agent now hold memory as it was when they were rendered.
-            memory::opened(&self.hub.store, &self.cfg.id, sid, &snapshot.memory)?;
-        }
-        if let Some((notice, revision)) =
-            memory::change_notice(&self.hub.store, &self.cfg, sid, self.memory_room().as_deref())
-        {
-            prompt = format!("{notice}\n\n{prompt}");
-            self.turn_memory_revision = revision;
-        }
-        if let Some(intro) = self.thread_intro.take() {
-            prompt = format!("{intro}\n\n{prompt}");
-        }
-        if std::mem::take(&mut self.session_fresh) && instructions == Instructions::FirstMessage {
-            prompt = format!("<bot-profile>\n{}\n</bot-profile>\n\n{prompt}", snapshot.system);
-        } else if resend {
-            context::mark_announced(&self.hub.store, &self.cfg.id, &snapshot, snapshot.system_identity.clone())?;
-            snapshot.announced = snapshot.system_identity.clone();
-            prompt = format!("<bot-profile>\n{PROFILE_AGAIN}\n\n{}\n</bot-profile>\n\n{prompt}", snapshot.system);
-        }
-        if let Some((update, identity)) = context::profile_update(&self.hub.store, &snapshot, &self.cfg) {
-            prompt = format!("{prompt}\n\n{update}");
-            self.announce = Some((snapshot, identity));
-        }
-        if remind_files && self.active_group.is_none() && self.active_request.is_none() && self.active_routine.is_none()
-        {
-            prompt.push_str("\n\n[Kith: send_file(path, name?) shares any regular file up to 100 MiB as a downloadable card. Use it instead of sending a local path. To share several files at once, pass them in one call with send_file(paths) (up to 10): they show as one group.]");
-        }
-        Ok(prompt)
+    /// The prompt for `text`: what the agent should hear first (its recall, a project change) and after.
+    async fn compose(&mut self, text: &str) -> Result<String> {
+        let recalled = self.first_message_recall(text).await;
+        let moved = self.project_context().await;
+        let recalled = match (moved, recalled) {
+            (Some(m), Some(r)) => Some(format!("{m}\n\n{r}")),
+            (m, r) => m.or(r),
+        };
+        Ok(self.compose_hq(text, recalled))
     }
 
     /// A start the terminal's hold refused: the owner's own messages go to the wake queue, quietly (no notice, not
@@ -88,7 +37,6 @@ impl Actor {
     async fn wait_for_terminal(&self, held: &crate::terminal::HeldByWriter, entry_ids: &[String]) -> bool {
         let owners_own = self.cfg.person.is_none()
             && held.code == "liveInTerminal"
-            && self.active_request.is_none()
             && self.active_group.is_none()
             && self.active_routine.is_none()
             && !entry_ids.is_empty();
@@ -119,7 +67,10 @@ impl Actor {
         hidden: bool,
         done_tx: &mpsc::UnboundedSender<Done>,
     ) -> Result<()> {
+        // C5: no turn of any kind (message, room, ask, routine) starts for a host-native bot.
+        self.cfg.refuse_native()?;
         self.start_entries = entry_ids.to_vec();
+        self.writer_note_start(&lane, entry_ids, text, hidden);
         let stopping = |c: &Cmd| matches!(c, Cmd::Stop | Cmd::Shutdown);
         let cancelled = self.deferred.iter().any(stopping);
         if !cancelled && let Some(mut rx) = self.cmd_rx.take() {
@@ -163,7 +114,7 @@ impl Actor {
         }
         for id in entry_ids {
             if self.hub.store.entry(id).is_some_and(|e| e.kind == EntryKind::User.as_str()) {
-                self.set_user_status(id, crate::chat::team::RequestStatus::Cancelled);
+                self.set_user_status(id, crate::chat::status::RequestStatus::Cancelled);
             }
         }
         Err(StartCancelled.into())
@@ -187,7 +138,9 @@ impl Actor {
                 r.lane = Some(begin_lane);
             });
         };
-        if let Err(held) = crate::terminal::start_gate(&self.hub, &lane, begin).await {
+        // Writer mode: a thread a terminal holds is not refused here; the claim finds it held and the turn parks (design 1.3).
+        let parks = self.writer_parks().await;
+        if let Err(held) = crate::terminal::start_gate_in(&self.hub, &lane, parks, begin).await {
             // The owner's own messages wait for the terminal as wakes instead of failing: the queue starts their turn
             // once it lets go. Anything else (a bot guest's thread, a person's chat, a hidden or room turn) is refused.
             if self.wait_for_terminal(&held, entry_ids).await {
@@ -195,7 +148,7 @@ impl Actor {
             }
             for id in entry_ids {
                 if let Some(mut e) = self.hub.store.entry(id).filter(|e| e.kind == EntryKind::User.as_str()) {
-                    e.data["status"] = json!(crate::chat::team::RequestStatus::Failed);
+                    e.data["status"] = json!(crate::chat::status::RequestStatus::Failed);
                     self.hub.set_entry(id, &e.data);
                 }
             }
@@ -212,20 +165,15 @@ impl Actor {
             |e| e.turn,
         );
         // Only a person's own words to an hq agent say what the chat is about.
-        let from_person = !hidden
-            && self.is_hq()
-            && self.active_request.is_none()
-            && self.active_group.is_none()
-            && self.active_routine.is_none()
-            && !entry_ids.is_empty();
+        let from_person =
+            !hidden && self.active_group.is_none() && self.active_routine.is_none() && !entry_ids.is_empty();
         self.project_turn = if from_person { self.infer_project(&lane, entry_ids, text).await } else { None };
         for id in entry_ids {
-            // Bot-message notices belong to `chat::team`; writing them here would race its final status.
             if let Some(mut e) = self.hub.store.entry(id).filter(|e| e.kind == EntryKind::User.as_str()) {
                 // A wake's message is sent once its prompt is (`turn_started`): until then a failed start gives it
                 // back to the queue, still waiting.
                 if !crate::cards::resume::wake_carries(id) {
-                    e.data["status"] = json!(crate::chat::team::RequestStatus::Sent);
+                    e.data["status"] = json!(crate::chat::status::RequestStatus::Sent);
                 }
                 if let Some(turn) = &self.project_turn {
                     e.data["projects"] = json!(turn.projects);
@@ -244,22 +192,15 @@ impl Actor {
         // The opening turn of a call the agent placed (`calls::greet`) is the host's, not the person's words.
         let greeting = !entry_ids.is_empty()
             && entry_ids.iter().all(|id| self.hub.store.entry(id).is_some_and(|e| e.data["greeting"] == true));
-        let from_user = !hidden
-            && !greeting
-            && self.active_request.is_none()
-            && self.active_group.is_none()
-            && self.active_routine.is_none();
+        let from_user = !hidden && !greeting && self.active_group.is_none() && self.active_routine.is_none();
         self.turn_call = (from_user || greeting)
             && !entry_ids.is_empty()
             && entry_ids.iter().all(|id| self.hub.store.entry(id).is_some_and(|e| e.data["via"] == "call"));
         self.turn_text = from_user.then(|| text.to_owned());
         self.turn_entries = if from_user { entry_ids.to_vec() } else { Vec::new() };
-        self.turn_memory_revision.clear();
-        self.announce = None;
         self.stop_requested = false;
         self.secrets_turn = false;
         self.cancel_deadline = None;
-        self.hub.team.start_turn(&self.rt, self.active_request.as_ref());
         self.exit_tail = None;
         self.seg = Seg::None;
         self.tools.clear();
@@ -267,32 +208,19 @@ impl Actor {
         self.plan_card = None;
         self.last_text = None;
         self.last_agent = None;
-        self.sent.clear();
         self.files.summary = None;
         self.files.cancel();
-        // A delegated or group turn has no live waiter after a host restart. Its persisted
+        // A group turn has no live waiter after a host restart. Its persisted
         // notices are marked interrupted instead of silently repeating work.
-        self.set_inflight(
-            self.active_request.is_none() && self.active_group.is_none() && self.active_routine.is_none(),
-        );
+        self.set_inflight(self.active_group.is_none() && self.active_routine.is_none());
         self.hub.set_runtime(&self.rt, |r| {
             r.status = BotStatus::Working;
-            r.activity = match (self.compacting.is_some(), hidden) {
-                (true, _) => "Summarizing the earlier conversation…",
-                (false, true) => "Picking up where it left off…",
-                (false, false) => "Starting…",
-            }
-            .into();
+            r.activity = if hidden { "Picking up where it left off…" } else { "Starting…" }.into();
             r.started_at = Some(now_ms());
             r.lane = Some(lane.clone());
             r.message = if from_user { entry_ids.last().cloned() } else { None };
         });
 
-        // Memory files changed since (in an editor, say) reach the opening or the next notice.
-        if !self.is_hq() {
-            let (hub, cfg) = (self.hub.clone(), self.cfg.clone());
-            let _ = tokio::task::spawn_blocking(move || memory::files::scan(&hub, &cfg)).await;
-        }
         self.turn_prompt = Some((text.to_owned(), hidden));
         self.turn_tried.clear();
         self.limit_seen = None;
@@ -324,16 +252,13 @@ impl Actor {
         let session = self.turn_session.clone();
         // What the agent does on this session after the turn, by itself, belongs to this lane: unless the turn was
         // a room's, an ask's or a routine's.
-        self.off_lane = (self.active_group.is_none() && self.active_request.is_none() && self.active_routine.is_none())
-            .then(|| lane.clone());
+        self.off_lane = (self.active_group.is_none() && self.active_routine.is_none()).then(|| lane.clone());
         self.hub.set_runtime(&self.rt, |r| r.session.clone_from(&session));
         if let Some(sid) = session {
             self.sync_call_model(&sid).await;
         }
         if hidden && self.session_fresh {
-            // A new session must never silently repeat an interrupted routine, and has nothing to compact.
-            self.compacting = None;
-            self.raw_prompt = false;
+            // A new session must never silently repeat an interrupted routine.
             self.finish_routine(
                 crate::routines::Status::Interrupted,
                 Some("The agent could not reload this run's saved session; inspect before retrying".into()),
@@ -344,7 +269,6 @@ impl Actor {
             if self.routine_completion.is_none() {
                 self.set_inflight(false);
             }
-            self.hub.team.cancel_from(&self.rt);
             self.hub.set_runtime(&self.rt, |r| {
                 r.status = BotStatus::Idle;
                 r.activity = String::new();
@@ -369,8 +293,9 @@ impl Actor {
         }
         let sid = self.turn_session.clone().ok_or_else(|| anyhow!("no session"))?;
         self.claim_for_turn(&sid, lane).await?;
-        let prompt =
-            if std::mem::take(&mut self.raw_prompt) { text.to_owned() } else { self.compose(&sid, text).await? };
+        // Writer mode: a thread a terminal forked moves the turn to the session the lane follows now (step 7).
+        let sid = self.turn_session.clone().ok_or_else(|| anyhow!("no session"))?;
+        let prompt = self.compose(text).await?;
         self.hub.set_runtime(&self.rt, |r| r.activity = "Thinking…".into());
         let acp = self.conn.as_ref().ok_or_else(|| anyhow!("agent not running"))?.acp.clone();
         let params = json!({
@@ -385,11 +310,6 @@ impl Actor {
         // Written before this returns, so a Stop right after is sent after the prompt.
         let answer = acp.send("session/prompt", params).await?;
         crate::cards::resume::turn_started(&self.hub, &self.start_entries);
-        if !self.turn_memory_revision.is_empty()
-            && let Err(error) = memory::mark_announced(&self.hub.store, &self.cfg.id, &sid, &self.turn_memory_revision)
-        {
-            tracing::warn!(%error, "could not acknowledge memory update notice");
-        }
         let done_tx = done_tx.clone();
         tokio::spawn(async move {
             let _ = done_tx.send(answer.response().await);
@@ -402,6 +322,14 @@ impl Actor {
     ///
     /// An app chat's session takes it before it loads (`ensure_hq_session`): that claim is the turn's.
     pub(super) async fn claim_for_turn(&mut self, sid: &str, lane: &Lane) -> Result<()> {
+        // Writer mode: the core's claim and the stub's lock are the writer; `Ok(false)` is any other mode, which takes the file path.
+        if self.writer_claim(sid, lane, false).await? {
+            return Ok(());
+        }
+        // A turn the core queued is the core's to claim: it never runs on the files path.
+        if self.writer.acc.as_ref().is_some_and(|a| a.pulled.is_some()) {
+            return Err(anyhow!("this scheduled run is the core's: it runs only while the core is the writer"));
+        }
         let pid = self.conn.as_ref().and_then(|c| c.acp.pid());
         if pid.is_some() && self.turn_claim.as_ref().is_some_and(|(held, by)| held == sid && Some(*by) == pid) {
             return Ok(());
@@ -470,6 +398,11 @@ impl Actor {
     }
 
     pub(super) fn release_turn_claim(&mut self) {
+        if self.writer.run.is_some() {
+            self.writer_release();
+            return;
+        }
+        self.writer.acc = None;
         if let Some((sid, pid)) = self.turn_claim.take() {
             let state = self.hub.terminal.env().state;
             crate::terminal::claim::release(&state, &sid, pid, false);
@@ -480,14 +413,9 @@ impl Actor {
         if self.turn.is_none() {
             return;
         }
-        let compaction = self.compacting.is_some();
         // A terminal thread's transcript now holds this turn: it isn't imported again.
         crate::terminal::host_turn_ended(&self.hub, &self.lane);
         self.after_turn(done);
-        // The bot's own edits to its memory files, checked and shown in the chat it made them from.
-        if !self.is_hq() {
-            memory::files::scan_after_turn(self.hub.clone(), self.cfg.clone());
-        }
         if let (Some(conn), Some(sid)) = (self.conn.as_mut(), &self.turn_session)
             && let Some(used) = conn.loaded.get_mut(sid)
         {
@@ -501,6 +429,10 @@ impl Actor {
         let ids: Vec<String> = self.perms.drain().map(|(k, _)| k).collect();
         // Cards nobody answered: an owner's gave up the turn's slot, which comes back with the dropped guard.
         self.parked_prompts.clear();
+        // A room turn a revoke ended: a card that opened after the withdraw looked can't be answered either.
+        if self.ended_by_access() {
+            crate::cards::withdraw_room_person(&self.hub, self.cfg.person.as_deref().unwrap_or_default());
+        }
         for id in ids {
             // A question with a card parks with its asker; an old one can't be answered and shows as expired.
             if crate::cards::park_entry(&self.hub, &id) {
@@ -527,13 +459,6 @@ impl Actor {
         let mut reply_entry = None;
         let routine = self.active_routine.is_some();
         let grouped = self.active_group.is_some() || routine;
-        let delegated = self.active_request.as_ref().is_some_and(crate::chat::team::BotRequest::expects_reply);
-        let sent = std::mem::take(&mut self.sent);
-        if !sent.is_empty() {
-            // The bot talked through send_message: what it wrote as its reply stays in the trace.
-            self.last_text = None;
-            final_text = Some(sent.join("\n\n"));
-        }
         if let Some(id) = self.last_text.take().filter(|_| !stopped)
             && let Some(mut e) = self.hub.store.entry(&id)
         {
@@ -542,7 +467,7 @@ impl Actor {
             if !(grouped && text.as_deref().is_none_or(crate::chat::group::is_pass)) {
                 // A room turn that a newer message or Stop moved on from: the reply is kept, marked, and wakes nobody.
                 if let Some(g) = &self.active_group {
-                    // Saved with the `final` mark just below (a room turn is never a delegated ask).
+                    // Saved with the `final` mark just below.
                     if let Some(conversation) = &g.conversation {
                         e.data["conversation"] = conversation.clone().into();
                     }
@@ -557,19 +482,14 @@ impl Actor {
                         e.data["lateWhy"] = if stopped { "stopped" } else { "newer" }.into();
                     }
                 }
-                // An ask's answer belongs to its requesting bot and exchange notice.
-                // Independent messages still report to the user in this chat.
-                if !delegated {
-                    e.data["final"] = true.into();
-                    self.hub.set_entry(&id, &e.data);
-                    reply_entry = Some(id);
-                }
+                e.data["final"] = true.into();
+                self.hub.set_entry(&id, &e.data);
+                reply_entry = Some(id);
                 final_text = text;
             }
         }
         // After the `final` marking above: `flush(true)` rewrote the open segment's data wholesale.
-        if !compaction
-            && let (Some(id), Some(sid)) = (self.last_agent.take(), &self.turn_session)
+        if let (Some(id), Some(sid)) = (self.last_agent.take(), &self.turn_session)
             && let Some(pct) =
                 context_percent(self.conn.as_ref().and_then(|c| c.usage.get(sid)).copied(), self.context_show)
         {
@@ -605,16 +525,6 @@ impl Actor {
         let failure = done.as_ref().err().filter(|_| !self.stop_requested);
         let failed = failure.is_some();
         self.report_turn(stopped, failure, &stop_reason);
-        let reply = if stopped {
-            Err(anyhow!("recipient was stopped; partial work may have happened"))
-        } else if stop_reason != "end_turn" {
-            Err(anyhow!("recipient did not finish ({stop_reason}); partial work may have happened"))
-        } else {
-            final_text
-                .clone()
-                .filter(|s| !s.trim().is_empty())
-                .ok_or_else(|| anyhow!("recipient finished without a text reply"))
-        };
         if routine {
             let (status, detail) = if self.routine_timed_out {
                 (
@@ -634,25 +544,19 @@ impl Actor {
             let text = (status == crate::routines::Status::Succeeded).then(|| final_text.clone()).flatten();
             self.finish_routine(status, detail, text);
         }
-        let message_failed =
-            !stopped && reply.is_err() && self.active_request.as_ref().is_some_and(|r| !r.expects_reply());
-        self.complete_request(reply, stopped);
         self.complete_group(if stopped || failed || stop_reason != "end_turn" {
             Err(anyhow!("turn did not complete ({stop_reason})"))
         } else {
             Ok(final_text.clone())
         });
         self.hub.set_task_status(&self.lane, TaskState::after_turn(stopped, failed, &stop_reason));
+        if done.is_err() {
+            self.writer_prompt_failed();
+        }
         self.release_turn_claim();
         self.turn = None;
         if self.routine_completion.is_none() {
             self.set_inflight(false);
-        }
-        // The message reached the agent: the profile update it carried is now known to it.
-        if let (Ok(_), Some((snapshot, identity))) = (&done, self.announce.take())
-            && let Err(error) = context::mark_announced(&self.hub.store, &self.cfg.id, &snapshot, identity)
-        {
-            tracing::warn!(bot = %self.cfg.id, error = format!("{error:#}"), "couldn't record the profile update");
         }
         if let (Some(user), Some(agent), "end_turn") = (self.turn_text.take(), &final_text, stop_reason.as_str()) {
             let turn = crate::chat::naming::Turn { user, agent: agent.clone() };
@@ -666,13 +570,11 @@ impl Actor {
             r.message = None;
             r.session = None;
         });
-        self.hub.team.cancel_from(&self.rt);
         // A room turn's news comes from the group once the room is done (see `group`).
         let more = self.queue.iter().any(|q| matches!(q, Queued::User { .. }));
         if !self.stop_requested
-            && !delegated
             && !grouped
-            && let Some(kind) = turn_alert(failed || message_failed, &stop_reason, more)
+            && let Some(kind) = turn_alert(failed, &stop_reason, more)
         {
             let body = final_text.unwrap_or_else(|| match kind {
                 AlertKind::Done => "Finished.".into(),
@@ -688,7 +590,7 @@ impl Actor {
     /// them (see `rich_card::jev`). The reply is already shown; the card is attached when and if Jev answers.
     fn start_reply_card(&self, entry_id: String, text: &str) {
         let run = crate::rich_card::jev::Run {
-            owner: self.cfg.person.is_none() && self.active_request.is_none() && self.active_routine.is_none(),
+            owner: self.cfg.person.is_none() && self.active_routine.is_none(),
             owner_only_room: if self.cfg.is_group() || self.active_group.is_some() {
                 self.run_members() == crate::agent::hq::Members::OwnerOnly
             } else {
@@ -720,8 +622,6 @@ impl Actor {
             TurnSource::Routine
         } else if self.active_group.is_some() {
             TurnSource::Group
-        } else if self.active_request.is_some() {
-            TurnSource::Bot
         } else {
             TurnSource::User
         };

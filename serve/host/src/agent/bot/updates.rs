@@ -147,7 +147,6 @@ impl Actor {
                     "locations": u["locations"].clone(),
                 });
                 merge_tool_content(&mut data, &u["content"]);
-                crate::chat::memory::files::touched(&self.hub.store, &self.cfg, &data);
                 let title = data["title"].as_str().unwrap_or("Tool").to_owned();
                 // A call a This session grant let through says so on its row (the owner's own chat only).
                 let grant = match (&self.cfg.hq_agent, &self.cfg.person) {
@@ -179,7 +178,6 @@ impl Actor {
                     e.data["locations"] = u["locations"].clone();
                 }
                 merge_tool_content(&mut e.data, &u["content"]);
-                crate::chat::memory::files::touched(&self.hub.store, &self.cfg, &e.data);
                 let status = e.data["status"].as_str().unwrap_or_default().to_owned();
                 let title = e.data["title"].as_str().unwrap_or_default().to_owned();
                 self.hub.set_entry(&entry_id, &e.data);
@@ -193,11 +191,7 @@ impl Actor {
                 }
                 // Claude's adapter carries the summary on one of its completed updates.
                 if u["status"] == "completed" {
-                    let summary = acp::content_text(&u["summary"]);
-                    self.compacted(
-                        u["compactionId"].as_str().unwrap_or_default(),
-                        (!summary.trim().is_empty()).then_some(summary),
-                    );
+                    self.compacted();
                 }
             }
             "usage_update" => {
@@ -296,7 +290,9 @@ impl Actor {
         let tool_name = crate::cards::edge::acp_tool(tool, &title).to_owned();
         // A host or a helper the owner is asked about can be kept: "Always for <person>", or the job that holds it.
         let mut kept = None;
-        if let (Some((person, agent)), None) = (&whose, &answerable_by) {
+        if let (Some((person, agent)), None) = (&whose, &answerable_by)
+            && !self.is_room_actor()
+        {
             let who = self.hub.store.person(person).map(|p| p.name).filter(|n| !n.is_empty());
             let who = who.unwrap_or_else(|| person.clone());
             kept = crate::cards::edge::for_acp(person, &who, agent, &tool_name, raw, &mut options).await;
@@ -386,7 +382,11 @@ impl Actor {
             bot_id: Some(self.cfg.id.clone()),
             run_id: None,
             person: whose.as_ref().map(|w| w.0.clone()).unwrap_or_default(),
-            agent: whose.as_ref().map(|w| w.1.clone()).or_else(|| self.cfg.hq_agent.clone()).unwrap_or_default(),
+            agent: whose
+                .as_ref()
+                .map(|w| w.1.to_string())
+                .or_else(|| self.cfg.hq_agent.as_ref().map(ToString::to_string))
+                .unwrap_or_default(),
             answerable_by: answerable_by.clone(),
             in_grants,
             tool: tool_name,
@@ -421,9 +421,17 @@ impl Actor {
             return;
         }
         self.close_seg();
-        if let Some(e) = self.add(EntryKind::Permission, turn, data.clone()) {
+        let card_entry = if self.is_room_actor() {
+            self.add_room_card(data.clone())
+        } else {
+            self.add(EntryKind::Permission, turn, data.clone())
+        };
+        if let Some(e) = card_entry {
             if let Ok(Opened::New(c) | Opened::Joined(c)) = &opened {
                 let _ = self.hub.store.card_live(&c.id, Some(&e.id), None);
+            }
+            if self.is_room_actor() {
+                self.add_room_pointer(&e);
             }
             // The owner may be a while: the slot goes back to the gate so other people's turns aren't stuck behind it.
             if waiting_for.is_some() && in_turn {
@@ -550,29 +558,6 @@ impl Actor {
         });
     }
 
-    /// A `send_message`: the user's next bubble, in the turn's lane, right away. Only in the
-    /// bot's own chat and threads, including independent messages; a room, an ask or a
-    /// routine reads the turn's reply.
-    pub(super) fn send_to_user(&mut self, text: String) -> anyhow::Result<()> {
-        let Some(turn) = self.turn else { anyhow::bail!("no turn is running") };
-        if self.active_request.as_ref().is_some_and(crate::chat::team::BotRequest::expects_reply) {
-            anyhow::bail!(
-                "send_message isn't available in an ask: return your answer to the requesting bot as your final reply"
-            );
-        }
-        if self.active_group.is_some() || self.active_routine.is_some() {
-            anyhow::bail!("send_message isn't available in this turn: write your answer as your reply");
-        }
-        self.close_seg();
-        let entry = self
-            .add(EntryKind::Agent, turn, json!({"text": text, "final": true}))
-            .ok_or_else(|| anyhow::anyhow!("couldn't save the message"))?;
-        self.last_agent = Some(entry.id);
-        self.sent.push(text);
-        self.set_activity("Working…");
-        Ok(())
-    }
-
     // MARK: streaming text segments
 
     pub(super) fn append(&mut self, kind: SegKind, text: &str) {
@@ -604,16 +589,15 @@ impl Actor {
 
     /// Persists streamed text at most every 300 ms (or immediately with `force`).
     pub(super) fn flush(&mut self, force: bool) {
-        let (hq, serving) = (self.is_hq(), self.serving.clone());
+        let serving = self.serving.clone();
         if let Seg::Open { kind, entry_id, buf, flushed, dirty } = &mut self.seg
             && *dirty
             && (force || flushed.elapsed() >= Duration::from_millis(300))
         {
             let data = match kind {
-                SegKind::Text if hq => {
+                SegKind::Text => {
                     json!({"text": buf, "final": false, "author": self.cfg.id, "answeredBy": serving})
                 }
-                SegKind::Text => json!({"text": buf, "final": false, "author": self.cfg.id}),
                 SegKind::Thought => json!({"text": buf, "author": self.cfg.id}),
             };
             self.hub.set_entry(entry_id, &data);
@@ -707,6 +691,19 @@ mod tests {
         assert_eq!(kept, ["exit-plan-default", "reject"]);
         let card = json!({"options": [{"optionId": "reject"}]});
         assert!(crate::api::roles::offered(&card, "reject") && !crate::api::roles::offered(&card, "exit-plan-bypass"));
+    }
+
+    /// A room person's actor has a person (`room-<id>`), so its cards go through the same filter: Allow once and Deny, and
+    /// a forged always answer is not one the card offered. Kept as its own test so that dropping the generic filter shows.
+    #[test]
+    fn a_room_persons_card_offers_only_once_choices_and_a_forged_always_is_refused() {
+        let kept = once_only(claude_options());
+        assert_eq!(ids(&kept), ["allow", "reject"]);
+        let card = json!({"options": kept});
+        for forged in ["allow-always", DERIVED_ALWAYS, "reject-always"] {
+            assert!(!crate::api::roles::offered(&card, forged), "{forged}");
+        }
+        assert!(crate::api::roles::offered(&card, "allow") && crate::api::roles::offered(&card, "reject"));
     }
 
     fn claude_options() -> Vec<Value> {

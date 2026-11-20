@@ -183,7 +183,7 @@ fn agents_here(hub: &Hub) -> Vec<String> {
         .unwrap_or_default()
         .into_iter()
         .filter(|r| !r.deleted && r.config.person.is_none())
-        .filter_map(|r| r.config.hq_agent)
+        .filter_map(|r| r.config.hq_agent.map(String::from))
         .collect();
     agents.sort();
     agents.dedup();
@@ -614,7 +614,7 @@ fn chats_of(hub: &Hub, person: &str) -> Vec<(String, Option<String>)> {
         .unwrap_or_default()
         .into_iter()
         .filter(|r| !r.deleted && r.config.person.as_deref() == Some(person))
-        .map(|r| (r.config.id, r.config.hq_agent))
+        .map(|r| (r.config.id, r.config.hq_agent.map(String::from)))
         .collect()
 }
 
@@ -737,10 +737,31 @@ pub(crate) async fn revoke_owned_by(hub: &Hub, person: &str, why: &str) {
 /// `terminal::claim::sweep`): the runs a restarted host lost track of. Never the owner's (their claims name nobody).
 /// With `only_denied` (access narrowed, not removed) a holder survives while its person may still use its agent; a claim
 /// that names no agent (from before claims did) cannot be judged and goes.
-pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: bool) {
+pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: bool) -> Option<String> {
     let state = hub.terminal.env().state;
     // Their doors too: all of them, or (access narrowed) those kith-auth no longer allows.
     let doors_of = if only_denied { Vec::new() } else { persons.clone() };
+    // Writer mode (or a gate that cannot be read): the core's claims are the runs, not the files. A sweep the core did not
+    // take is owed and retried (core_holders), never reported as "nothing to end".
+    match crate::terminal::core_holders::sweep(hub, &state, persons.clone(), only_denied).await {
+        Some(crate::terminal::core_holders::Swept::Done(ended)) => {
+            if !ended.is_empty() {
+                tracing::info!(pids = ?ended, "ended runs left over after access was removed");
+            }
+            crate::doors::sweep(&doors_of).await;
+            return None;
+        }
+        // The core did not take it: owed and retried on the slow tick. The warning is the caller's to give the owner, in the
+        // style of `revokePending`.
+        Some(crate::terminal::core_holders::Swept::Owed(why)) => {
+            crate::doors::sweep(&doors_of).await;
+            return Some(format!(
+                "warning: the core could not end the runs of {}: {why}; the sweep is owed and retried",
+                persons.join(", ")
+            ));
+        }
+        None => {}
+    }
     let mut allowed: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
     if only_denied {
         let (st, ps) = (state.clone(), persons.clone());
@@ -764,6 +785,7 @@ pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: b
         tracing::info!(pids = ?ended, "ended runs left over after access was removed");
     }
     crate::doors::sweep(&doors_of).await;
+    None
 }
 
 /// After `person`'s access changed: a bot's turn on an agent its owner no longer holds stops now, so a long turn
@@ -1087,6 +1109,12 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
     // A retry of an ask already sent answers the same and sends nothing; the same nonce for anything else is refused
     // (C4). The nonce is the bot's own, across its agents and conversations.
     let chat = known.as_ref().map(|c| c.chat_bot_id.clone()).or_else(|| chat_row_of(hub, &bot.person_id, &agent));
+    // C5: no ask reaches a host-native bot's chat (an old conversation may still point at one).
+    if let Some(row) = chat.as_deref().and_then(|id| hub.store.bot(id).ok().flatten()).filter(|r| !r.deleted)
+        && let Err(e) = row.config.refuse_native()
+    {
+        return Err(BotError::err(400, Code::BadRequest, format!("{e:#}")));
+    }
     if let Some(e) = hub.store.find_bot_guest_nonce(&bot.bot_id, nonce) {
         if !is_retry(hub, &e, text, &agent, known.as_ref(), external.as_deref()) {
             return Err(BotError::err(
@@ -1224,6 +1252,10 @@ async fn ask_room(
             format!("Name the agent to ask with @ ({}).", names.join(", ")),
         ));
     };
+    // C5: a host-native member is never asked.
+    if let Err(e) = agent.refuse_native() {
+        return Err(BotError::err(400, Code::BadRequest, format!("{e:#}")));
+    }
     // Like any ask: at most what its owner holds of the agent.
     if let Some(hq) = &agent.hq_agent
         && !roles::may_use(&bot.person_id, hq).await

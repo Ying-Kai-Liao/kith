@@ -5,3 +5,4 @@ MaxRevs = 0
 Holds = FALSE
 AdHocLate = TRUE
 Redeliver = TRUE
+KeepRebegin = FALSE

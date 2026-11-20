@@ -50,10 +50,12 @@ public struct ThreadView: View {
         transcript
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
+                // Rooms with people: which agents won't answer, and why. Fix opens Room info (owner only).
+                if let bot, bot.isGroup { WontAnswerLine(group: bot) { roomInfo = true }.padding(.horizontal, 16) }
                 // A bot's tasks carry their own writer banner on the card, so the box stays (a send to a held task
                 // takes it over first, or waits for the terminal); elsewhere the banner sits over the box.
                 switch ThreadFeed.chatBottom(held: bot?.usesTasks == true && bot?.botGuest == nil ? nil : ThreadFeed.heldTask(in: model.chat(botId)),
-                                             mismatch: model.mismatch != nil, guest: bot?.botGuest != nil) {
+                                             mismatch: model.mismatch != nil, guest: bot?.botGuest != nil, flagged: bot?.isFlagged == true) {
                 case .updateNeeded:
                     // Nothing sent now could be read on the other side.
                     if let mismatch = model.mismatch {
@@ -72,6 +74,8 @@ public struct ThreadView: View {
                 case .readOnly:
                     // A bot from outside's conversation: the owner reads along, nothing is sent here.
                     if let guest = bot?.botGuest { ReadOnlyLine(text: guest.readOnlyLine) }
+                case .flagged:
+                    if let bot { NativeBotNotice(bot: bot) }
                 case .composer:
                     // The phone is in the top bar, so the dock has no call button.
                     Composer(botId: botId, visibleTasks: visibleTasks) { model.focusEntry = BotStore.FocusEntry(chat: botId, entry: $0) }
@@ -88,6 +92,7 @@ public struct ThreadView: View {
     /// Why a call can't start now; nil when it can. The phone and header buttons show it.
     var callBlock: String? {
         if bot == nil { return "This chat is no longer available." }
+        if bot?.isFlagged == true { return "This bot no longer runs" }
         if model.isOffline { return "\(model.hostName) is offline." }
         if model.mismatch != nil { return "Update Kith to make calls." }
         return nil
@@ -107,10 +112,14 @@ public struct ThreadView: View {
                 guard bot?.isGroup == true else { return }
                 await model.botGuests.refresh()
                 await model.refreshConversation(botId)
+                await model.refreshRoomPeople(botId)
+                await model.loadRoom(botId)
             }
             .kithSheet(isPresented: $roomInfo) {
-                RoomInfoView(groupId: botId)
+                if model.myRooms[botId] != nil { MemberRoomInfoView(roomId: botId) } else { RoomInfoView(groupId: botId) }
             }
+            .memberRoomRefresh(botId)
+            .overlay { if let name = model.closedRooms[botId] { MemberRoomClosed(name: name) } }
             .kithSheet(item: Binding<FileDownloads.Export?>(get: {
                 guard let item = model.fileDownloads.export, item.botId == botId else { return nil }
                 return item
@@ -448,17 +457,15 @@ struct ChatItem: Identifiable {
             if e.kind == "tool" { all.append(.tool(e)) } else if e.threadId != nil, e.isChat { all.append(.slot(.entry(e))) }
         }
         for group in topics { all.append(.topic(group)) }
-        func date(_ f: Flat) -> Date {
+        // Dates once, and the sort moves indexes: moving the slots themselves copied an entry per comparison.
+        let dates = all.map { f -> Date in
             switch f {
             case .topic(let g): g.date
             case .slot(let s): s.date
             case .tool(let e): e.date
             }
         }
-        return all.enumerated().sorted { a, b in
-            let (da, db) = (date(a.element), date(b.element))
-            return da == db ? a.offset < b.offset : da < db
-        }.map(\.element)
+        return all.indices.sorted { a, b in dates[a] == dates[b] ? a < b : dates[a] < dates[b] }.map { all[$0] }
     }
 
     /// Whether this row shows the entry (a search result's message, or a thread reply or tool call in the flat chat).
@@ -589,6 +596,9 @@ extension ThreadView {
                     .onAppear { showEarlier() }
             })
         }
+        if !moreOnComputer, let bot, model.myRooms[botId] != nil {
+            rows.append(ConversationRow("member-start") { MemberStartLines(room: bot.name, owner: MemberRoomLogic.ownerName(model.myRooms[botId])) })
+        }
         if items.isEmpty, let bot {
             rows.append(ConversationRow("intro") {
                 if bot.isGroup { GroupIntroCard(group: bot).padding(.top, 40) } else { IntroCard(bot: bot).padding(.top, 40) }
@@ -607,6 +617,9 @@ extension ThreadView {
                     } : nil)
                 })
             }
+        }
+        if let room = model.myRooms[botId], let asked = MemberRoomLogic.askedLine(entries: model.chat(botId), agents: MemberRoomLogic.agentNames(room)) {
+            rows.append(ConversationRow("asked") { AskedLine(text: asked) })
         }
         // Offline, "working" is only what the computer last said; don't show it as live. In a group the live line above
         // the box says who is working, so the chat shows it once.

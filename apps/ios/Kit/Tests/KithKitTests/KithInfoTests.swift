@@ -82,25 +82,23 @@ private func houseInfo() throws -> KithInfo {
 }
 
 @Test func hqBotWithKithDetailsHidesTheCardsKithRepeats() throws {
-    let sections = BotSections(hqAgent: "house", info: try houseInfo())
-    #expect(!sections.instructions && !sections.backendPicker && !sections.harnessMemoryTab && !sections.kithSettings)
+    let sections = BotSections(info: try houseInfo())
+    #expect(!sections.instructions && !sections.harnessMemoryTab && !sections.kithSettings)
 }
 
-@Test func plainBotAndUnloadedKithKeepEveryCard() throws {
-    #expect(BotSections(hqAgent: nil, info: try houseInfo()) == .all)
-    #expect(BotSections(hqAgent: "", info: try houseInfo()) == .all)
+@Test func unloadedKithKeepsEveryCardButTheHarnessNotes() throws {
     var unloaded = BotSections.all
     unloaded.harnessMemoryTab = false
     unloaded.kithSettings = false
-    #expect(BotSections(hqAgent: "house", info: nil) == unloaded)
+    #expect(BotSections(info: nil) == unloaded)
 }
 
 @Test func aCardStaysWhenKithCouldNotReadWhatItRepeats() throws {
     var info = try houseInfo()
     info.harness = nil
     info.errors = ["role": "unreadable"]
-    let sections = BotSections(hqAgent: "house", info: info)
-    #expect(sections.instructions && sections.backendPicker && !sections.harnessMemoryTab)
+    let sections = BotSections(info: info)
+    #expect(sections.instructions && !sections.harnessMemoryTab)
 }
 
 @Test func rolePromptJoinsIntroAndEverySection() throws {
@@ -113,10 +111,9 @@ private func houseInfo() throws -> KithInfo {
 }
 
 @Test func anHqBotOnAHostWithoutKithInfoKeepsKithsOwnSettingsControls() throws {
-    #expect(BotSections(hqAgent: "house", info: nil, unsupportedHost: true).kithSettings)
-    #expect(BotSections(hqAgent: "house", info: try houseInfo(), unsupportedHost: true).kithSettings)
-    #expect(!BotSections(hqAgent: "house", info: try houseInfo()).kithSettings)
-    #expect(BotSections(hqAgent: nil, info: nil).kithSettings)
+    #expect(BotSections(info: nil, unsupportedHost: true).kithSettings)
+    #expect(BotSections(info: try houseInfo(), unsupportedHost: true).kithSettings)
+    #expect(!BotSections(info: try houseInfo()).kithSettings)
 }
 
 @Test func hqSettingsAreAllWrittenThrough() throws {
@@ -221,4 +218,11 @@ private actor RecordingTransport: HostTransport {
     let data = try decode(EntryData.self, #"{"status": "answered", "selected": "allow", "outcome": "Allowed once only: it can't be kept for always (x)"}"#)
     #expect(data.outcome == "Allowed once only: it can't be kept for always (x)")
     #expect(try decode(EntryData.self, #"{"status": "answered"}"#).outcome == nil)
+}
+
+@Test func aFlaggedNativeRowIsNeverARoom() throws {
+    #expect(try decode(Bot.self, #"{"id":"a","needsKithAgent":true}"#).isFlagged)
+    #expect(try decode(Bot.self, #"{"id":"g","kind":"group","needsKithAgent":true}"#).isFlagged == false)
+    #expect(try decode(Bot.self, #"{"id":"k","hqAgent":"house"}"#).isFlagged == false)
+    #expect(try decode(Bot.self, #"{"id":"old"}"#).isFlagged == false, "an older host sends no flag")
 }

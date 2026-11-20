@@ -119,6 +119,21 @@ fn an_older_hosts_answers_leave_out_what_it_didnt_have() {
     assert_eq!((started.bot.person, started.bot.hq_agent), (None, None));
 }
 
+/// C5: `needsKithAgent` marks a host-native row; every other row (and a host from before) leaves it out.
+#[test]
+fn needs_kith_agent_is_true_for_a_native_row_and_otherwise_left_out() {
+    let started: BotAnswer = fixture("compat", "start-chat-before-people.json");
+    assert_eq!(started.bot.needs_kith_agent, None, "an older host leaves it out");
+    let mut native = started.clone();
+    native.bot.needs_kith_agent = Some(true);
+    let wire = serde_json::to_value(&native).unwrap();
+    assert_eq!(wire["bot"]["needsKithAgent"], true);
+    let plain = serde_json::to_value(&started).unwrap();
+    assert!(plain["bot"].get("needsKithAgent").is_none(), "omitted when absent: {plain}");
+    let back: BotAnswer = serde_json::from_value(wire).unwrap();
+    assert_eq!(back.bot.needs_kith_agent, Some(true));
+}
+
 #[test]
 fn the_member_and_bot_lists_name_contract_methods() {
     let lists = [rpc::MEMBER_METHODS, rpc::UNPROVEN_METHODS, rpc::BOT_METHODS, rpc::BOT_PENDING_METHODS];

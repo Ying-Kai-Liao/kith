@@ -75,6 +75,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, mut b: Value) -> Result<C
                 Stopped::Ended(c) => json!({"stopped": shown(&c)}),
                 Stopped::StillEnding(c) => json!({"stopped": null, "stillEnding": shown(&c)}),
                 Stopped::CantStop(c) => json!({"stopped": null, "cantStop": shown(&c)}),
+                // Writer mode and the core could not say: not "nobody", the owner is told and can press Stop again.
+                Stopped::Unreadable(why) => json!({"stopped": null, "unreadable": why}),
             }
         }
         // Secret cards (cards/secret.rs). Owner only, like every method that is on neither the member nor the bot

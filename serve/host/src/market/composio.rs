@@ -432,18 +432,6 @@ fn allowed(store: &Store, bot: &str) -> Result<Vec<Connection>> {
     Ok(connections(store)?.into_iter().filter(|c| c.active() && on.contains(&c.toolkit.as_str())).collect())
 }
 
-/// Toolkits a bot has turned on, for its MCP server list (none: no server).
-pub fn enabled_for(store: &Store, connectors: &[String]) -> Result<bool> {
-    if !connectors.iter().any(|s| s.starts_with(PREFIX)) {
-        return Ok(false);
-    }
-    let conns = connections(store)?;
-    Ok(connectors
-        .iter()
-        .filter_map(|id| id.strip_prefix(PREFIX))
-        .any(|t| conns.iter().any(|c| c.active() && c.toolkit == t)))
-}
-
 /// A tool call from a bot's `composio` MCP server.
 pub async fn call(store: &Store, bot: &str, name: &str, args: &Value) -> Result<Value> {
     let c = config(store)?;

@@ -81,6 +81,7 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
+mod runtools;
 // The revoke order (M3-10d): claims of the person and their bots, then their ask tree. First caller is the kith-auth bridge (M2-18).
 #[cfg(unix)]
 #[allow(dead_code, reason = "first caller is the kith-auth bridge after M2-18")]
@@ -117,6 +118,8 @@ mod wake;
 // The host's claim rows (M3-10f): called only by a host started with KITH_HOST_CORE_CLAIMS=1.
 mod hostclaim;
 
+#[cfg(all(test, unix))]
+mod direct_park_tests;
 #[cfg(test)]
 mod runs_props;
 #[cfg(all(test, unix))]
@@ -129,6 +132,7 @@ pub use daemon::status;
 pub use db::Core;
 pub use error::Error;
 pub use owner::Reached;
+pub use runtools::set_kernel_finder;
 
 use kith_kernel::paths::Paths;
 
@@ -233,6 +237,18 @@ pub fn cutover(
     cutover::run(paths, kernel, args)
 }
 
+/// [`cutover`] for the CLI, with the exit code: `(code, stdout lines, stderr lines)`. The `status MODULE | --json | --require`
+/// questions answer by exit code, and `--json` goes to stdout whatever the code.
+#[cfg(unix)]
+pub fn cutover_outcome(
+    paths: &Paths,
+    kernel: &std::path::Path,
+    args: &[String],
+) -> Result<(i32, Vec<String>, Vec<String>), Error> {
+    let o = cutover::run_outcome(paths, kernel, args)?;
+    Ok((o.code, o.out, o.err))
+}
+
 /// Opens the core inside this process for one command.
 pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
     match embedded_with(&Layout::new(&paths.machine), MIGRATIONS)? {
@@ -262,6 +278,8 @@ pub const EMBEDDED_WRITES: &[&str] = &[
     "people.removePerson",
     "people.removeBot",
     "people.revoke",
+    // a revoke's claim sweep (`kith-sessions sweep` once the claims are the core's): it only ends access
+    "claim.sweepPerson",
 ];
 
 /// The reads `kith-auth` routes to the core on the authority tombstone (`ROUTED_READS` in the host's `core_front.rs`, which
@@ -321,6 +339,11 @@ pub fn call_authority_embedded(
         return Ok(EmbeddedCall::NoCore(layout.dir));
     }
     match open_embedded(paths)? {
+        // The claim sweep of a revoke with no daemon (P5): a claim transaction like the revoke itself, refused until the
+        // claims are switched. The caller signals the kills it returns.
+        Embedded::Open(mut core) if conversations::external::serves(method) => {
+            conversations::external::call(&mut core, method, params).map(EmbeddedCall::Answered)
+        }
         Embedded::Open(mut core) => {
             authority::call::call(&mut core, method, params).map(EmbeddedCall::Answered)
         }
@@ -353,6 +376,35 @@ pub fn call_account_embedded(
         Embedded::Open(core) => core
             .account_call(method, params)
             .map(EmbeddedCall::Answered),
+        Embedded::DaemonRunning { .. } => Ok(EmbeddedCall::Busy),
+    }
+}
+
+/// Runs `session.record` (transcripts P1) inside an embedded core, for a `SessionStart` hook that found no daemon. Takes the
+/// lifetime lock WITHOUT waiting: a held lock is [`EmbeddedCall::Busy`] at once, nothing ran, and the hook's spool entry
+/// stays for the daemon's drain (a hook has five seconds and must never stall a session). Never creates a core.db and
+/// never migrates one. The answer is the daemon's: `{outcome}` or `{refused: invalid | not-serving, why}`.
+#[cfg(unix)]
+pub fn call_transcripts_embedded(
+    paths: &Paths,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<EmbeddedCall, Error> {
+    if !transcripts::record::serves(method) {
+        return Err(Error::NoSuchMethod(format!(
+            "kith-core: {method} is not a transcripts method"
+        )));
+    }
+    call::check(kith_api::Principal::Owner, method, params)?;
+    let layout = Layout::new(&paths.machine);
+    let empty = std::fs::metadata(&layout.db).map_or(true, |m| m.len() == 0);
+    if empty && !layout.marker.exists() {
+        return Ok(EmbeddedCall::NoCore(layout.dir));
+    }
+    match open_embedded(paths)? {
+        Embedded::Open(mut core) => {
+            transcripts::record::call(&mut core, params).map(EmbeddedCall::Answered)
+        }
         Embedded::DaemonRunning { .. } => Ok(EmbeddedCall::Busy),
     }
 }

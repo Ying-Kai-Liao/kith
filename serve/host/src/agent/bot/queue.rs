@@ -4,7 +4,7 @@ use super::{Actor, CANCEL_GRACE, Cmd, Done, NoticeStyle, Queued, RESUME_PROMPT, 
 use crate::agent::{folder, own_memory};
 use crate::chat::memory;
 use crate::chat::router::{self, Route};
-use crate::chat::team::RequestStatus;
+use crate::chat::status::RequestStatus;
 use crate::hub::BotStatus;
 use crate::market::requests;
 use crate::store::{EntryKind, Lane, now_ms};
@@ -19,8 +19,7 @@ impl Actor {
         // behind background work. Only what the agent itself sends, and answers to its questions, go on inside it.
         if self.off_turn.is_some() {
             match &cmd {
-                Cmd::SendToUser { .. }
-                | Cmd::SendFile { .. }
+                Cmd::SendFile { .. }
                 | Cmd::Permission { .. }
                 | Cmd::IdleFor(_)
                 | Cmd::StopIdle(_)
@@ -38,7 +37,11 @@ impl Actor {
                 self.tools_changed = true;
             }
             Cmd::Routine(id) => {
-                self.queue.push_back(Queued::Routine(id));
+                let acc = match self.hub.routines.pulled_of(&id) {
+                    Some((turn, pulled)) => self.accept_pulled(turn, pulled).await,
+                    None => self.accept(&[]).await,
+                };
+                self.queue.push_back(Queued::Routine(id, acc));
                 if self.turn.is_none() {
                     self.next_in_queue(done_tx).await;
                 }
@@ -47,15 +50,24 @@ impl Actor {
                 if route {
                     self.route_later(&lane, &entry_id);
                 }
-                self.queue.push_back(Queued::User { lane, entry_id, text, alone: false });
+                let acc = self.accept(&[]).await;
+                self.queue.push_back(Queued::User { lane, entry_id, text, alone: false, acc });
                 if self.turn.is_none() {
                     self.next_in_queue(done_tx).await;
                 }
             }
             Cmd::WakeBatch { lane, items } => {
-                // All of them before the first start, so an idle actor takes them as one turn.
+                // All of them before the first start, so an idle actor takes them as one turn. One accept for the batch: the
+                // first entry's key and epochs are the turn's.
+                let acc = self.accept(&[]).await;
                 for (entry_id, text) in items {
-                    self.queue.push_back(Queued::User { lane: lane.clone(), entry_id, text, alone: false });
+                    self.queue.push_back(Queued::User {
+                        lane: lane.clone(),
+                        entry_id,
+                        text,
+                        alone: false,
+                        acc: acc.clone(),
+                    });
                 }
                 if self.turn.is_none() {
                     self.next_in_queue(done_tx).await;
@@ -66,52 +78,23 @@ impl Actor {
                 let _ = reply.send(self.unsend(&entry_id));
             }
             Cmd::Group(turn) => {
-                self.queue.push_back(Queued::Group(turn));
+                // The people the turn runs for: the room's, when it is at room level.
+                let level = crate::chat::room_turn::Level::Room;
+                let people: Vec<String> =
+                    turn.basis.as_ref().filter(|b| b.level() == level).map(|b| b.people.clone()).unwrap_or_default();
+                let acc = self.accept(&people).await;
+                self.queue.push_back(Queued::Group(turn, acc));
                 if self.turn.is_none() {
                     self.next_in_queue(done_tx).await;
                 }
             }
             Cmd::CancelGroup { chat } => {
                 // Dropping a queued turn's reply tells the room it won't come.
-                self.queue.retain(|q| !matches!(q, Queued::Group(g) if g.lane.chat == chat));
+                self.queue.retain(|q| !matches!(q, Queued::Group(g, _) if g.lane.chat == chat));
                 if self.active_group.as_ref().is_some_and(|g| g.lane.chat == chat) {
+                    self.writer_drop_parked();
                     self.cancel_turn().await;
                 }
-            }
-            Cmd::BotRequest(ask) => {
-                self.queue.push_back(Queued::BotRequest(ask));
-                if self.turn.is_none() {
-                    self.next_in_queue(done_tx).await;
-                }
-            }
-            Cmd::CancelAsk { id } => {
-                self.queue.retain(|q| !matches!(q, Queued::BotRequest(a) if a.expects_reply() && a.id == id));
-                if self.active_request.as_ref().is_some_and(|a| a.expects_reply() && a.id == id) {
-                    self.hub.team.cancel_from(&self.rt);
-                    self.stop_requested = true;
-                    // The request has expired. Kill only its process so a harness
-                    // ignoring cooperative cancellation cannot block the queue.
-                    if let Some(c) = self.conn.take() {
-                        c.acp.kill().await;
-                    }
-                }
-            }
-            Cmd::SendToUser { text, reply } => {
-                // The outbox gave up waiting and told the agent the send failed; posting now would show a bubble
-                // the agent will send again.
-                if reply.is_closed() {
-                    return true;
-                }
-                // The agent may be talking out of a turn (a background task woke it).
-                let off = self.off_turn_context();
-                let result = match self.ensure_turn().await {
-                    Ok(()) => self.send_to_user(text),
-                    Err(error) => Err(error),
-                };
-                if let (true, Err(error)) = (off, &result) {
-                    self.off_turn_failed("send a message", error);
-                }
-                let _ = reply.send(result);
             }
             Cmd::SendFile { paths, name, cancelled, reply } => match self.ensure_turn().await {
                 Ok(()) => self.begin_file(paths, name, cancelled, reply),
@@ -142,7 +125,12 @@ impl Actor {
                 let _ = self.tidier.send(memory::TidyEvent::Flush);
             }
             Cmd::Reconfigure(cfg) => {
-                let cfg = *cfg;
+                let mut cfg = *cfg;
+                // A room person's actor runs as that person for as long as it lives: an edit of the bot (its whole config
+                // arrives here) must not make it the owner's.
+                if self.is_room_actor() {
+                    cfg.person.clone_from(&self.cfg.person);
+                }
                 // The harness reads its own memory's switch when it starts: an agent that can resume its session
                 // restarts into it, one that can't starts afresh.
                 let memory_changed = own_memory::kept(&cfg) != own_memory::kept(&self.cfg);
@@ -191,7 +179,9 @@ impl Actor {
             }
             Cmd::ResetPlace { lane } => self.reset_place(&lane).await,
             Cmd::ForgetLoaded { lane } => self.forget_loaded(&lane),
+            Cmd::Unpark => self.writer_kick(),
             Cmd::Shutdown => {
+                self.writer_drop_parked();
                 // A card's wake queued here never starts: the wake queue gets it back.
                 let mut gone: Vec<String> = self.start_entries.clone();
                 gone.extend(self.queue.iter().filter_map(|q| match q {
@@ -207,7 +197,6 @@ impl Actor {
 
     /// Stops this place: its running turn and everything queued here. The bot's other places carry on.
     pub(super) async fn stop(&mut self) {
-        self.hub.team.cancel_from(&self.rt);
         // Routines run in the bot's own chat.
         if self.is_main() {
             if let Err(error) = self.hub.routines.cancel_queued(&self.hub.store, &self.cfg.id) {
@@ -228,6 +217,7 @@ impl Actor {
         // router's Stop ended this place, which no `stop_place` saw.
         crate::cards::resume::stopped_lane(&self.hub, &self.cfg.id, &self.home);
         crate::cards::resume::not_started(&self.hub, &dropped, false);
+        self.writer_drop_parked();
         self.cancel_turn().await;
     }
 
@@ -296,12 +286,12 @@ impl Actor {
                 if self.turn.is_none() || !running_here {
                     return;
                 }
-                let Some(Queued::User { lane, entry_id, text, .. }) = self.queue.remove(p) else {
+                let Some(Queued::User { lane, entry_id, text, acc, .. }) = self.queue.remove(p) else {
                     unreachable!("position found a user message")
                 };
                 // The same work again, corrected, before anything else that waits.
                 let text = router::redo(&task, &text);
-                self.queue.push_front(Queued::User { lane, entry_id, text, alone: false });
+                self.queue.push_front(Queued::User { lane, entry_id, text, alone: false, acc });
                 self.notice("Stopping to start again with your correction.", NoticeStyle::Info);
                 self.cancel_turn().await;
             }
@@ -339,15 +329,22 @@ impl Actor {
     }
 
     pub(super) async fn next_in_queue(&mut self, done_tx: &mpsc::UnboundedSender<Done>) {
-        let main = Lane::main(&self.cfg.id);
-        while self.turn.is_none() && self.routine_completion.is_none() && !self.queue.is_empty() {
+        // A start parked for the core (Writer mode) stays first: nothing runs behind it.
+        while self.turn.is_none()
+            && self.routine_completion.is_none()
+            && !self.queue.is_empty()
+            && self.writer.parked.is_none()
+        {
             // Every turn takes a slot from the gate first; without one this resumes when it is granted.
             if !self.have_room() {
                 return;
             }
             match self.queue.front() {
-                Some(Queued::Routine(_)) => {
-                    let Some(Queued::Routine(id)) = self.queue.pop_front() else { unreachable!("front is a routine") };
+                Some(Queued::Routine(..)) => {
+                    let Some(Queued::Routine(id, acc)) = self.queue.pop_front() else {
+                        unreachable!("front is a routine")
+                    };
+                    self.writer.acc = Some(acc);
                     self.active_routine = Some(id.clone());
                     self.routine_timed_out = false;
                     match self.hub.routines.begin(&self.hub, &self.cfg.id, &id) {
@@ -372,29 +369,19 @@ impl Actor {
                     }
                     continue;
                 }
-                Some(Queued::BotRequest(_)) => {
-                    let Some(Queued::BotRequest(mut ask)) = self.queue.pop_front() else {
-                        unreachable!("front is an ask")
-                    };
-                    if ask.reply_closed() {
-                        continue;
-                    }
-                    let ids = [ask.entry_id.clone()];
-                    let prompt = ask.prompt.clone();
-                    ask.mark_started();
-                    self.active_request = Some(ask);
-                    let result = self.start_turn(main.clone(), &ids, &prompt, false, done_tx).await;
-                    if let Err(e) = result {
-                        self.start_failed(&e);
-                    }
-                    continue;
-                }
-                Some(Queued::Group(_)) => {
-                    let Some(Queued::Group(turn)) = self.queue.pop_front() else {
+                Some(Queued::Group(..)) => {
+                    let Some(Queued::Group(turn, acc)) = self.queue.pop_front() else {
                         unreachable!("front is a group turn")
                     };
+                    self.writer.acc = Some(acc);
                     // A newer message in the room (or Stop) ended the room turn that queued this.
                     if turn.reply.is_closed() || !crate::chat::group::current(&self.hub.store, &turn.lane, turn.epoch) {
+                        continue;
+                    }
+                    // The room as it is now, fixed for the turn; one that is not the room the turn was written for is dropped (the
+                    // room then counts it as a pass, and what its author asked is answered or told in its next step).
+                    if let Err(why) = self.begin_room_turn(&turn).await {
+                        tracing::info!(bot = %self.cfg.id, why, "a room turn did not start");
                         continue;
                     }
                     let (lane, prompt) = (turn.lane.clone(), turn.prompt.clone());
@@ -405,18 +392,12 @@ impl Actor {
                     }
                     continue;
                 }
-                Some(Queued::Compact { .. }) => {
-                    let Some(Queued::Compact { idle }) = self.queue.pop_front() else {
-                        unreachable!("front is a compaction")
-                    };
-                    self.start_compaction(idle, done_tx).await;
-                    continue;
-                }
                 _ => {}
             }
             // Messages sent while the agent worked go out together as its next turn
             // without crossing a bot request or another lane: each gets its own reply.
-            let Some((lane, mut batch)) = take_batch(&mut self.queue) else { continue };
+            let Some((lane, mut batch, acc)) = take_batch(&mut self.queue) else { continue };
+            self.writer.acc = Some(acc);
             // A message taken back or stopped while it waited is not part of the turn.
             batch.retain(|(id, _)| {
                 let wanted = self
@@ -440,10 +421,6 @@ impl Actor {
             if self.limit_parks(&lane, &ids).await {
                 continue;
             }
-            // A handoff waiting in the chat starts a new conversation with this message.
-            if lane == main {
-                self.handoff = self.take_handoff();
-            }
             if let Err(e) = self.start_turn(lane, &ids, &text, false, done_tx).await {
                 self.start_failed(&e);
             }
@@ -453,7 +430,7 @@ impl Actor {
     /// Whether the owner's messages `ids` wait under a limit card instead of running now: only for an owner's kith
     /// agent over its monthly limit with ask or hold (`limits`). Tell writes its line once a month and runs.
     async fn limit_parks(&mut self, lane: &Lane, ids: &[String]) -> bool {
-        if !self.is_hq() || self.cfg.person.is_some() || ids.is_empty() {
+        if self.cfg.person.is_some() || ids.is_empty() {
             return false;
         }
         // Allowed on the card: this run goes on.
@@ -475,13 +452,23 @@ impl Actor {
     }
 
     pub(super) fn start_failed(&mut self, e: &anyhow::Error) {
+        // Writer mode: a begin the core cannot take yet parks the start; the item stays first and runs again (same turn id).
+        if let Some(wait) = e.downcast_ref::<super::writer::WriterWait>()
+            && self.writer_park(wait)
+        {
+            return;
+        }
+        // A claim this start holds was never prompted on: it is given up (the turn cancelled), not reported done.
+        if self.writer.run.is_some() {
+            self.writer.end = Some(super::writer::Rel::Abandon);
+        }
+        self.writer.start = None;
         let stopped = e.is::<super::turn::StartCancelled>();
         if self.turn.is_some() {
             self.report_turn(stopped, (!stopped).then_some(e), "start_failed");
         }
         let status = if stopped { crate::routines::Status::Cancelled } else { crate::routines::Status::Failed };
         self.finish_routine(status, Some(format!("Could not start routine: {e:#}")), None);
-        self.complete_request(Err(anyhow!("couldn't start recipient: {e:#}")), false);
         self.complete_group(Err(anyhow!("couldn't start: {e:#}")));
         if stopped {
             self.notice("Stopped.", NoticeStyle::Info);
@@ -507,7 +494,10 @@ impl Actor {
             self.notice(&format!("Couldn't start the agent: {e:#}"), NoticeStyle::Error);
         }
         // Any other start that failed gives its wake back too (M5); one the person stopped isn't offered again now.
-        crate::cards::resume::not_started(&self.hub, &self.start_entries, !stopped);
+        // A host-native bot's refusal is final, like a Stop: its wake is dropped and its cards withdrawn, not offered
+        // again (the retry would only post the same notice).
+        let final_refusal = self.cfg.is_native();
+        crate::cards::resume::not_started(&self.hub, &self.start_entries, !(stopped || final_refusal));
         self.release_turn_claim();
         self.turn = None;
         if self.routine_completion.is_none() {
@@ -523,7 +513,6 @@ impl Actor {
             r.message = None;
             r.session = None;
         });
-        self.hub.team.cancel_from(&self.rt);
     }
 
     /// When `e` asks for signing in: marks the harness signed out and puts a sign-in card in the
@@ -543,16 +532,11 @@ impl Actor {
             .is_ok()
     }
 
-    pub(super) fn complete_request(&mut self, result: Result<String>, cancelled: bool) {
-        if let Some(ask) = self.active_request.take() {
-            ask.complete(result, cancelled);
-        }
-    }
-
     pub(super) fn complete_group(&mut self, result: Result<Option<String>>) {
         if let Some(turn) = self.active_group.take() {
             let _ = turn.reply.send(result);
         }
+        self.end_room_turn();
     }
 
     pub(super) fn finish_routine(
@@ -635,11 +619,15 @@ impl Actor {
     }
 }
 
+/// A lane's messages that go out as one turn: `(entry id, text)` each, and the accept of the first.
+type Batch = (Lane, Vec<(String, String)>, super::writer::Accept);
+
 /// The messages at the front of the queue that go out together as the next turn, with their lane: the same lane, up to
 /// and including one on a different subject (which goes alone). None when the front is not a user message.
-fn take_batch(queue: &mut std::collections::VecDeque<Queued>) -> Option<(Lane, Vec<(String, String)>)> {
-    let Some(Queued::User { lane, .. }) = queue.front() else { return None };
-    let lane = lane.clone();
+fn take_batch(queue: &mut std::collections::VecDeque<Queued>) -> Option<Batch> {
+    let Some(Queued::User { lane, acc, .. }) = queue.front() else { return None };
+    // The batch is one turn: its key and epochs are the first message's.
+    let (lane, acc) = (lane.clone(), acc.clone());
     let mut batch = Vec::new();
     while let Some(Queued::User { lane: l, alone, .. }) = queue.front()
         && *l == lane
@@ -653,7 +641,7 @@ fn take_batch(queue: &mut std::collections::VecDeque<Queued>) -> Option<(Lane, V
             break;
         }
     }
-    Some((lane, batch))
+    Some((lane, batch, acc))
 }
 
 #[cfg(test)]
@@ -662,7 +650,13 @@ mod tests {
     use std::collections::VecDeque;
 
     fn user(lane: &Lane, id: &str, alone: bool) -> Queued {
-        Queued::User { lane: lane.clone(), entry_id: id.into(), text: format!("t-{id}"), alone }
+        Queued::User {
+            lane: lane.clone(),
+            entry_id: id.into(),
+            text: format!("t-{id}"),
+            alone,
+            acc: super::super::writer::Accept::default(),
+        }
     }
 
     #[test]
@@ -671,7 +665,7 @@ mod tests {
         // What `Cmd::WakeBatch` pushes: a card's notice and two messages that waited for a terminal.
         let mut queue: VecDeque<Queued> = ["notice", "m1", "m2"].iter().map(|id| user(&lane, id, false)).collect();
         queue.push_back(user(&Lane::main("bot"), "other", false));
-        let (got, batch) = take_batch(&mut queue).unwrap();
+        let (got, batch, _) = take_batch(&mut queue).unwrap();
         assert_eq!(got, lane);
         assert_eq!(batch.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["notice", "m1", "m2"]);
         assert_eq!(queue.len(), 1, "another lane's message waits for its own turn");

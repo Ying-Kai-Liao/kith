@@ -2,7 +2,8 @@
 //! over its files, the place-or-adopt rule, and the reading `kith-sessions` and `kith-wake` do over transcripts.
 //!
 //! M3-6 builds and tests this; no start calls it yet (the switch is later) and nothing here writes a transcript in
-//! production. Python (`kith-sessions`) stays the writer of `live/terminal/<sid>.json`.
+//! production. Python (`kith-sessions`) stays the writer of `live/terminal/<sid>.json` until the `transcripts` module is
+//! switched; from then on [`record`] is (and the files are a projection of the core's rows).
 //!
 //! - [`locate`]: the session per engine and account. Claude: `<config dir>/projects/<cwd-slug>/<sid>.jsonl` plus the
 //!   sidecar folder `<sid>/`. Any other engine is [`Located::NotHeld`], never an error.
@@ -12,13 +13,24 @@
 //! - [`TranscriptReader`]: whether a conversation's transcript holds `[kith wake RUN]` ([`read`]), plus the ports of
 //!   `recent`, `pick`, `latest` and the reading half of `resolve`.
 //! - [`rows`]: the `engine_sessions` table.
+//! - [`record`], [`project`], [`reconcile`], [`prune`]: `session.record` and the registry files as a projection of the
+//!   `session_records` rows, once the `transcripts` module is switched (transcripts P1).
 
 pub(crate) mod hash;
 pub(crate) mod place;
+pub(crate) mod project;
+pub(crate) mod prune;
 pub(crate) mod read;
+pub(crate) mod reconcile;
+#[cfg(test)]
+mod reconcile_tests;
+pub(crate) mod record;
+#[cfg(test)]
+mod record_tests;
 pub(crate) mod rows;
 #[cfg(test)]
 mod tests;
+pub(crate) mod tick;
 
 use std::path::{Path, PathBuf};
 
@@ -196,4 +208,29 @@ pub(crate) fn find_everywhere(ctx: &Ctx<'_>, sid: &str) -> Vec<SessionPtr> {
         .iter()
         .filter_map(|r| find_in(r, sid))
         .collect()
+}
+
+/// Where a record's session is: the pointer its `transcriptPath` names, else where the engine keeps it; and the pointer
+/// text a row stores (`''` when nothing is known). Shared by the import and `session.record`, so both store the same row.
+pub(crate) fn pointer(
+    ctx: &Ctx<'_>,
+    account: &str,
+    sid: &str,
+    transcript_path: &str,
+) -> (Option<SessionPtr>, String) {
+    let ptr = SessionPtr::from_text(transcript_path).or_else(|| match locate(ctx, account, sid) {
+        Located::Found(p) => Some(p),
+        Located::Missing | Located::NotHeld => None,
+    });
+    let text = match (&ptr, transcript_path.is_empty()) {
+        (Some(p), _) => p.text(),
+        (None, false) => transcript_path.to_owned(),
+        (None, true) => String::new(),
+    };
+    (ptr, text)
+}
+
+/// [`pointer`]'s text only.
+pub(crate) fn pointer_of(ctx: &Ctx<'_>, account: &str, sid: &str, transcript_path: &str) -> String {
+    pointer(ctx, account, sid, transcript_path).1
 }

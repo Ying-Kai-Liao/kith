@@ -28,7 +28,8 @@ kith_cutover_refuse() {
 }
 
 # kith_core_prime   looks up the program and its module list once and keeps them in shell variables, so the launch's
-# several kith_core_exec calls (pkg, project-id x3) do not each spawn `kith_paths.py --bin` and `kith kernel version`.
+# several kith_core_exec calls (pkg) and the project_id calls (they pass the program as KITH_BIN to the stub) do not each spawn
+# `kith_paths.py --bin` and `kith kernel version`.
 # Subshells inherit the variables; nothing is exported. The decision is the same as without it, made earlier.
 kith_core_prime() {
   _kith_core_bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || _kith_core_bin=""
@@ -64,25 +65,44 @@ kith_core_exec() {
   KITH_BIN=$bin exec "$bin" kernel $verb "$@"
 }
 
-# kith_cost_ported ARGS...   succeeds when `kith-cost ARGS` is a line the Rust core answers (core/kernel/src/cost/mod.rs `run`):
-# limit AGENT, sync, spent PERSON, usage --json, agent NAME --json, members AGENT, bots --json. Every other line (tag and record,
-# which write the ledger, the text reports, a bare `kith cost`, -h) is Python's, so `cost` in core-switched.txt moves exactly these.
-kith_cost_ported() {
-  local a json=0
-  for a in "$@"; do [[ $a == --json ]] && json=1; done
-  case ${1:-} in
-    limit|spent|members) [[ $# -ge 2 ]] ;;
-    sync) return 0 ;;
-    usage|bots) [[ $json == 1 ]] ;;
-    agent) [[ $# -ge 2 && $json == 1 ]] ;;
-    *) return 1 ;;
-  esac
+# kith_core_bin VERB   prints the program kith_core_exec VERB would run (and returns 0), or returns 1 when the Python answers:
+# the same rule without the exec, for a caller that has to name the program (the SessionStart hook of `kith AGENT`).
+kith_core_bin() {
+  local verb=$1 module bin ver
+  [[ ${KITH_CORE:-} == python ]] && return 1
+  read -r module _ < <(awk -F'\t' -v v="$verb" '$1 == v { print $2, ($3 != "" ? $3 : $2); exit }' "$KITH/lib/core-switched.txt" 2>/dev/null) || true
+  if [[ -z $module ]]; then
+    [[ ${KITH_CORE:-} == rust ]] || return 1
+    module=${verb%% *}
+    # the cost hook needs the ledger's writers, not just the read verbs an older program has under `cost`
+    [[ $module == cost ]] && module=cost-ledger
+    # `kith-sessions` needs every verb in both modes of the claims, not the Files-mode port an older program has under `threads`
+    [[ $module == threads ]] && module=threads-writer
+  fi
+  if [[ -n ${_kith_core_primed:-} ]]; then
+    bin=$_kith_core_bin ver=$_kith_core_ver
+  else
+    bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+    ver=$("$bin" kernel version 2>/dev/null)
+  fi
+  [[ -n $bin && $ver == *"\"$module\""* ]] || return 1
+  printf '%s' "$bin"
 }
 
-# kith_cost ARGS...   `kith-cost ARGS`: the core's when `cost` is switched and the line is one it answers, else the Python.
+# kith_threads VERB ARGS...   `kith-sessions VERB ARGS`, on the side this launch decided once (bin/kith sets `kthreads`, the
+# program that answers `kernel threads`, or leaves it empty for the Python, which stays the rollback). Never decides itself: a
+# launch must not split its claims between the two programs. The caller's env prefix (KITH_REVOKE_SEEN=..) reaches either.
+kith_threads() {
+  if [[ -n ${kthreads:-} ]]; then "$kthreads" kernel threads --kernel "$KITH" "$@"
+  else python3 "$KITH/bin/kith-sessions" "$@"
+  fi
+}
+
+# kith_cost ARGS...   `kith-cost ARGS`: the core's when `cost` is switched and the program has the `cost-ledger` module (tag and
+# record write the ledger, so a program that only has the read verbs is not enough), else the Python, which stays the rollback.
 # A subshell, because kith_core_exec execs; `KITH_PERSON_WAS=.. kith_cost ..` reaches whichever answers.
 kith_cost() {
-  ( if kith_cost_ported "$@"; then kith_core_exec cost --kernel "$KITH" "$@" || :; fi; exec "$KITH/bin/kith-cost" "$@" )
+  ( kith_core_exec cost --kernel "$KITH" "$@" || :; exec "$KITH/bin/kith-cost" "$@" )
 }
 
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag
@@ -222,7 +242,7 @@ kith_held_launch() {
     if [[ -n $rsid ]]; then
       ans=$(echo '{}' | kith_held_call terminal.list) || rc=$?
       if [[ $rc -ne 0 || $(printf '%s' "$ans" | kith_held_get link) != up ]]; then why="holder not reachable"
-      elif python3 "$KITH/bin/kith-sessions" release "$rsid"; then released=1
+      elif kith_threads release "$rsid"; then released=1
       else why="the session's claim is not this shell's to hand over"
       fi
       rc=0
@@ -236,7 +256,7 @@ import json, os, sys
 # (the core drops the token names too; kith_env_sync mirrors KITH_ names as HQ_ ones, so both spellings are listed here).
 drop = {"TERM_SESSION_ID", "ITERM_SESSION_ID", "TMUX", "TMUX_PANE", "SSH_TTY", "WINDOWID", "COLUMNS", "LINES", "SHLVL", "_"}
 for p in ("KITH_", "HQ_"):
-    drop |= {p + n for n in ("RUN_TOKEN", "RUN_SOCKET", "ASK_TOKEN", "ASK_SOCKET")}
+    drop |= {p + n for n in ("RUN_TOKEN", "RUN_SOCKET", "CORE_RUN_SOCKET", "ASK_TOKEN", "ASK_SOCKET")}
 env = {k: v for k, v in os.environ.items() if k not in drop and not k.startswith(("KITH_RUN_", "HQ_RUN_", "KITH_CALL_", "HQ_CALL_"))}
 size = None
 for fd in (2, 0, 1):
@@ -282,6 +302,11 @@ print(json.dumps(p))' "$agent" "$sid" "$@")
   fi
   if [[ -t 0 && -t 1 ]]; then echo "kith: ${why}; running here (--direct)" >&2
   else echo "kith: ${why}; an interactive session needs a terminal to run here" >&2; fi
-  [[ $released -eq 0 ]] || python3 "$KITH/bin/kith-sessions" terminal "$rsid" "$$" || exit 1
+  if [[ $released -eq 1 ]]; then
+    # The claim again; a core that gave no answer marks the run lock-alone (bin/kith passes --lock-alone to the stub).
+    local claimed
+    claimed=$(kith_threads terminal "$rsid" "$$") || exit 1
+    [[ $claimed != lock-alone ]] || held_alone=1
+  fi
   return 1
 }

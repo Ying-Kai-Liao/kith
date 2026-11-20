@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { isChat, isWorkingIn, normalizeBot, type Entry } from './models.ts'
+import { draftOf, isChat, needsKithAgent, isWorkingIn, normalizeBot, type Entry } from './models.ts'
 
 test('a bot works in every place its host lists at once, and only there', () => {
   const bot = normalizeBot({
@@ -29,4 +29,11 @@ test('a kept handoff leaves no line; a fresh conversation does', () => {
   assert.equal(isChat(notice('kept')), false)
   assert.equal(isChat(notice('sent')), true)
   assert.equal(isChat(notice('draft')), true)
+})
+
+test('only a native row is flagged: a room never is, and an older host sends no flag', () => {
+  assert.equal(needsKithAgent(normalizeBot({ id: 'n', needsKithAgent: true })), true)
+  assert.equal(needsKithAgent(normalizeBot({ id: 'g', kind: 'group', needsKithAgent: true })), false)
+  assert.equal(needsKithAgent(normalizeBot({ id: 'k', hqAgent: 'house' })), false)
+  assert.equal(needsKithAgent(normalizeBot({ id: 'old' })), false)
 })

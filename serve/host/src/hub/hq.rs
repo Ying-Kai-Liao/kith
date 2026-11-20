@@ -87,6 +87,11 @@ impl Hub {
             if agent.is_builtin() && !Path::new(&agent.home).is_dir() {
                 std::fs::create_dir_all(&agent.home)?;
             }
+            // A row without a name would be a native one: never make one.
+            if agent.name.trim().is_empty() {
+                tracing::warn!("hq agent with no name; no bot");
+                continue;
+            }
             if !agent.runnable() {
                 tracing::debug!(agent = %agent.name, harness = ?agent.harness, "hq agent is not a Claude agent; no bot");
                 continue;

@@ -1,0 +1,2 @@
+# design + an old-code tick still running when the step starts; the step waits it out (gate condition 6)
+OldTick = TRUE

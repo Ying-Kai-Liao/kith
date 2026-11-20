@@ -4,8 +4,8 @@
 #   kith init [--from <github-user>]   set kith up on this Mac, or bring yours back on a new one (kith-init)
 #   kith doctor                     check the install: links, repos, agents, services, plugin, background jobs
 #   kith backup [--yes|--check|--nightly [off]]   everything to private GitHub repos, making the missing ones; --check says what isn't; --nightly at 03:00 (kith-state)
-#   kith backup list|add|remove ...                      deprecated aliases of kith account add|remove|order (kith-account); the accounts live in `kith account`
-#   kith account add|list|remove ... [--json]            extra Claude / Codex logins for that chain, one folder each (kith-account); add --json returns the login command instead of running it
+#   kith backup list|add|remove ...                      deprecated aliases of kith account add|remove|order (the Rust core); the accounts live in `kith account`
+#   kith account add|list|remove ... [--json]            extra Claude / Codex logins for that chain, one folder each (the Rust core); add --json returns the login command instead of running it
 #   kith account use <id> [--agent A] | --reset           the main account an agent's runs use; the chain sits on top of it
 #   kith ls [--json]                list agents (--json: name, description, home, model, effort, harness, for programs)
 #   kith send-to <service> "text" [--body FILE|-] [--profile P] [--for A] [--json]   push to a bot's webhook (grok); "sent" = a run started (success:true), not a reply; Grok caps 200 runs/h per routine, silently (kith-send-to)
@@ -84,7 +84,7 @@
 #   kith bug "<title>" [--details TEXT|-]|list|show ID|send ID|publish ID   report a bug: the owner's stays on this Mac with the transcript; anyone else's is a redacted GitHub issue after a yes (kith-bug)
 #   kith migrate run [--dry-run|--undo|--force]        move this Mac from ~/.hq and the dev.hq.* jobs to ~/.kith and dev.kith.*, reversibly (kith-migrate)
 #   kith paths [--json|--sh]                           where Kith's folders are (lib/kith_paths.py; the core's paths module when switched)
-#   kith engines [--json] | install ID | login ID       the coding engines: installed or not, and the command to install or sign in (lib/kith_engines.py; the core's engines module when switched)
+#   kith engines [--json] | install ID | login ID       the coding engines: installed or not, and the command to install or sign in (the core's engines module)
 #   kith serve start|stop|restart|status|relay [URL]     Kith's host on this Mac (launchd dev.kith.serve, port 19224); `kith` is the same command (kith-serve)
 #
 # Bare `kith backup`, `kith update` and `kith migrate` print their verbs and exit 2: each acts on real state, so none starts
@@ -116,6 +116,14 @@ set -euo pipefail
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
 
+# kith_core_exec returned: no kith program that lists the module (or KITH_CORE=python). The accounts have no Python left.
+kith_account_missing() {
+  local why=""
+  [[ ${KITH_CORE:-} == python ]] && why="; KITH_CORE=python reaches no Python body any more"
+  echo "kith: kith account needs the kith program, and this Mac has none that answers it (install or update kith)$why" >&2
+  exit 1
+}
+
 [[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,77p' "$0" | sed 's/^#   //'; exit 0; }
 # migrate runs before the paths below are exported: it moves what they point at, and its children must see the new ones
 if [[ $1 == migrate ]]; then
@@ -127,7 +135,7 @@ fi
 # Verbs the Rust core has taken over are listed in lib/core-switched.txt; kith_core_exec returns when this one isn't, or
 # the program is missing or older, and the Python below answers (docs/plans/core-design.md section 3).
 if [[ $1 == paths ]]; then . "$KITH/lib/kith-core.sh"; kith_core_exec paths --kernel "$KITH" "${@:2}" || true; exec python3 "$KITH/lib/kith_paths.py" "${@:2}"; fi
-if [[ $1 == engines ]]; then . "$KITH/lib/kith-core.sh"; kith_core_exec engines "${@:2}" || true; exec python3 "$KITH/lib/kith_engines.py" "${@:2}"; fi
+if [[ $1 == engines ]]; then . "$KITH/lib/kith-core.sh"; kith_core_exec engines "${@:2}" || true; echo "kith: \`kith engines\` needs the kith program (kith serve install); this one has no engines table" >&2; exit 1; fi
 . "$KITH/lib/kith-env.sh"   # KITH_X and the old HQ_X agree (role repos read HQ_X)
 export KITH_ROOT=$KITH
 # Where things are, from the one place that knows (lib/kith_paths.py): KITH_HOME (~/kith) holding kernel/ and agents/ (each
@@ -162,19 +170,22 @@ case $1 in
   cards)              shift; exec "$KITH/bin/kith-cards" "${@:---help}" ;;
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
   doctor)             shift; exec "$KITH/bin/kith-doctor" "$@" ;;
-  backup)             case ${2:-} in list|add|remove) shift; exec "$KITH/bin/kith-account" backup "$@" ;; esac
+  backup)             case ${2:-} in list|add|remove) shift; . "$KITH/lib/kith-core.sh"; kith_core_exec account --kernel "$KITH" backup "$@" || true
+                                                      kith_account_missing ;; esac
                       [[ $# -eq 1 ]] && { echo "usage: kith backup run [--yes|--check|--nightly [off]]   everything to private GitHub repos
        kith backup list|add|remove ...                the backup chain (kith account)" >&2; exit 2; }
                       [[ $2 == run ]] && shift
                       shift; exec "$KITH/bin/kith-state" backup "$@" ;;
   account)            shift
-                      # The state verbs are the Rust core's when `account-state` is switched (lib/core-switched.txt) and a
-                      # program lists it: the file until `kith migrate step accounts`, the core's table after. Same words,
-                      # same exit codes (golden/account-state.json). Otherwise the Python answers.
+                      # The Rust core answers every verb (golden/account-state.json, golden/account-writes.json): the state
+                      # verbs when `account-state` is switched (lib/core-switched.txt) and a program lists it, the rest when
+                      # `account` is. The Python body of bin/kith-account is gone, so no program is one line and exit 1.
+                      . "$KITH/lib/kith-core.sh"
                       case ${1:-} in
-                        list|ls|pick|out|clear|usage) . "$KITH/lib/kith-core.sh"; kith_core_exec account-state --kernel "$KITH" "$@" || true ;;
+                        list|ls|pick|out|clear|usage) kith_core_exec account-state --kernel "$KITH" "$@" || true ;;
+                        *) kith_core_exec account --kernel "$KITH" "${@:---help}" || true ;;
                       esac
-                      exec "$KITH/bin/kith-account" "${@:---help}" ;;
+                      kith_account_missing ;;
   new)                shift; exec "$KITH/bin/kith-new" "$@" ;;
   remote)             shift; exec "$KITH/bin/kith-remote" "${@:---help}" ;;
   recall)             shift; exec "$KITH/bin/kith-recall" "${@:---help}" ;;
@@ -354,6 +365,32 @@ if [[ $src_pkg == */role ]]; then home=${src_pkg%/role}; else home="$KITH_STATE/
 nested=0; [[ -n ${KITH_AGENT:-} ]] && nested=1   # started by another run (KITH_AGENT is exported further down)
 caller_env=${KITH_AGENT:-}   # the caller's name as it came in (exported over with this agent's a little below)
 caller=${KITH_AGENT:-}; [[ $caller == "$agent" ]] && caller=""; p_owner=1 p_trusted=0 p_mode="" p_model="" p_deny="" p_line="" p_env_names="" p_rooms=""
+# A room person (room-<id>, the meet of everyone in a room with people) has no row in auth.json: only the Rust launch
+# builds its grant (launch/room.rs), so this script never starts a run for one.
+if [[ ${KITH_PERSON:-} == room-* ]]; then
+  echo "kith: ${KITH_PERSON} is a room person; it only launches through the Rust launch, not this script" >&2; exit 3
+fi
+# Once the claims are the core's (the claims tombstone, kernel/lib/kith_claims.py), a person's revoke epoch is read BEFORE
+# kith-auth decides that they may run, and travels with the run's claim (KITH_REVOKE_SEEN): a revoke that lands in between
+# refuses the claim instead of being missed by the sweep that ran before it. Files mode (no marker): nothing is read.
+claim_seen=""
+# `kith-sessions` (the writer claims, the registry, --resume's pick) is the Rust `kith kernel threads` when `threads` is switched
+# (lib/core-switched.txt) and the program lists the module `threads-writer`, else the Python, which stays the rollback. Decided
+# ONCE here, in a plain variable: every call of this launch (epoch, proc, claim, terminal, resolve, the SessionStart hook and
+# the held launch's release) runs on the same side, so one launch never splits its claims between the two programs.
+. "$KITH/lib/kith-core.sh"
+[[ -n ${_kith_core_primed:-} ]] || kith_core_prime
+kthreads=""; kthreads=$(kith_core_bin threads) || kthreads=""
+# Writer mode is either source (kernel/lib/kith_claims.py switched): the marker, or the module's switch file once it says more than
+# `stepping`, so a marker lost while the core serves does not send a taker back to the files.
+claims_core() {
+  [[ -e ${KITH_STATE:-/nonexistent}/live/terminal/claims.tombstone ]] && return 0
+  local f=${KITH_MACHINE:-/nonexistent}/core/cutover/claims.switch
+  [[ -e $f ]] && ! grep -qx 'state=stepping' "$f" 2>/dev/null
+}
+if [[ -n ${KITH_PERSON:-} ]] && claims_core; then
+  claim_seen=$(kith_threads epoch "$KITH_PERSON") || exit 1
+fi
 if [[ -n ${KITH_PERSON:-} ]]; then
   # Anyone but the owner is resolved while this Mac is in sync with the Kith cloud (revoke-person R5c, R8): while
   # kith-auth says held, a revoke made in the app or on another Mac may not be here yet, so ask again every 2 s for up
@@ -452,11 +489,18 @@ shared=$home/memory/shared
 
 # The pinned package (prompt.md = agent.md body + PROTOCOL.md). If versioning itself breaks, run the live folder
 # rather than not at all.
-# `resolve` is the Rust core's when `pkg` is switched (lib/core-switched.txt); kith_core_exec returns otherwise (or with
-# KITH_CORE=python) and the Python answers. The rest of kith-pkg stays Python.
+# `resolve` is the Rust core's and has no Python fallback: the program that lists the `pkg` module answers, whatever
+# lib/core-switched.txt or KITH_CORE says (there is no Python to go back to; the rollback is a previous release), and a Mac without
+# one names that and takes the live folder. The rest of kith-pkg stays Python.
 . "$KITH/lib/kith-core.sh"
 [[ -n ${_kith_core_primed:-} ]] || kith_core_prime   # one program lookup for the pkg call and the project_id calls below
-pkg=$({ kith_core_exec pkg --kernel "$KITH" resolve "$agent" || "$KITH/bin/kith-pkg" resolve "$agent"; }) && [[ -f $pkg/prompt.md ]] \
+pkg_missing() {
+  echo "kith: no kith program with the pkg module was found (kith update); $agent runs its live folder, so a pin or rollback is ignored until one is" >&2
+}
+if [[ -n ${_kith_core_bin:-} && ${_kith_core_ver:-} == *'"pkg"'* ]]; then
+  pkg=$(KITH_BIN=$_kith_core_bin "$_kith_core_bin" kernel pkg --kernel "$KITH" resolve "$agent")
+else pkg=""; pkg_missing; fi
+[[ -f $pkg/prompt.md ]] \
   || { echo "kith: $agent: package snapshot failed; running the live folder" >&2; pkg=$src_pkg; }
 export KITH_AGENT=$agent KITH_AGENT_DIR=$pkg KITH_AGENT_HOME=$home KITH_AGENT_VERSION=${pkg##*@}
 [[ $pkg == "$src_pkg" ]] && KITH_AGENT_VERSION=live
@@ -525,17 +569,17 @@ done
 # resolve takes the session's writer claim for this shell ($$): it execs into `kith-sessions run` below, so the pid is the
 # same until claude has exited, and run gives the claim back.
 # -r alone picks the session from the agent's recent ones, -c takes the latest begun in this folder; then the same.
-r_sid="" r_cwd="" r_from=""
+r_sid="" r_cwd="" r_from="" r_alone=""
 if [[ -n $resume_thread || -n $resume_pick ]]; then
   [[ $launch -eq 0 && $print -eq 0 ]] || { echo "kith: --resume is for a run in this terminal, not --launch-json or --print" >&2; exit 1; }
   [[ $p_owner == 1 ]] || { echo "kith: --resume is for the owner's own sessions" >&2; exit 1; }
-  if [[ -z $resume_thread && $resume_pick == pick ]]; then resume_thread=$(python3 "$KITH/bin/kith-sessions" pick "$agent") || exit 1
-  elif [[ -z $resume_thread ]]; then resume_thread=$(python3 "$KITH/bin/kith-sessions" latest "$agent" "$PWD") || exit 1; fi
+  if [[ -z $resume_thread && $resume_pick == pick ]]; then resume_thread=$(kith_threads pick "$agent") || exit 1
+  elif [[ -z $resume_thread ]]; then resume_thread=$(kith_threads latest "$agent" "$PWD") || exit 1; fi
   [[ -n $resume_thread ]] || exit 1   # a pick that named nothing must not fall through to a fresh claude
   # Whatever named the session (--resume, -r ID, the picker, -c), it is claimed and checked here and nowhere else.
   # Not `eval "$(…)" || exit 1`: a refusal prints nothing, eval of nothing succeeds, and claude would start anyway.
   # A one-shot (a task is given) waits a few seconds for a held session; a terminal run refuses at once.
-  resolved=$(python3 "$KITH/bin/kith-sessions" resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit 1
+  resolved=$(kith_threads resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit 1
   eval "$resolved"
   [[ -z $r_cwd ]] || cd "$r_cwd" || exit 1
   # A built-in's engine and model are per thread: a resumed one keeps what it started with unless -H/-m say otherwise.
@@ -584,9 +628,9 @@ if [[ $p_owner == 1 ]] && lim=$(kith_cost limit "$agent" --sh 2>/dev/null) && [[
   fi
 fi
 # Launch-time lookups are the kernel's own, whoever the run is for: a guest token in the environment would narrow them.
-# They are the Rust core's when `project-id` is switched. A guest's own calls never come through here (the token is dropped
-# above): they reach bin/project-id, which asks the host over the run socket and which the core does not replace.
-project_id() { ( unset KITH_RUN_TOKEN; kith_core_exec project-id --kernel "$KITH" "$@" || true; exec "$KITH/bin/project-id" "$@" ); }
+# bin/project-id is a stub for `kith kernel project-id`. A guest's own calls never come through here (the token is dropped
+# above): they reach the stub too, and the program asks the core over its run socket.
+project_id() { ( unset KITH_RUN_TOKEN; [[ -z ${_kith_core_bin:-} ]] || export KITH_BIN=$_kith_core_bin; exec "$KITH/bin/project-id" "$@" ); }
 if [[ -n $project ]]; then
   project_id --list | cut -f1 | cut -d' ' -f1 | grep -qx -- "$project" \
     || { echo "kith: unknown project '$project'. Known: $(project_id --list | cut -f1 | cut -d' ' -f1 | tr '\n' ' ')" >&2
@@ -844,6 +888,7 @@ state_projects="$KITH_STATE/projects"$'\n'"$KITH_STATE_REAL/projects"
 [[ $p_owner == 0 ]] && state_projects=""
 learned="$src_pkg/skills/learned"$'\n'"$(cd "$src_pkg" && pwd -P)/skills/learned"
 [[ $p_owner == 0 ]] && learned=""
+guest_kbin=""   # the kith program a guest run is given (claude only), below
 if [[ $harness == claude ]]; then
 # The owner at their own terminal (same test as `terminal` below, which the settings fill needs earlier): their plugins stay on.
 owner_terminal=0
@@ -853,7 +898,11 @@ plugins=$(claude plugin list --json 2>/dev/null || echo '[]')
 # checks and blocks a refused write with the reason; after it, `post` records the version. Files that aren't memory
 # return at once. Without the kith binary (a kernel checkout never built) writes still go through, unchecked.
 # Room notes also get a write-time record of who was in the room (bin/kith-room-ledger); it never blocks a write.
-ledger_pre=$(printf '%q pre --agent %q --home %q || true' "$KITH/bin/kith-room-ledger" "$agent" "$home")
+# The Rust `kith kernel room-ledger` when `room-ledger` is switched and the program lists it, else the stub at the old path, which
+# forwards (or does nothing: a hook never fails). Quoted with %q as the memory hook below is, so both launch paths write the same bytes.
+ledger_cmd=$(printf '%q' "$KITH/bin/kith-room-ledger")
+if lbin=$(kith_core_bin room-ledger); then ledger_cmd=$(printf '%q kernel room-ledger --kernel %q' "$lbin" "$KITH"); fi
+ledger_pre=$(printf '%s pre --agent %q --home %q || true' "$ledger_cmd" "$agent" "$home")
 ledger_post=${ledger_pre/ pre --agent / post --agent }
 mem_pre="" mem_post=""
 if mbin=$(python3 "$KITH/lib/kith_paths.py" --bin) && [[ -n $mbin ]]; then
@@ -862,12 +911,25 @@ if mbin=$(python3 "$KITH/lib/kith_paths.py" --bin) && [[ -n $mbin ]]; then
   # Claude Code blocks a tool call on exit 2, which an older kith binary's usage error also exits with; the hook says
   # "deny" in JSON instead, and any failure of its own lets the write through.
   mem_pre+=" || true" mem_post+=" || true"
+  # A guest's project-id is the stub in bin/, which runs `kith kernel project-id` on a program that lists project-guest: the run is
+  # given this one (the launch's lookup above, whose module list kith_core_prime read) only when it does, and the settings below
+  # open it to the sandbox's reads. Otherwise the run gets none and the stub looks for its own.
+  if [[ $p_owner == 0 && ${_kith_core_bin:-} == "$mbin" && ${_kith_core_ver:-} == *'"project-guest"'* ]]; then
+    guest_kbin=$mbin; export KITH_BIN=$mbin
+  fi
   # Anyone but the owner: a hook that fails (the binary gone, a usage error, a crash) denies the write instead of letting it through.
   [[ $p_owner == 0 ]] && mem_pre="out=\$(${mem_pre% || true}) || out='{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"the memory check could not run, so this write is refused\"}}'; printf '%s\\n' \"\$out\""
 else
   echo "kith: no kith binary found, so memory writes by $agent are not checked or versioned (kith serve start builds it)" >&2
   [[ $p_owner == 0 ]] && { echo "kith: runs for anyone but the owner need the memory check; not running $agent for ${KITH_PERSON}" >&2; exit 3; }
 fi
+# The ledger's SessionStart hook: the Rust `kith kernel cost tag` when `cost` is switched and the program has it (the module
+# `cost-ledger`), else the Python. Quoted with %q as the memory hook above is, so both launch paths write the same bytes.
+cost_hook="\"$KITH/bin/kith-cost\" tag"
+if cbin=$(kith_core_bin cost); then cost_hook=$(printf '%q kernel cost --kernel %q tag' "$cbin" "$KITH"); fi
+# The registry's SessionStart hook: the same side of `kith-sessions` as the rest of this launch (kthreads, decided above).
+sessions_hook="\"$KITH/bin/kith-sessions\" record"
+if [[ -n $kthreads ]]; then sessions_hook=$(printf '%q kernel threads --kernel %q record' "$kthreads" "$KITH"); fi
 # A built-in (scratch) keeps no long-term memory: its memory folder is not pre-approved for writes.
 [[ $p_owner == 1 ]] && { [[ $builtin == 1 ]] && writable="" || writable="$home/memory"$'\n'"$home_real/memory"; } \
   || writable=$(printf '%s\n' "$mem" "$(real "$mem")" "$shared" "$(real "$shared")" "$files" "$(real "$files")")
@@ -879,7 +941,8 @@ if [[ $p_owner == 0 && -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX && -d $KIT
   [[ $(dirname "$ob") == "$(cd "$KITH_MACHINE/outbox" && pwd -P)" && $(basename "$ob") != .* ]] && run_outbox=$ob
 fi
 [[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
-fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
+# The live folder (a launch without a package snapshot) may have no settings.json: an empty one then.
+fill < <([[ -f $pkg/settings.json ]] && cat "$pkg/settings.json" || echo "{}") | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK=$cost_hook SESSIONS_HOOK=$sessions_hook WRITABLE="$writable
 $learned
 $state_projects" python3 -I -c '
 import json, os, re, sys
@@ -981,6 +1044,11 @@ if os.environ["P_OWNER"] == "0":
     socks = [x for m in machine for x in both(m + "/run/host.sock")]
     if os.environ.get("KITH_RUN_SOCKET"):
         socks += both(os.environ["KITH_RUN_SOCKET"])
+    # The core run socket (recall, memory search and project-id are answered there) is the one file of <machine>/core a guest
+    # may reach: the folder stays on the deny list above and nothing else in it is opened (owner.sock, owner.token, the core database).
+    socks += [x for m in machine for x in both(m + "/core/run.sock")]
+    if os.environ.get("KITH_CORE_RUN_SOCKET"):
+        socks += both(os.environ["KITH_CORE_RUN_SOCKET"])
     s["sandbox"] = {
         "enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False, "autoAllowBashIfSandboxed": True,
         "filesystem": {"denyRead": list(dict.fromkeys(deny_read)), "allowWrite": list(dict.fromkeys(allow_write))},
@@ -1115,7 +1183,7 @@ if [[ $p_owner == 0 && $harness == claude ]]; then
   [[ $wide == 1 && $PWD != "$files" ]] && { echo "kith: working directory $PWD is wider than a guest may read; working in $files" >&2; cd "$files"; }
   read_dirs=$PWD
   for ((i = 1; i < ${#dirs[@]}; i += 2)); do read_dirs+=$'\n'"${dirs[i]}"; done
-  READ_DIRS=$read_dirs RUN_OUTBOX=$run_outbox WORK=$work CTMP=$ctmp GUARD_TREES=$(printf '%s\n' "$KITH" "$src_pkg/role" "$src_pkg/skills" "$pkg" "$src_pkg" "$KITH_STATE/people" "$KITH_STORE") python3 -I -c '
+  GUEST_KBIN=$guest_kbin READ_DIRS=$read_dirs RUN_OUTBOX=$run_outbox WORK=$work CTMP=$ctmp GUARD_TREES=$(printf '%s\n' "$KITH" "$src_pkg/role" "$src_pkg/skills" "$pkg" "$src_pkg" "$KITH_STATE/people" "$KITH_STORE") python3 -I -c '
 import json, os, re, sys
 f = sys.argv[1]
 s = json.load(open(f))
@@ -1132,6 +1200,19 @@ for d in os.environ["READ_DIRS"].split("\n"):
 for d in (os.environ.get("WORK"), home + "/.local/share/uv", home + "/.local/bin"):
     if d:
         allow += both(d)
+# The kith program (the project-id stub of a guest runs it), the file and each link on the way to it.
+kb = os.environ.get("GUEST_KBIN")
+if kb:
+    chain, at = [kb], kb
+    for _ in range(16):
+        if not os.path.islink(at):
+            break
+        to = os.readlink(at)
+        at = to if os.path.isabs(to) else os.path.join(os.path.dirname(at), to)
+        chain.append(at)
+    if os.path.realpath(kb) not in chain:
+        chain.append(os.path.realpath(kb))
+    allow += chain
 if os.environ["CTMP"]:   # the Claude Code temp folder of theirs (above), never run/t around it
     allow.append(os.environ["CTMP"])
 if os.environ.get("RUN_OUTBOX"):   # its own outbox, which kith-send writes (made writable above)
@@ -1281,8 +1362,8 @@ emit_launch() {
   [[ $harness == claude ]] || allowed_tools=""
   # A guest's workspace (above): Claude Code reads its temp dir from the process environment, not the settings, so the host
   # has to start it with these.
-  local work_env=""; [[ $p_owner == 1 ]] || work_env="CLAUDE_CODE_TMPDIR KITH_WORK CLAUDE_ENV_FILE"
-  ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
+  local work_env=""; [[ $p_owner == 1 ]] || work_env="CLAUDE_CODE_TMPDIR KITH_WORK CLAUDE_ENV_FILE${guest_kbin:+ KITH_BIN}"
+  ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_CORE_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_GEN KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
     ADD_DIRS=$add_dirs ALLOWED=$allowed_tools SETTINGS=$settings MCP=$(merged_mcp) PROMPT=$prompt PERM_MODE=$perm_mode NO_SLASH=$no_slash CALL_MODEL=$call_model \
     BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib ENGINE_SPEC=$engine_spec \
     python3 -I -c '
@@ -1330,7 +1411,15 @@ for k, v in json.load(sys.stdin).get("env", {}).items():
 fi
 # Every run with someone else's profile is findable by the revoke sweep (kith-sessions proc): its pid is the one that execs
 # claude below, so the claim lives as long as claude (or, for an interactive run, the launcher claude runs under).
-[[ $p_owner == 1 || $launch -eq 1 ]] || python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || true
+# Once the claims are the core's (the marker), any failure of proc means this person's run has no core claim, so a revoke
+# could not find it: it does not start (exit 9 is the core saying so; a traceback or a failed import is the same to a revoke).
+if [[ $p_owner != 1 && $launch -ne 1 ]]; then
+  proc_rc=0
+  KITH_REVOKE_SEEN=$claim_seen kith_threads proc "$$" "$p_id" "$agent" 2>/dev/null || proc_rc=$?
+  if [[ $proc_rc -eq 9 ]] || { [[ $proc_rc -ne 0 ]] && claims_core; }; then
+    echo "kith: the Kith core cannot record this run, so ${p_id} cannot start it right now (is kith serve running?)" >&2; exit 1
+  fi
+fi
 # Another harness: the same run, handed to its adapter (prompt in a file, directories and MCP configs as lists).
 if [[ $harness != claude ]]; then
   [[ $want_held -eq 0 ]] || echo "kith: --held holds claude sessions only; $harness runs here (--direct)" >&2
@@ -1458,13 +1547,21 @@ if [[ -n $csid ]]; then
     echo "kith: no kith-stub program beside kith; this run is not locked against another run of the same conversation" >&2
   fi
 fi
+# A run the core gave no answer for goes on under the lock alone (kith-sessions prints `lock-alone`, resolve sets r_alone): the
+# stub then kills a host warm process that has the conversation loaded, after it takes the lock and before claude starts
+# (designs/2026-11-16-offturn-lock-alone). With a core that answered, the core's warm check did that and nothing is cleared.
+lock_alone() { [[ ${#stub[@]} -eq 0 ]] || stub=("${stub[0]}" --lock-alone "${stub[@]:1}"); }
+[[ -z $r_alone ]] || lock_alone
 # The claim names the person kith-auth resolved (never anything the run can change), so revoking them ends this run.
 claim_person=""; [[ $p_owner == 1 ]] || claim_person=$p_id
 if [[ $# -gt 0 ]]; then
   [[ $want_held -eq 0 ]] || echo "kith: --held is for an interactive session; this task runs here (--direct)" >&2
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
-  [[ -z $csid ]] || python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
+  if [[ -n $csid ]]; then
+    claimed=$(KITH_REVOKE_SEEN=$claim_seen kith_threads claim "$csid" "$$" "$claim_person" "$agent") || exit 1
+    [[ $claimed != lock-alone || -n $r_alone ]] || lock_alone
+  fi
   [[ -z $csid || -z $sid_file ]] || printf '%s\n' "$csid" > "$sid_file"
   # A permission prompt in this run asks for approval through a card (--permission-prompt-tool) instead of being refused.
   # A guest run was given KITH_RUN_TOKEN/KITH_RUN_SOCKET by the host, an owner run KITH_ASK_*, or gets them here: the
@@ -1496,7 +1593,9 @@ if [[ $want_held -eq 1 ]]; then
     . "$KITH/lib/kith-core.sh"
     export KITH_TERMINAL_SESSION=1
     [[ -z $r_sid ]] || export KITH_RESUMED_FROM=$r_from
+    held_alone=""
     kith_held_launch "$agent" "$csid" "${r_sid:-}" "${args[@]}" || true
+    [[ -z $held_alone || -n $r_alone ]] || lock_alone
   else
     echo "kith: --held is for the owner's own terminal; running here (--direct)" >&2
   fi
@@ -1513,7 +1612,8 @@ fi
 # The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
 # claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
 if [[ -n $csid && $csid != "${r_sid:-}" ]]; then
-  python3 "$KITH/bin/kith-sessions" terminal "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
+  claimed=$(KITH_REVOKE_SEEN=$claim_seen kith_threads terminal "$csid" "$$" "$claim_person" "$agent") || exit 1
+  [[ $claimed != lock-alone || -n $r_alone ]] || lock_alone
 fi
 # An interactive owner run is listed in the apps (the SessionStart hook above) and may be taken over from there, which ends
 # claude: it runs as a child of kith-sessions so the note about getting it back can follow it (signals and the exit code
