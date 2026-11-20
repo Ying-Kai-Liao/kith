@@ -397,12 +397,20 @@ impl Hub {
                 self.events.send(json!({"type": "bot", "rev": rev, "bot": {"id": id, "deleted": true, "rev": rev}}));
         }
         // Its shared files are unreachable once the bot is deleted.
-        let files = crate::chat::files::root(id);
+        // The owner's own Delete also takes a host-native row's old memory files and its export bundle (C5 itself
+        // deletes nothing).
+        let folders = [
+            crate::chat::files::root(id),
+            crate::chat::memory::files::folder(Some(id)),
+            crate::api::native_export::bundle_dir(id),
+        ];
         tokio::task::spawn_blocking(move || {
-            if let Err(error) = std::fs::remove_dir_all(&files)
-                && error.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(error = %error, "couldn't remove a deleted bot's shared files");
+            for dir in folders {
+                if let Err(error) = std::fs::remove_dir_all(&dir)
+                    && error.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::warn!(dir = %dir.display(), error = %error, "couldn't remove a deleted bot's folder");
+                }
             }
         });
         // A deleted bot leaves its groups; what it said there stays.

@@ -77,7 +77,7 @@ pub fn spawn_tidier(hub: Arc<Hub>, bot_id: String) -> mpsc::UnboundedSender<Tidy
     let (tx, mut rx) = mpsc::unbounded_channel::<TidyEvent>();
     // Only an hq agent's memory is tidied by the host: a host-native row (C5) or a room has none, so events sent to
     // it are dropped.
-    if !hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.is_hq()) {
+    if !hub.store.bot(&bot_id).ok().flatten().is_some_and(|b| b.config.is_hq() && !b.config.is_native()) {
         return tx;
     }
     if kv_get_or_old(&hub.store, &bookmark_key(&bot_id)).is_none() {
@@ -255,12 +255,7 @@ fn message(e: &Entry) -> Option<Message> {
         (false, vec![clip(e.data["text"].as_str().unwrap_or_default())])
     };
     let text: Vec<String> = text.into_iter().filter(|run| !run.trim().is_empty()).collect();
-    (!text.is_empty()).then(|| Message {
-        id: e.id.clone(),
-        from_user,
-        text,
-        date: crate::chat::memory::ymd(e.created_at),
-    })
+    (!text.is_empty()).then(|| Message { id: e.id.clone(), from_user, text, date: super::ymd(e.created_at) })
 }
 
 /// The runs of a user message the user typed themselves: not pasted, quoted or forwarded text.

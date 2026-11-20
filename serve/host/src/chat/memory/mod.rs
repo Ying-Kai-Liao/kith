@@ -6,11 +6,10 @@
 //! This is only what `agent/bot`'s native arms and the context snapshot still call: the session opening, the
 //! change notices and the folder names. It goes with those arms.
 
-mod dates;
 pub mod files;
 
 pub use crate::hqmem::tidier::{TidyEvent, spawn_tidier};
-pub use dates::ymd;
+pub use crate::hqmem::ymd;
 
 use crate::hub::Hub;
 use crate::store::{BotConfig, Store};

@@ -473,7 +473,7 @@ Split:
 ### 2. Thread summaries and trajectory indexing
 
 - Summary write at thread end and compaction; one row per thread; cost tagged.
-- Trajectory indexing: host `entries` (`serve/host/src/store/entries.rs`: `thread`, `search_messages`,
+- Trajectory indexing: host `entries` (`serve/host/src/store/entries.rs`: `thread`,
   `thread_summary`) and the harness log reader for non-imported runs (`kernel/bin/kith-sessions`, the jsonl glob).
 - Redaction before indexing; the threat-model rule.
 - Files: `serve/host/src/store/entries.rs`, `serve/host/src/store/model.rs`, `serve/host/crates/memory/src/compaction.rs`
@@ -560,7 +560,7 @@ Product choices only. Each has a recommended default.
 ## Verification of paths
 
 Checked against origin/main (`git ls-tree`, `git cat-file -e`, `git grep`): every existing path named above exists,
-and line numbers were replaced by function names (`render`, `resolve`, `memory_tag`, `search`, `search_messages`,
+and line numbers were replaced by function names (`render`, `resolve`, `memory_tag`, `search`,
 `thread_summary`, `paths()`, `BotConfig.project`). Proposals, not in the repo yet: `kith recall`, `kith-memory index`
 and `recall`, `kernel/bin/kith-recall`, the facets module under `kernel/lib/`, `kith summarise`,
 `$KITH_MACHINE/index/memory.db`, `memory/rooms/`.

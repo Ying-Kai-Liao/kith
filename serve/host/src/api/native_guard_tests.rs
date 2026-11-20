@@ -204,6 +204,14 @@ async fn the_export_has_the_row_memory_and_routines_and_no_secret_or_webhook_key
     std::fs::create_dir_all(memory.join("notes")).unwrap();
     std::fs::write(memory.join("likes.md"), "likes tea").unwrap();
     std::fs::write(memory.join("notes/deep.md"), "deeper").unwrap();
+    // A kith-mem fact of the bot's own layer, which lives in serve.db.
+    r.hub
+        .store
+        .memory_write(|c, now, rev| {
+            let new = kith_mem::store::New { bot: Some(&a), text: "Likes oolong", room: None, evidence: &[] };
+            kith_mem::store::add(c, kith_mem::store::Writer::User, new, now, rev)
+        })
+        .unwrap();
     // A routine with a webhook trigger and a schedule, one of them paused; the engine's saved key.
     let saved = r
         .hub
@@ -232,6 +240,7 @@ async fn the_export_has_the_row_memory_and_routines_and_no_secret_or_webhook_key
     );
     assert_eq!(std::fs::read_to_string(dir.join("memory/likes.md")).unwrap(), "likes tea");
     assert_eq!(std::fs::read_to_string(dir.join("memory/notes/deep.md")).unwrap(), "deeper");
+    assert_eq!(read("entries.json")["entries"][0]["text"], "Likes oolong");
     let routines = read("routines.json");
     let first = &routines["routines"][0];
     assert_eq!(
@@ -253,6 +262,20 @@ async fn the_export_has_the_row_memory_and_routines_and_no_secret_or_webhook_key
     assert_eq!(again["path"], out["path"]);
     assert!(!dir.join("memory/likes.md").exists());
     assert!(dir.join("memory/notes/deep.md").exists());
+}
+
+#[tokio::test]
+async fn deleting_a_native_row_removes_its_memory_files_and_export_bundle() {
+    let r = Rig::new().await;
+    let a = native(&r, "Old");
+    let memory = crate::chat::memory::files::folder(Some(&a));
+    std::fs::create_dir_all(&memory).unwrap();
+    std::fs::write(memory.join("likes.md"), "likes tea").unwrap();
+    let out = call(&r, "exportHostBot", json!({"botId": a})).await.unwrap();
+    let dir = bundle(out["path"].as_str().unwrap());
+    assert!(dir.exists() && memory.exists(), "kept until the owner deletes the row");
+    r.hub.delete_bot(&a).unwrap();
+    until("the folders to go", || !memory.exists() && !dir.exists()).await;
 }
 
 #[tokio::test]

@@ -290,12 +290,12 @@ async fn write_now(
     if text.is_empty() {
         return Ok(Wrote::Nothing);
     }
-    // A group has no harness of its own: its first bot with one writes the summary.
+    // A group has no harness of its own: its first kith agent writes the summary (a host-native member can't).
     let runner = if cfg.is_group() {
         cfg.members
             .iter()
             .filter_map(|m| hub.store.bot(m).ok().flatten())
-            .find(|b| !b.deleted && !b.config.is_group())
+            .find(|b| !b.deleted && !b.config.is_group() && !b.config.refused_native())
             .map(|b| b.config)
     } else {
         Some(cfg.clone())
