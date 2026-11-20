@@ -8,52 +8,31 @@ public struct EditorRequest: Identifiable {
     public init(_ draft: BotDraft) { self.draft = draft }
 }
 
-/// Create or edit a bot in a modal (iPhone): the settings form plus Close / Save.
+/// Edit a bot in a modal (iPhone): the settings form plus Close / Save. A new agent is `NewAgentSheet`.
 public struct BotEditorView: View {
     @Environment(BotStore.self) private var model
     @Environment(\.dismissModal) private var dismiss
     @State var draft: BotDraft
-    private let computers: [(id: ComputerID, label: String)]
-    private let computer: Binding<ComputerID>?
 
-    /// `computer` lets a new bot pick which computer it runs on; the caller swaps the `BotStore` to match.
-    public init(draft: BotDraft, computers: [(id: ComputerID, label: String)] = [], computer: Binding<ComputerID>? = nil) {
+    public init(draft: BotDraft) {
         _draft = State(initialValue: draft)
-        self.computers = computers
-        self.computer = computer
     }
     @State private var saving = false
     @State private var error: String?
 
-    private var isNew: Bool { draft.id == nil }
-
     public var body: some View {
         VStack(spacing: 0) {
-            ModalHeader(isNew ? "New agent" : "Settings") {
+            ModalHeader("Settings") {
                 if saving {
                     Spinner()
                 } else {
-                    IconButton(isNew ? "Create" : "Save", systemImage: "checkmark") { save() }
+                    IconButton("Save", systemImage: "checkmark") { save() }
                         .disabled(!draft.isValid || saving || model.connection != .online)
                 }
             }
-            BotSettingsForm(draft: $draft, error: error, computers: computers, computer: computer)
+            BotSettingsForm(draft: $draft, error: error)
         }
         .background(Palette.background)
-        .onAppear { if isNew { model.fillDefaults(&draft) } }
-        // A new bot's connectors and skills start on once the computer has listed them.
-        .onChange(of: model.installedConnectors.map(\.id) + model.installedSkills.map(\.id)) {
-            if isNew { model.fillDefaults(&draft) }
-        }
-        .onChange(of: model.computer.id) {
-            // Folders, models and connectors belong to the old computer.
-            draft.cwd = ""
-            draft.model = nil
-            draft.modelOptions = [:]
-            draft.connectors = nil
-            draft.skills = nil
-            model.fillDefaults(&draft)
-        }
     }
 
     private func save() {
@@ -62,9 +41,8 @@ public struct BotEditorView: View {
         error = nil
         Task {
             do {
-                let bot = try await model.save(draft.normalized)
+                _ = try await model.save(draft.normalized)
                 dismiss()
-                if isNew { model.selection = bot.id }
             } catch {
                 self.error = error.localizedDescription
             }
@@ -84,8 +62,6 @@ enum FormPart {
 struct BotSettingsForm: View {
     @Binding var draft: BotDraft
     let error: String?
-    var computers: [(id: ComputerID, label: String)] = []
-    var computer: Binding<ComputerID>?
     var scrolls = true
     var part: FormPart = .all
     /// An hq bot's details sheet shows kith's copy of some facts: those cards go (`BotSections`).
@@ -101,7 +77,6 @@ struct BotSettingsForm: View {
     @State private var hqProjects: [HQProject] = []
     @State private var pickingAvatar = false
     @State private var editingInstructions = false
-    @State private var viewingSkill: SkillRef?
 
     var body: some View {
         Group {
@@ -116,7 +91,6 @@ struct BotSettingsForm: View {
         .background(Palette.background)
         .task { await model.refreshPlugins() }
         .task { hqProjects = (try? await model.projects().projects) ?? [] }
-        .kithSheet(item: $viewingSkill) { SkillSheet(skill: $0) }
         .kithSheet(isPresented: $pickingAvatar) {
             ColourSheet(draft: $draft, isGroup: model.bots[draft.id ?? ""]?.isGroup ?? false)
         }
@@ -143,7 +117,6 @@ struct BotSettingsForm: View {
                     }
                 }
                 if shown.instructions { instructionsRow }
-                if shown.backendPicker, !isKithAgent { agentPicker }
                 settingsRows
             }
             if let error {
@@ -167,26 +140,6 @@ struct BotSettingsForm: View {
             TextField("e.g. Reviews PRs. Never pushes without asking.", text: $draft.description, axis: .vertical)
                 .lineLimit(3...8)
                 .fieldBox()
-        }
-    }
-
-    private var agentPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ValueRow("Agent") {
-                ChoicePicker(selection: $draft.backend,
-                             options: (model.hello?.backends ?? []).map { ($0.id, $0.available ? $0.name : "\($0.name) (not installed)") } + [("custom", "Custom command")],
-                             image: { id in AgentIcon.image(registry: model.hello?.backends.first { $0.id == id }?.registry ?? id) })
-            }
-            if let b = model.hello?.backends.first(where: { $0.id == draft.backend }), !b.available {
-                Text(b.installHint).font(.caption).foregroundStyle(Palette.warning)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if draft.backend == "custom" {
-                TextField("ACP command, e.g. my-agent --acp", text: Binding(get: { draft.command ?? "" }, set: { draft.command = $0.isEmpty ? nil : $0 }))
-                    .font(.callout.monospaced())
-                    .plainTextInput()
-                    .fieldBox()
-            }
         }
     }
 
@@ -218,22 +171,14 @@ struct BotSettingsForm: View {
         .accessibilityLabel("Mode")
     }
 
-    /// An hq agent: kith holds its engine, model, effort and tools (`kith <agent> set …`), so the host's own controls never show.
-    private var isKithAgent: Bool { !(model.bots[draft.id ?? ""]?.hqAgent ?? "").isEmpty }
-
+    /// Every bot here is a kith agent: kith holds its engine, model, effort and tools (`kith <agent> set …`), so the
+    /// host's own controls never show.
     @ViewBuilder private var settingsRows: some View {
-        if isKithAgent, kith == nil {
-            Text("Engine, model and effort are set from this agent's details page.").font(.footnote).foregroundStyle(Palette.secondary)
-        } else if let kith, isKithAgent {
+        if let kith {
             HqSettingsRows(store: kith, showsPermission: !permissionInAccess)
-        } else if let kith, !shown.kithSettings { HqSettingsRows(store: kith, showsPermission: !permissionInAccess) } else { modelPicker }
-    }
-
-    private var modelPicker: some View {
-        AgentModelPicker(backend: draft.backend, selection: $draft.model, options: $draft.modelOptions,
-                         fastMode: Binding(get: { draft.fastMode ?? false }, set: { on in
-                             withAnimation(Motion.reduced(Motion.fade, reduceMotion)) { draft.fastMode = on }
-                         }), bot: draft.id.flatMap { model.bots[$0] })
+        } else {
+            Text("Engine, model and effort are set from this agent's details page.").font(.footnote).foregroundStyle(Palette.secondary)
+        }
     }
 
     @ViewBuilder private var sections: some View {
@@ -287,22 +232,10 @@ struct BotSettingsForm: View {
 
             // On the details sheet the agent and its model are on the Details page; what's left is where it works.
             CardSection(part == .all ? "Agent" : "Workspace") {
-                VStack(alignment: .leading, spacing: 6) {
-                    ValueRow("Computer") {
-                        if let computer {
-                            ChoicePicker(selection: computer, options: computers, fitsAvailableWidth: true)
-                                .accessibilityLabel("Computer")
-                        } else {
-                            Text(model.hostName).lineLimit(1)
-                        }
-                    }
-                    if computer != nil, model.connection != .online {
-                        Text("Connect this computer to create the bot, or choose another computer.")
-                            .font(.caption).foregroundStyle(Palette.warning)
-                    }
+                ValueRow("Computer") {
+                    Text(model.hostName).lineLimit(1)
                 }
                 if part == .all {
-                    if !isKithAgent { agentPicker }
                     settingsRows
                 }
                 ValueRow("Folder") {
@@ -366,24 +299,8 @@ struct BotSettingsForm: View {
                 }
             }
 
-            if isKithAgent {
-                Text("This agent's tools and skills are kept by Kith. Change them with kith on the Mac or in the Mac app.")
-                    .font(.footnote).foregroundStyle(Palette.secondary)
-            } else {
-            PluginToggles(
-                title: "Connectors",
-                empty: "No connectors yet. Add GitHub, Linear, Notion and more from Extensions.",
-                items: model.installedConnectors.map { ($0.id, $0.name, $0.command ?? $0.url ?? "") },
-                selection: Binding(get: { draft.connectors ?? [] }, set: { draft.connectors = $0 })
-            )
-            PluginToggles(
-                title: "Skills",
-                empty: "No skills yet. Get some from Extensions, or write your own.",
-                items: model.installedSkills.map { ($0.id, $0.name, $0.description) },
-                selection: Binding(get: { draft.skills ?? [] }, set: { draft.skills = $0 }),
-                info: { id in viewingSkill = model.installedSkills.first { $0.id == id }.map(SkillRef.init) }
-            )
-            }
+            Text("This agent's tools and skills are kept by Kith. Change them with kith on the Mac or in the Mac app.")
+                .font(.footnote).foregroundStyle(Palette.secondary)
             if let error {
                 Text(error).font(.footnote).foregroundStyle(Palette.danger)
             }
@@ -477,24 +394,6 @@ extension BotDraft {
         var d = self
         if d.backend != "custom" { d.command = nil }
         return d
-    }
-}
-
-public extension BotStore {
-    /// Picks an installed agent we know (a registry agent nobody chose is never the default);
-    /// empty cwd requests a personal workspace from the host.
-    func fillDefaults(_ draft: inout BotDraft) {
-        if hello?.backends.first(where: { $0.id == draft.backend })?.available != true,
-           let first = hello?.backends.first(where: { $0.available && $0.curated == true }) {
-            draft.backend = first.id
-        }
-        // Connectors and skills start on; left unset, the host turns on every one.
-        if draft.connectors == nil, !installedConnectors.isEmpty {
-            draft.connectors = installedConnectors.map(\.id)
-        }
-        if draft.skills == nil, !installedSkills.isEmpty {
-            draft.skills = installedSkills.map(\.id)
-        }
     }
 }
 
