@@ -197,8 +197,7 @@ fn pyrepr(x: &str) -> String {
 ///
 /// Bash also runs `kith_cutover_refuse` under `KITH_CORE=python`, refusing the rollback of a module whose files the core
 /// owns after its cutover. It is left out here on purpose: that refusal only matters for a module that has a cutover step,
-/// and `pkg` and `cost` have none (the core does not own the cost ledger), so the rollback is always
-/// allowed for these verbs. Add the refusal when one of them gets a cutover.
+/// and `pkg` has none, so the rollback is always allowed for this verb. Add the refusal when it gets a cutover.
 fn switched(kernel: &Path, env: &Env, verb: &str) -> bool {
     match get(env, "KITH_CORE") {
         "python" => return false,
@@ -211,7 +210,7 @@ fn switched(kernel: &Path, env: &Env, verb: &str) -> bool {
     })
 }
 
-/// `kith-cost ARGS` answered by the core in process (`cost` in lib/core-switched.txt): its stdout without the last newline when it
+/// `kith-cost ARGS` answered by the core in process: its stdout without the last newline when it
 /// exits 0, else `None`, which the callers read as `kith-cost` failing. Only the verbs the launch asks (`spent`, `limit --sh`).
 fn cost_core(
     kernel: &Path,
@@ -446,12 +445,14 @@ pub(crate) fn knows_module(bin: &Path, module: &str) -> bool {
     .is_some_and(|o| o.contains(&format!("\"{module}\"")))
 }
 
-/// The program the `SessionStart` hook runs for the cost ledger (`kith kernel cost tag`): `kith_bin` when `cost` is switched (a
-/// line in `lib/core-switched.txt` and no `KITH_CORE=python`) and the program has the `cost-ledger` module. `None` keeps the
-/// Python hook, `bin/kith-cost tag`, which stays as the rollback and for runs that hold the old path. `kith_core_bin cost` in
-/// lib/kith-core.sh decides the same way for the bash launch.
-pub fn cost_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Option<String> {
-    switched_bin(kernel, env, kith_bin, "cost", "cost-ledger")
+/// The program the `SessionStart` hook runs for the cost ledger (`kith kernel cost tag`): `kith_bin` when it has the `cost-ledger`
+/// module, else this program (it always does). `kernel/bin/kith-cost tag`, the forwarding stub, stays for the runs that hold the
+/// old hook path. `kith_cost_bin` in lib/kith-core.sh decides the same way for the bash launch.
+pub fn cost_hook_bin(kith_bin: Option<&str>) -> Option<String> {
+    kith_bin
+        .filter(|b| !b.is_empty() && knows_module(Path::new(b), "cost-ledger"))
+        .map(str::to_owned)
+        .or_else(|| std::env::current_exe().ok().map(|e| s(&e)))
 }
 
 /// The program the `SessionStart` hook runs for the session registry (`kith kernel threads record`): `kith_bin` when `threads`
@@ -797,29 +798,15 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
                 ));
                 return Err(3);
             }
-            // `cost` in lib/core-switched.txt: the core's own `spent` (kith-cost spent is the rollback, KITH_CORE=python).
-            let spent = if switched(kernel, &env, "cost") {
-                cost_core(
-                    kernel,
-                    &p,
-                    &env,
-                    &home_dir,
-                    &p_was,
-                    &["spent", &spend_who, &p_budget_agent],
-                )
-            } else {
-                let sys = Sys { env: &env };
-                let mut c = sys.cmd(
-                    kernel.join("bin/kith-cost"),
-                    &["spent", &spend_who, &p_budget_agent],
-                );
-                c.env("KITH_PERSON_WAS", &p_was).stderr(Stdio::null());
-                c.output().ok().filter(|o| o.status.success()).map(|o| {
-                    String::from_utf8_lossy(&o.stdout)
-                        .trim_end_matches('\n')
-                        .to_owned()
-                })
-            };
+            // The core's own `spent`, in process (there is no program to ask and no Python to go back to).
+            let spent = cost_core(
+                kernel,
+                &p,
+                &env,
+                &home_dir,
+                &p_was,
+                &["spent", &spend_who, &p_budget_agent],
+            );
             let spent = match spent {
                 None if p_owner => "0".to_owned(),
                 None => {
@@ -982,17 +969,10 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .unwrap_or_else(|| get(&env, "KITH_PERMISSION_MODE").to_owned());
 
     // ---- the agent's monthly limit
-    let sys = Sys { env: &env };
-    let limit_line = if !p_owner {
-        None
-    } else if switched(kernel, &env, "cost") {
+    let limit_line = if p_owner {
         cost_core(kernel, &p, &env, &home_dir, "", &["limit", agent, "--sh"])
     } else {
-        sys.out(
-            kernel.join("bin/kith-cost"),
-            &["limit", agent, "--sh"],
-            false,
-        )
+        None
     };
     if let Some(lim) = limit_line.filter(|l| !l.is_empty()) {
         let v = assignments(&lim);
@@ -1389,7 +1369,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .filter(|b| knows_readfence(Path::new(b)))
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
     let ledger_bin = ledger_hook_bin(kernel, &env, kith_bin.as_deref());
-    let cost_bin = cost_hook_bin(kernel, &env, kith_bin.as_deref());
+    let cost_bin = cost_hook_bin(kith_bin.as_deref());
     let threads_bin = threads_hook_bin(kernel, &env, kith_bin.as_deref());
     if perm_mode.is_empty() {
         perm_mode.clear();

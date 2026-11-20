@@ -3,9 +3,9 @@
   "name": "cost-limit-none",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -126,9 +126,9 @@
   "name": "cost-limit-no-settings",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -174,9 +174,9 @@
   "name": "cost-limit-set",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -287,9 +287,9 @@
   "name": "cost-limit-over-and-float",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -415,9 +415,9 @@
   "name": "cost-limit-no-spend",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -472,9 +472,9 @@
   "name": "cost-limit-small-and-large",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -586,9 +586,9 @@
   "name": "cost-limit-broken-settings",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -699,9 +699,9 @@
   "name": "cost-limit-invalid-settings",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -808,9 +808,9 @@
   "name": "cost-limit-array-settings",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -912,9 +912,9 @@
   "name": "cost-limit-string-and-bool",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -1030,9 +1030,9 @@
   "name": "cost-limit-string-alone",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -1143,9 +1143,9 @@
   "name": "cost-limit-zero-and-null",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -1256,9 +1256,9 @@
   "name": "cost-limit-sh-quoting",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -1370,9 +1370,9 @@
   "name": "cost-limit-clock-first-instant",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -1478,9 +1478,9 @@
   "name": "cost-limit-clock-first-day",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -1586,9 +1586,9 @@
   "name": "cost-limit-clock-midday-tomorrow",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -1694,9 +1694,9 @@
   "name": "cost-limit-clock-reaches-today",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -1802,9 +1802,9 @@
   "name": "cost-limit-clock-end-of-day",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -1910,9 +1910,9 @@
   "name": "cost-limit-clock-mid-month",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -2018,9 +2018,9 @@
   "name": "cost-limit-clock-last-day",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -2126,9 +2126,9 @@
   "name": "cost-limit-clock-december",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -2234,9 +2234,9 @@
   "name": "cost-limit-clock-february",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -2342,9 +2342,9 @@
   "name": "cost-limit-clock-sydney",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -2450,9 +2450,9 @@
   "name": "cost-limit-clock-sydney-dst-start",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -2558,9 +2558,9 @@
   "name": "cost-limit-clock-sydney-month-edge",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -2666,9 +2666,9 @@
   "name": "cost-limit-clock-new-york-dst-end",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -2774,9 +2774,9 @@
   "name": "cost-limit-clock-lord-howe",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -2882,9 +2882,9 @@
   "name": "cost-limit-clock-epoch",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -2990,9 +2990,9 @@
   "name": "cost-limit-clock-iso-offset",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -3098,9 +3098,9 @@
   "name": "cost-spent",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -3225,9 +3225,9 @@
   "name": "cost-spent-was",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -3334,9 +3334,9 @@
   "name": "cost-spent-empty",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -3382,9 +3382,9 @@
   "name": "cost-spent-sydney",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -3487,9 +3487,9 @@
   "name": "cost-spent-no-args",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -3586,9 +3586,9 @@
   "name": "cost-usage-json",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -3714,9 +3714,9 @@
   "name": "cost-usage-json-empty",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -3761,9 +3761,9 @@
   "name": "cost-usage-json-no-runs",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -3856,9 +3856,9 @@
   "name": "cost-usage-json-sydney",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -3969,9 +3969,9 @@
   "name": "cost-agent-json",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -4110,9 +4110,9 @@
   "name": "cost-agent-json-limit-over",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -4219,9 +4219,9 @@
   "name": "cost-agent-json-empty",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -4262,9 +4262,9 @@
   "name": "cost-agent-json-clock",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -4372,9 +4372,9 @@
   "name": "cost-members",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -4487,9 +4487,9 @@
   "name": "cost-members-no-auth",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -4586,9 +4586,9 @@
   "name": "cost-bots",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -4693,9 +4693,9 @@
   "name": "cost-bots-no-cap",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -4796,9 +4796,9 @@
   "name": "cost-bots-none",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -4899,9 +4899,9 @@
   "name": "cost-sync",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5006,9 +5006,9 @@
   "name": "cost-sync-stale-seen",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5113,9 +5113,9 @@
   "name": "cost-sync-bridge",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5216,9 +5216,9 @@
   "name": "cost-sync-bridge-broken",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5319,9 +5319,9 @@
   "name": "cost-sync-bridge-half",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5422,9 +5422,9 @@
   "name": "cost-sync-accounts",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5533,9 +5533,9 @@
   "name": "cost-sync-nothing",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5582,9 +5582,9 @@
   "name": "cost-sync-old-ledger",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5685,9 +5685,9 @@
   "name": "cost-sync-token-shapes",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5736,9 +5736,9 @@
   "name": "cost-usage-errors",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5855,9 +5855,9 @@
   "name": "cost-usage-errors-empty",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -5899,9 +5899,9 @@
   "name": "cost-agent-json-first-arg",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -6005,9 +6005,9 @@
   "name": "cost-text-dated",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -6191,9 +6191,9 @@
   "name": "cost-text-dated-csv",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -6309,9 +6309,9 @@
   "name": "cost-text-relative-periods",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -6390,9 +6390,9 @@
   "name": "cost-text-relative-agents",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -6506,9 +6506,9 @@
   "name": "cost-text-relative-people",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -6597,9 +6597,9 @@
   "name": "cost-text-relative-people-no-auth",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -6664,9 +6664,9 @@
   "name": "cost-text-relative-csv-session",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -6802,9 +6802,9 @@
   "name": "cost-text-empty-ledger",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -6897,9 +6897,9 @@
   "name": "cost-text-no-ledger-dir",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -6955,9 +6955,9 @@
   "name": "cost-tag-full",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7008,9 +7008,9 @@
   "name": "cost-tag-minimal",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7052,9 +7052,9 @@
   "name": "cost-tag-no-agent",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7095,9 +7095,9 @@
   "name": "cost-tag-empty-agent",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7139,9 +7139,9 @@
   "name": "cost-tag-no-session",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7192,9 +7192,9 @@
   "name": "cost-tag-empty-session",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7245,9 +7245,9 @@
   "name": "cost-tag-empty-stdin",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7298,9 +7298,9 @@
   "name": "cost-tag-malformed",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7351,9 +7351,9 @@
   "name": "cost-tag-truncated",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7404,9 +7404,9 @@
   "name": "cost-tag-list",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7457,9 +7457,9 @@
   "name": "cost-tag-null",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7510,9 +7510,9 @@
   "name": "cost-tag-number",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7563,9 +7563,9 @@
   "name": "cost-tag-string",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7616,9 +7616,9 @@
   "name": "cost-tag-two-documents",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7669,9 +7669,9 @@
   "name": "cost-tag-replaces-run",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7727,9 +7727,9 @@
   "name": "cost-tag-keeps-other-runs",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7776,9 +7776,9 @@
   "name": "cost-tag-empty-values",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7829,9 +7829,9 @@
   "name": "cost-tag-room-person",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7883,9 +7883,9 @@
   "name": "cost-tag-room-owner",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7937,9 +7937,9 @@
   "name": "cost-tag-room-empty",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -7991,9 +7991,9 @@
   "name": "cost-tag-old-ledger",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8049,9 +8049,9 @@
   "name": "cost-tag-unicode",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8102,9 +8102,9 @@
   "name": "cost-tag-extra-keys",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8155,9 +8155,9 @@
   "name": "cost-tag-numeric-session",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8208,9 +8208,9 @@
   "name": "cost-tag-session-null",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8261,9 +8261,9 @@
   "name": "cost-tag-list-session",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8314,9 +8314,9 @@
   "name": "cost-tag-zero-session",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8367,9 +8367,9 @@
   "name": "cost-tag-false-session",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8420,9 +8420,9 @@
   "name": "cost-tag-bad-clock",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8473,9 +8473,9 @@
   "name": "cost-tag-empty-comment-person",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8526,9 +8526,9 @@
   "name": "cost-tag-twice",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8582,9 +8582,9 @@
   "name": "cost-tag-then-agents",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8655,9 +8655,9 @@
   "name": "cost-tag-extra-args",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8708,9 +8708,9 @@
   "name": "cost-record-full",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8761,9 +8761,9 @@
   "name": "cost-record-minimal",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8804,9 +8804,9 @@
   "name": "cost-record-agent-only",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8848,9 +8848,9 @@
   "name": "cost-record-no-id",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8901,9 +8901,9 @@
   "name": "cost-record-no-session",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -8954,9 +8954,9 @@
   "name": "cost-record-empty-stdin",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9007,9 +9007,9 @@
   "name": "cost-record-malformed",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9060,9 +9060,9 @@
   "name": "cost-record-list",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9113,9 +9113,9 @@
   "name": "cost-record-null",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9166,9 +9166,9 @@
   "name": "cost-record-float-tokens",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9219,9 +9219,9 @@
   "name": "cost-record-null-tokens",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9272,9 +9272,9 @@
   "name": "cost-record-bad-type",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9325,9 +9325,9 @@
   "name": "cost-record-big-int",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9378,9 +9378,9 @@
   "name": "cost-record-room-person",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9432,9 +9432,9 @@
   "name": "cost-record-empty-values",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9479,9 +9479,9 @@
   "name": "cost-record-replaces-req-keeps-run",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9537,9 +9537,9 @@
   "name": "cost-record-old-ledger",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9595,9 +9595,9 @@
   "name": "cost-record-unicode",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9648,9 +9648,9 @@
   "name": "cost-record-true-token",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9701,9 +9701,9 @@
   "name": "cost-record-object-value",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9754,9 +9754,9 @@
   "name": "cost-record-empty-id",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9807,9 +9807,9 @@
   "name": "cost-record-no-agent",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9850,9 +9850,9 @@
   "name": "cost-record-bad-clock",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9903,9 +9903,9 @@
   "name": "cost-record-twice",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -9959,9 +9959,9 @@
   "name": "cost-record-symlinked-cwd",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -10028,9 +10028,9 @@
   "name": "cost-record-float-then-csv",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -10096,9 +10096,9 @@
   "name": "cost-text-sydney-days",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [
@@ -10159,9 +10159,9 @@
   "name": "cost-record-then-reports",
   "command": "cost",
   "needs": "rust",
+  "bin_both": true,
   "program": {
    "old": [
-    "python3",
     "{KERNEL}/bin/kith-cost"
    ],
    "new": [

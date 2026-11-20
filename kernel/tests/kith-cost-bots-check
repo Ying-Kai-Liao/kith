@@ -2,9 +2,12 @@
 # kith-cost-bots-check — a bot's runs sit on its owner's line in `kith-cost people`, with a sub-line per bot, and
 # `kith-cost spent` sums a person with the `was` ids kith-auth resolves for a bot. Throwaway auth.json and ledger.
 #
-#   kernel/tests/kith-cost-bots-check     a second or two; prints each check, exits 1 when one fails
+#   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-cost-bots-check     a second or two; prints each check, exits 1 when one fails
+# kernel/bin/kith-cost is a stub for the kith program, so the check needs one (without it the check says so and exits 0).
 set -uo pipefail
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+BIN=${KITH_DIFFTEST_BIN:-}
+if [ -z "$BIN" ] || [ ! -x "$BIN" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN): kernel/bin/kith-cost forwards to it"; exit 0; fi
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-cost-bots-check.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 export KITH_AUTH=$T/auth.json HOME=$T/home KITH_HOME=$T/kith
@@ -12,7 +15,7 @@ unset KITH_STATE HQ_STATE KITH_PERSON KITH_AGENT HQ_HOME KITH_PERSON_WAS
 mkdir -p "$HOME" "$KITH_HOME/agents/house/role"
 printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
 A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
-C() { python3 "$KERNEL/bin/kith-cost" "$@"; }
+C() { KITH_BIN=$BIN "$KERNEL/bin/kith-cost" "$@"; }
 fail=0
 check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
 
@@ -56,14 +59,15 @@ check "bots-cap --json gives the cap and the owner's bot ids" \
   "[ \"\$(A bots-cap --json | J 'd[\"cap\"], d[\"bots\"]')\" = \"5.0 ['bot-k']\" ]"
 check "bots --json sets the spend against the cap" "[ \"\$(C bots --json | J 'd[\"cap\"], d[\"spent\"]')\" = '5.0 3.0' ]"
 # a room's run (the turns of a group room with people) is written down for whoever asked, the owner's as none
-CP() { KERNEL=$KERNEL python3 -c "
-import os, sys
-sys.path.insert(0, os.path.join(os.environ['KERNEL'], 'bin'))
-import importlib.machinery, importlib.util
-l = importlib.machinery.SourceFileLoader('kc', os.environ['KERNEL'] + '/bin/kith-cost'); sp = importlib.util.spec_from_loader('kc', l)
-m = importlib.util.module_from_spec(sp); l.exec_module(m)
-print(m.cost_person(os.environ.get))"; }
-check "a room run is the cost of the person who asked" "[ \"\$(KITH_PERSON=room-g-9 KITH_COST_PERSON=sam CP)\" = sam ]"
-check "a room run the owner asked is the owner's own (none)" "[ \"\$(KITH_PERSON=room-g-9 KITH_COST_PERSON=owner CP)\" = None ]"
-check "any other run is KITH_PERSON's" "[ \"\$(KITH_PERSON=sam CP)\" = sam ] && [ \"\$(CP)\" = None ]"
+# `tag` writes the person: a run's KITH_PERSON, or for a room's run the one KITH_COST_PERSON names (`owner` is nobody)
+CP() { # SESSION PERSON COST_PERSON -> the person the ledger holds for the run
+  printf '{"session_id":"%s"}' "$1" | KITH_AGENT=house KITH_PERSON=$2 KITH_COST_PERSON=$3 C tag
+  KERNEL=$KERNEL python3 -c "
+import os, sqlite3, sys
+sys.path.insert(0, os.path.join(os.environ['KERNEL'], 'lib'))
+from kith_paths import paths
+print(sqlite3.connect(paths()['KITH_MACHINE'] / 'cost.db').execute('select person from runs where session = ?', (sys.argv[1],)).fetchone()[0])" "$1"; }
+check "a room run is the cost of the person who asked" "[ \"\$(CP s-room room-g-9 sam)\" = sam ]"
+check "a room run the owner asked is the owner's own (none)" "[ \"\$(CP s-owner room-g-9 owner)\" = None ]"
+check "any other run is KITH_PERSON's" "[ \"\$(CP s-sam sam '')\" = sam ] && [ \"\$(CP s-none '' '')\" = None ]"
 exit $fail

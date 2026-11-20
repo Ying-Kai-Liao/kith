@@ -1,650 +1,92 @@
-#!/usr/bin/env python3
-"""kith-cost — what Claude Code usage costs, at API prices, kept over time.
+#!/bin/sh
+''':'
+# Two languages in one file, on purpose. The launchd job dev.kith.cost (written by hand, no installer owns it) runs
+# `kith-uv run --quiet --script <kernel>/bin/kith-cost sync`, and uv runs a script as Python. The chain is
+# launchd -> kith-uv -> python -> /bin/sh -> kith. Line 2 is a no-op `:` to sh and opens a triple-quoted string to Python; the
+# string holds the whole sh part, and the Python after it re-runs this same file under /bin/sh. So the installed plist keeps
+# working with nobody editing it. Rules for this file: the sh part never has three single quotes in a row, the Python part has no single quote but the one in its last comment, and every
+# path through it ends in exec or exit before the line that closes the string. R9 (deleting this stub) must first rewrite the
+# plist (retire-python plan, rule 3).
+# kith-cost: this script moved to the kith program (`kith kernel cost`, core/kernel/src/cost/). It stays at this path for the
+# callers that run the file: the SessionStart hook of a run that started with the old hook path, adapters/harness.py (`record`),
+# the host, older hosts, other kernel tools. The usage text is `kith kernel cost -h`. Same stdout, stderr and exit codes as the
+# program.
+#
+# Finds the program without Python: the first candidate whose `kernel version` lists "cost-ledger" (an older program that has the
+# read verbs only is not enough: `tag` and `record` write the ledger):
+#   $KITH_BIN, the release this file sits in (<release>/share/kith/kernel/bin -> <release>/bin/kith), a kith on PATH that is
+#   not a kernel entry, the host kith serve installed, a build in the checkout (the builds come first with KITH_DEV_BIN=1).
+# None found: `tag` exits 0 without a word (a hook never blocks a session start); any other verb prints one line on stderr and
+# exits 3 (the code of "this moved"). Callers treat any non-zero as "cost unknown", and the line shows.
+self=$0
+n=0
+while [ -L "$self" ] && [ $n -lt 16 ]; do
+  link=$(readlink "$self") || break
+  case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+  n=$((n + 1))
+done
+# The logical path, as bin/kith keeps it (it may be a link to a path with spaces).
+kernel=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd)
+if [ -z "$kernel" ]; then
+  echo "kith-cost: cannot find the kernel folder this script sits in" >&2
+  exit 3
+fi
+# The module that has the ledger's writers (`tag`, `record`), not only the read verbs an older program lists under "cost".
+need='"cost-ledger"'
 
-  kith-cost [today|week|month|all]   totals, by day, by project and the top sessions (syncs first)
-  kith-cost agents [period]          kith agents side by side: cost, runs, cost per run, models (default: month)
-  kith-cost agent <name> [period]    one kith agent: by day, by version, by model and effort, its costliest runs
-  kith-cost people [period]          what each person's runs cost (KITH_PERSON; the owner's own runs as owner), by agent;
-                                   a bot's runs count on its owner's line, with a sub-line per bot
-  kith-cost spent <person> [agent]   this calendar month's cost of a person's runs, a bare number (bin/kith checks a
-                                   membership's budget= with it)
-  kith-cost session <id-prefix>      one session turn by turn, plus its subagents
-  kith-cost usage [period] --json    for the apps: total, agents vs your own sessions, one row per agent with its
-                                   month and its limit (period: today, week = 7 days, month = this calendar month)
-  kith-cost agent <name> [period] --json   one agent for the apps: days of this month, models, costliest runs, its
-                                   limit and a forecast in words
-  kith-cost limit <agent> [--json|--sh]    where the agent stands against its monthly limit (kith AGENT set limit N):
-                                   spent this calendar month, the limit, what happens at it, a forecast. bin/kith
-                                   (--sh) and the host (--json) read it; no limit answers at once, without a sync
-  kith-cost members <agent> --json   this calendar month per person on the agent (owner: your own runs), and each
-                                    person's budget= on it (kith-auth budgets)
-  kith-cost bots --json              this calendar month's cost of the Mac owner's bots together, per bot, and their
-                                   cap (kith-auth bots-cap)
-  kith-cost sync                     copy new usage from ~/.claude/projects into the ledger
-  kith-cost csv [since YYYY-MM-DD]   every request as CSV with its kith agent, for a spreadsheet
-  kith-cost tag                      (SessionStart hook in kith runs) record the session as a run of $KITH_AGENT
-  kith-cost record                   (adapters/harness.py) one run on another harness (codex, pi, ...) as a row
+# A kith program: executable, not a kernel bash entry (the last three parts of its real path are kernel/bin/kith), and its
+# `kernel version` lists the module $need names.
+usable() {
+  [ -n "$1" ] && [ -f "$1" ] && [ -x "$1" ] || return 1
+  f=$1
+  k=0
+  while [ -L "$f" ] && [ $k -lt 16 ]; do
+    l=$(readlink "$f") || return 1
+    case $l in /*) f=$l ;; *) f=$(dirname "$f")/$l ;; esac
+    k=$((k + 1))
+  done
+  case $(cd "$(dirname "$f")" 2>/dev/null && pwd -P)/$(basename "$f") in */kernel/bin/kith) return 1 ;; esac
+  "$1" kernel version 2>/dev/null | grep -q "$need"
+}
+# Each try sets bin and succeeds on a usable program (a path may have a space: nothing here is split).
+try() { usable "$1" && bin=$1; }
+try_built() {
+  target=${CARGO_TARGET_DIR:-$kernel/../serve/host/target}
+  try "$target/dev-app/kith" || try "$target/release/kith" || try "$target/debug/kith"
+}
+try_path() {
+  oldifs=$IFS; IFS=:
+  for d in $PATH; do
+    if [ -n "$d" ] && try "$d/kith"; then IFS=$oldifs; return 0; fi
+  done
+  IFS=$oldifs
+  return 1
+}
+try_release() { case $kernel in */share/kith/kernel) try "$kernel/../../../bin/kith" ;; *) return 1 ;; esac; }
+bin=
+if [ "${KITH_DEV_BIN:-}" = 1 ]; then
+  try "${KITH_BIN:-}" || try_built || try_path || try "$HOME/.kith/serve/bin/kith-serve" || try_release
+else
+  try "${KITH_BIN:-}" || try_release || try_path || try "$HOME/.kith/serve/bin/kith-serve" || try_built
+fi
+if [ -z "$bin" ]; then
+  # `tag` is the SessionStart hook of every kith run: it must never block a session from starting, so with no program it
+  # says nothing and exits 0 (the session just goes unattributed). Everything else says why and exits 3.
+  [ "${1:-}" = tag ] && exit 0
+  echo "kith-cost: this script moved to the kith program (module cost-ledger), which was not found; kith update" >&2
+  exit 3
+fi
+exec "$bin" kernel cost --kernel "$kernel" "$@"
 
-The ledger (~/.kith/cost.db) keeps one row per API request, so it outlives Claude Code's transcript cleanup
-(30 days by default). Prices are list API prices per million tokens; on a subscription this is usage, not a bill.
+exit 3
+'''
+import os
+import sys
 
-kith attribution: bin/kith runs `kith-cost tag` as a SessionStart hook, so each session it starts (including resumes and
-/clear) is recorded in `runs` with the agent, package version, model, effort and caller. A request belongs to a kith
-agent when its session is such a run, or when it was made by an `kith:<name>` subagent in any session; a helper agent
-called from inside a run counts for the helper.
-"""
-import csv, datetime as dt, glob, json, os, sqlite3, subprocess, sys
-from pathlib import Path
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
-from kith_paths import paths  # noqa: E402  the one place that knows where kith's folders are
-MACHINE = paths()['KITH_MACHINE']
-DB = MACHINE / 'cost.db'
-PROJECTS = Path.home() / '.claude/projects'
-BRIDGE_STATE = MACHINE / 'bridge/state.json'  # thread -> {sessions: {agent: id}}: Discord runs before tagging
-
-# $ per MTok: input, output, cache read, cache write 5m, cache write 1h. First matching key wins.
-PRICES = [
-    ('fable', (10, 50, 0.25, 12.5, 20)), ('mythos', (10, 50, 0.25, 12.5, 20)),
-    ('opus-5-5', (4, 20, 0.20, 5, 8)), ('opus', (5, 25, 0.50, 6.25, 10)),
-    ('sonnet-5', (2, 10, 0.20, 2.5, 4)), ('sonnet', (3, 15, 0.30, 3.75, 6)),
-    ('haiku-5', (0.10, 0.50, 0.01, 0.125, 0.20)), ('haiku', (1, 5, 0.10, 1.25, 2)),
-]
-
-
-def now():
-    """Now, as aware local time. KITH_COST_NOW (ISO local time, or epoch seconds) hands tests a fixed one; unset, nothing
-    changes. It moves the calendar month, the periods, the forecast and the limit's month, not the stamps `tag` writes."""
-    v = os.environ.get('KITH_COST_NOW', '').strip()
-    if not v:
-        return dt.datetime.now().astimezone()
+if __name__ == "__main__":
     try:
-        return dt.datetime.fromtimestamp(float(v)).astimezone()
-    except ValueError:
-        return dt.datetime.fromisoformat(v).astimezone()
-
-
-def price(model, u):
-    p = next((v for k, v in PRICES if k in (model or '')), None)
-    if not p:
-        return None
-    cc = u.get('cache_creation') or {}
-    w1h = cc.get('ephemeral_1h_input_tokens', 0)
-    w5m = cc.get('ephemeral_5m_input_tokens', u.get('cache_creation_input_tokens', 0) - w1h)
-    c = (u.get('input_tokens', 0) * p[0] + u.get('output_tokens', 0) * p[1] + u.get('cache_read_input_tokens', 0) * p[2]
-         + w5m * p[3] + w1h * p[4]) / 1e6
-    return c * (2 if u.get('speed') == 'fast' else 1)
-
-
-def db():
-    DB.parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(DB)
-    c.executescript('''
-      create table if not exists req (id text primary key, session text, ts text, project text, model text,
-        agent text, turn text, input int, output int, cache_read int, cache_write int, cost real);
-      create table if not exists seen (path text primary key, size int);
-      create index if not exists req_ts on req(ts);
-      create index if not exists req_session on req(session);
-      create table if not exists runs (session text primary key, agent text, version text, model text, effort text,
-        via text, project text, started text);''')
-    if 'person' not in [r[1] for r in c.execute('pragma table_info(runs)')]:
-        c.execute('alter table runs add column person text')   # who the run was for: KITH_PERSON; null is the owner
-    # which harness and which login answered (KITH_PROVIDER / KITH_ACCOUNT; null is claude, ambient), and the login's whole
-    # id (KITH_ACCOUNT_ID: claude, claude:work, claude-api:main, codex:deep): a session is resumed only under it
-    for col in ('provider', 'account', 'account_id'):
-        if col not in [r[1] for r in c.execute('pragma table_info(runs)')]:
-            c.execute(f'alter table runs add column {col} text')
-    # the person comes from the session: a helper or kith:<name> subagent in a person's run counts for them too
-    c.executescript('''
-      drop view if exists hq_req;
-      create view hq_req as
-        select req.*, case when req.agent like 'kith:%' then substr(req.agent, 6, instr(substr(req.agent, 6) || ':', ':') - 1)
-                           when req.agent like 'hq:%' then substr(req.agent, 4, instr(substr(req.agent, 4) || ':', ':') - 1)
-                           else runs.agent end as hq_agent,
-               case when req.agent like 'kith:%' or req.agent like 'hq:%' then null else runs.version end as version,
-               case when req.agent like 'kith:%' or req.agent like 'hq:%' then 'subagent' else runs.via end as via,
-               case when req.agent like 'kith:%' or req.agent like 'hq:%' then null else runs.effort end as effort,
-               runs.person as person
-        from req left join runs using (session);''')
-    return c
-
-
-def sync(c, quiet=False):
-    seen = dict(c.execute('select path, size from seen'))
-    # an extra Claude account (kith account add claude) keeps its transcripts in its own config dir
-    files = []
-    for root in [str(PROJECTS)] + glob.glob(str(MACHINE / 'accounts/claude/*/projects')):
-        files += glob.glob(root + '/*/*.jsonl') + glob.glob(root + '/*/*/subagents/*.jsonl')
-    n = 0
-    for f in files:
-        try:
-            size = os.path.getsize(f)
-        except OSError:
-            continue
-        if seen.get(f) == size:
-            continue
-        sub = '/subagents/' in f
-        agent = 'main'
-        if sub:
-            try:
-                m = json.load(open(f[:-6] + '.meta.json'))
-                agent = f"{m.get('agentType', 'agent')}: {m.get('description', '')}"
-            except (OSError, ValueError):
-                agent = 'subagent'
-        turn, rows = None, {}
-        for line in open(f, errors='replace'):
-            try:
-                d = json.loads(line)
-            except ValueError:
-                continue
-            m = d.get('message') or {}
-            if d.get('type') == 'user' and not d.get('isMeta') and not sub:
-                t = m.get('content')
-                if isinstance(t, list):
-                    t = next((b.get('text') for b in t if isinstance(b, dict) and b.get('type') == 'text'), None)
-                if isinstance(t, str) and t.strip() and not t.lstrip().startswith('<'):
-                    turn = ' '.join(t.split())[:100]
-            u = m.get('usage')
-            if d.get('type') != 'assistant' or not u or not m.get('id') or m.get('model') == '<synthetic>':
-                continue
-            # streamed messages are logged once per content block; the last copy has the final usage
-            proj = d.get('cwd') or ''
-            rows[m['id']] = (m['id'], d.get('sessionId'), d.get('timestamp'), proj, m.get('model'), agent, turn,
-                             u.get('input_tokens', 0), u.get('output_tokens', 0), u.get('cache_read_input_tokens', 0),
-                             u.get('cache_creation_input_tokens', 0), price(m.get('model'), u))
-        c.executemany('insert or replace into req values (?,?,?,?,?,?,?,?,?,?,?,?)', rows.values())
-        c.execute('insert or replace into seen values (?, ?)', (f, size))
-        n += len(rows)
-    try:
-        threads = json.loads(BRIDGE_STATE.read_text()).get('threads', {}).values()
-        rows = [(t['session_id'], t['agent']) for t in threads if t.get('session_id') and t.get('agent')]   # v1
-        rows += [(sid, a) for t in threads for a, sid in (t.get('sessions') or {}).items() if sid]
-        c.executemany("insert or ignore into runs (session, agent, via) values (?, ?, 'discord')", rows)
-    except (OSError, ValueError, AttributeError):
-        pass
-    c.commit()
-    if not quiet:
-        print(f'synced {len(files)} transcripts, {n} requests updated')
-
-
-def money(x):
-    return f'${x:,.2f}' if x is not None else '   n/a'
-
-
-def report(c, period):
-    since = since_of(period)
-    q = lambda sql, *a: c.execute(sql, (since, *a)).fetchall()
-    tot = q('select sum(cost), count(*), sum(output), sum(cache_read) from req where ts >= ?')[0]
-    print(f'\n{period}: {money(tot[0] or 0)} over {tot[1]} requests '
-          f'({(tot[2] or 0)/1e6:.2f}M output tokens, {(tot[3] or 0)/1e6:.0f}M cache reads)\n')
-    print('by day')
-    for day, cost, n in q("select substr(datetime(ts,'localtime'),1,10) d, sum(cost), count(*) from req where ts >= ? group by d order by d desc limit 14"):
-        print(f'  {day}  {money(cost):>9}  {n:5d} req')
-    print('\nby project')
-    for p, cost, n in q('select project, sum(cost) s, count(*) from req where ts >= ? group by project order by s desc limit 10'):
-        print(f'  {money(cost):>9}  {n:5d} req  {p.replace(str(Path.home()), "~") or "?"}')
-    print('\nby model')
-    for m, cost, n in q('select model, sum(cost) s, count(*) from req where ts >= ? group by model order by s desc'):
-        print(f'  {money(cost):>9}  {n:5d} req  {m}')
-    print('\ntop sessions  (kith-cost session <id> for turns)')
-    for s, cost, first, turn in q("""select session, sum(cost) s, min(datetime(ts,'localtime')),
-            (select turn from req r2 where r2.session = req.session and turn is not null order by ts limit 1)
-            from req where ts >= ? group by session order by s desc limit 8"""):
-        print(f'  {money(cost):>9}  {s[:8]}  {first[:16]}  {(turn or "")[:60]}')
-    print()
-
-
-def cost_person(env):
-    """Whom a run is written down for. A room's run (room-<id>, the turns of a group room with people) is the cost of whoever
-    asked: KITH_COST_PERSON names them, `owner` is the owner's own (written as none). Anyone else's is KITH_PERSON."""
-    who = env('KITH_COST_PERSON')
-    if who:
-        return None if who == 'owner' else who
-    return env('KITH_PERSON') or None
-
-
-def tag(c):
-    """SessionStart hook: the session on stdin is a run of $KITH_AGENT. Never fails the session."""
-    try:
-        hook = json.load(sys.stdin)
-        env = os.environ.get
-        if hook.get('session_id') and env('KITH_AGENT'):
-            c.execute('insert or replace into runs (session, agent, version, model, effort, via, project, started, '
-                      'person, provider, account, account_id) values (?,?,?,?,?,?,?,?,?,?,?,?)', (
-                hook['session_id'], env('KITH_AGENT'), env('KITH_AGENT_VERSION'), env('KITH_MODEL') or None,
-                env('KITH_EFFORT') or None, env('KITH_VIA', 'terminal'), env('KITH_PROJECT') or None,
-                dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S'), cost_person(env),
-                env('KITH_PROVIDER') or None, env('KITH_ACCOUNT') or None, env('KITH_ACCOUNT_ID') or None))
-            c.commit()
-    except Exception as e:  # noqa: BLE001 — cost tracking must never block a run
-        print(f'kith-cost tag: {e}', file=sys.stderr)
-
-
-def record(c):
-    """A run on another harness (adapters/harness.py): one row, the harness's own cost when it reports one."""
-    try:
-        r, env = json.load(sys.stdin), os.environ.get
-        now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
-        c.execute('insert or replace into req values (?,?,?,?,?,?,?,?,?,?,?,?)', (
-            r['id'], r['session'], now, os.getcwd(), r.get('model'), 'main', r.get('turn'), r.get('input', 0),
-            r.get('output', 0), r.get('cache_read', 0), r.get('cache_write', 0), r.get('cost')))
-        c.execute('insert or ignore into runs (session, agent, version, model, effort, via, project, started, '
-                  'person, provider, account, account_id) values (?,?,?,?,?,?,?,?,?,?,?,?)', (
-            r['session'], env('KITH_AGENT'), env('KITH_AGENT_VERSION'), r.get('model'), env('KITH_EFFORT') or None,
-            env('KITH_VIA', 'terminal'), env('KITH_PROJECT') or None, now[:19], cost_person(env),
-            env('KITH_PROVIDER') or None, env('KITH_ACCOUNT') or None, env('KITH_ACCOUNT_ID') or None))
-        c.commit()
-    except Exception as e:  # noqa: BLE001 — cost tracking must never block a run
-        print(f'kith-cost record: {e}', file=sys.stderr)
-
-
-def since_of(period):
-    now = dt.datetime.now(dt.timezone.utc).astimezone()
-    start = {'today': now.replace(hour=0, minute=0, second=0, microsecond=0),
-             'week': now - dt.timedelta(days=7), 'month': now - dt.timedelta(days=30)}.get(period)
-    return start.astimezone(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S') if start else '0'
-
-
-def agents(c, period):
-    since = since_of(period)
-    rows = c.execute('''select hq_agent, sum(cost) s, count(distinct session), count(*), sum(output),
-                              group_concat(distinct model) from hq_req where hq_agent is not null and ts >= ?
-                       group by hq_agent order by s desc''', (since,)).fetchall()
-    total = c.execute('select sum(cost) from req where ts >= ?', (since,)).fetchone()[0] or 0
-    kith = sum(r[1] or 0 for r in rows)
-    print(f'\nkith agents, {period}: {money(kith)} of {money(total)} total Claude Code usage\n')
-    print(f'  {"agent":<12}{"cost":>10}{"runs":>6}{"per run":>10}{"req":>7}{"out tok":>9}  models')
-    for a, cost, runs, n, out, models in rows:
-        short = ', '.join(sorted({m.replace('claude-', '') for m in (models or '').split(',') if m}))
-        print(f'  {a:<12}{money(cost):>10}{runs:>6}{money((cost or 0) / runs):>10}{n:>7}{out / 1e3:>8.0f}k  {short}')
-    if not rows:
-        print('  no kith runs recorded yet (runs are tagged from now on; kith:<name> subagents count from the start)')
-    print('\n  runs = sessions started by `kith <agent>` plus sessions that called it as a kith:<name> subagent\n')
-
-
-def agent(c, name, period):
-    since = since_of(period)
-    q = lambda sql: c.execute(sql, (name, since)).fetchall()
-    where = 'from hq_req where hq_agent = ? and ts >= ?'
-    tot = q(f'select sum(cost), count(distinct session), count(*), sum(output) {where}')[0]
-    if not tot[2]:
-        sys.exit(f'no usage recorded for kith agent {name!r} ({period})')
-    print(f'\n{name}, {period}: {money(tot[0])} over {tot[1]} runs, {tot[2]} requests, {(tot[3] or 0) / 1e3:.0f}k output tokens\n')
-    print('by day')
-    for day, cost, runs in q(f"select substr(datetime(ts,'localtime'),1,10) d, sum(cost), count(distinct session) {where} group by d order by d desc limit 14"):
-        print(f'  {day}  {money(cost):>9}  {runs:3d} runs')
-    print('\nby version, model and effort  (version and effort are known for `kith <agent>` runs only)')
-    for ver, model, eff, via, cost, runs in q(f'''select coalesce(version, '-'), model, coalesce(effort, '-'), via, sum(cost) s,
-            count(distinct session) {where} group by 1, 2, 3, 4 order by s desc limit 15'''):
-        print(f'  {money(cost):>9}  {runs:3d} runs  {ver:<11} {model:<22} {eff:<7} {via}')
-    print('\ncostliest runs  (kith-cost session <id> for turns)')
-    for s, cost, first, turn in q(f'''select session, sum(cost) s, min(datetime(ts,'localtime')),
-            (select turn from req r2 where r2.session = hq_req.session and turn is not null order by ts limit 1)
-            {where} group by session order by s desc limit 10'''):
-        print(f'  {money(cost):>9}  {s[:8]}  {first[:16]}  {(turn or "")[:60]}')
-    print()
-
-
-def bot_tree():
-    """{bot id: (root person, label)} from `kith-auth people --json`, one call per report; {} when kith-auth has no bots
-    or can't answer (the report then lists each id as before)."""
-    try:
-        out = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-auth'), 'people', '--json'],
-                             capture_output=True, text=True, timeout=20, check=True).stdout
-        people = json.loads(out)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return {}
-    owner = next((x['id'] for x in people if x.get('owner')), None)
-    return {x['id']: ('owner' if x['root'] == owner else x['root'],
-                      f"{x.get('name') or x['id']} ({x.get('provider') or 'other'})")
-            for x in people if x.get('bot_of')}
-
-
-def people(c, period):
-    since = since_of(period)
-    rows = c.execute('''select coalesce(person, 'owner'), hq_agent, sum(cost) s, count(distinct session)
-                        from hq_req where hq_agent is not null and ts >= ? group by 1, 2 order by 1, s desc''',
-                     (since,)).fetchall()
-    bots = bot_tree()
-    # a person's line holds their own runs and their bots'; each bot is a sub-line under it
-    groups = {}
-    for p, a, cost, runs in rows:
-        g = groups.setdefault(bots[p][0] if p in bots else p, {'own': [], 'bots': {}})
-        if p in bots:
-            b = g['bots'].setdefault(p, [bots[p][1], 0])
-            b[1] += cost or 0
-        else:
-            g['own'].append((a, cost, runs))
-    print(f'\nwhat each person\'s runs cost, {period}  (owner: your own runs)\n')
-    for p in sorted(groups):
-        g = groups[p]
-        total = sum(x[1] or 0 for x in g['own']) + sum(b[1] for b in g['bots'].values())
-        print(f'  {p:<12}{money(total):>10}')
-        for a, cost, runs in g['own']:
-            print(f'    {a:<14}{money(cost):>10}{runs:>5} runs')
-        for label, cost in sorted(g['bots'].values(), key=lambda b: -b[1]):
-            print(f'    └ {label:<30}{money(cost):>10}')
-    if not rows:
-        print('  nothing recorded yet')
-    print()
-
-
-def spent(c, person, agent=None):
-    """This calendar month (local time) for a person, all agents or one; the person's old ids count too."""
-    start = now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    since = start.astimezone(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
-    ids = [person] + [x for x in os.environ.get('KITH_PERSON_WAS', '').split(',') if x]
-    sql = f'select sum(cost) from hq_req where ts >= ? and person in ({",".join("?" * len(ids))})'
-    args = [since, *ids]
-    if agent:
-        sql, args = sql + ' and hq_agent = ?', args + [agent]
-    print(f'{c.execute(sql, args).fetchone()[0] or 0:.4f}')
-
-
-# ---- the apps' views and the per-agent monthly limit -------------------------------------------------------------
-
-def _settings():
-    import kith_settings  # noqa: E402  lib/, on sys.path above
-    return kith_settings
-
-
-def month_start():
-    return now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-
-def utc(t):
-    return t.astimezone(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
-
-
-def app_since(period):
-    """Where an app's period starts: today, the last 7 days, this calendar month (a limit's month), or all."""
-    n = now()
-    start = {'today': n.replace(hour=0, minute=0, second=0, microsecond=0), 'week': n - dt.timedelta(days=7),
-             'month': month_start()}.get(period)
-    return utc(start) if start else '0'
-
-
-def period_label(period):
-    return {'today': 'Today', 'week': 'Last 7 days', 'month': now().strftime('%B')}.get(period, 'All time')
-
-
-def short_day(d):
-    return f'{d:%b} {d.day}'
-
-
-def dollars(x):
-    """A sum in words: whole dollars from $10 up, cents below."""
-    return f'${x:,.0f}' if x >= 10 else f'${x:,.2f}'
-
-
-def month_spent(c, agent):
-    return c.execute('select sum(cost) from hq_req where hq_agent = ? and ts >= ?',
-                     (agent, utc(month_start()))).fetchone()[0] or 0.0
-
-
-def month_days(c, agent):
-    """[(date, cost)] for every day of this month up to today, local time."""
-    rows = dict(c.execute("""select substr(datetime(ts,'localtime'),1,10) d, sum(cost) from hq_req
-                             where hq_agent = ? and ts >= ? group by d""", (agent, utc(month_start()))).fetchall())
-    today = now().date()
-    return [(d, rows.get(d.isoformat(), 0.0) or 0.0)
-            for d in (today.replace(day=1) + dt.timedelta(days=i) for i in range(today.day))]
-
-
-def forecast(days, spent, limit, agent):
-    """The pace and what it means, in words: about $X a day since the first day with spend in the last week (this month
-    only), and the day the limit is reached (or the month's end without one). Plus the day each round amount is reached,
-    for the limit sheet."""
-    at = now()
-    today = at.date()
-    end = (today.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
-    recent = [(d, x) for d, x in days if (today - d).days < 7]
-    since = next((d for d, x in recent if x > 0), None)
-    per_day = sum(x for d, x in recent if since and d >= since) / ((today - since).days + 1) if since else 0.0
-    left_today = (at.replace(hour=0, minute=0, second=0, microsecond=0) + dt.timedelta(days=1) - at).total_seconds() / 86400
-
-    def reach(amount):
-        """The day `amount` is (or was) reached this month, or None when it lasts the month."""
-        total = 0.0
-        for d, x in days:
-            total += x
-            if total >= amount:
-                return d
-        if per_day <= 0:
-            return None
-        by_tonight = spent + per_day * left_today
-        if by_tonight >= amount:
-            return today
-        d = today + dt.timedelta(days=-(-(amount - by_tonight) // per_day))
-        return d if d <= end else None
-
-    month = today.strftime('%B')
-    if not since:
-        text = f'Nothing spent in the last 7 days.' if spent else f'Nothing spent in {month} yet.'
-        if limit:
-            text += f' {dollars(limit)} is the limit for {month}.'
-    else:
-        pace = f'About {dollars(per_day)} a day since {short_day(since)}'
-        hit = reach(limit) if limit else None
-        if limit and spent >= limit:
-            text = f'{pace}; it reached {dollars(limit)} on {short_day(hit)}.' if hit else f'{pace}; it is at {dollars(limit)}.'
-        elif limit and hit == today:
-            text = f'{pace}, so it reaches {dollars(limit)} today.'
-        elif limit and hit == today + dt.timedelta(days=1):
-            text = f'{pace}, so it reaches {dollars(limit)} tomorrow.'
-        elif limit and hit:
-            text = f'{pace}, so it reaches {dollars(limit)} about {short_day(hit)}.'
-        elif limit:
-            text = f'{pace}, so it stays under {dollars(limit)} in {month}.'
-        else:
-            text = f'{pace}, about {dollars(spent + per_day * ((end - today).days + left_today))} by the end of {month}.'
-    amounts = sorted({50, 100, 200, 300, 400, 500, 750, 1000} | ({limit} if limit else set()))
-    return {'perDay': round(per_day, 2), 'since': since.isoformat() if since else None, 'text': text,
-            'monthEnd': end.isoformat(),
-            'reach': {str(a): (r.isoformat() if (r := reach(a)) else None) for a in amounts}}
-
-
-def raise_to(limit, spent):
-    """The next limit a card offers: $100 more from $100 up, double below; always above what is spent."""
-    step = 100 if limit >= 100 else max(10, limit)
-    to = limit + step
-    while to <= spent:
-        to += step
-    return int(to) if to == int(to) else round(to, 2)
-
-
-def limit_state(c, agent):
-    """Where the agent stands against its monthly limit; None when it has none."""
-    amount, at = _settings().limit(agent)
-    if not amount:
-        return None
-    spent = month_spent(c, agent)
-    runs = c.execute('select count(distinct session) from hq_req where hq_agent = ? and ts >= ?',
-                     (agent, utc(month_start()))).fetchone()[0] or 0
-    month = now().strftime('%B')
-    return {'agent': agent, 'limit': amount, 'at': at, 'spent': round(spent, 4), 'over': spent >= amount,
-            'month': month, 'runs': runs, 'perRun': round(spent / runs, 2) if runs else 0, 'raiseTo': raise_to(amount, spent),
-            'resets': (month_start().replace(day=28) + dt.timedelta(days=4)).replace(day=1).date().isoformat(),
-            'text': f'{agent} has used ${spent:,.2f} of its {dollars(amount)} for {month} (at API prices)'}
-
-
-def limit_cmd(agent, fmt):
-    """`kith-cost limit AGENT`: answers at once without a limit, else syncs and reads the month."""
-    amount, at = _settings().limit(agent)
-    if not amount:
-        if fmt == '--sh':
-            return
-        print(json.dumps({'agent': agent, 'limit': None, 'at': at, 'over': False}))
-        return
-    c = db()
-    sync(c, quiet=True)
-    st = limit_state(c, agent)
-    st['forecast'] = forecast(month_days(c, agent), st['spent'], amount, agent)
-    if fmt == '--sh':
-        import shlex
-        print(f"l_over={int(st['over'])} l_at={shlex.quote(st['at'])} l_limit={shlex.quote(str(st['limit']))} "
-              f"l_spent={st['spent']:.2f} l_text={shlex.quote(st['text'])}")
-    elif fmt == '--json':
-        print(json.dumps(st))
-    else:
-        print(f"{st['text']}; at the limit: {st['at']}.\n{st['forecast']['text']}")
-
-
-def usage_json(c, period):
-    since = app_since(period)
-    rows = c.execute('''select hq_agent, sum(cost) s, count(distinct session) from hq_req
-                         where hq_agent is not null and ts >= ? group by hq_agent order by s desc''', (since,)).fetchall()
-    total = c.execute('select sum(cost) from req where ts >= ?', (since,)).fetchone()[0] or 0
-    limits = {a: v for a, v in (_settings().read()[0].get('agents') or {}).items() if isinstance(v, dict) and v.get('limit')}
-    out, seen = [], set()
-    for a, cost, runs in rows:
-        seen.add(a)
-        out.append({'agent': a, 'cost': round(cost or 0, 4), 'runs': runs, 'perRun': round((cost or 0) / runs, 2) if runs else 0})
-    out += [{'agent': a, 'cost': 0, 'runs': 0, 'perRun': 0} for a in sorted(limits) if a not in seen]
-    for r in out:
-        lim = limits.get(r['agent'])
-        r['limit'] = lim['limit'] if lim else None
-        r['at'] = (lim or {}).get('at_limit') or 'ask'
-        r['month'] = round(month_spent(c, r['agent']), 4) if lim else None
-    agents_total = sum(r['cost'] for r in out)
-    print(json.dumps({'period': period, 'label': period_label(period), 'since': since, 'prices': 'api',
-                      'total': round(total, 4), 'agents': round(agents_total, 4), 'own': round(max(total - agents_total, 0), 4),
-                      'rows': out}))
-
-
-def agent_json(c, name, period):
-    since = app_since(period)
-    q = lambda sql: c.execute(sql, (name, since)).fetchall()
-    where = 'from hq_req where hq_agent = ? and ts >= ?'
-    cost, runs = q(f'select sum(cost), count(distinct session) {where}')[0]
-    cost = cost or 0
-    models = [{'model': m, 'effort': e, 'cost': round(x or 0, 4), 'runs': n}
-              for m, e, x, n in q(f'''select model, effort, sum(cost) s, count(distinct session)
-                                    {where} group by 1, 2 order by s desc limit 6''')]
-    costliest = [{'session': sid, 'cost': round(x or 0, 4), 'started': first, 'via': via, 'turn': turn}
-                 for sid, x, first, via, turn in q(f'''select session, sum(cost) s, min(datetime(ts,'localtime')), max(via),
-            (select turn from req r2 where r2.session = hq_req.session and turn is not null order by ts limit 1)
-            {where} group by session order by s desc limit 5''')]
-    amount, at = _settings().limit(name)
-    spent = month_spent(c, name)
-    days = month_days(c, name)
-    # The model and effort its newest run used: the lever that matters most.
-    latest = c.execute('''select model, effort from runs where agent = ? and model is not null order by started desc limit 1''',
-                       (name,)).fetchone()
-    print(json.dumps({'agent': name, 'period': period, 'label': period_label(period), 'prices': 'api',
-                      'cost': round(cost, 4), 'runs': runs or 0, 'perRun': round(cost / runs, 2) if runs else 0,
-                      'month': round(spent, 4), 'monthLabel': period_label('month'), 'limit': amount, 'at': at,
-                      'raiseTo': raise_to(amount, spent) if amount else None,
-                      'days': [{'day': d.isoformat(), 'cost': round(x, 4)} for d, x in days],
-                      'latest': {'model': latest[0], 'effort': latest[1]} if latest else None,
-                      'models': models, 'costliest': costliest, 'forecast': forecast(days, spent, amount, name)}))
-
-
-def read_budgets(agent):
-    """Each person's monthly budget on the agent, from kith-auth (which asks the core itself once auth.json is its
-    tombstone). Raises when it can't be read: an unreadable limit is never "no limit"."""
-    here = os.path.dirname(os.path.realpath(__file__))
-    r = subprocess.run([os.path.join(here, 'kith-auth'), 'budgets', agent, '--json'], capture_output=True, text=True, timeout=20)
-    if r.returncode != 0:
-        raise subprocess.CalledProcessError(r.returncode, 'kith-auth budgets')
-    return json.loads(r.stdout)
-
-
-def members(c, agent):
-    rows = c.execute('''select coalesce(person, 'owner'), sum(cost) from hq_req where hq_agent = ? and ts >= ?
-                         group by 1''', (agent, utc(month_start()))).fetchall()
-    try:   # each person's own budget on the agent (kith-auth member .. budget=), null when it has none
-        budgets = read_budgets(agent)
-        error = None
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-        # Not "nobody has a budget": a broken kith-auth, an unreachable core and a malformed budget all land here, and
-        # from here they look the same. `budgetsError` lets the app say it can't read them instead of "no budget" (the
-        # limit itself is enforced at launch, which fails closed on its own).
-        budgets, error = {}, "can't read budgets"
-    out = {'agent': agent, 'month': period_label('month'), 'people': {p: round(x or 0, 4) for p, x in rows},
-           'budgets': budgets}
-    if error:
-        out['budgetsError'] = error
-    print(json.dumps(out))
-
-
-def bots_json(c):
-    """The Mac owner's bots this calendar month, all agents, against their cap together (kith-auth bots-cap)."""
-    out = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-auth'), 'bots-cap', '--json'],
-                         capture_output=True, text=True, timeout=20, check=True).stdout
-    cap = json.loads(out)
-    ids = cap['bots']
-    rows = c.execute(f'''select person, sum(cost) from hq_req where ts >= ? and person in ({",".join("?" * len(ids))})
-                         group by 1''', (utc(month_start()), *ids)).fetchall() if ids else []
-    spent = sum(x or 0 for _, x in rows)
-    print(json.dumps({'month': period_label('month'), 'cap': cap['cap'], 'spent': round(spent, 4),
-                      'bots': {p: round(x or 0, 4) for p, x in rows}}))
-
-
-def session(c, prefix):
-    ids = [r[0] for r in c.execute('select distinct session from req where session like ?', (prefix + '%',))]
-    if len(ids) != 1:
-        sys.exit(f'{len(ids)} sessions match {prefix!r}')
-    sid = ids[0]
-    print(f'\nsession {sid}\n\nturns (main conversation; cost of everything until the next prompt)')
-    rows = c.execute('''select turn, sum(cost), count(*), sum(output), sum(cache_read), min(datetime(ts,'localtime'))
-                        from req where session = ? and agent = 'main' group by turn order by min(ts)''', (sid,)).fetchall()
-    for turn, cost, n, out, cr, t in rows:
-        print(f'  {money(cost):>8}  {n:4d} req  {out/1e3:6.1f}k out  {cr/1e6:5.1f}M cached  {t[5:16]}  {(turn or "(start)")[:60]}')
-    subs = c.execute('''select agent, sum(cost) s, count(*) from req where session = ? and agent != 'main'
-                        group by agent order by s desc''', (sid,)).fetchall()
-    if subs:
-        print('\nsubagents')
-        for a, cost, n in subs:
-            print(f'  {money(cost):>8}  {n:4d} req  {a[:80]}')
-    total = c.execute('select sum(cost) from req where session = ?', (sid,)).fetchone()[0]
-    print(f'\ntotal {money(total)}\n')
-
-
-def main():
-    a = sys.argv[1:] or ['week']
-    if a[0] in ('-h', '--help'):
-        sys.exit(print(__doc__))
-    if a[0] == 'limit' and len(a) > 1:   # before the ledger: no limit answers without opening it
-        return limit_cmd(a[1], a[2] if len(a) > 2 else '')
-    c = db()
-    if a[0] == 'tag':
-        return tag(c)
-    if a[0] == 'record':
-        return record(c)
-    if a[0] == 'sync':
-        return sync(c)
-    sync(c, quiet=True)
-    if a[0] == 'session' and len(a) > 1:
-        session(c, a[1])
-    elif a[0] == 'usage' and '--json' in a:
-        usage_json(c, next((x for x in a[1:] if x != '--json'), 'month'))
-    elif a[0] == 'agent' and len(a) > 1 and '--json' in a:
-        rest = [x for x in a[2:] if x != '--json']
-        agent_json(c, a[1], rest[0] if rest else 'month')
-    elif a[0] == 'members' and len(a) > 1:
-        members(c, a[1])
-    elif a[0] == 'bots' and '--json' in a:
-        bots_json(c)
-    elif a[0] == 'agents':
-        agents(c, a[1] if len(a) > 1 else 'month')
-    elif a[0] == 'agent' and len(a) > 1:
-        agent(c, a[1], a[2] if len(a) > 2 else 'month')
-    elif a[0] == 'people':
-        people(c, a[1] if len(a) > 1 else 'month')
-    elif a[0] == 'spent' and len(a) > 1:
-        spent(c, a[1], a[2] if len(a) > 2 else None)
-    elif a[0] == 'csv':
-        since = a[2] if len(a) > 2 else '0'
-        w = csv.writer(sys.stdout)
-        w.writerow(['id', 'session', 'ts', 'project', 'model', 'agent', 'turn', 'input', 'output', 'cache_read', 'cache_write',
-                    'cost', 'hq_agent', 'version', 'via', 'effort', 'person'])
-        w.writerows(c.execute('select * from hq_req where ts >= ? order by ts', (since,)))
-    elif a[0] in ('today', 'week', 'month', 'all'):
-        report(c, a[0])
-    else:
-        sys.exit(__doc__)
-
-
-if __name__ == '__main__':
-    main()
+        os.execv("/bin/sh", ["/bin/sh", os.path.abspath(__file__)] + sys.argv[1:])
+    except OSError as e:
+        print("kith-cost: cannot run /bin/sh: %s" % e, file=sys.stderr)
+        sys.exit(3)
+# ' sh never gets here; this quote ends the one the line of three quotes above opens for it, so `sh -n` parses the whole file

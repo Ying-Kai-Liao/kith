@@ -24,7 +24,9 @@ printf -- '---\nname: other\ndescription: another agent\n---\nYou other.\n' > "$
 printf '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)"\n[ "$1 $2" = "plugin list" ] && echo "[]"\nexit 0\n' > "$T/bin/claude"; chmod +x "$T/bin/claude"
 # A guest run refuses to start without a kith program that answers `memory hook` (fail closed, no unchecked memory writes);
 # CI has no host build, so a stub stands in for it (macOS dev machines pass without one only because a real kith is installed).
-printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-fake-host"; chmod +x "$T/bin/kith-fake-host"
+# It also has the cost ledger (a guest's budget is read through bin/kith-cost, which is a stub for `kith kernel cost`: with no
+# program that has `cost-ledger` the launch refuses the guest) and answers `spent` with 0.
+printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\n[ "$1 $2" = "kernel version" ] && echo %s\ncase "$*" in "kernel cost "*" spent "*) [ ! -e "$0.fail" ] || exit 1; echo 0 ;; esac\nexit 0\n' "'{\"abi\":1,\"modules\":[\"cost-ledger\"]}'" > "$T/bin/kith-fake-host"; chmod +x "$T/bin/kith-fake-host"
 export KITH_BIN=$T/bin/kith-fake-host
 export PATH=$T/bin:$PATH
 
@@ -83,7 +85,8 @@ expect "guest: nothing in the launch env but KITH_WORK is inside their folder" "
 cat > "$T/bin/kith-fake-guest" <<'SH'
 #!/bin/sh
 [ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"
-[ "$1 $2" = "kernel version" ] && echo '{"abi":1,"modules":["project-guest"]}'
+[ "$1 $2" = "kernel version" ] && echo '{"abi":1,"modules":["project-guest","cost-ledger"]}'
+case "$*" in "kernel cost "*" spent "*) echo 0 ;; esac
 exit 0
 SH
 chmod +x "$T/bin/kith-fake-guest"
@@ -263,10 +266,12 @@ expect "guest: memory hook that fails denies the write" "$(echo '{}' | sh -c "$B
 "$AUTH" member echo guest mode=default budget=5 >/dev/null 2>&1
 LEDGER=$(python3 "$KERNEL/lib/kith_paths.py" --sh | sed -n "s/^export KITH_MACHINE=//p" | tr -d "'")/cost.db
 mv "$LEDGER" "$LEDGER.keep"; mkdir "$LEDGER"
+touch "$T/bin/kith-fake-host.fail"   # the stand-in program's `spent` fails as the real one does on an unreadable ledger
 (cd "$KITH_HOME/agents/echo" && KITH_PERSON=guest "$KITH" echo --launch-json >/dev/null 2>&1); rc=$?
 expect "guest with a budget and an unreadable ledger: refused" "$rc" 3
 (cd "$KITH_HOME/agents/echo" && "$KITH" echo --launch-json >/dev/null 2>&1); rc=$?
 expect "owner with an unreadable ledger: still runs" "$rc" 0
+rm -f "$T/bin/kith-fake-host.fail"
 rmdir "$LEDGER"; mv "$LEDGER.keep" "$LEDGER"
 "$AUTH" member echo guest mode=default >/dev/null 2>&1
 # a malicious membership: bad env keys are skipped, names lose angle brackets

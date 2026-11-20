@@ -35,7 +35,7 @@ export PATH=$T/bin:$PATH
 # A copy of the kernel folder whose two Python programs log what they are asked, then run the originals.
 cp -R "$KERNEL" "$T/k"
 LOG=$T/calls
-for prog in kith-pkg project-id; do
+for prog in kith-pkg project-id kith-cost; do
   mv "$T/k/bin/$prog" "$T/k/bin/$prog.real"
   printf '#!/bin/sh\necho "%s $*" >> "%s"\nexec "%s" "$@"\n' "$prog" "$LOG" "$T/k/bin/$prog.real" > "$T/k/bin/$prog"
   chmod +x "$T/k/bin/$prog"
@@ -125,8 +125,8 @@ rm -f "$T/vcalls"; touch "$T/vcalls"; reset
 cp "$NOLAUNCH" "$T/k/lib/core-switched.txt"
 (cd "$T/work/proj" && KITH_BIN=$T/bin/kith-count "$KITH" echo --launch-json >/dev/null 2>&1)
 cp "$T/switched.keep" "$T/k/lib/core-switched.txt"
-# (each project-id call is the stub, which asks the program it is given once more: it needs the project-guest module)
-check "bash path: the router asks kernel version once for the whole launch" "[ \$(( \$(wc -l < '$T/vcalls' | tr -d ' ') - \$(calls project-id) )) = 1 ]"
+# (each project-id and kith-cost call is a stub, which asks the program it is given once more: it needs the project-guest or cost-ledger module)
+check "bash path: the router asks kernel version once for the whole launch" "[ \$(( \$(wc -l < '$T/vcalls' | tr -d ' ') - \$(calls project-id) - \$(calls kith-cost) )) = 1 ]"
 
 # 4. The other kith-pkg verbs stay Python.
 reset; "$KITH" versions echo > /dev/null 2>&1

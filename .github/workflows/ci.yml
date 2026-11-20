@@ -346,7 +346,7 @@ jobs:
             host_core:
               # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
               # memory and summary), and the libs those programs load on every call.
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-lifecycle,kernel/lib/kith_lifecycle.py,kernel/tests/kith-lifecycle-check,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check,kernel/tests/kith-agent-set-check,kernel/lib/kith_facets.py,kernel/bin/kith-room-ledger,kernel/tests/kith-load-check,kernel/tests/kith-summary-check,kernel/tests/kith-json-misc-check}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-lifecycle,kernel/lib/kith_lifecycle.py,kernel/tests/kith-lifecycle-check,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-cost-bots-check,kernel/tests/kith-limit-check,kernel/tests/kith-scratch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check,kernel/tests/kith-agent-set-check,kernel/lib/kith_facets.py,kernel/bin/kith-room-ledger,kernel/tests/kith-load-check,kernel/tests/kith-summary-check,kernel/tests/kith-json-misc-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -421,7 +421,6 @@ jobs:
               Auth revoke check|kernel/tests/kith-auth-revoke-check
               Auth core mirror check (kith-auth person/bot --rm/--revoke against a fake core)|kernel/tests/kith-auth-core-mirror-check
               Helper MCP grants check|kernel/tests/kith-helper-mcp-check
-              Cost bots check|kernel/tests/kith-cost-bots-check
               Call check|kernel/tests/kith-call-check
               Chain check|kernel/tests/kith-chain-check
               People check (kith people, kith invite, kith bot ls/invite/revoke/decide/auto-allow --json, against a stub host)|kernel/tests/kith-people-check
@@ -432,7 +431,6 @@ jobs:
               Schedules tick.lock check (kith-sched holds sched/tick.lock across read, decide, record, save; a held lock starts nothing)|kernel/tests/kith-sched-tick-lock-check
               Schedules run-turn check (kith-sched run-turn: start()'s env, the claim's check-and-set before the engine, no state.json, no tick.lock)|kernel/tests/kith-sched-run-turn-check
               Grants check (connectors and skills as grants on an agent)|kernel/tests/kith-grants-check
-              Limit check|kernel/tests/kith-limit-check
               Agent allow check|kernel/tests/kith-agent-allow-check
               Agent deny secrets check|kernel/tests/kith-agent-deny-secrets-check
               Trusted allow check|kernel/tests/kith-trusted-allow-check
@@ -449,6 +447,7 @@ jobs:
               Terminal flags check|kernel/tests/kith-terminal-flags-check
               Recall check|kernel/tests/kith-recall-check
               Guest helper check|kernel/tests/kith-guest-helper-check
+              Cost stub check (bin/kith-cost is sh and Python in one file; forwards to a program that has cost-ledger, with none says so and exits 3, tag exits 0)|kernel/tests/kith-cost-stub-check
               Room ledger stub check (no kith program: silent exit 0, a room note's pre is denied, nothing else)|kernel/tests/kith-room-ledger-stub-check
               Wake check|kernel/tests/kith-wake-check
               Sessions core check (the kernel claim takers in Files and Writer mode, a fake core)|kernel/tests/kith-sessions-core-check
@@ -465,9 +464,9 @@ jobs:
               Schedule json check (kith schedule ls/add/rm/pause/resume/run/log --json, the error object)|kernel/tests/kith-sched-json-check
               Auth json check (kith auth ls/granted/grant/revoke --json, no secret value in any output)|kernel/tests/kith-auth-json-check
               Doctor services check (kith doctor: an ok grant outside needs is fine, a missing one is a failure)|kernel/tests/kith-doctor-services-check
+              Doctor jobs check (a launchd job that runs a kernel script is warned about)|kernel/tests/kith-doctor-jobs-check
               New check (kith new --json - the agent made, or the error object and no folder left)|kernel/tests/kith-new-check
               Pkg json check (kith versions, history, pin, unpin, restore, install, share, deps, update, push, commit --json)|kernel/tests/kith-pkg-json-check
-              Scratch check (the built-in scratch agent: engine per chat, never backed up or shared, keep as an agent)|kernel/tests/kith-scratch-check
               Core boundary check (kith-core stays sealed)|kernel/tests/kith-core-boundary-check
               Core boundary self-test (each rule fails on a deliberate violation)|kernel/tests/kith-core-boundary-check --selftest
               Owner launch check|kernel/tests/kith-owner-launch-check
@@ -917,8 +916,13 @@ jobs:
           # The pkg switch and the project-id stub: the launch's pkg lookup is the core's, per verb, and project-id (a stub for the
           # Rust verb) is the program's in the bash launch and in process in the Rust one.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
-          # The cost switch: every kith-cost verb (tag and record too) is the core's, KITH_CORE=python the Python's, and the launch's budget checks hold on both paths.
+          # The cost stub: every kith-cost verb (tag and record too) goes stub -> the program, KITH_CORE=python changes nothing, with no
+          # program tag is silent and the rest say so (exit 3), and the launch's budget checks hold on both paths.
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
+          # These three read the ledger through kith-cost, which is a stub now: they skip or fail without a program, so they run here.
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-bots-check
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-limit-check
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-scratch-check
           # The revoke stopgap: kith-auth reaches the core with no daemon, through the embedded core-call.
           KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-embedded-check
           # The memory and summary verbs and the settings switch run the built kith.

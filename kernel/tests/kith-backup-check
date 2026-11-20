@@ -5,6 +5,9 @@
 #
 #   kernel/tests/kith-backup-check     a few seconds; prints each check, exits 1 when one fails
 set -uo pipefail
+# kernel/bin/kith-cost is a stub for the kith program, which writes the ledger rows below: this check needs one.
+BIN=${KITH_DIFFTEST_BIN:-}
+if [ -z "$BIN" ] || [ ! -x "$BIN" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN)"; exit 0; fi
 
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-backup-check.XXXXXX")
@@ -206,9 +209,9 @@ c.executescript('''create table runs (session text primary key, agent text, vers
   insert into runs values ('old1','echo','v1','sonnet',null,'terminal',null,'2026-10-01T00:00:00',null);''')
 c.commit()
 EOF
-printf '{"session_id":"s1"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=work KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
-printf '{"session_id":"s2"}' | KITH_AGENT=echo KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
-printf '{"id":"r1","session":"s3","model":"codex","input":1,"output":1}' | KITH_AGENT=echo KITH_PROVIDER=codex KITH_ACCOUNT=deep KITH_STATE=$M "$KERNEL/bin/kith-cost" record
+printf '{"session_id":"s1"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=work KITH_STATE=$M KITH_BIN=$BIN "$KERNEL/bin/kith-cost" tag
+printf '{"session_id":"s2"}' | KITH_AGENT=echo KITH_STATE=$M KITH_BIN=$BIN "$KERNEL/bin/kith-cost" tag
+printf '{"id":"r1","session":"s3","model":"codex","input":1,"output":1}' | KITH_AGENT=echo KITH_PROVIDER=codex KITH_ACCOUNT=deep KITH_STATE=$M KITH_BIN=$BIN "$KERNEL/bin/kith-cost" record
 rows=$(python3 -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(sorted(c.execute("select session, provider, account from runs")))' "$M/cost.db")
 check "old DB gets the columns; old rows stay null; new rows carry provider/account (tag and record)" "[ \"\$rows\" = \"[('old1', None, None), ('s1', 'claude', 'work'), ('s2', None, None), ('s3', 'codex', 'deep')]\" ]"
 
@@ -301,9 +304,9 @@ check "use --reset without --agent drops the global choice" "[ \"\$(st \"'accoun
 
 # --- a session is resumed only under the account it was made under ------------------------------------------------------
 "$KITH" account use claude:work --agent echo >/dev/null 2>&1
-printf '{"session_id":"sess-def"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT_ID=claude KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
-printf '{"session_id":"sess-work"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=work KITH_ACCOUNT_ID=claude:work KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
-printf '{"session_id":"sess-old"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=work KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
+printf '{"session_id":"sess-def"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT_ID=claude KITH_STATE=$M KITH_BIN=$BIN "$KERNEL/bin/kith-cost" tag
+printf '{"session_id":"sess-work"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=work KITH_ACCOUNT_ID=claude:work KITH_STATE=$M KITH_BIN=$BIN "$KERNEL/bin/kith-cost" tag
+printf '{"session_id":"sess-old"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=work KITH_STATE=$M KITH_BIN=$BIN "$KERNEL/bin/kith-cost" tag
 check "ledger: account_id per session; an older row reads as provider:account" "[ \"\$(python3 '$KERNEL/lib/kith_accounts.py' session-account sess-def),\$(python3 '$KERNEL/lib/kith_accounts.py' session-account sess-work),\$(python3 '$KERNEL/lib/kith_accounts.py' session-account sess-old),\$(python3 '$KERNEL/lib/kith_accounts.py' session-account nope)\" = 'claude,claude:work,claude:work,' ]"
 OUT=$(KITH_RESUME=sess-work "$KITH" echo "hi" 2>/dev/null)
 check "KITH_RESUME of a session made under the main account: resumed" "echo \"\$OUT\" | grep -q 'resume=sess-work id=claude:work'"
@@ -317,7 +320,7 @@ mkdir -p "$HOME/.claude/projects/p" "$T/work"
 printf '{"type":"user","cwd":"%s","message":{"content":"hi"}}\n' "$T/work" > "$HOME/.claude/projects/p/sess-def.jsonl"
 OUT=$(cd "$T" && "$KITH" echo --resume sess-def "go on" 2>"$T/err"); rc=$?
 check "--resume of a session made under another account runs under that one, and says so" "[ $rc = 0 ] && echo \"\$OUT\" | grep -q 'claude-run config= provider=claude account= helper=none resume=sess-def id=claude' && grep -q 'made under claude, so it runs under claude' $T/err"
-printf '{"session_id":"sess-gone"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=gone KITH_ACCOUNT_ID=claude:gone KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
+printf '{"session_id":"sess-gone"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=gone KITH_ACCOUNT_ID=claude:gone KITH_STATE=$M KITH_BIN=$BIN "$KERNEL/bin/kith-cost" tag
 cp "$HOME/.claude/projects/p/sess-def.jsonl" "$HOME/.claude/projects/p/sess-gone.jsonl"
 OUT=$(cd "$T" && "$KITH" echo --resume sess-gone "go on" 2>"$T/err"); rc=$?
 check "--resume of a session whose account can't run: exit 4, names the account and its fix" "[ $rc = 4 ] && grep -q 'made under claude:gone' $T/err && grep -q 'kith account add claude gone' $T/err"
