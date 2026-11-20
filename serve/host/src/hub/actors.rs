@@ -291,9 +291,9 @@ impl Hub {
                 && actors.places.get(key).is_some_and(|(_, h)| h.tx.same_channel(own))
             {
                 actors.places.remove(key);
-                // Nothing of the finished turns shows any more; the Fast mode support is the bot's.
+                // Nothing of the finished turns shows any more.
                 if let Some(rt) = self.runtime.locked().get_mut(key) {
-                    *rt = Runtime { fast_mode: rt.fast_mode.clone(), ..Runtime::default() };
+                    *rt = Runtime::default();
                 }
             }
             rx.close();
@@ -381,7 +381,7 @@ impl Hub {
     }
 
     /// The bot as clients see it: its own chat's state while that is busy, else a place waiting on the user,
-    /// else one at work, else its own chat's (idle, or how its last turn ended). Fast mode is the bot's.
+    /// else one at work, else its own chat's (idle, or how its last turn ended).
     pub fn bot_runtime(&self, bot_id: &str) -> Runtime {
         let runtime = self.runtime.locked();
         let main = runtime.get(bot_id).cloned().unwrap_or_default();
@@ -392,7 +392,7 @@ impl Hub {
         let busy = others()
             .find(|rt| rt.status == BotStatus::NeedsInput)
             .or_else(|| others().find(|rt| rt.status == BotStatus::Working));
-        busy.map_or(main.clone(), |rt| Runtime { fast_mode: main.fast_mode.clone(), ..rt.clone() })
+        busy.map_or(main, Clone::clone)
     }
 
     /// Where the bot (or, for a group, its members in it) is working right now.
@@ -435,7 +435,6 @@ impl Hub {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::config::FastModeSupport;
     use crate::remote::identity::Identity;
     use crate::store::Store;
 
@@ -445,10 +444,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let store = Store::open(std::path::Path::new(":memory:")).unwrap();
         let hub = Hub::new(store, "actors-test".into(), Identity::load_or_create(&dir).unwrap(), "test".into(), 0);
-        hub.set_runtime("b", |r| {
-            r.status = BotStatus::Error;
-            r.fast_mode = FastModeSupport::Unsupported;
-        });
+        hub.set_runtime("b", |r| r.status = BotStatus::Error);
         assert_eq!(hub.bot_runtime("b").status, BotStatus::Error);
 
         hub.set_runtime("b|b/root", |r| {
@@ -458,7 +454,6 @@ mod tests {
         let shown = hub.bot_runtime("b");
         assert_eq!(shown.status, BotStatus::Working, "a thread at work outranks the chat's failed turn");
         assert_eq!(shown.lane, Some(Lane::in_thread("b", "root")));
-        assert_eq!(shown.fast_mode, FastModeSupport::Unsupported, "Fast mode is the bot's");
 
         hub.set_runtime("b", |r| r.status = BotStatus::NeedsInput);
         assert_eq!(hub.bot_runtime("b").status, BotStatus::NeedsInput, "the chat while it's busy");

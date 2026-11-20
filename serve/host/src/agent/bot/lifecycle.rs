@@ -205,7 +205,6 @@ impl Actor {
                 if let Some(proc) = conn.writer.as_mut() {
                     proc.closed.insert(sid.to_owned());
                 }
-                conn.fast_options.remove(sid);
                 conn.usage.remove(sid);
                 conn.profiles.remove(sid);
             }

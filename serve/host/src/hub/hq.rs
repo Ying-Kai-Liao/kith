@@ -227,7 +227,6 @@ mod tests {
             (json!({"model": "opus"}), "kith house set model"),
             (json!({"backend": "codex"}), "kith house set harness"),
             (json!({"modelOptions": {"effort": "high"}}), "kith house set effort"),
-            (json!({"fastMode": true}), "no Fast mode"),
             (json!({"connectors": ["github"]}), "kith house connect"),
             (json!({"skills": ["pdf"]}), "kith house skill add"),
         ] {
@@ -236,11 +235,14 @@ mod tests {
             let e = hub.update_bot(&patch).unwrap_err().to_string();
             assert!(e.contains(command), "{patch}: {e}");
         }
-        hub.update_bot(
-            &json!({"id": bot.id, "backend": "claude", "model": null, "modelOptions": {}, "fastMode": false,
-            "connectors": [], "skills": []}),
-        )
-        .unwrap();
+        // An old app's Fast mode switch is no change at all, on or off.
+        for fast in [true, false] {
+            hub.update_bot(
+                &json!({"id": bot.id, "backend": "claude", "model": null, "modelOptions": {}, "fastMode": fast,
+                "connectors": [], "skills": []}),
+            )
+            .unwrap();
+        }
         let done = hub.apply_hq_agents(&[agent(&dir, "house", "keeps the house tidy")]).unwrap();
         assert!(done.created.is_empty(), "never a second bot: {done:?}");
         let all = bots(&hub);
@@ -250,7 +252,7 @@ mod tests {
             (kept.name.as_str(), kept.pinned, kept.notify, kept.model.as_deref()),
             ("Home", true, Some(false), None)
         );
-        // Model, effort, Fast mode and permission are hq's: an app's edit of them on an hq bot is not stored.
+        // Model, effort and permission are hq's: an app's edit of them on an hq bot is not stored.
         assert_eq!(kept.permission, crate::store::Permission::Ask);
         assert_eq!((kept.hq_agent.as_deref(), kept.backend.as_str()), (Some("house"), "claude"), "not editable");
         assert_eq!(kept.description, "keeps the house tidy", "hq's description");

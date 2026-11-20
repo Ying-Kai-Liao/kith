@@ -116,7 +116,7 @@ private func houseInfo() throws -> KithInfo {
     #expect(!BotSections(info: try houseInfo()).kithSettings)
 }
 
-@Test func hqSettingsAreAllWrittenThroughAndFastModeIsNotOffered() throws {
+@Test func hqSettingsAreAllWrittenThrough() throws {
     var info = try houseInfo()
     info.permissionMode = "plan"
     info.model = "opus"
@@ -142,9 +142,9 @@ private func houseInfo() throws -> KithInfo {
 @Test func aKithAgentsDraftKeepsWhatTheBotHoldsForTheFieldsKithOwns() throws {
     let kith = try decode(Bot.self, #"{"id":"a","hqAgent":"house","backend":"claude","model":"opus","connectors":["x"]}"#)
     var draft = BotDraft(kith)
-    draft.backend = "codex"; draft.model = "gpt"; draft.fastMode = true; draft.connectors = []; draft.skills = ["s"]; draft.notify = false
+    draft.backend = "codex"; draft.model = "gpt"; draft.connectors = []; draft.skills = ["s"]; draft.notify = false
     let sent = draft.keepingKithOwned(from: kith)
-    #expect(sent.backend == "claude" && sent.model == "opus" && sent.fastMode == kith.fastMode)
+    #expect(sent.backend == "claude" && sent.model == "opus")
     #expect(sent.connectors == ["x"] && sent.skills == kith.skills)
     #expect(sent.notify == false)
     let plain = try decode(Bot.self, #"{"id":"p","backend":"claude"}"#)

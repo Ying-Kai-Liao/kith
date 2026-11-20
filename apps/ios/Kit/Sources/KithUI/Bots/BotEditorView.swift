@@ -52,7 +52,7 @@ public struct BotEditorView: View {
 }
 
 /// Which settings a form shows: all of them (a new bot), what changes often (instructions, model,
-/// fast mode: the details sheet's Details page) or the rest (its Settings page).
+/// the details sheet's Details page) or the rest (its Settings page).
 enum FormPart {
     case all, often, rarely
 }
@@ -66,7 +66,7 @@ struct BotSettingsForm: View {
     var part: FormPart = .all
     /// An hq bot's details sheet shows kith's copy of some facts: those cards go (`BotSections`).
     var shown = BotSections.all
-    /// An hq bot's kith details: its permission, model, effort and Fast mode come from hq (`HqSettingsRows`).
+    /// An hq bot's kith details: its permission, model and effort come from hq (`HqSettingsRows`).
     var kith: KithInfoStore?
     /// The details sheet has an Access tab: the permission mode lives there (Asks before), not in these rows.
     var permissionInAccess = false

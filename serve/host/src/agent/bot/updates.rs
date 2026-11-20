@@ -1,6 +1,5 @@
 //! Agent → client: `session/update`s, permission requests and streamed text mapped onto entries.
 
-use super::fast_mode::Listing;
 use super::{Actor, Seg, SegKind};
 use crate::access::{self, Ask, Request};
 use crate::agent::acp::{self, Incoming};
@@ -77,12 +76,9 @@ impl Actor {
                 crate::cards::bot_exited(&self.hub, &self.cfg.id);
             }
             Some(Incoming::Notification { method, params }) => {
-                // Any session's, turn or not: the agent changed an option itself.
-                if method == "session/update"
-                    && params["update"]["sessionUpdate"] == "config_option_update"
-                    && let Some(sid) = params["sessionId"].as_str()
-                {
-                    self.note_options(sid, &params["update"], Listing::Update);
+                // Any session's, turn or not: the agent changed an option itself, which is not turn output.
+                if method == "session/update" && params["update"]["sessionUpdate"] == "config_option_update" {
+                    // Ignored on purpose: nothing here tracks agent-set options any more.
                 } else if method == "session/update" && params["sessionId"].as_str() == self.turn_session.as_deref() {
                     if self.turn.is_none() && super::offturn::wakes(self, &params["update"]) {
                         // The agent woke itself (a background task finished): its work goes where the last turn was.
