@@ -550,21 +550,11 @@ pub async fn grant_for_env_async(
 
 /// `$KITH_MACHINE/run/host.sock`: outside the serve data folder, which a guest's sandbox denies.
 ///
-/// The kernel's `KITH_MACHINE` (`kith_paths.py --json`) is the source of truth, because bin/kith allows exactly this
-/// path in a guest's sandbox: ~/.kith on this Mac's own layout, ~/.config/kith under the old link layout. Without a
-/// kernel to ask, the host's own reading of the same rules.
+/// The kernel's `KITH_MACHINE` is the source of truth, because bin/kith allows exactly this path in a guest's sandbox:
+/// ~/.kith on this Mac's own layout, ~/.config/kith under the old link layout. Read in process by the kernel's rules
+/// (`kith-kernel` paths, what `kith kernel paths` prints).
 pub fn socket_path() -> PathBuf {
-    let asked = crate::kernel::current_kernel().and_then(|k| {
-        let out = std::process::Command::new("python3").arg(k.join("lib/kith_paths.py")).arg("--json").output().ok()?;
-        out.status.success().then(|| machine_from_paths_json(&out.stdout))?
-    });
-    let machine = asked.unwrap_or_else(|| crate::kernel::machine_dir(&dirs::home_dir().unwrap_or_default()));
-    machine.join("run").join("host.sock")
-}
-
-fn machine_from_paths_json(json: &[u8]) -> Option<PathBuf> {
-    let v: Value = serde_json::from_slice(json).ok()?;
-    v["KITH_MACHINE"].as_str().filter(|m| Path::new(m).is_absolute()).map(PathBuf::from)
+    crate::kernel::machine_dir(&dirs::home_dir().unwrap_or_default()).join("run").join("host.sock")
 }
 
 // ---- requests
@@ -1103,10 +1093,6 @@ mod tests {
 
     #[test]
     fn the_socket_lives_under_the_kernels_machine_folder() {
-        let kept = machine_from_paths_json(br#"{"KITH_MACHINE": "/Users/x/.config/kith", "KITH_STATE": "/s"}"#);
-        assert_eq!(kept, Some(PathBuf::from("/Users/x/.config/kith")));
-        assert_eq!(machine_from_paths_json(br#"{"KITH_MACHINE": "relative"}"#), None);
-        assert_eq!(machine_from_paths_json(b"nope"), None);
         assert!(socket_path().ends_with("run/host.sock"));
     }
 
