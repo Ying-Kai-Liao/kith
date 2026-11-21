@@ -753,3 +753,91 @@ fn a_browser_profile_is_made_for_the_owner_and_keeps_its_browser() {
         ("refused: not available to this run".to_owned(), 2)
     );
 }
+
+// --- the kernel's service specs come through the package facts, never from the disk under the lock -------------------
+
+#[test]
+fn a_write_that_needs_a_spec_the_disk_will_not_give_is_refused_and_writes_nothing() {
+    let mut rig = rig();
+    let hold = super::packages::blocked(&mut rig);
+    let before = rig.tables();
+    // ensure_profile / ensure_owned: a new profile of a personal service needs its spec
+    let (why, _) = died(
+        &rig.call("people.secretSet", &set("chatgpt/main", &["SESSION"], None))
+            .unwrap(),
+    );
+    assert!(why.contains("the disk did not answer"), "{why}");
+    // secret_owner default needs the spec to say who `default` is
+    let (why, _) = died(
+        &rig.call(
+            "people.secretOwner",
+            &json!({"profile": "github/work", "person": "default", "viaSwitch": true, "dies": true}),
+        )
+        .unwrap(),
+    );
+    assert!(why.contains("the disk did not answer"), "{why}");
+    assert_eq!(rig.tables(), before);
+    hold.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// A personal login the owner holds, for an owner change to find.
+fn owner_holds_a_login(rig: &mut Rig) {
+    rig.call("people.secretSet", &set("chatgpt/main", &["SESSION"], None))
+        .unwrap();
+    assert_eq!(profile(rig, "chatgpt/main")["person"], "kai");
+}
+
+#[test]
+fn an_owner_change_that_cannot_read_a_spec_is_refused_and_changes_no_owner() {
+    let mut rig = rig();
+    owner_holds_a_login(&mut rig);
+    let hold = super::packages::blocked(&mut rig);
+    let before = rig.tables();
+    let said = rig
+        .call("people.addPerson", &json!({"id": "sam", "owner": true}))
+        .unwrap_err();
+    assert!(said.contains("the disk did not answer"), "{said}");
+    assert_eq!(rig.tables(), before);
+    hold.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[test]
+fn an_owner_change_whose_spec_the_params_do_not_name_rolls_back_once_and_commits_once() {
+    let mut rig = rig();
+    owner_holds_a_login(&mut rig);
+    crate::packages::forbid_disk_under_lock();
+    let mut cached = rig.c.clone();
+    cached.packages = kith_kernel::secrets::Packages::Source(rig.cache.clone());
+    let roots = (cached.agents.clone(), cached.kernel.clone());
+    let state = crate::authority::revoke::Life::beside(&cached).state;
+    let params = json!({"id": "sam", "owner": true});
+    // the params name no service: the first pass finds the spec missing, the second has it
+    let wants = crate::packages::first_wants("people.addPerson", &params, Some(&state));
+    assert!(
+        !wants
+            .iter()
+            .any(|w| matches!(w, crate::packages::Want::Service(_))),
+        "{wants:?}"
+    );
+    let core = &mut rig.core;
+    let mut passes: Vec<bool> = Vec::new();
+    let out = crate::packages::run_call_in(&rig.cache, Some(&roots), wants, || {
+        crate::daemon::mark_lock_held(true);
+        let r =
+            crate::authority::call::call_with_deferred(core, &cached, "people.addPerson", &params);
+        crate::daemon::mark_lock_held(false);
+        passes.push(matches!(r, Err(crate::error::Error::NeedPackages(_))));
+        r
+    })
+    .unwrap();
+    assert_eq!(passes, [true, false], "rolled back once, then committed");
+    assert!(
+        out.0["lines"][0]
+            .as_str()
+            .unwrap()
+            .contains("kept kai's: chatgpt/main")
+    );
+    let t = rig.tables();
+    assert_eq!(t["people"]["sam"]["owner"], true);
+    assert!(t["people"]["kai"].get("owner").is_none(), "{t}");
+}

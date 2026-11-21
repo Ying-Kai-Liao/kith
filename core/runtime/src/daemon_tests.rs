@@ -3115,3 +3115,7 @@ fn a_tick_fires_a_due_guest_job_on_a_healthy_disk_and_writes_no_skip_when_the_re
     );
     drop(d);
 }
+
+#[cfg(unix)]
+#[path = "daemon_life_tests.rs"]
+mod life;

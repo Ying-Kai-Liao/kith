@@ -26,7 +26,7 @@ mod card;
 mod load;
 mod people_json;
 mod requests;
-mod revoke;
+pub(crate) mod revoke;
 mod secret_writes;
 mod store;
 #[cfg(test)]
