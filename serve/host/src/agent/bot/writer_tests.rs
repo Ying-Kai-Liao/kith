@@ -1,4 +1,4 @@
-//! Writer mode on the real actor (`writer.rs`, P7b): native bots whose agent is a fixture (`tests/fixtures/writer_agent.py`) run
+//! Writer mode on the real actor (`writer.rs`, P7b): kith agents (a stand-in kernel, `tests/fixtures/kernel_agents.py`) whose ACP agent is a fixture (`tests/fixtures/writer_agent.py`) run
 //! under a REAL `kith-stub --resident`, against the scripted core of `terminal/core_writer_tests.rs`. Each test sends a message
 //! through the host's own API and reads what the core was asked and what the chat shows. The rules of the core's rows are tested on
 //! a real core in `core/runtime`; here is the host's side: the answer table of design 1.3, one begin at a time, the end reports, a
@@ -57,6 +57,8 @@ const SWITCHED: Mac = Mac { file: true, ok: true };
 type Hooks = Arc<Mutex<Vec<(&'static str, Box<dyn FnOnce() + Send>)>>>;
 
 struct Rig {
+    /// The stand-in kernel is the process's one (`hq::TEST_KERNEL_BIN`): held for the test, as the api rig does.
+    _one: tokio::sync::MutexGuard<'static, ()>,
     hub: Arc<Hub>,
     dir: PathBuf,
     world: Arc<Mutex<World>>,
@@ -83,7 +85,7 @@ fn folders(dir: &std::path::Path) -> Paths {
 }
 
 impl Rig {
-    /// A host with one native bot per id (their sessions are `sess-<id>`), on a Mac that is `mac`.
+    /// A host with one kith agent per id (their sessions are `sess-<id>`), on a Mac that is `mac`.
     fn new(bots: &[&str], mac: Mac) -> Self {
         Self::new_as(bots, mac, None)
     }
@@ -91,6 +93,15 @@ impl Rig {
     /// [`Self::new`] with the bots running as `person` (a room person's actor, say).
     fn new_as(bots: &[&str], mac: Mac, person: Option<&str>) -> Self {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        // Another test may hold the kernel (and even this thread's runtime is free to wait: each test has its own).
+        let one = loop {
+            match crate::remote::account::ONE_AT_A_TIME.try_lock() {
+                Ok(guard) => break guard,
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+        *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap() =
+            Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/kernel_agents.py"));
         let dir = std::env::temp_dir().join(format!(
             "kw-{}-{}",
             std::process::id(),
@@ -104,7 +115,7 @@ impl Rig {
             std::fs::write(switch.join("claims.switch"), "").unwrap();
         }
         let world =
-            Arc::new(Mutex::new(World { account: "fixture".into(), switched: Some(mac.ok), ..World::default() }));
+            Arc::new(Mutex::new(World { account: "claude".into(), switched: Some(mac.ok), ..World::default() }));
         let w = world.clone();
         let hooks: Hooks = Hooks::default();
         let h = hooks.clone();
@@ -129,8 +140,10 @@ impl Rig {
         for id in bots {
             let cwd = dir.join(id);
             std::fs::create_dir_all(&cwd).unwrap();
+            // The stand-in kernel puts an agent named `<test folder>.<id>` in `<tmp>/<test folder>/<id>`.
+            let name = format!("{}.{id}", dir.file_name().unwrap().to_string_lossy());
             let cfg: BotConfig = serde_json::from_value(json!({
-                "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false,
+                "id": id, "name": id, "backend": "fixture", "cwd": cwd, "tasks": false, "hqAgent": name,
                 "command": crate::shell::python(&agent), "notify": false, "person": person,
             }))
             .unwrap();
@@ -140,7 +153,7 @@ impl Rig {
         let hub = Hub::new(store, "writer-test".into(), identity, "test-token".into(), 19223);
         hub.terminal.set_env(crate::terminal::Env { state: f.state.clone(), sessions: None });
         hub.start().unwrap();
-        Self { hub, locks: f.machine.join("core").join("locks"), dir, world, held: Vec::new(), hooks }
+        Self { _one: one, hub, locks: f.machine.join("core").join("locks"), dir, world, held: Vec::new(), hooks }
     }
 
     fn w(&self) -> MutexGuard<'_, World> {
@@ -316,6 +329,7 @@ impl Drop for Rig {
             }
         }
         let _ = std::fs::remove_dir_all(&self.dir);
+        *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 }
 
@@ -344,8 +358,10 @@ fn test_rig() -> Rig {
 
 actor_test! {
     /// claimed: the turn runs under the lock, and the core hears each step in order. The epoch is read before the enqueue, the account
-    /// sent is the process's own, a native bot claims as `bot:<id>`, and the process has its `warm_procs` row.
+    /// sent is the process's own, an agent claims under its own name, and the process has its `warm_procs` row.
     async fn a_claimed_turn_runs_and_reports_done(rig) {
+        // The launch names this account, so the assertion below can tell it from the rig's own "claude".
+        std::fs::write(rig.dir.join("a/account"), "claude:launch").unwrap();
         rig.send("a", "hello").await;
         rig.until("the reply", |r| r.replied("a", "hello")).await;
         rig.until("the end report", |r| r.w().reports.iter().any(|(k, _)| k == "done")).await;
@@ -355,9 +371,9 @@ actor_test! {
         assert!(at("hostclaim.enqueue") < at("hostclaim.turn") && at("hostclaim.turn") < at("hostclaim.redeem"));
         assert!(at("hostclaim.redeem") < at("hostclaim.report"));
         let enqueue = &w.asked.iter().find(|(m, _)| m == "hostclaim.enqueue").unwrap().1;
-        assert_eq!(enqueue["agent"], "bot:a", "a native bot claims as bot:<id> (B10)");
+        assert_eq!(enqueue["agent"], agent_a(&rig).as_str(), "an agent's claims name the agent");
         assert!(enqueue["key"].as_str().is_some_and(|k| !k.is_empty()), "every enqueue carries its key");
-        assert_eq!(w.sent_accounts, [Some("fixture".to_owned())], "the process's own account, not a fixed one");
+        assert_eq!(w.sent_accounts, [Some("claude:launch".to_owned())], "the launch's own account, not a fixed one");
         assert_eq!(w.turns[0].1, "done");
         assert_eq!(w.claims[0].state, "ended");
         assert!(!w.procs.is_empty(), "the warm process is known to the core");
@@ -1086,11 +1102,17 @@ mod units {
 
 // MARK: the runner (design 2026-11-16-core-queued-runner): turns the core's schedule tick queued
 
-/// A turn the core fired for `job` of the native bot `a` (agent `bot:a`), waiting in the scripted core.
+/// The kith agent the rig made for the bot `a`.
+fn agent_a(rig: &Rig) -> String {
+    format!("{}.a", rig.dir.file_name().unwrap().to_string_lossy())
+}
+
+/// A turn the core fired for `job` of the bot `a` (its kith agent), waiting in the scripted core.
 fn fire(rig: &Rig, turn: i64, job: &str, redeemed_before: bool) {
+    let agent = agent_a(rig);
     let mut w = rig.w();
     w.turns.push((turn, "queued".into(), None));
-    w.fired.push(json!({"turn": turn, "conversation": format!("schedule:bot:a:{job}:claude"), "agent": "bot:a",
+    w.fired.push(json!({"turn": turn, "conversation": format!("schedule:{agent}:{job}:claude"), "agent": agent,
                         "engine": "claude", "job": job, "person": "kai", "owner": true, "prompt": format!("run {job}"),
                         "deadline": null, "parkedReason": null, "redeemedBefore": redeemed_before}));
 }
@@ -1134,7 +1156,7 @@ actor_test! {
         let claims: Vec<&serde_json::Value> =
             w.asked.iter().filter(|(m, p)| m == "hostclaim.turn" && p["turn"] == 102).map(|(_, p)| p).collect();
         assert_eq!(claims.len(), 1, "turn 102 is claimed once: {claims:?}");
-        assert_eq!(claims[0]["conversation"], format!("schedule:bot:a:{routine}:claude"), "on the core's conversation");
+        assert_eq!(claims[0]["conversation"], format!("schedule:{}:{routine}:claude", agent_a(&rig)), "on the core's conversation");
         assert_eq!(claims[0]["person"], "kai", "as the turn's person");
         assert_ne!(claims[0]["sessionId"], claims[0]["conversation"], "on a session of its own");
         // The cron job: claimed once with no process, on the core's conversation, as the turn's person; no bot actor claim.
@@ -1145,7 +1167,7 @@ actor_test! {
             .map(|(_, p)| p)
             .collect();
         assert_eq!(runs.len(), 1, "turn 101 is claimed once: {runs:?}");
-        assert_eq!(runs[0]["conversation"], "schedule:bot:a:daily:claude");
+        assert_eq!(runs[0]["conversation"], format!("schedule:{}:daily:claude", agent_a(&rig)));
         assert_eq!(runs[0]["person"], "kai");
         assert!(w.asked.iter().all(|(m, p)| !(m == "hostclaim.turn" && p["turn"] == 101)), "not through a bot's actor");
         assert_eq!(w.reports.iter().filter(|(k, _)| k == "done").count(), 2, "{:?}", w.reports);

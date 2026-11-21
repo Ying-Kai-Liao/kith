@@ -31,6 +31,8 @@ FILES=(
   core/kernel/src/procstart.rs        # (M3-12, K2) orphan_group, same_process, comparable, claim_victims: what "the process is gone" means
   core/procstart                      # (M3-12) the stamp crate behind it (Linux b<boot_id>:<ticks>, unknown cross-form)
   core/runtime/src/cutover/modules/claims.rs # (#1010) the claims step: files imported as external rows, tombstone then files re-read then marker and Switched, rollback refuses live claims
+  core/kernel/src/threads/writer.rs   # (R5) the takers' side of claim.external in Rust: revokeSeen only from KITH_REVOKE_SEEN, the agent with every claim, proc never held when down
+  kernel/bin/kith-sessions            # (R5) the Python twin of the takers (core_take, read_epoch, proc_claim): still the rollback and `run`
   serve/host/src/agent/bot/writer.rs  # adopt_once: the host's adopt (Claims4 Meet), done only once it went through, retried with a growing wait
   serve/host/src/terminal             # (M3-12, M3-10f, P6-P9) core_writer.rs, warm_stub.rs, core_holders.rs, core_claims.rs, core_strays.rs: in Writer mode the core row and the stub's lock are the writer (no claim file); claim.rs, sync.rs, registry.rs the Files mode
 )

@@ -70,7 +70,9 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
         "voiceLocalSpeak" => crate::voice_local::speak(str_arg(&b, "text")?, b["voice"].as_str()).await?,
         "hello" => {
             let port = hub.port;
-            json!({
+            // C5: how many host-native rows this Mac still has (left out when none).
+            let native = hub.store.bots().map(|rows| crate::store::native_ids(&rows).len()).unwrap_or_default();
+            let mut hello = json!({
                 "hostId": hub.host_id,
                 "computerId": hub.identity.computer_id(),
                 "signKey": hub.identity.sign_pub_b64(),
@@ -93,7 +95,11 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
                 "cli": tokio::task::spawn_blocking(crate::kernel::current_cli).await?.json(),
                 // Shells out to `tailscale`: keep it off the async workers.
                 "urls": tokio::task::spawn_blocking(move || crate::service::addresses(port)).await?,
-            })
+            });
+            if native > 0 {
+                hello["nativeBots"] = native.into();
+            }
+            hello
         }
         "refreshBackends" => {
             tokio::task::spawn_blocking(backends::hydrate_path).await?;
@@ -196,11 +202,6 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
         "setScreenEnabled" => {
             hub.screen.set_enabled(&hub.store, b["enabled"].as_bool().unwrap_or(false)).await?;
             hub.screen.state()
-        }
-        "computerTools" => crate::screen::computer_tools(hub).await,
-        "computerCall" => {
-            let args = b.get("arguments").filter(|a| a.is_object()).cloned().unwrap_or_else(|| json!({}));
-            crate::screen::computer(hub, str_arg(&b, "botId")?, str_arg(&b, "name")?, args).await?
         }
         // Owner only: on no guest list.
         "sampleCards" => crate::samples::post(hub)?,

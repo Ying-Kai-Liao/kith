@@ -30,7 +30,10 @@ impl Host {
     async fn start(env: &[(&str, &str)]) -> Self {
         let home = std::env::temp_dir().join(format!("kith-gate-e2e-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
-        let (child, base) = common::serve_env(&home, env).await;
+        let agents = common::agents_env(&home);
+        let mut vars: Vec<(&str, &str)> = agents.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        vars.extend(env.iter().copied());
+        let (child, base) = common::serve_env(&home, &vars).await;
         let token = common::read_token(&home).trim().to_owned();
         Self { child, base, token, home }
     }
@@ -50,12 +53,7 @@ impl Host {
     }
 
     async fn bot(&self, name: &str) -> String {
-        let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/slow_agent.py");
-        let bot = json!({
-            "name": name, "backend": "custom", "tasks": false, "command": common::python_agent(&agent),
-            "cwd": self.home, "permission": "auto", "notify": false,
-        });
-        self.call("createBot", bot).await["bot"]["id"].as_str().unwrap().to_owned()
+        common::agent_bot(&self.base, &self.token, &self.home, name, "slow_agent.py", "").await
     }
 
     async fn send(&self, bot: &str, text: &str) -> String {
@@ -132,7 +130,13 @@ async fn five_bots_at_once_run_two_and_queue_three() {
         host.send(bot, &format!("job {i}")).await;
     }
 
-    let gate = host.gate().await;
+    // A kith agent's turn asks the gate once its launch is described (the stand-in kernel runs first), not at `send`.
+    let line_up = Instant::now() + Duration::from_secs(10);
+    let mut gate = host.gate().await;
+    while (gate["running"].clone(), gate["waiting"].clone()) != (json!(2), json!(3)) && Instant::now() < line_up {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        gate = host.gate().await;
+    }
     assert_eq!((gate["running"].clone(), gate["waiting"].clone()), (json!(2), json!(3)), "gate: {gate}");
     assert_eq!(gate["maxRunning"], 2);
     assert_eq!(gate["blocked"], "slots");
@@ -178,6 +182,10 @@ async fn stopping_a_waiting_bot_takes_it_out_of_the_line() {
     let (first, second) = (host.bot("First").await, host.bot("Second").await);
     host.send(&first, "job a").await;
     host.send(&second, "job b").await;
+    let line_up = Instant::now() + Duration::from_secs(10);
+    while host.gate().await["waiting"] != 1 && Instant::now() < line_up {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     assert_eq!(host.gate().await["waiting"], 1);
 
     host.call("stop", json!({"botId": second})).await;

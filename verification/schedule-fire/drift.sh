@@ -9,7 +9,8 @@
 set -euo pipefail
 
 # The commit at which the models were confirmed to describe the files below: origin/rust-rebuild after M4-5 packages A1
-# (#1033), B (#1042), E (#1043) and C (#1044), with the code tables in the skill and the model headers checked.
+# (#1033), B (#1042), E (#1043) and C (#1044), with the code tables in the skill and the model headers checked. The commit
+# is #1052's last code commit (the architect-review fixes); its later commits only moved this line and merged rust-rebuild.
 SYNC=9ef9e01c75c8591f5254a34553526753c1702743
 
 FILES=(

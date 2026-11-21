@@ -125,9 +125,10 @@
         "screen": "json?",
         "analytics": "json?",
         "urls": "json?",
-        "cli": "json?"
+        "cli": "json?",
+        "nativeBots": "int?"
       },
-      "mayOmit": ["grantedAgents", "cloud", "device", "home", "backends", "screen", "analytics", "urls", "cli"]
+      "mayOmit": ["grantedAgents", "cloud", "device", "home", "backends", "screen", "analytics", "urls", "cli", "nativeBots"]
     },
 
     "KithCard": {
@@ -156,7 +157,7 @@
       }
     },
     "Bot": {
-      "doc": "A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev.",
+      "doc": "A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev. Deprecated: fastMode, fastModeSupport and fastModeIssue. Fast mode is gone; the host always sends false, \"unsupported\" and null so an older app hides its switch, and ignores a fastMode it is sent.",
       "fields": {
         "id": "string",
         "kind": "BotKind",
@@ -188,6 +189,7 @@
         "tasks": "bool?",
         "hqAgent": "string?",
         "builtin": "bool?",
+        "needsKithAgent": "bool?",
         "project": "string?",
         "person": "string?",
         "createdAt": "int",
@@ -210,7 +212,7 @@
         "lastAt": "int",
         "botGuest": "BotGuestRef?"
       },
-      "mayOmit": ["labels", "command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "builtin", "project", "person", "botGuest"]
+      "mayOmit": ["labels", "command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "builtin", "needsKithAgent", "project", "person", "botGuest"]
     },
     "BotAnswer": { "fields": { "bot": "Bot" } },
 

@@ -51,6 +51,7 @@ fn key_account(home: &Path) -> String {
 /// sealed. Without this the item stays in the login keychain of the machine that ran the tests.
 #[allow(dead_code)]
 pub fn forget_home(home: &Path) {
+    let _ = std::fs::remove_dir_all(agents_dir(home));
     // Best effort; the service name is the core's (secrets/keystore.rs).
     let account = key_account(home);
     #[cfg(target_os = "macos")]
@@ -87,6 +88,67 @@ impl Drop for Reaper {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+}
+
+/// Where the kith agents of the test host `home` live: a folder beside the host's data folder, not in it (a folder
+/// inside the host's data is its secrets, and a run may not send those).
+#[allow(dead_code)]
+pub fn agents_dir(home: &Path) -> std::path::PathBuf {
+    let mut name = home.file_name().unwrap_or_default().to_os_string();
+    name.push("-agents");
+    home.with_file_name(name)
+}
+
+/// The variables that make a test host's kernel `tests/fixtures/kernel_agents.py`: it lists the folders of
+/// [`agents_dir`] as kith agents, and each starts on the scripted ACP agent its `acp` file names (see
+/// `host::Host::agent`). One-bot-model C5: every bot of a test is a kith agent.
+#[allow(dead_code)]
+pub fn agents_env(home: &Path) -> Vec<(&'static str, String)> {
+    let agents = agents_dir(home);
+    std::fs::create_dir_all(&agents).expect("the agents' folder");
+    let fixtures = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let agents_text = agents.to_string_lossy().into_owned();
+    let acp = format!("{} '{}'", python_agent(&fixtures.join("acp_dispatch.py")), agents_text);
+    vec![
+        ("KITH_KERNEL_BIN", fixtures.join("kernel_agents.py").to_string_lossy().into_owned()),
+        ("STUB_AGENTS_HOME", agents_text),
+        ("KITH_SERVE_HQ_ACP_COMMAND", acp),
+    ]
+}
+
+/// A kith agent `name` on the scripted ACP agent `tests/fixtures/<fixture>` with `args` for a host started with
+/// [`agents_env`]: writes its folder, has the host sync, and returns the id of its bot (messages are not tasks).
+#[allow(dead_code)]
+pub async fn agent_bot(base: &str, token: &str, home: &Path, name: &str, fixture: &str, args: &str) -> String {
+    let script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture);
+    let dir = agents_dir(home).join(name);
+    std::fs::create_dir_all(&dir).expect("the agent's folder");
+    std::fs::write(dir.join("acp"), format!("{} {args}", python_agent(&script))).expect("the agent's command");
+    let post = |method: &'static str, body: serde_json::Value| async move {
+        let res = reqwest::Client::new()
+            .post(format!("{base}/api/{method}"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+            .expect(method);
+        let ok = res.status().is_success();
+        let body: serde_json::Value = res.json().await.expect(method);
+        assert!(ok, "{method} failed: {body}");
+        body
+    };
+    post("syncHqBots", serde_json::json!({})).await;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let seen = snapshot(base, token).await;
+        if let Some(bot) = seen["bots"].as_array().into_iter().flatten().find(|b| b["hqAgent"] == name) {
+            let id = bot["id"].as_str().expect("a bot id").to_owned();
+            post("updateBot", serde_json::json!({"id": id, "tasks": false})).await;
+            return id;
+        }
+        assert!(Instant::now() < deadline, "the agent {name} never got a bot");
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 

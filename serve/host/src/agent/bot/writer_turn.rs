@@ -165,12 +165,8 @@ impl Actor {
             "off"
         } else if self.active_routine.is_some() {
             "routine"
-        } else if self.active_request.is_some() {
-            "bot"
         } else if self.active_group.is_some() {
             "group"
-        } else if self.compacting.is_some() {
-            "compact"
         } else {
             "app"
         }

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use super::schedules::{RUNS_FIRED_TURNS, Schedules};
 use super::schedules_gate::{
-    Facts, MESSAGE, launchd_runs, launchd_sched_locks, refusal, serves_rows,
+    Facts, MESSAGE, launchd_has_holder, launchd_runs, launchd_sched_locks, refusal, serves_rows,
 };
 use crate::cutover::Module;
 
@@ -17,6 +17,7 @@ fn all() -> Facts {
         serves_rows: true,
         launchd: Ok(()),
         sched_locks: Ok(()),
+        holder: Ok(()),
     }
 }
 
@@ -260,4 +261,77 @@ fn condition_five_refuses_on_its_own() {
         r.starts_with(MESSAGE) && r.contains("5: launchd's kith-sched") && !r.contains("4:"),
         "{r}"
     );
+}
+
+#[test]
+fn a_missing_holder_refuses_on_its_own_and_names_it() {
+    let r = refusal(&Facts {
+        holder: Err("there is no kith-holder for launchd's host (/x/kith)".into()),
+        ..all()
+    })
+    .unwrap();
+    assert!(
+        r.starts_with(MESSAGE) && r.contains("7: there is no kith-holder") && !r.contains("5:"),
+        "{r}"
+    );
+}
+
+fn executable(path: &Path) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, "#!/bin/sh\n").unwrap();
+    let mut perm = std::fs::metadata(path).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+    std::fs::set_permissions(path, perm).unwrap();
+}
+
+/// A serve plist for `kith`, with `holder` as the host's `KITH_HOLDER_BIN` when given.
+fn write_serve_plist(home: &Path, kith: &Path, holder: Option<&Path>) {
+    let dir = home.join("Library/LaunchAgents");
+    std::fs::create_dir_all(&dir).unwrap();
+    let env = holder.map_or_else(String::new, |h| {
+        format!("<key>KITH_HOLDER_BIN</key><string>{}</string>", h.display())
+    });
+    std::fs::write(
+        dir.join("dev.kith.serve.plist"),
+        format!(
+            "<plist><dict><key>ProgramArguments</key><array><string>{}</string><string>serve</string><string>--port</string><string>1</string></array><key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/bin</string>{env}</dict></dict></plist>",
+            kith.display()
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn the_holder_is_the_one_launchds_host_would_start() {
+    let t = tempfile::tempdir().unwrap();
+    let home = t.path();
+    // No plist: nothing says which host starts, so the gate refuses.
+    let why = launchd_has_holder(home).unwrap_err();
+    assert!(
+        why.contains("kith-holder") && why.contains("dev.kith.serve.plist"),
+        "{why}"
+    );
+
+    // A kith with no holder beside it, and one with it.
+    let bare = home.join("cli/a/bin/kith");
+    executable(&bare);
+    write_serve_plist(home, &bare, None);
+    assert!(
+        launchd_has_holder(home)
+            .unwrap_err()
+            .contains("kith-holder")
+    );
+    let full = home.join("cli/b/bin/kith");
+    executable(&full);
+    executable(&home.join("cli/b/bin/kith-holder"));
+    write_serve_plist(home, &full, None);
+    assert_eq!(launchd_has_holder(home), Ok(()));
+
+    // The host's own KITH_HOLDER_BIN counts; a path that is not a file does not.
+    let elsewhere = home.join("elsewhere/kith-holder");
+    executable(&elsewhere);
+    write_serve_plist(home, &bare, Some(&elsewhere));
+    assert_eq!(launchd_has_holder(home), Ok(()));
+    write_serve_plist(home, &full, Some(&home.join("gone")));
+    assert!(launchd_has_holder(home).is_err());
 }

@@ -1,0 +1,51 @@
+kith-account — the accounts kith runs on: a managed set, any number per provider, all equal.
+
+  kith account list [--agent A] [--json]   every account: id, whether it is in the set (and its place), ready / out until <time>
+                                           / signed out (and the command that fixes it), last usage, pins. --json: an array of rows
+                                           (docs/accounts.md). With --agent: that agent's order and where pick would start
+  kith account add claude <name> [--yes] [--json]   an extra Claude subscription account in ~/.kith/accounts/claude/<name>, its login, and
+                                           it joins the set at the end (an account already there is signed in again, no copy)
+  kith account add codex <name> [--json]   an extra Codex login in ~/.kith/accounts/codex/<name>, the same
+                                           --json does not log in: it makes the folder and prints {ok, id, harness, name, dir, created,
+                                           login: {argv, env}, warning} for the caller to run the login in a terminal. A new Claude
+                                           account needs --yes with --json (without it: {ok: false, error, warning}, exit 2)
+  kith account add claude-api:<profile>    an Anthropic API key entry (kith auth set anthropic/<profile> ANTHROPIC_API_KEY, then
+                                           kith auth grant AGENT anthropic anthropic/<profile>); joins the set
+  kith account login <id>                  sign an existing account in again, in its own folder (claude, codex, claude:<name>, codex:<name>)
+  kith account remove <id> [--yes] [--json]       leaves the set (and every agent's list and pin); a folder account also loses its
+                                           folder and the login kept in it (asks, or --yes). The default login's credentials are never
+                                           touched. `remove <harness> <name>` is the same
+  kith account order <id>...               these first, in this order; the rest of the set after them
+  kith account move <id> --to N            put the account at place N of the set (1 = first)
+  kith account policy [fill|spread]        how a run picks among the set: fill (the set's order, each until it is out; the default)
+                                           or spread (the ready account with the most room, ties by least recently started)
+  kith account pin <agent> <id> [--only]   the account the agent's runs start on. Preferred (default): when it is out the agent
+                                           uses the rest of the set; --only: never anything else
+  kith account unpin <agent>               the agent follows the set again
+  kith account cross-harness [on|off|reset] [--agent A]   whether accounts of another harness in the set also serve as fallbacks
+                                           (a Claude agent falling over to Codex). Off by default: the set serves each agent with its
+                                           own harness's accounts; an agent's own list (set --agent A) may name any. Shown by list
+  kith account set <id>... [--agent A]     the whole set (or A's own subset and order) in one write; no ids: empty.
+                                           `set --reset --agent A` drops A's own list, so A follows the global set (what the host calls)
+  kith account out <id> [--until T] [--reason R] [--extend]   mark an account out of usage until T (a Unix time, 90m, 2h, 1d, or
+                                           "2026-11-04 09:30" local; default an hour) so runs skip it. --extend never shortens a
+                                           mark that is already later (what the host sends: it only knows its own limit)
+  kith account clear <id>                  back to ready
+  kith account usage <id> [--json READING]  record a usage reading ('{"windows": [{"name": "five_hour", "percent": 71.5,
+                                           "resets_at": 1900000000}]}', or - for stdin); without --json print the stored one
+  kith account migrate                     write settings.json in the account-set shape now (reading migrates in memory; every write persists it)
+  kith account pick <agent> [--json]       the ordered candidates a run of the agent would try now: the pin, then the set by
+                                           policy; accounts that are out or signed out are skipped (and listed). All out: the first
+
+An account id is claude (the default login), claude:<name>, claude-api:<profile>, codex or codex:<name> (lib/kith_accounts.py).
+The set and the policy are in settings.json (lib/kith_settings.py); what each account is doing right now (out until, usage, last
+start) is one state file, <state>/accounts/state.json, which this command and every run write. An agent runs on the accounts of
+its own harness first (a Claude agent: claude, claude:<name>, claude-api:<profile>), then on those of another harness the set
+lists (Codex). A session is continued only under the account it was made under: after a change of account the next turn starts a
+new session. Each login is made by the harness itself, in the account's folder (CLAUDE_CONFIG_DIR / CODEX_HOME), as you at the
+terminal; kith never reads, copies or prints a token.
+
+Older commands, deprecated but working (the same effect on the set):
+  kith account use [<id>] [--agent A] [--reset] [--json]   = pin A <id> / the global first account; --reset = unpin / the default login first
+  kith backup list|add|remove ...          the accounts after the first one, as a list (add --at N places one)
+  kith account backup set [id ...] [--agent A] | reset --agent A    the accounts after the first, whole / forget A's own list

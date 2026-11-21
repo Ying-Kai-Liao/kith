@@ -1,65 +1,86 @@
-#!/usr/bin/env python3
-"""kith-room-ledger pre|post --agent A --home DIR — Pre/PostToolUse hook for Write, Edit and MultiEdit.
+#!/bin/sh
+# kith-room-ledger pre|post --agent A --home DIR: this script moved to the kith program (`kith kernel room-ledger`,
+# core/kernel/src/room_ledger/). It stays at this path for the runs that hold it: the Pre/PostToolUse hooks of a run started
+# before the launch wrote the Rust call, and the launch itself while no program lists the module. Same stdin, same effect as the
+# program.
+#
+# Unlike the other stubs, a program that is not found is NOT an error exit: this is a hook of every Write, Edit and MultiEdit, and
+# its command ends in `|| true`, so it must exit 0 whatever happens. But "nothing recorded" is not the safe direction either: a
+# `post` that is skipped leaves the older, wider record in place for the new text, and a `pre` that is skipped lets the `post`
+# record a note from before the ledger as wide as the room. So with no program a `pre` for a `file_path` under the run's own
+# `<home>/memory/rooms/` says "deny" in the PreToolUse JSON on stdout (exit 2 would be swallowed by the `|| true`): room notes are
+# refused while the program is missing, nothing else is (not a file whose content mentions rooms/, not another folder named
+# rooms). A `post` prints nothing. The path is judged as written and with its folder's links resolved, as the program does; only
+# when no file_path can be read is the whole input matched, for `/memory/rooms/`.
+#
+# Finds the program without Python (see bin/project-id): the first candidate whose `kernel version` lists "room-ledger":
+#   $KITH_BIN, the release this file sits in (<release>/share/kith/kernel/bin -> <release>/bin/kith), a kith on PATH that is
+#   not a kernel entry, the host kith serve installed, a build in the checkout (the builds come first with KITH_DEV_BIN=1).
+self=$0
+n=0
+while [ -L "$self" ] && [ $n -lt 16 ]; do
+  link=$(readlink "$self") || exit 0
+  case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+  n=$((n + 1))
+done
+# The logical path, as bin/kith keeps it (it may be a link to a path with spaces).
+kernel=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd) || exit 0
+[ -n "$kernel" ] || exit 0
 
-Keeps the write-time record of room notes (lib/kith_facets.py, "the room-note ledger"): who was in the room when each
-note under <home>/memory/rooms/<room>/ was written, so a note never reaches someone who was not there. Reads the hook
-input on stdin and the run's members from the environment the host set (KITH_ROOM, KITH_ROOM_MEMBERS or
-KITH_ROOM_OWNER_ONLY), which the agent cannot change for its own hook. `pre` notes that the file already existed; `post`
-narrows the note's record to the people present now (the first write records them). A write outside a room folder, or
-into another room's folder than the run's, records nobody but the owner. It prints nothing and never fails the tool call.
-"""
-import os
-import sys
+# A kith program: executable, not a kernel bash entry (the last three parts of its real path are kernel/bin/kith), and its
+# `kernel version` lists the module.
+usable() {
+  [ -n "$1" ] && [ -f "$1" ] && [ -x "$1" ] || return 1
+  f=$1
+  k=0
+  while [ -L "$f" ] && [ $k -lt 16 ]; do
+    l=$(readlink "$f") || return 1
+    case $l in /*) f=$l ;; *) f=$(dirname "$f")/$l ;; esac
+    k=$((k + 1))
+  done
+  case $(cd "$(dirname "$f")" 2>/dev/null && pwd -P)/$(basename "$f") in */kernel/bin/kith) return 1 ;; esac
+  "$1" kernel version 2>/dev/null | grep -q '"room-ledger"'
+}
+# Each try sets bin and succeeds on a usable program (a path may have a space: nothing here is split).
+try() { usable "$1" && bin=$1; }
+try_built() {
+  target=${CARGO_TARGET_DIR:-$kernel/../serve/host/target}
+  try "$target/dev-app/kith" || try "$target/release/kith" || try "$target/debug/kith"
+}
+try_path() {
+  oldifs=$IFS; IFS=:
+  for d in $PATH; do
+    if [ -n "$d" ] && try "$d/kith"; then IFS=$oldifs; return 0; fi
+  done
+  IFS=$oldifs
+  return 1
+}
+try_release() { case $kernel in */share/kith/kernel) try "$kernel/../../../bin/kith" ;; *) return 1 ;; esac; }
+bin=
+if [ "${KITH_DEV_BIN:-}" = 1 ]; then
+  try "${KITH_BIN:-}" || try_built || try_path || try "$HOME/.kith/serve/bin/kith-serve" || try_release
+else
+  try "${KITH_BIN:-}" || try_release || try_path || try "$HOME/.kith/serve/bin/kith-serve" || try_built
+fi
+if [ -n "$bin" ]; then exec "$bin" kernel room-ledger --kernel "$kernel" "$@"; fi
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
-import kith_facets  # noqa: E402
-
-
-def target(home, data):
-    """(room, rel) for a file under <home>/memory/rooms/<room>/, links resolved on both sides, else None."""
-    path = (data.get('tool_input') or {}).get('file_path')
-    if not isinstance(path, str) or not os.path.isabs(path):
-        return None
-    mem = os.path.realpath(os.path.join(home, 'memory'))
-    real = os.path.realpath(path)
-    if not real.startswith(mem + os.sep):
-        return None
-    rel = real[len(mem) + 1:]
-    parts = rel.split('/')
-    if len(parts) < 3 or parts[0] != 'rooms' or not kith_facets.ID.match(parts[1]):
-        return None
-    return parts[1], rel
-
-
-def present_now(room):
-    """The people in this run's room, the owner implied: unknown, owner-only, or a run in another room, is nobody."""
-    if os.environ.get('KITH_ROOM', '') != room:
-        return []
-    kind = 'owner' if os.environ.get('KITH_OWNER') == '1' or not os.environ.get('KITH_PERSON') else 'person'
-    return kith_facets.env_members(kind) or []
-
-
-def main(argv):
-    import json
-    if len(argv) < 5 or argv[0] not in ('pre', 'post') or argv[1] != '--agent' or argv[3] != '--home':
-        return 0
-    mode, agent, home = argv[0], argv[2], argv[4]
-    try:
-        data = json.load(sys.stdin)
-        found = target(home, data)
-        if not found:
-            return 0
-        room, rel = found
-        if mode == 'pre':
-            existed = os.path.isfile(os.path.join(home, 'memory', rel))
-            if existed and rel not in kith_facets.read_ledger(agent, room):
-                kith_facets.record_room_write(agent, room, rel, [], True)
-            return 0
-        kith_facets.record_room_write(agent, room, rel, present_now(room), False)
-    except Exception:  # noqa: BLE001  a record that cannot be written leaves the note unrecorded: owner-only
-        pass
-    return 0
-
-
-if __name__ == '__main__':
-    sys.exit(main(sys.argv[1:]))
+# No program: refuse a room note's write (see the head of this file), do nothing else.
+[ "${1:-}" = pre ] || exit 0
+home=${5:-}
+input=$(cat 2>/dev/null) || exit 0
+file=$(printf '%s' "$input" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+room=
+if [ -z "$file" ]; then
+  case $input in */memory/rooms/*) room=1 ;; esac
+elif [ -n "$home" ]; then
+  case $file in "$home"/memory/rooms/*) room=1 ;; esac
+  case $file in
+    /*)
+      dir=$(cd "$(dirname "$file")" 2>/dev/null && pwd -P) || dir=
+      mem=$(cd "$home/memory" 2>/dev/null && pwd -P) || mem=
+      [ -z "$mem" ] || case $dir/ in "$mem"/rooms/*) room=1 ;; esac ;;
+  esac
+fi
+[ -n "$room" ] || exit 0
+printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"the room ledger could not run (no kith program lists the room-ledger module; kith update), so this write to a room note is refused"}}'
+exit 0

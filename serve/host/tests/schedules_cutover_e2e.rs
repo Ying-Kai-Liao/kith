@@ -17,7 +17,7 @@
 #[allow(dead_code)]
 mod common;
 
-use chrono::{Timelike as _, Utc};
+use chrono::{Datelike as _, Timelike as _, Utc};
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::io::{BufRead as _, BufReader};
@@ -406,9 +406,25 @@ async fn seed_routine(host: &Host, minute: u32) -> String {
 
 // --- (a) -------------------------------------------------------------------------------------------------------------------
 
+/// A loaded machine can set up past the minute edge the case waits for. The whole case is then run again in a fresh lab
+/// at a later minute (never moved in place: the step has copied the schedules into the core by then, and a host that was
+/// up at the edge has already run the routine itself), at most this many times.
+const EDGE_TRIES: u32 = 3;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_slot_due_while_the_host_is_down_fires_exactly_once_when_the_host_starts() {
-    let lab = Lab::new("a", None);
+    for try_no in 1..=EDGE_TRIES {
+        if slot_due_while_the_host_is_down(try_no).await {
+            return;
+        }
+        eprintln!("try {try_no}: setup missed the minute edge; starting the case again at a later minute");
+    }
+    panic!("setup missed the minute edge {EDGE_TRIES} times: the machine is too slow, run it again");
+}
+
+/// One try of case (a): `false` when setup was not done before the edge (nothing was asserted), else the case's asserts.
+async fn slot_due_while_the_host_is_down(try_no: u32) -> bool {
+    let lab = Lab::new(&format!("a{try_no}"), None);
     lab.step_before_schedules();
     // Early in a minute, so the whole setup is done before the next one begins: that edge is the slot.
     wait_for_second(2, 12);
@@ -425,7 +441,9 @@ async fn a_slot_due_while_the_host_is_down_fires_exactly_once_when_the_host_star
     std::fs::write(lab.kith_home.join("agents/mel/jobs.json"), jobs).unwrap();
 
     lab.step_ok("schedules");
-    assert!(Utc::now() < edge, "the step was not done before the minute edge: a slow machine, run it again");
+    if Utc::now() >= edge {
+        return false;
+    }
     // The host stays down past the edge.
     std::thread::sleep((edge + chrono::Duration::seconds(2) - Utc::now()).to_std().unwrap());
     // `kith-sched` (launchd is not running ticks here) stands down at the tombstone and starts nothing.
@@ -457,6 +475,7 @@ async fn a_slot_due_while_the_host_is_down_fires_exactly_once_when_the_host_star
     assert_eq!(lab.fires(), rows, "a host restart wrote a fire row");
     assert_eq!((lab.runs_log().len(), lab.prompts()), (1, 1), "a host restart ran a job again");
     lab.stop_host(host);
+    true
 }
 
 // --- (b) -------------------------------------------------------------------------------------------------------------------
@@ -683,12 +702,18 @@ fn count(lab: &Lab, sql: &str) -> i64 {
 async fn kith_schedule_on_a_switched_mac_talks_to_the_core_in_kith_scheds_words() {
     let lab = Lab::new("e", None);
     lab.step_before_schedules();
-    let hourly = json!({"id": "hourly", "cron": "0 * * * *", "task": "do it"});
+    // Nothing here may fire at the wall clock's hour. `hourly` gets noon UTC on the day 30 days out (the lab runs in UTC):
+    // a real next slot that both sides must find and print the same way, far from the catch-up window. The `add` calls
+    // below use Feb 31, a cron no month has, since they only compare keys or refusals.
+    let slot = Utc::now() + chrono::Duration::days(30);
+    let cron = format!("0 12 {} {} *", slot.day(), slot.month());
+    let hourly = json!({"id": "hourly", "cron": cron, "task": "do it"});
     std::fs::write(lab.kith_home.join("agents/mel/jobs.json"), format!("{}\n", json!([hourly]))).unwrap();
     // What kith-sched itself answers before the switch: the shapes, and the file `add` leaves, to compare with after it.
     let (rc, before_ls) = cli_json(&lab, &["ls", "mel"]);
     assert_eq!(rc, 0, "{before_ls}");
-    let add = |agent: &'static str| ["add", agent, "0 9 * * *", "Do B!", "-m", "sonnet", "-e", "low"];
+    assert!(job_rows(&before_ls, "hourly")["next"].is_string(), "kith-sched finds the dated slot: {before_ls}");
+    let add = |agent: &'static str| ["add", agent, "0 0 31 2 *", "Do B!", "-m", "sonnet", "-e", "low"];
     let (rc, before_add) = cli_json(&lab, &add("house"));
     assert_eq!(rc, 0, "{before_add}");
     let house_file = jobs_text(&lab, "house");
@@ -722,7 +747,7 @@ async fn kith_schedule_on_a_switched_mac_talks_to_the_core_in_kith_scheds_words(
     let guest = lab
         .cmd("python3")
         .arg(lab.kernel.join("bin/kith-sched"))
-        .args(["add", "mel", "5 5 * * *", "guest job", "--json"])
+        .args(["add", "mel", "0 0 31 2 *", "guest job", "--json"])
         .env("KITH_PERSON", "sam")
         .output()
         .unwrap();
@@ -777,7 +802,7 @@ async fn kith_schedule_on_a_switched_mac_talks_to_the_core_in_kith_scheds_words(
     // Without a daemon nothing is done and the line says so: the files are the core's, so there is no fallback.
     lab.stop_host(host);
     let before = jobs_text(&lab, "mel");
-    let out = lab.sched(None, &["add", "mel", "1 1 * * *", "late"]);
+    let out = lab.sched(None, &["add", "mel", "0 0 31 2 *", "late"]);
     assert_eq!(out.status.code(), Some(1), "{}", text(&out));
     assert!(text(&out).contains("Kith core is not answering"), "{}", text(&out));
     assert_eq!(jobs_text(&lab, "mel"), before);

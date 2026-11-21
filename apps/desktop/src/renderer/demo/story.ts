@@ -11,13 +11,14 @@ const CWD = '/Users/demo/code/pace'
 const pace = { kind: 'project' as const, project: 'pace', path: CWD, name: 'pace', inherited: false }
 
 export type SeedBot = Pick<Bot, 'id' | 'name' | 'description' | 'avatarColor' | 'avatarShape' | 'backend' | 'model'> &
-  Partial<Pick<Bot, 'hqAgent' | 'avatarSource' | 'kind' | 'members' | 'permission' | 'status' | 'activity' | 'unread' | 'folder' | 'workingChat' | 'workingThread' | 'botGuest'>>
+  Partial<Pick<Bot, 'hqAgent' | 'needsKithAgent' | 'avatarSource' | 'kind' | 'members' | 'permission' | 'status' | 'activity' | 'unread' | 'folder' | 'workingChat' | 'workingThread' | 'botGuest'>>
 
 export const bots: SeedBot[] = [
   { id: 'pacer', hqAgent: 'pacer', name: 'Pacer', description: 'Owns the pace math', avatarColor: '', avatarShape: 'blob', backend: 'claude', model: 'opus', permission: 'default', status: 'needsInput', activity: 'Needs approval: Edit src/pace.js', unread: 1, folder: pace },
-  { id: 'scout', name: 'Scout', description: 'Finds things in the repo and builds them', avatarColor: 'kith:mint', avatarShape: 'blob', backend: 'codex', model: null, unread: 1, status: 'working', activity: 'Running npm test', workingChat: 'scout', workingThread: 's1', folder: pace },
-  { id: 'reviewer', name: 'Reviewer', description: 'Reviews every change before it ships', avatarColor: 'kith:violet', avatarShape: 'blob', backend: 'claude', model: 'sonnet', unread: 1, folder: pace },
-  { id: 'relay', name: 'Relay', description: 'Writes the release notes', avatarColor: 'kith:sky', avatarShape: 'blob', avatarSource: 'spare:globe', backend: 'codex', model: null, unread: 1 },
+  { id: 'scout', hqAgent: 'scout', name: 'Scout', description: 'Finds things in the repo and builds them', avatarColor: 'kith:mint', avatarShape: 'blob', backend: 'codex', model: null, unread: 1, status: 'working', activity: 'Running npm test', workingChat: 'scout', workingThread: 's1', folder: pace },
+  { id: 'reviewer', hqAgent: 'reviewer', name: 'Reviewer', description: 'Reviews every change before it ships', avatarColor: 'kith:violet', avatarShape: 'blob', backend: 'claude', model: 'sonnet', unread: 1, folder: pace },
+  // The one flagged native row (one-bot-model C5): it no longer runs, so its chat shows the "Make a kith agent like this" actions.
+  { id: 'relay', needsKithAgent: true, name: 'Relay', description: 'Writes the release notes', avatarColor: 'kith:sky', avatarShape: 'blob', avatarSource: 'spare:globe', backend: 'codex', model: null, unread: 1 },
   // Bot-guest chats: an outside bot asking Pacer (read-only here), one Grok and one of another kind.
   { id: 'pacer-grok', hqAgent: 'pacer', name: 'Pacer', description: 'Owns the pace math', avatarColor: '', avatarShape: 'blob', backend: 'claude', model: 'opus', folder: pace, botGuest: { botId: 'bg_invited', name: 'Rex', provider: 'grok', ownerPerson: null, ownerName: null } },
   { id: 'pacer-other', hqAgent: 'pacer', name: 'Pacer', description: 'Owns the pace math', avatarColor: '', avatarShape: 'blob', backend: 'claude', model: 'opus', folder: pace, botGuest: { botId: 'bg_active', name: 'Max', provider: 'other', ownerPerson: 'mia', ownerName: 'Mia' } },
@@ -202,7 +203,7 @@ export const secretEntries: SeedEntry[] = [
  * Telegram), held by a terminal, waiting on an approval, and at work. Builder works two lanes at once.
  */
 export const taskBot: SeedBot = {
-  id: 'builder', name: 'Builder', description: 'Builds pace features', avatarColor: 'kith:sky', avatarShape: 'blob', backend: 'claude', model: 'opus',
+  id: 'builder', hqAgent: 'builder', name: 'Builder', description: 'Builds pace features', avatarColor: 'kith:sky', avatarShape: 'blob', backend: 'claude', model: 'opus',
   status: 'working', activity: 'Running npm test', folder: pace,
 }
 export const taskLanes = [{ chat: 'builder', thread: 't4' }, { chat: 'builder', thread: 't3' }]

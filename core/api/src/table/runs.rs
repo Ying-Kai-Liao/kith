@@ -14,7 +14,7 @@ pub(super) const ROWS: &[Method] = &[
         )],
         "json",
         &["kernel", "core-run", "recall"],
-        Served::Kernel,
+        Served::Core,
         Stability::Experimental,
     )
     .principals(RUN),
@@ -28,7 +28,7 @@ pub(super) const ROWS: &[Method] = &[
         )],
         "json",
         &["kernel", "core-run", "memory-search"],
-        Served::Kernel,
+        Served::Core,
         Stability::Experimental,
     )
     .principals(RUN),

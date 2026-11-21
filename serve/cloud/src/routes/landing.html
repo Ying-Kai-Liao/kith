@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Kith</title>
-<meta name="description" content="Kith makes the agents you build on your own computer shareable. Send someone a link; your agent keeps working on your Mac.">
+<meta name="description" content="Kith turns your Claude Code, Codex or pi setup into agents with their own skills, memory and accounts, each a folder on your Mac that you talk to in one app, call from any repo and share with a link.">
 <link rel="icon" href="img/mark.png">
 <style>
 /* The artifact viewer's base styles the page was designed in; the room's script relies on [hidden] winning. */
@@ -18,11 +18,11 @@ img{max-width:100%}
 @font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:500;font-display:swap;src:url(fonts/jetbrains-mono-500-latin.woff2) format("woff2")}
 </style>
 <style>
-/* Layout: one page on the morning sky (night sky in dark mode); centred hero around a shared-agent card, then left-aligned sections on a 1120 column */
+/* Layout: one page on the morning sky (night sky in dark mode); hero with the app window, then sections on a 1120 column: three steps, the folder, sharing (the room), what is included, questions */
 :root{
   --bg:#FFFFFF; --fg:#14161B; --muted:#5F6472; --soft:#4B5160; --line:#E6E7EE; --panel:#F5F5FA;
   --card:#FFFFFF; --inset:#F5F5FA; --bubble:#E9E9EF; --btn:#14161B; --btn-fg:#FFFFFF; --ghost:rgba(255,255,255,.72);
-  --focus:#6A45F2; --ok:#178357; --video:#8E6BFF; --code-bg:#14161B; --code-fg:#E9EAF0; --code-dim:#8D93A3;
+  --focus:#6A45F2; --ok:#178357; --video:#8E6BFF; --code-bg:#14161B; --code-fg:#E9EAF0; --code-dim:#8D93A3; --code-line:rgba(255,255,255,.09);
   --shadow:0 24px 60px -16px rgba(30,40,80,.24),0 0 0 1px rgba(20,22,27,.06);
   --sky:url(img/sky-day.jpg); --sky-card:url(img/sky-card.jpg);
   --display:Nunito,"SF Pro Rounded",ui-rounded,system-ui,sans-serif;
@@ -54,6 +54,8 @@ h1,h2,h3,p,ul,ol{margin:0}
 .sky::after{content:"";position:absolute;inset:auto 0 0 0;height:40%;background:linear-gradient(transparent,var(--bg))}
 .col{max-width:1120px;margin:0 auto;position:relative}
 .ico{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ico.s{width:15px;height:15px}
+.ico.dim{color:var(--muted)}
 
 /* buttons */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 20px;border-radius:22px;border:0;
@@ -73,84 +75,144 @@ nav .links a:hover{color:var(--fg)}
 nav .btn{margin-left:auto}
 nav .btn + .btn{margin-left:-16px}
 
-/* hero: copy left, a live room right */
-.hero-b{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,600px);gap:64px;align-items:center;padding-block:clamp(40px,6vw,72px) 0}
+/* hero: copy left, the app's home right */
+.hero-b{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,620px);gap:56px;align-items:center;padding-block:clamp(40px,6vw,72px) 0}
 .hero-b .copy{display:flex;flex-direction:column;gap:20px;min-width:0}
 .hero-b h1{max-width:9em}
-.hero-b .acts{justify-content:flex-start;margin-top:8px}
-.hero-b .fine{max-width:34em}
-#link .intro{max-width:none;align-items:center;text-align:center}
-#link h2{max-width:16em}
-/* link section (was the hero of concept A) */
-.hero{text-align:center;padding-block:clamp(40px,7vw,72px) 0;display:flex;flex-direction:column;align-items:center;gap:18px}
-.ln{display:inline-block}
+.hero-b .acts{margin-top:8px}
 h1{font:800 clamp(36px,5.4vw,60px)/1.04 var(--display);letter-spacing:-.035em;text-wrap:balance;max-width:16em}
 .lead{font-size:clamp(17px,1.6vw,19px);color:var(--soft);max-width:34em;text-wrap:pretty}
-.acts{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+.acts{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}
 .fine{font-size:14px;color:var(--muted)}
-
-.stage{display:grid;grid-template-columns:1fr 420px 1fr;gap:48px;align-items:center;margin-top:48px;text-align:left}
-.thread{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0}
-.from{font-size:12px;color:var(--muted);margin-left:14px}
-.bub{background:var(--bubble);border-radius:20px;padding:10px 14px;font-size:16px;line-height:1.4;max-width:330px}
-.share{width:100%;border-radius:22px;overflow:hidden;background:var(--card);box-shadow:var(--shadow);margin-top:4px}
-.share .art{height:200px;background:var(--sky-card) center 18%/cover;display:grid;place-items:center}
-.share .art img{width:150px;height:150px;filter:drop-shadow(0 14px 18px rgba(40,30,110,.25))}
-.share .meta{padding:16px 18px 18px;display:flex;flex-direction:column;gap:8px}
-.share .n{font:800 26px/1 var(--display);letter-spacing:-.02em}
-.by{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--muted)}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
-.share p{font-size:15px;color:var(--soft);margin-bottom:8px}
-.share .btn{width:100%}
-.notes{display:flex;flex-direction:column;gap:40px;min-width:0}
-.note h3{font:800 18px/1.2 var(--display);margin-bottom:6px;letter-spacing:-.01em}
-.note p{font-size:15px;color:var(--soft)}
-.faces{display:flex;gap:8px;margin-top:12px}
-.faces>*{width:30px;height:30px}
-
-/* arrival: the room plays in once on load: Rex, his bot, then the ask */
-@media (prefers-reduced-motion:no-preference){
-  .hero-b .room .body>*{animation:land .7s cubic-bezier(.16,1,.3,1) backwards}
-  .hero-b .room .body>:nth-child(1){animation-delay:.2s}.hero-b .room .body>:nth-child(2){animation-delay:.7s}.hero-b .room .body>:nth-child(3){animation-delay:1.3s}.hero-b .room .body>:nth-child(4){animation-delay:1.7s}
-}
+@media (prefers-reduced-motion:no-preference){.win{animation:land .7s .2s cubic-bezier(.16,1,.3,1) backwards}}
 @keyframes land{from{opacity:0;transform:translateY(14px) scale(.98)}}
 
+/* the app window: the Crew sidebar and one open chat, as in the Mac app */
+.win{position:relative;display:grid;grid-template-columns:minmax(0,272px) minmax(0,1fr);background:var(--card);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;font-size:13px;line-height:1.4}
+.win-sky{position:absolute;inset:0 0 auto 0;height:150px;background:var(--sky-card) center 30%/cover;pointer-events:none}
+.win-sky::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent,var(--card))}
+.lights{position:absolute;top:14px;left:14px;display:flex;gap:7px;z-index:1}
+.lights i{width:11px;height:11px;border-radius:50%;background:color-mix(in srgb,var(--fg) 20%,transparent)}
+.side,.chat{position:relative;display:flex;flex-direction:column;min-width:0}
+.side{border-right:1px solid var(--line)}
+.side-top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:40px 12px 8px}
+.side-top .person{width:30px;height:30px;box-shadow:0 0 0 2px rgba(255,255,255,.7)}
+.glass{background:var(--ghost);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 10%,transparent)}
+.switch{display:flex;padding:3px;border-radius:16px;font:500 12.5px var(--body)}
+.switch>span{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 12px;border-radius:13px}
+.switch .on{background:var(--card);font-weight:600;box-shadow:0 1px 3px rgba(20,22,27,.1)}
+.count{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--fg);color:var(--bg);font:600 10.5px/1 var(--body)}
+.round{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;flex:none}
+.crew{list-style:none;padding:0 6px;flex:1}
+.crow{display:flex;align-items:center;gap:10px;width:100%;padding:9px 8px;border:0;border-radius:12px;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.crow:hover{background:color-mix(in srgb,var(--inset) 60%,transparent)}
+.crow[aria-current]{background:var(--inset)}
+.face{position:relative;flex:none;width:48px;height:48px}
+.face img{display:block;width:48px;height:48px}
+.face .work{position:absolute;right:-3px;bottom:-1px;margin:0;gap:3px}
+.face .work i{width:4px;height:4px;background:var(--fg)}
+.crew .m{flex:1;min-width:0}
+.crew .top{display:flex;align-items:center;gap:6px}
+.crew b,.chat-top b{font:800 14.5px/1.25 var(--display)}
+.crew .r{margin-left:auto;display:inline-flex;color:var(--muted);font-size:11.5px;white-space:nowrap}
+.crew .st{display:block;margin-top:1px;color:var(--muted);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crew .st.ink{color:var(--fg)}
+.dock{padding:10px 12px 12px}
+.box{display:flex;align-items:center;gap:8px;height:42px;padding:0 14px 0 12px;border-radius:21px;background:var(--card);color:var(--muted);font-size:13.5px;
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 10%,transparent),0 2px 14px rgba(20,22,27,.08)}
+.chat-top{display:flex;align-items:center;gap:8px;padding:40px 16px 10px}
+.chat-top img{width:28px;height:28px}
+.chat-top span{color:var(--muted);font-size:11.5px}
+.back{display:none;place-items:center;width:28px;height:28px;margin-left:-6px;border:0;border-radius:50%;background:none;color:inherit;cursor:pointer}
+.lst{list-style:none;padding:0;font-size:13.5px;line-height:1.5}
+.lst li{padding:5px 0;border-top:1px solid var(--line)}
+.chat-body .chips .file{background:var(--inset);font-family:var(--body)}
+.chat-body .work{margin:0}
+.chat-body{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:12px;padding:12px 16px}
+.chat-body p{font-size:13.5px;line-height:1.5}
+.chat-body .bub{align-self:flex-end;font-size:13.5px;border-radius:16px;padding:8px 12px;max-width:86%}
+.chat-body .file{margin-top:0;align-self:flex-start}
+.chat .ask{margin:0;padding:14px}
+.chat .ask .q{font-size:14px}
+.chat .dock{padding-top:0}
+
 /* people and outside bots */
-.person{border-radius:50%;background:url(img/sky-card.jpg) no-repeat;background-size:320%;flex:none}
+.person{border-radius:50%;background:url(img/sky-card.jpg) no-repeat;background-size:320%;flex:none;width:32px;height:32px}
 .p1{background-position:22% 8%}.p2{background-position:70% 14%}
-.guest{border-radius:30%;background:#14161B;display:grid;place-items:center;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+.guest{border-radius:30%;background:#14161B;display:grid;place-items:center;flex:none;width:32px;height:32px;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
 .guest svg{width:55%;height:55%;stroke:#fff;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.guest.xs{width:18px;height:18px}
 
 /* sections */
 section.s{padding-block:clamp(72px,10vw,120px) 0}
 .s h2{font:800 clamp(30px,3.6vw,42px)/1.1 var(--display);letter-spacing:-.03em;text-wrap:balance}
 .s .intro{display:flex;flex-direction:column;gap:12px;max-width:36em}
-.s .intro p{font-size:18px;color:var(--soft);text-wrap:pretty}
+.s .intro p,.sub{font-size:18px;color:var(--soft);text-wrap:pretty}
+.s .intro p + p{font-size:16px}
+.sub{max-width:34em}
+.ln{display:inline-block}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,560px);gap:64px;align-items:center}
 
-/* how: a real sequence */
+/* three steps: the app first, the same thing in the terminal under it */
 .steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px;margin-top:44px;list-style:none;padding:0;counter-reset:step}
-.steps li{display:flex;flex-direction:column;gap:14px;counter-increment:step}
-.vig{height:176px;border-radius:18px;background:var(--panel);padding:20px;display:flex;flex-direction:column;justify-content:center;gap:10px}
+.steps li{display:flex;flex-direction:column;gap:14px;min-width:0;counter-increment:step}
+.vig{min-height:176px;border-radius:18px;background:var(--panel);padding:20px;display:flex;flex-direction:column;justify-content:center;gap:10px}
 .steps h3{font:600 17px var(--body);display:flex;gap:10px;align-items:baseline}
 .steps h3::before{content:counter(step);font:500 13px var(--mono);color:var(--muted)}
 .steps p{font-size:15px;color:var(--soft);max-width:30em}
+.steps .on .vig{box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--fg) 22%,transparent)}
+.steps h3 .replay{margin:0 0 0 auto;align-self:center;display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 12px 0 10px;border-radius:14px;color:var(--fg);font:600 12.5px var(--body);text-decoration:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 14%,transparent);transition:background .2s}
+.steps h3 .replay:hover{background:var(--panel)}
+.steps h3 .replay:disabled{opacity:.45;cursor:default}
+.steps h3 .replay svg{width:9px;height:10px;fill:currentColor}
+.cmd{font:500 13px/1.6 var(--mono);color:var(--soft);overflow-wrap:anywhere;margin-top:auto;padding-top:12px;border-top:1px solid var(--line)}
+.cmd .c{color:var(--muted)}
 .row{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:14px;padding:10px 12px;box-shadow:0 1px 2px rgba(20,22,27,.06)}
 .row img{width:40px;height:40px}
 .row .t{flex:1;min-width:0}
 .row .t b{font:800 15px/1.2 var(--display);display:block}
 .row .t span{font-size:13px;color:var(--muted)}
-.mini{font:600 13px var(--body);border-radius:15px;min-height:30px;padding:0 12px;display:inline-flex;align-items:center;border:0;background:var(--btn);color:var(--btn-fg)}
+.row.wrap{flex-wrap:wrap;gap:8px 12px}
+.row.wrap .link{flex-basis:112px}
+.mini{font:600 13px var(--body);border-radius:15px;min-height:30px;padding:0 12px;display:inline-flex;align-items:center;border:0;background:var(--btn);color:var(--btn-fg);flex:none}
 .mini.alt{background:transparent;color:var(--fg);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 16%,transparent)}
 .link{font:500 13px var(--mono);color:var(--soft);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.file{display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:7px 12px;border-radius:10px;background:var(--inset);font:500 13px var(--body)}
+.chips .file{margin:0;background:var(--card);font-family:var(--mono)}
+.bub{background:var(--bubble);border-radius:20px;padding:10px 14px;font-size:16px;line-height:1.4;max-width:330px}
+.vig .bub{align-self:flex-end;font-size:14px;border-radius:16px;padding:8px 12px}
 
-/* bots: the room */
-.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,560px);gap:64px;align-items:center}
-.makers{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-.makers span{font:500 14px var(--body);padding:5px 12px;border-radius:999px;background:var(--panel);color:var(--soft)}
+/* the folder */
+.tree{display:grid;grid-template-columns:minmax(0,184px) minmax(0,1fr);background:var(--code-bg);color:var(--code-fg);border-radius:18px;overflow:hidden;box-shadow:var(--shadow)}
+.tbar{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--code-line);font:500 12.5px var(--mono);color:var(--code-dim)}
+.tbar .lights{position:static}
+.tbar .lights i{background:rgba(255,255,255,.16)}
+#tree{border-right:1px solid var(--code-line)}
+.view{min-height:340px;font-size:13px}
+.pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.pane b{font-weight:500;color:var(--video)}
+.tbtn{border:0;border-radius:6px;background:none;color:inherit;font:inherit;padding:0 8px;margin-left:-8px;cursor:pointer}
+.tbtn:hover,.tbtn[aria-pressed="true"]{background:color-mix(in srgb,var(--code-fg) 16%,transparent)}
+.hsw{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+.hb{min-height:28px;padding:0 12px;border:0;border-radius:14px;background:none;color:var(--code-fg);font:600 12.5px var(--body);cursor:pointer;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--code-fg) 30%,transparent)}
+.hb[aria-pressed="true"]{background:var(--code-fg);color:var(--code-bg)}
+.pane :focus-visible{outline-color:var(--code-fg)}
+.pane{padding:18px 22px;font:500 13.5px/1.85 var(--mono);min-width:0}
+.pane .c{color:var(--code-dim)}
+.pane .h{font:600 13px var(--body);color:var(--code-dim);margin-bottom:6px;display:block}
+.cli{grid-column:1/-1;border-top:1px solid var(--code-line)}
+.cli div{white-space:pre-wrap;overflow-wrap:anywhere}
+.facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:32px;margin-top:56px;padding-top:32px;border-top:1px solid var(--line)}
+.note h3{font:800 18px/1.2 var(--display);margin-bottom:6px;letter-spacing:-.01em}
+.note p{font-size:15px;color:var(--soft)}
+
+/* sharing: the room, then what moves and what stays */
 .room{background:var(--card);border-radius:20px;box-shadow:var(--shadow);overflow:hidden}
 .room .top{display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
 .room .top b{font:600 16px var(--body);color:var(--fg)}
-.room .body{padding:18px 20px 22px;display:flex;flex-direction:column;gap:16px;min-height:380px}
+.room .body,#after{display:flex;flex-direction:column;gap:16px}
+.room .body{padding:18px 20px 22px;min-height:360px}
 .msg{display:flex;gap:12px;align-items:flex-start}
 .msg .av{width:34px;height:34px}
 .msg>div{min-width:0}
@@ -158,65 +220,107 @@ section.s{padding-block:clamp(72px,10vw,120px) 0}
 .who b{font:800 16px/1.2 var(--display)}
 .who span{font-size:12px;color:var(--muted)}
 .msg p{font-size:15px;line-height:1.45}
-.file{display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:7px 12px;border-radius:10px;background:var(--inset);font:500 13px var(--body)}
 .ask{margin-left:46px;border-radius:16px;background:var(--inset);padding:16px 18px;display:flex;flex-direction:column;gap:6px}
 .ask .h{display:flex;align-items:center;gap:8px;font:600 13px var(--body);color:var(--soft)}
 .ask .q{font:500 16px/1.4 var(--body)}
 .ask .q b{font:800 16px var(--display)}
 .ask .b{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .ask .b .mini.alt{background:var(--card)}
-.ask .b .mini{min-height:34px;padding:0 14px;font-size:14px;border-radius:17px;cursor:pointer}
+.ask .b .mini{min-height:34px;padding:0 14px;font-size:14px;border-radius:17px}
+.ask .b button{cursor:pointer}
 .answered{margin-left:46px;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
 .work{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:13px;color:var(--muted)}
 .work i{width:5px;height:5px;border-radius:50%;background:var(--video);display:inline-block;opacity:.35}
 @media (prefers-reduced-motion:no-preference){
   .work i{animation:pulse 1.2s infinite ease-in-out}.work i:nth-child(2){animation-delay:.2s}.work i:nth-child(3){animation-delay:.4s}
   .appear{animation:land .5s cubic-bezier(.16,1,.3,1) backwards}
+  .appear.late{animation-delay:.25s}
 }
 @keyframes pulse{50%{opacity:1}}
 .replay{margin-left:46px;font:500 13px var(--body);color:var(--muted);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px;align-self:flex-start}
-
-/* ledger */
-.ledger{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:0 48px;align-items:start}
+.ledger{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 48px;margin-top:64px}
 .ledger h3{font:600 15px var(--body);padding-bottom:12px;border-bottom:1px solid var(--fg);display:flex;gap:8px;align-items:center}
 .ledger ul{list-style:none;padding:0}
 .ledger li{padding:13px 0;border-bottom:1px solid var(--line);font-size:15px;color:var(--soft)}
+.ledger .also{grid-column:1/-1;margin-top:28px;max-width:64ch;font-size:15px;color:var(--soft);text-wrap:pretty}
 
-/* builders */
-.tree{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px}
-.pane{background:var(--code-bg);color:var(--code-fg);border-radius:18px;padding:20px 22px;font:500 14px/1.9 var(--mono);overflow-x:auto}
-.pane .c{color:var(--code-dim)}
-.pane .h{font:600 13px var(--body);color:var(--code-dim);margin-bottom:6px;display:block}
-.cli{grid-column:1/-1}
-.cli div{white-space:pre}
+/* included: a plain grid, no pictures */
+#included{margin-top:clamp(72px,10vw,120px);padding:clamp(28px,5vw,56px);border-radius:28px;background:var(--panel)}
+.incl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:40px 32px;margin-top:44px;list-style:none;padding:0}
+.incl li{display:flex;flex-direction:column;gap:6px}
+.incl .ico{width:22px;height:22px;margin-bottom:6px}
+.incl h3{font:600 16px var(--body)}
+.incl p{font-size:15px;color:var(--soft)}
+code{font:500 .92em var(--mono)}
 
-/* final */
-.final{padding-block:clamp(80px,11vw,140px) 40px;display:flex;flex-direction:column;align-items:flex-start;gap:16px}
-.install{display:flex;align-items:center;gap:10px;max-width:100%;margin-top:6px;border-radius:14px;background:var(--panel);padding:10px 10px 10px 16px}
-.install code{font:500 13px var(--mono);color:var(--soft);overflow-x:auto;white-space:nowrap;min-width:0}
-.install button{flex:none;border:0;background:var(--card);color:var(--fg);border-radius:10px;min-height:32px;padding:0 12px;font:600 13px var(--body);cursor:pointer;box-shadow:0 1px 2px rgba(20,22,27,.08)}
-footer{border-top:1px solid var(--line);padding-block:28px 40px;display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center;font-size:14px;color:var(--muted)}
-footer .brand{font-size:18px;color:var(--fg)}
+/* questions */
+.qa{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,720px);gap:32px 64px;align-items:start}
+.faq{border-top:1px solid var(--line)}
+.faq details{border-bottom:1px solid var(--line)}
+.faq summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 0;font:600 17px var(--body);cursor:pointer;list-style:none}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary .ico{color:var(--muted)}
+.faq details[open] summary .ico{transform:rotate(180deg)}
+.faq p{font-size:16px;color:var(--soft);max-width:40em;padding-bottom:18px;text-wrap:pretty}
+.faq p + p{margin-top:-6px}
+
+/* final, the quiet terminal line, footer */
+section.final{margin-top:clamp(72px,10vw,120px);padding:clamp(48px,8vw,88px) 24px;border-radius:28px;background:var(--sky) center top/auto 230% no-repeat;display:flex;flex-direction:column;align-items:center;text-align:center;gap:16px}
+.final .sub{text-wrap:balance}
+.final .mark{width:48px;height:48px;margin-bottom:4px}
+.final .acts{justify-content:center}
+.final .fine{color:var(--soft)}
+.quiet{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 32px;padding-block:28px 40px}
+.quiet .fine{flex:1 1 320px;max-width:56ch}
+.install{display:flex;align-items:center;gap:10px;max-width:100%;border-radius:12px;background:var(--panel);padding:6px 6px 6px 14px}
+.install code{font:500 12.5px var(--mono);color:var(--soft);overflow-x:auto;white-space:nowrap;min-width:0}
+.install button{flex:none;border:0;background:var(--card);color:var(--fg);border-radius:8px;min-height:28px;padding:0 10px;font:600 12.5px var(--body);cursor:pointer;box-shadow:0 1px 2px rgba(20,22,27,.08)}
+footer{border-top:1px solid var(--line);padding-block:40px 56px;display:grid;grid-template-columns:minmax(0,1.5fr) repeat(3,minmax(0,1fr));gap:32px;font-size:14px;color:var(--muted)}
+footer .brand{font-size:18px;color:var(--fg);margin-bottom:10px}
 footer .brand img{width:22px;height:22px}
+footer h3{font:600 14px var(--body);color:var(--fg);margin-bottom:10px}
+footer ul{list-style:none;padding:0;display:flex;flex-direction:column;gap:8px}
 footer a{text-decoration:none}
 footer a:hover{color:var(--fg)}
-footer .right{margin-left:auto}
 
 @media (max-width:1000px){
-  .stage{grid-template-columns:1fr;max-width:440px;margin-inline:auto;gap:36px}
-  .stage .notes{gap:28px}
-  .stage .thread{order:-1}
-  .split,.hero-b{grid-template-columns:1fr;gap:40px}
-  .ledger{grid-template-columns:1fr 1fr;gap:32px 32px}
-  .ledger>h2{grid-column:1/-1}
+  .split,.hero-b,.qa{grid-template-columns:1fr;gap:40px}
+  .qa{gap:24px}
+  .room .body{min-height:0}
+  .incl,.facts{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:720px){
   nav .links{display:none}
-  .steps{grid-template-columns:1fr;gap:40px}
-  .ledger{grid-template-columns:1fr}
-  .tree{grid-template-columns:1fr}
+  .sky{height:440px;min-height:0}
+  .win{grid-template-columns:1fr}
+  .chat{display:none;min-height:430px}
+  .side{border:0}
+  .win.open .side{display:none}
+  .win.open .chat{display:flex}
+  .back{display:grid}
+  .steps,.facts,.ledger,.tree{grid-template-columns:1fr}
+  #tree{border-right:0;border-bottom:1px solid var(--code-line)}
+  .view{min-height:0}
+  .install code{white-space:normal;overflow-wrap:anywhere}
+  .steps{gap:40px}
+  .facts{gap:24px}
+  .vig{min-height:0}
+  .ledger{gap:32px}
+  .ledger .also{margin-top:0}
+  .incl{gap:28px 20px}
   .ask,.answered,.replay{margin-left:0}
-  footer .right{margin-left:0}
+  footer{grid-template-columns:repeat(3,minmax(0,1fr));gap:28px 16px}
+  footer .about{grid-column:1/-1}
+}
+@media (max-width:400px){
+  nav{gap:12px}
+  nav .brand{font-size:21px}
+  nav .brand img{width:28px;height:28px}
+  nav .btn.sm{padding:0 12px;font-size:13px}
+  nav .btn + .btn{margin-left:-4px}
+  .pane{padding:14px 16px;font-size:13px}
+  .incl{grid-template-columns:1fr}
+  footer{font-size:13px;gap:28px 10px}
 }
 </style>
 </head>
@@ -225,144 +329,296 @@ footer .right{margin-left:auto}
 <div class="col">
 <nav aria-label="Main">
   <a class="brand" href="#top" id="top"><img src="img/mark.png" alt="">kith</a>
-  <div class="links"><a href="#how">How it works</a><a href="#link">Send a link</a><a href="#builders">For builders</a><a href="https://github.com/Ying-Kai-Liao/kith">GitHub</a></div>
+  <div class="links"><a href="#start">How it works</a><a href="#folder">The folder</a><a href="#share">Sharing</a><a href="https://kithbot.app/docs">Docs</a><a href="https://github.com/Ying-Kai-Liao/kith">GitHub</a></div>
   <a class="btn sm ghost" href="https://kithbot.app/join/">Sign in</a>
   <a class="btn sm" href="https://kithbot.app/download">Download</a>
 </nav>
 
 <header class="hero-b">
   <div class="copy">
-    <h1>Your agents. Your computer. Your network.</h1>
-    <p class="lead">Share an agent you built with a link. People, and the bots they bring, work with it on your Mac while you choose who gets in.</p>
+    <h1>A home for the agents you build.</h1>
+    <p class="lead">Kith turns your Claude Code, Codex or pi setup into agents with their own skills, memory and accounts. Each one is a folder on your Mac. Talk to them in one app, call them from any repo, share one with a link.</p>
     <div class="acts">
       <a class="btn" href="https://kithbot.app/download/mac"><svg class="ico" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Download for Mac</a>
-      <a class="btn ghost" href="#how">Share an agent you built</a>
+      <a class="btn ghost" href="#start">See how it works</a>
     </div>
-    <p class="fine">Also runs on <a href="https://kithbot.app/download/linux">Linux</a>. Their bots can join too: Grok, Codex, Muse, Cursor.</p>
+    <p class="fine"><span class="ln">Free and open source ·</span> <span class="ln">Apple silicon and Intel</span></p>
   </div>
-  <div class="room" aria-label="Example room">
-    <div class="top"><b>Launch teaser</b>· on Kai's MacBook</div>
-    <div class="body" id="room">
-      <div class="msg"><span class="person p2 av"></span><div><div class="who"><b>Rex</b><span>guest</span></div>
-        <p>Can your video agent cut a 40-second teaser from yesterday's shoot? My bot wrote the script.</p></div></div>
-      <div class="msg"><span class="guest av"><svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg></span><div><div class="who"><b>Rex's bot</b><span>Grok · invited by Rex</span></div>
-        <p>Script attached: three beats, hook in the first two seconds.</p>
-        <span class="file"><svg class="ico" viewBox="0 0 24 24" style="width:15px;height:15px"><path d="M7 3h7l5 5v13H7zM14 3v5h5"/></svg>teaser-script.md</span></div></div>
-      <div class="ask" id="ask">
-        <div class="h"><span class="guest" style="width:18px;height:18px"><svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg></span>Rex's bot · Grok</div>
-        <div class="q">wants to ask <b>video</b> to work in your Footage folder</div>
-        <div class="b"><button class="mini" id="allow" type="button">Allow</button><button class="mini alt" id="deny" type="button">Deny</button><button class="mini alt" id="always" type="button">Always allow Rex's bots</button></div>
-      </div>
-      <div class="msg" id="waiting"><img class="av" src="img/video.png" alt=""><div><div class="who"><b>video</b><span>Kai's agent</span></div><div class="work"><i></i><i></i><i></i>Waiting for Kai to allow</div></div></div>
-      <div id="after" hidden></div>
+  <div class="win" id="win" role="group" aria-label="The Kith app, with six agents in the crew list. Choose one to open its chat.">
+    <div class="win-sky" aria-hidden="true"></div>
+    <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="side">
+      <div class="side-top"><span class="person p1"></span><span class="switch glass"><span class="on">Crew</span><span>Board<span class="count" id="bc">1</span></span></span><span class="round glass"><svg class="ico s" viewBox="0 0 24 24"><path d="M12 5H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6M17.5 4.5l2 2L12 14l-3 1 1-3z"/></svg></span></div>
+      <ul class="crew" id="crew">
+        <li><button class="crow" type="button" data-a="video" aria-current="true"><span class="face"><img src="img/video.png" width="320" height="320" alt=""></span><span class="m"><span class="top"><b>video</b><span class="r"><span class="count">1</span></span></span><span class="st ink">Post now, or wait for Friday?</span></span></button></li>
+        <li><button class="crow" type="button" data-a="coder"><span class="face"><img src="img/coder.png" width="320" height="320" alt=""><span class="work"><i></i><i></i><i></i></span></span><span class="m"><span class="top"><b>coder</b><span class="r">working</span></span><span class="st">Editing export.ts · tests running</span></span></button></li>
+        <li><button class="crow" type="button" data-a="designer"><span class="face"><img src="img/designer.png" width="320" height="320" alt=""><span class="work"><i></i><i></i><i></i></span></span><span class="m"><span class="top"><b>designer</b><span class="r">working</span></span><span class="st">Three covers for the blog</span></span></button></li>
+        <li><button class="crow" type="button" data-a="reading"><span class="face"><img src="img/reading.png" width="320" height="320" alt=""></span><span class="m"><span class="top"><b>reading</b><span class="r">9:02</span></span><span class="st">Four saved, one worth a look</span></span></button></li>
+        <li><button class="crow" type="button" data-a="finance"><span class="face"><img src="img/finance.png" width="320" height="320" alt=""></span><span class="m"><span class="top"><b>finance</b><span class="r">Yesterday</span></span><span class="st">October summary sent</span></span></button></li>
+        <li><button class="crow" type="button" data-a="mail"><span class="face"><img src="img/mail.png" width="320" height="320" alt=""></span><span class="m"><span class="top"><b>mail</b><span class="r">Tuesday</span></span><span class="st">12 sorted, 2 need a reply</span></span></button></li>
+      </ul>
+      <div class="dock"><div class="box"><svg class="ico s" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Find or ask…</div></div>
     </div>
-</header>
-
-<section class="s" id="link">
-  <div class="intro"><h2><span class="ln">Send someone your agent.</span> <span class="ln">It keeps working on your Mac.</span></h2></div>
-  <div class="stage">
-    <div class="notes">
-      <div class="note"><h3>The agent stays home</h3><p>It runs on your Mac, next to its files and tools. People with the link talk to it there.</p></div>
-    </div>
-    <div class="thread" aria-label="Example: a shared agent in a message">
-      <div class="from">Kai</div>
-      <div class="bub">Try my video agent. It cut all my reels this month.</div>
-      <div class="share">
-        <div class="art"><img src="img/video.png" alt="The video agent: a violet camera with two eyes"></div>
-        <div class="meta">
-          <div class="n">video</div>
-          <div class="by"><span class="dot"></span>Kai's agent · runs on Kai's MacBook</div>
-          <p>Cuts long footage into shorts, adds captions, and asks Kai before it posts anything.</p>
-          <a class="btn" href="#how">Open in Kith</a>
+    <div class="chat" aria-live="polite">
+      <div class="chat-top"><button class="back" type="button" id="back" aria-label="Back to the crew"><svg class="ico s" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button><img id="cface" src="img/video.png" width="320" height="320" alt=""><b id="cname">video</b><span>Kai's MacBook</span></div>
+      <div class="chat-body" id="cbody">
+        <div class="bub">Cut a 40-second teaser from yesterday's shoot.</div>
+        <p>On it. There are 14 usable minutes from yesterday.</p>
+        <p>Done. Three beats, with the hook in the first two seconds. Captions are burned in.</p>
+        <span class="file"><svg class="ico s" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7zM14 3v5h5"/></svg>teaser-40s.mp4</span>
+        <div class="ask">
+          <div class="h">video asks</div>
+          <div class="q">Post the teaser now, or wait for Friday?</div>
+          <div class="b"><button class="mini" type="button" data-ans="now">Post now</button><button class="mini alt" type="button" data-ans="friday">Wait for Friday</button></div>
         </div>
       </div>
+      <div class="dock"><div class="box"><svg class="ico s" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span id="cmsg">Message video</span></div></div>
     </div>
-    <div class="notes">
-      <div class="note"><h3>Anyone can join in</h3><p>Send the link to a friend or a client. They can bring their Grok or Codex bot along as a guest.</p>
-        <div class="faces" aria-hidden="true"><span class="person p1"></span><span class="person p2"></span><span class="guest"><svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg></span><span class="guest"><svg viewBox="0 0 24 24"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/></svg></span></div></div>
-      <div class="note"><h3>Your data isn't in the link</h3><p>Your accounts, keys and memory stay on your Mac. Each new person or bot waits for your OK.</p></div>
-    </div>
-</section>
+  </div>
+</header>
 
-<section class="s" id="how">
-  <div class="intro"><h2>How sharing works</h2><p>Three steps, and the agent never leaves your computer.</p></div>
+<section class="s" id="start">
+  <div class="intro"><h2>An agent in three steps.</h2></div>
   <ol class="steps">
     <li>
-      <div class="vig"><div class="row"><img src="img/video.png" alt=""><div class="t"><b>video</b><span>on your MacBook · ready</span></div></div>
-        <div class="row"><img src="img/designer.png" alt=""><div class="t"><b>designer</b><span>on your MacBook · asleep</span></div></div></div>
-      <h3>Build it on your Mac</h3><p>An agent is a folder with its instructions, skills and tools. Start one with <code style="font:500 14px var(--mono)">kith new</code>.</p>
+      <div class="vig"><div class="row" data-s="2"><img src="img/reading.png" width="320" height="320" alt=""><div class="t"><b>reading</b><span>tracks what I read</span></div></div>
+        <div class="chips" data-s="3"><span class="file">agent.md</span><span class="file">skills/</span><span class="file">tools/</span></div></div>
+      <h3>Make one</h3><p>An agent is a folder that holds its instructions, skills and tools.</p>
+      <div class="cmd" data-s="1"><span class="c">$</span> <span data-type>kith new reading "tracks what I read"</span></div>
     </li>
     <li>
-      <div class="vig"><div class="row"><svg class="ico" viewBox="0 0 24 24" style="color:var(--muted)"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span class="link">Invite to video</span><span class="mini">Copy link</span></div>
-        <div class="row"><span class="person p2" style="width:32px;height:32px"></span><div class="t"><b>Rex</b><span>can use video</span></div></div></div>
-      <h3>Send the link</h3><p>Make an invite link for one agent and send it however you usually talk to them.</p>
+      <div class="vig"><div class="bub" data-s="1">What did I finish this month?</div>
+        <div class="row" data-s="2"><img src="img/reading.png" width="320" height="320" alt=""><div class="t"><b>reading</b><span>Four books. The last one on Tuesday.</span></div></div></div>
+      <h3>Talk to it</h3><p>It runs on the engine you chose, on your Mac, and remembers where it left off.</p>
+      <div class="cmd"><span class="c">$</span> kith ask reading "what did I finish?"</div>
     </li>
     <li>
-      <div class="vig"><div class="row" style="flex-direction:column;align-items:stretch;gap:10px"><div style="font-size:14px"><b style="font-family:var(--display)">Rex</b> wants to use <b style="font-family:var(--display)">video</b></div><div style="display:flex;gap:6px"><span class="mini">Allow</span><span class="mini alt">Deny</span><span class="mini alt">Always allow</span></div></div></div>
-      <h3>They use it, you approve</h3><p>Each new person or bot asks first. You choose Allow, Deny or Always allow.</p>
+      <div class="vig"><div class="row wrap" data-s="1"><svg class="ico dim" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span class="link">Invite to reading</span><span class="mini" data-copied>Copy link</span></div>
+        <div class="row" data-s="2"><span class="person p2"></span><div class="t"><b>Rex</b><span>in a browser · guest</span></div></div></div>
+      <h3>Share it</h3><p>Send a link. It keeps working on your Mac while they use it in a browser.</p>
+      <div class="cmd"><span class="c">link</span> kithbot.app/join</div>
     </li>
   </ol>
 </section>
 
-<section class="s ledger">
-  <h2>Share the agent.<br>Keep your data.</h2>
-  <div><h3><svg class="ico" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>Goes with the link</h3>
-    <ul><li>An invite to this one agent</li><li>The work it does for them</li><li>Room for their own bot</li></ul></div>
-  <div><h3><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/></svg>Stays on your Mac</h3>
-    <ul><li>The agent's files</li><li>Its memory</li><li>Your accounts and keys</li></ul></div>
+<section class="s" id="folder">
+  <div class="split">
+    <div class="intro">
+      <h2>What's in the folder.</h2>
+      <p>The role folder holds the agent's instructions, skills and tools. It is a git repo you can share. Beside it sit the agent's memory, data and files, which stay with you.</p>
+      <p>Put a role on GitHub and others install their own copy. Their agent starts with your skills and none of your memory.</p>
+      <p class="more"><a href="https://kithbot.app/agents">The agent format</a></p>
+    </div>
+    <div class="tree">
+      <div class="tbar" aria-hidden="true"><span class="lights"><i></i><i></i><i></i></span>agents/reading</div>
+      <div class="pane" id="tree" role="group" aria-label="The reading agent's folder"><span class="c">role/ · shareable</span><br>&nbsp;&nbsp;<button class="tbtn" type="button" data-f="agent.md" aria-pressed="true">agent.md</button><br>&nbsp;&nbsp;<button class="tbtn" type="button" data-f="skills" aria-pressed="false">skills/</button><br>&nbsp;&nbsp;<button class="tbtn" type="button" data-f="tools" aria-pressed="false">tools/</button><br><span class="c">yours only</span><br>&nbsp;&nbsp;<button class="tbtn" type="button" data-f="memory" aria-pressed="false">memory/</button><br>&nbsp;&nbsp;<button class="tbtn" type="button" data-f="data" aria-pressed="false">data/</button><br>&nbsp;&nbsp;<button class="tbtn" type="button" data-f="files" aria-pressed="false">files/</button></div>
+      <div class="pane view" aria-live="polite">
+        <div id="f-agent"><span class="h">role/agent.md · shareable</span><div class="pre">---
+name: reading
+description: tracks what I read
+<span id="mv">model: sonnet
+</span>effort: medium
+harness: <b id="hv">claude</b>
+---
+You keep track of what I read. Save each article with one line on why it matters. On Fridays, list what I finished.</div>
+          <div class="hsw" id="hsw" role="group" aria-label="Engine"><button class="hb" type="button" data-h="claude" aria-pressed="true">Claude Code</button><button class="hb" type="button" data-h="codex" aria-pressed="false">Codex</button><button class="hb" type="button" data-h="pi" aria-pressed="false">pi</button></div>
+          <div class="pre"><span class="c"># or for one run</span>
+kith ask reading -H <b id="hf">claude</b> "what did I finish?"</div></div>
+        <div id="f-other" hidden></div>
+      </div>
+      <div class="pane cli"><div><span class="c"># start from one someone shared on GitHub</span>
+kith install owner/repo
+<span class="c"># list its versions; kith restore brings one back</span>
+kith history reading</div></div>
+    </div>
+  </div>
+  <div class="facts">
+    <div class="note"><h3>Every version is kept</h3><p>The role is a git repo. When the agent learns a skill, that is a change you can read and roll back.</p></div>
+    <div class="note"><h3>It carries no accounts</h3><p>An agent says which services it needs. You grant one of your accounts, and the key reaches only the process that uses it.</p></div>
+    <div class="note"><h3>Your choice of engine</h3><p>One line in <code>agent.md</code> sets it: <code>harness: codex</code>. The <code>-H</code> flag changes it for one run.</p></div>
+    <div class="note"><h3>One job each</h3><p>Each agent loads only its own skills and tools. Adding a tenth doesn't weigh on the other nine.</p></div>
+  </div>
 </section>
 
-<section class="s split" id="builders">
-  <div class="intro">
-    <h2>Made an agent worth sharing?</h2>
-    <p>Each Kith agent is a folder and a git repo, in an open format. Share it from your Mac by link, or put it on GitHub so others can install their own copy.</p>
-    <p style="font-size:16px"><a href="https://github.com/Ying-Kai-Liao/kith">Read the docs on GitHub</a></p>
+<section class="s" id="share">
+  <div class="split">
+    <div class="intro">
+      <h2>Send someone your agent.</h2>
+      <p>It keeps working on your Mac. They open your link in a browser, sign in and start talking, with nothing to install. A link is for one person and works for 24 hours.</p>
+      <p>You choose guest or member. A guest asks you before anything that needs permission. A member works within the limits you set. Set a monthly spending limit for each person, and remove them whenever you like.</p>
+      <p>They can bring a bot of their own, such as Grok, as a guest. You decide whether it joins. Answer the card here to see how.</p>
+      <p class="more"><a href="https://kithbot.app/sharing">How sharing works</a></p>
+    </div>
+    <div class="room" aria-label="Example room">
+      <div class="top"><b>Launch teaser</b>· on Kai's MacBook</div>
+      <div class="body" id="room">
+        <div class="msg"><span class="person p2 av"></span><div><div class="who"><b>Rex</b><span>guest</span></div>
+          <p>Can your video agent cut a 40-second teaser from yesterday's shoot? My bot wrote the script, so I'm bringing it in.</p></div></div>
+        <div class="msg" id="waiting"><span class="guest av"><svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg></span><div><div class="who"><b>Rex's bot</b><span>Grok · invited by Rex</span></div><div class="work"><i></i><i></i><i></i>Waiting for Kai to allow this bot</div></div></div>
+        <div class="ask" id="ask">
+          <div class="h"><span class="guest xs"><svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg></span>Rex's bot · Grok</div>
+          <div class="q">wants to ask <b>video</b></div>
+          <div class="b"><button class="mini" id="allow" type="button">Allow</button><button class="mini alt" id="deny" type="button">Deny</button><button class="mini alt" id="always" type="button">Always allow Rex's bots</button></div>
+        </div>
+        <div id="after" hidden></div>
+      </div>
+    </div>
   </div>
-  <div class="tree">
-    <div class="pane"><span class="h">The agent · shareable</span>video/<br>&nbsp;&nbsp;agent.md<br>&nbsp;&nbsp;skills/<br>&nbsp;&nbsp;tools/</div>
-    <div class="pane"><span class="h">Its data · yours only</span>video/<br>&nbsp;&nbsp;memory/<br>&nbsp;&nbsp;data/<br>&nbsp;&nbsp;files/</div>
-    <div class="pane cli"><div><span class="c"># start one yourself</span>
-kith new reading "tracks what I read"
-<span class="c"># or start from one someone shared on GitHub</span>
-kith install owner/repo</div></div>
+  <div class="ledger">
+    <div><h3><svg class="ico" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>Goes with the link</h3>
+      <ul><li>An invite to the agents you choose</li><li>The work it does for them</li><li>Their own bot can join, as a guest</li></ul></div>
+    <div><h3><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/></svg>Stays on your Mac</h3>
+      <ul><li>The agent's files</li><li>Its memory, and each person's chats</li><li>Your accounts and keys</li></ul></div>
+    <p class="also">For people you invite, the agent runs on Claude Code, on your own plan. What they ask counts toward the monthly limit you set. It answers only while your Mac is on.</p>
   </div>
 </section>
 
-<section class="final">
-  <h2 style="font:800 clamp(30px,3.6vw,42px)/1.1 var(--display);letter-spacing:-.03em">Start with one person.</h2>
-  <p style="font-size:18px;color:var(--soft);max-width:34em">Download Kith, make an invite link for one agent, and send it to someone who'd use it.</p>
-  <div class="acts" style="justify-content:flex-start">
-    <a class="btn" href="https://kithbot.app/download/mac"><svg class="ico" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Download for Mac</a>
-    <a class="btn ghost" href="#how">Share an agent you built</a>
-  </div>
-  <div class="install"><code id="cmd">curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install.sh | sh</code><button type="button" id="copy">Copy</button></div>
-  <p class="fine" style="margin-top:10px"><a href="https://kithbot.app/install">CLI installation guide</a></p>
+<section class="s" id="included">
+  <div class="intro"><h2>The rest is built in.</h2></div>
+  <ul class="incl">
+    <li><svg class="ico" viewBox="0 0 24 24"><path d="M4 5h16v11H10l-5 4v-4H4z"/></svg><h3>Chat channels</h3><p>Message an agent on Telegram, Slack or Discord.</p></li>
+    <li><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><h3>Routines on a schedule</h3><p>Run an agent at a set time. Read the result when you're back.</p></li>
+    <li><svg class="ico" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v4h4M12 8v4l3 2"/></svg><h3>Roll back any version</h3><p><code>kith history</code> lists every version. <code>kith restore</code> brings one back.</p></li>
+    <li><svg class="ico" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M17 14.5a6 6 0 0 1 4 5.5"/></svg><h3>Roles and limits</h3><p>Guest or member, and a monthly limit, for each person you invite.</p></li>
+    <li><svg class="ico" viewBox="0 0 24 24"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><h3>Cost per agent</h3><p>Every run is logged with its agent. <code>kith cost agents</code> compares them by day, week or month.</p></li>
+    <li><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><h3>Memory per person</h3><p>Each person you invite gets their own memory. They can't read yours.</p></li>
+    <li><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/></svg><h3>Your other Macs</h3><p>Ask an agent on another Mac of yours over ssh. Only the task, your code and its answer travel.</p></li>
+    <li><svg class="ico" viewBox="0 0 24 24"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/></svg><h3>Open source</h3><p>Apache-2.0. An agent is plain files in a git repo.</p></li>
+  </ul>
 </section>
+
+<section class="s qa" id="questions">
+  <div class="intro"><h2>Questions</h2><p>Something else? <a href="https://github.com/Ying-Kai-Liao/kith/issues">Ask on GitHub</a>.</p></div>
+  <div class="faq">
+    <details><summary>What do I need?<svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></summary><p>A Mac, Apple silicon or Intel, with at least one of Claude Code, Codex or pi installed and signed in. Kith is an app and the <code>kith</code> command. The app's engine picker lists Claude Code and Codex. You set pi in <code>agent.md</code>. Sharing with other people needs Claude Code.</p></details>
+    <details><summary>What does it cost?<svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></summary><p>Kith is free and open source, under Apache-2.0. Each agent runs on your own plan with the provider of its engine. Runs for people you invite use Claude Code, so they count toward your Claude plan, up to the limit you set.</p></details>
+    <details><summary>What does the person I invite need?<svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></summary><p>A browser. They open your link, sign in, and talk to the agent there.</p></details>
+    <details><summary>What if my Mac is off?<svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></summary><p>The agents don't answer until it is back on. People you invited see that your computer is offline. Their chats are kept on your Mac and show again when it's on.</p></details>
+    <details><summary>What leaves my Mac?<svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></summary><p>Chats with people you invite pass through the Kith cloud, encrypted end to end. The cloud can't read them. If a device is offline they wait there for up to 24 hours, still encrypted. The cloud keeps your account, your devices and who can reach which agent. Your prompts go to the provider of the engine the agent runs on, under your own account. Files, memory and keys stay on your Mac.</p><p>Usage analytics are on by default. They say which features you use, never your messages, code or files. Switch them off in Settings &gt; Privacy. The full list is on the <a href="https://kithbot.app/privacy">privacy page</a>.</p></details>
+    <details><summary>Does it run on Linux or Windows?<svg class="ico" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></summary><p>No, agents run on macOS only. There is a Linux app, which is a client: it reaches a Mac that runs them.</p></details>
+  </div>
+</section>
+
+<section class="s final">
+  <img class="mark" src="img/mark.png" width="48" height="48" alt="">
+  <h2>Start with one agent.</h2>
+  <p class="sub">Download Kith and make one agent for a job you do every week. When it's good, send it to someone.</p>
+  <div class="acts"><a class="btn" href="https://kithbot.app/download/mac"><svg class="ico" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Download for Mac</a></div>
+  <p class="fine"><span class="ln">Free and open source ·</span> <span class="ln">Apple silicon and Intel ·</span> <span class="ln">Runs on Claude Code, Codex or pi</span></p>
+</section>
+<div class="quiet">
+    <p class="fine">Prefer the terminal? <a href="https://kithbot.app/install">Install the <code>kith</code> command</a>. The installer offers builder, a starter agent that helps you set up the rest.</p>
+    <div class="install"><code id="cmd">curl -fsSL https://kithbot.app/install.sh | sh</code><button type="button" id="copy">Copy</button></div>
+</div>
 
 <footer>
-  <a class="brand" href="#top"><img src="img/mark.png" alt="">kith</a>
-  <a href="https://github.com/Ying-Kai-Liao/kith">GitHub</a>
-  <a href="https://kithbot.app/download">Download</a>
-  <a href="https://kithbot.app/install">Install</a>
-  <span class="right">Kith is open source. macOS and Linux.</span>
+  <div class="about"><a class="brand" href="#top"><img src="img/mark.png" alt="">kith</a><p>Kith is open source. Agents run on macOS.</p></div>
+  <div><h3>Product</h3><ul><li><a href="#start">How it works</a></li><li><a href="https://kithbot.app/sharing">Sharing</a></li><li><a href="https://kithbot.app/download">Download</a></li><li><a href="https://kithbot.app/install">Install</a></li><li><a href="https://kithbot.app/join/">Sign in</a></li></ul></div>
+  <div><h3>Builders</h3><ul><li><a href="https://kithbot.app/docs">Docs</a></li><li><a href="https://kithbot.app/agents">Agent format</a></li><li><a href="https://github.com/Ying-Kai-Liao/kith">GitHub</a></li></ul></div>
+  <div><h3>Trust</h3><ul><li><a href="#questions">Questions</a></li><li><a href="https://kithbot.app/privacy">Privacy</a></li><li><a href="https://kithbot.app/security">Security</a></li><li><a href="https://github.com/Ying-Kai-Liao/kith/blob/main/LICENSE">License</a></li></ul></div>
 </footer>
 </div>
 
 <script>
 (function(){
-  var ask=document.getElementById('ask'),after=document.getElementById('after');
-  var star='<span class="guest" style="width:18px;height:18px"><svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg></span>';
-  function done(line,reply){
-    ask.hidden=true;document.getElementById('waiting').hidden=true;
-    after.innerHTML='<div class="answered appear">'+star+line+'</div>'+reply+'<button class="replay" type="button" id="replay">Play again</button>';
-    after.hidden=false;
-    after.style.display='flex';after.style.flexDirection='column';after.style.gap='16px';
-    document.getElementById('replay').onclick=function(){after.hidden=true;after.innerHTML='';ask.hidden=false;document.getElementById('waiting').hidden=false;document.getElementById('allow').focus();};
+  var $=function(id){return document.getElementById(id);},all=function(q,el){return [].slice.call((el||document).querySelectorAll(q));};
+  var still=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var FILE='<svg class="ico s" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7zM14 3v5h5"/></svg>';
+  var u=function(t){return '<div class="bub">'+t+'</div>';},p=function(t){return '<p>'+t+'</p>';},
+    f=function(n){return '<span class="file">'+FILE+n+'</span>';},w=function(t){return '<div class="work"><i></i><i></i><i></i>'+t+'</div>';},
+    l=function(a){return '<ul class="lst"><li>'+a.join('</li><li>')+'</li></ul>';};
+
+  /* the crew: one short chat per agent; video's is the one already on the page */
+  var chats={
+    video:$('cbody').innerHTML,
+    coder:u('The export test fails one run in five. Fix it.')+p('Found it. The test reads the file before the write finishes.')+p('I made the export wait for the write. Running the suite three times to be sure.')+w('Editing export.ts · 14 of 16 tests pass'),
+    designer:u('Three covers for the blog post, in the sky style.')+p('Two are done. The second keeps the title readable at small sizes.')+'<div class="chips">'+f('cover-1.png')+f('cover-2.png')+'</div>'+w('Drawing the third'),
+    reading:u('What did I save this week?')+p('Four articles. Start with the second, it answers what you asked on Monday.')+l(['The folder is the interface','Small tools, kept sharp','Why notes outlive apps','A week without tabs']),
+    finance:u('Send me October.')+p('October has 41 transactions. Three are uncategorised. Spending is 8% under September.')+f('october-summary.pdf')+p('Tell me what the three are and I will file them.'),
+    mail:p('12 sorted this morning. Two need a reply from you.')+l(['Ana, about the invoice date','The landlord, about Thursday'])+p('A draft is ready for each. Say send, or tell me what to change.')
+  };
+  var win=$('win'),rows=all('.crow',win);
+  function open(a,show){
+    rows.forEach(function(r){if(r.getAttribute('data-a')===a)r.setAttribute('aria-current','true');else r.removeAttribute('aria-current');});
+    $('cface').src=win.querySelector('[data-a="'+a+'"] img').src;$('cname').textContent=a;$('cmsg').textContent='Message '+a;$('cbody').innerHTML=chats[a];
+    if(show)win.classList.add('open');
   }
-  var working='<div class="msg appear" style="animation-delay:.25s"><img class="av" src="img/video.png" alt=""><div><div class="who"><b>video</b><span>Kai\'s agent</span></div><p>On it. Cutting from Footage on Kai\'s MacBook, following the script\'s three beats.</p><div class="work"><i></i><i></i><i></i>Working</div></div></div>';
-  document.getElementById('allow').onclick=function(){done('You allowed Rex\'s bot this time',working);};
-  document.getElementById('always').onclick=function(){done('Rex\'s bots can always ask your agents',working);};
-  document.getElementById('deny').onclick=function(){done('You said no. Rex\'s bot can\'t ask video.','<div class="msg appear"><img class="av" src="img/video.png" alt=""><div><div class="who"><b>video</b><span>Kai\'s agent</span></div><p>Kai said no to the bot. Rex, send me the script yourself and I\'ll start.</p></div></div>');};
+  rows.forEach(function(r,i){
+    r.onclick=function(){open(r.getAttribute('data-a'),true);};
+    r.onkeydown=function(e){var d=e.key==='ArrowDown'?1:e.key==='ArrowUp'?-1:0;if(d){e.preventDefault();rows[(i+d+rows.length)%rows.length].focus();}};
+  });
+  $('back').onclick=function(){win.classList.remove('open');all('[aria-current]',win)[0].focus();};
+  $('cbody').onclick=function(e){
+    var b=e.target.closest('[data-ans]');if(!b)return;
+    var now=b.getAttribute('data-ans')==='now',card=b.closest('.ask'),row=rows[0];
+    card.outerHTML='<div class="bub appear">'+(now?'Post now':'Wait for Friday')+'</div><p class="appear late">'+(now?'Posting it to your channel now. I will send the link when it is up.':'Scheduled for Friday at 9:00. I will ask again if anything changes.')+'</p>';
+    chats.video=$('cbody').innerHTML.replace(/ appear( late)?/g,'');
+    row.querySelector('.r').textContent='now';
+    var st=row.querySelector('.st');st.className='st';st.textContent=now?'Posting the teaser':'Teaser scheduled for Friday';
+    if($('bc'))$('bc').remove();
+  };
+
+  /* the folder: what each entry holds; agent.md is already on the page */
+  var files={
+    skills:['role/skills/ · shareable','save-article/SKILL.md\nfriday-list/SKILL.md\nlearned/\n  skim-long-pdf/SKILL.md\n\n<span class="c"># read on demand, not loaded up front\n# learned/ holds the ones it wrote itself</span>'],
+    tools:['role/tools/ · shareable','reading.py\n\n<span class="c"># the tool its skills drive</span>\nreading.py add URL --why "..."\nreading.py list --since friday\nreading.py search "small tools"'],
+    memory:['memory/ · yours only','MEMORY.md\nprojects/\nsessions/\n\n<span class="c"># MEMORY.md, loaded on every call</span>\n- Prefers essays over news.\n- The Friday list goes out at 8:00.\n- Skip anything behind a paywall.'],
+    data:['data/ · yours only','reading.db\nreading.sql\n\n<span class="c"># its database, and the text dump\n# that is committed with its memory</span>'],
+    files:['files/ · yours only','reading-list/\n  2026-10.md\n  2026-11.md\n\n<span class="c"># what it made, one folder per project\n# on disk only, not in git</span>']
+  };
+  all('.tbtn').forEach(function(b){b.onclick=function(){
+    var k=b.getAttribute('data-f'),d=files[k];
+    all('.tbtn').forEach(function(x){x.setAttribute('aria-pressed',x===b);});
+    $('f-agent').hidden=!!d;$('f-other').hidden=!d;
+    if(d)$('f-other').innerHTML='<span class="h">'+d[0]+'</span><div class="pre">'+d[1]+'</div>';
+  };});
+  all('.hb').forEach(function(b){b.onclick=function(){
+    var h=b.getAttribute('data-h');
+    all('.hb').forEach(function(x){x.setAttribute('aria-pressed',x===b);});
+    $('hv').textContent=h;$('hf').textContent=h;
+    /* a model belongs to its engine: the others use their own default */
+    $('mv').hidden=h!=='claude';
+  };});
+
+  /* the three steps: choosing one plays its vignette once */
+  all('.steps li').forEach(function(li){
+    var btn=document.createElement('button');btn.type='button';btn.className='replay';btn.innerHTML='<svg viewBox="0 0 9 10" aria-hidden="true"><path d="M1 .8v8.4a.6.6 0 0 0 .9.5l6.6-4.2a.6.6 0 0 0 0-1L1.9.3a.6.6 0 0 0-.9.5z"/></svg>Play';
+    li.querySelector('h3').appendChild(btn);
+    btn.onclick=function(){
+      all('.steps li').forEach(function(x){x.classList.toggle('on',x===li);});
+      if(still)return;
+      var els=all('[data-s]',li).sort(function(a,b){return a.getAttribute('data-s')-b.getAttribute('data-s');}),at=0;
+      btn.disabled=true;
+      els.forEach(function(el){el.style.visibility='hidden';});
+      els.forEach(function(el){
+        var ty=el.querySelector('[data-type]'),txt=ty&&ty.textContent,cp=el.querySelector('[data-copied]');
+        if(ty)ty.textContent='';
+        setTimeout(function(){
+          el.style.visibility='';el.classList.remove('appear');void el.offsetWidth;el.classList.add('appear');
+          if(ty)txt.split('').forEach(function(c,i){setTimeout(function(){ty.textContent+=c;},300+i*24);});
+          if(cp)setTimeout(function(){cp.textContent='Copied';setTimeout(function(){cp.textContent='Copy link';},1500);},500);
+        },at);
+        at+=ty?600+txt.length*24:cp?1100:600;
+      });
+      setTimeout(function(){btn.disabled=false;},at);
+    };
+  });
+
+  /* the sharing room */
+  var ask=document.getElementById('ask'),wait=document.getElementById('waiting'),after=document.getElementById('after');
+  var mark='<svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg>';
+  var video='<img class="av" src="img/video.png" alt=""><div><div class="who"><b>video</b><span>Kai\'s agent</span></div>';
+  var joined='<div class="msg appear"><span class="guest av">'+mark+'</span><div><div class="who"><b>Rex\'s bot</b><span>Grok · invited by Rex</span></div><p>Script attached: three beats, hook in the first two seconds.</p><span class="file"><svg class="ico s" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7zM14 3v5h5"/></svg>teaser-script.md</span></div></div>'
+    +'<div class="msg appear late">'+video+'<p>On it. Cutting yesterday\'s shoot on Kai\'s MacBook, following the script\'s three beats.</p><div class="work"><i></i><i></i><i></i>Working</div></div></div>';
+  function done(line,reply){
+    ask.hidden=true;wait.hidden=true;
+    after.innerHTML='<div class="answered appear"><span class="guest xs">'+mark+'</span>'+line+'</div>'+reply+'<button class="replay" type="button" id="replay">Play again</button>';
+    after.hidden=false;
+    document.getElementById('replay').onclick=function(){after.hidden=true;after.innerHTML='';ask.hidden=false;wait.hidden=false;document.getElementById('allow').focus();};
+  }
+  document.getElementById('allow').onclick=function(){done('Allowed',joined);};
+  document.getElementById('always').onclick=function(){done('Allowed · Rex\'s bots now join on their own',joined);};
+  document.getElementById('deny').onclick=function(){done('Denied','<div class="msg appear">'+video+'<p>Rex, your bot wasn\'t let in. Paste the script here and I\'ll start.</p></div></div>');};
   var copy=document.getElementById('copy');
   copy.onclick=function(){
     var t=document.getElementById('cmd').textContent;

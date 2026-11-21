@@ -4,7 +4,7 @@ use super::{Actor, CANCEL_GRACE, Cmd, Done, NoticeStyle, Queued, RESUME_PROMPT, 
 use crate::agent::{folder, own_memory};
 use crate::chat::memory;
 use crate::chat::router::{self, Route};
-use crate::chat::team::RequestStatus;
+use crate::chat::status::RequestStatus;
 use crate::hub::BotStatus;
 use crate::market::requests;
 use crate::store::{EntryKind, Lane, now_ms};
@@ -19,8 +19,7 @@ impl Actor {
         // behind background work. Only what the agent itself sends, and answers to its questions, go on inside it.
         if self.off_turn.is_some() {
             match &cmd {
-                Cmd::SendToUser { .. }
-                | Cmd::SendFile { .. }
+                Cmd::SendFile { .. }
                 | Cmd::Permission { .. }
                 | Cmd::IdleFor(_)
                 | Cmd::StopIdle(_)
@@ -97,43 +96,6 @@ impl Actor {
                     self.cancel_turn().await;
                 }
             }
-            Cmd::BotRequest(ask) => {
-                let acc = self.accept(&[]).await;
-                self.queue.push_back(Queued::BotRequest(ask, acc));
-                if self.turn.is_none() {
-                    self.next_in_queue(done_tx).await;
-                }
-            }
-            Cmd::CancelAsk { id } => {
-                self.queue.retain(|q| !matches!(q, Queued::BotRequest(a, _) if a.expects_reply() && a.id == id));
-                if self.active_request.as_ref().is_some_and(|a| a.expects_reply() && a.id == id) {
-                    self.writer_drop_parked();
-                    self.hub.team.cancel_from(&self.rt);
-                    self.stop_requested = true;
-                    // The request has expired. Kill only its process so a harness
-                    // ignoring cooperative cancellation cannot block the queue.
-                    if let Some(c) = self.conn.take() {
-                        c.acp.kill().await;
-                    }
-                }
-            }
-            Cmd::SendToUser { text, reply } => {
-                // The outbox gave up waiting and told the agent the send failed; posting now would show a bubble
-                // the agent will send again.
-                if reply.is_closed() {
-                    return true;
-                }
-                // The agent may be talking out of a turn (a background task woke it).
-                let off = self.off_turn_context();
-                let result = match self.ensure_turn().await {
-                    Ok(()) => self.send_to_user(text),
-                    Err(error) => Err(error),
-                };
-                if let (true, Err(error)) = (off, &result) {
-                    self.off_turn_failed("send a message", error);
-                }
-                let _ = reply.send(result);
-            }
             Cmd::SendFile { paths, name, cancelled, reply } => match self.ensure_turn().await {
                 Ok(()) => self.begin_file(paths, name, cancelled, reply),
                 Err(error) => {
@@ -182,14 +144,9 @@ impl Actor {
                     cfg.connectors != self.cfg.connectors || cfg.computer != self.cfg.computer || memory_changed;
                 // Places with a folder of their own keep working in it; the rest follow the bot's default.
                 let default_changed = folder::default_of(&cfg) != folder::default_of(&self.cfg);
-                // Live sessions switch before their next turn (see `fast_mode`).
-                let fast_changed = cfg.fast_mode != self.cfg.fast_mode;
                 // Name, description and skill changes reach the agent as a profile update
                 // on the next message (see `context`).
                 self.cfg = cfg;
-                if fast_changed {
-                    self.fast_mode_changed();
-                }
                 if memory_changed {
                     // Claude Code's notes come or go on the memory screen.
                     memory::screen_changed(&self.hub, &self.cfg.id);
@@ -240,7 +197,6 @@ impl Actor {
 
     /// Stops this place: its running turn and everything queued here. The bot's other places carry on.
     pub(super) async fn stop(&mut self) {
-        self.hub.team.cancel_from(&self.rt);
         // Routines run in the bot's own chat.
         if self.is_main() {
             if let Err(error) = self.hub.routines.cancel_queued(&self.hub.store, &self.cfg.id) {
@@ -373,7 +329,6 @@ impl Actor {
     }
 
     pub(super) async fn next_in_queue(&mut self, done_tx: &mpsc::UnboundedSender<Done>) {
-        let main = Lane::main(&self.cfg.id);
         // A start parked for the core (Writer mode) stays first: nothing runs behind it.
         while self.turn.is_none()
             && self.routine_completion.is_none()
@@ -414,24 +369,6 @@ impl Actor {
                     }
                     continue;
                 }
-                Some(Queued::BotRequest(..)) => {
-                    let Some(Queued::BotRequest(mut ask, acc)) = self.queue.pop_front() else {
-                        unreachable!("front is an ask")
-                    };
-                    self.writer.acc = Some(acc);
-                    if ask.reply_closed() {
-                        continue;
-                    }
-                    let ids = [ask.entry_id.clone()];
-                    let prompt = ask.prompt.clone();
-                    ask.mark_started();
-                    self.active_request = Some(ask);
-                    let result = self.start_turn(main.clone(), &ids, &prompt, false, done_tx).await;
-                    if let Err(e) = result {
-                        self.start_failed(&e);
-                    }
-                    continue;
-                }
                 Some(Queued::Group(..)) => {
                     let Some(Queued::Group(turn, acc)) = self.queue.pop_front() else {
                         unreachable!("front is a group turn")
@@ -453,13 +390,6 @@ impl Actor {
                     if let Err(e) = result {
                         self.start_failed(&e);
                     }
-                    continue;
-                }
-                Some(Queued::Compact { .. }) => {
-                    let Some(Queued::Compact { idle }) = self.queue.pop_front() else {
-                        unreachable!("front is a compaction")
-                    };
-                    self.start_compaction(idle, done_tx).await;
                     continue;
                 }
                 _ => {}
@@ -491,10 +421,6 @@ impl Actor {
             if self.limit_parks(&lane, &ids).await {
                 continue;
             }
-            // A handoff waiting in the chat starts a new conversation with this message.
-            if lane == main {
-                self.handoff = self.take_handoff();
-            }
             if let Err(e) = self.start_turn(lane, &ids, &text, false, done_tx).await {
                 self.start_failed(&e);
             }
@@ -504,7 +430,7 @@ impl Actor {
     /// Whether the owner's messages `ids` wait under a limit card instead of running now: only for an owner's kith
     /// agent over its monthly limit with ask or hold (`limits`). Tell writes its line once a month and runs.
     async fn limit_parks(&mut self, lane: &Lane, ids: &[String]) -> bool {
-        if !self.is_hq() || self.cfg.person.is_some() || ids.is_empty() {
+        if self.cfg.person.is_some() || ids.is_empty() {
             return false;
         }
         // Allowed on the card: this run goes on.
@@ -543,7 +469,6 @@ impl Actor {
         }
         let status = if stopped { crate::routines::Status::Cancelled } else { crate::routines::Status::Failed };
         self.finish_routine(status, Some(format!("Could not start routine: {e:#}")), None);
-        self.complete_request(Err(anyhow!("couldn't start recipient: {e:#}")), false);
         self.complete_group(Err(anyhow!("couldn't start: {e:#}")));
         if stopped {
             self.notice("Stopped.", NoticeStyle::Info);
@@ -569,7 +494,10 @@ impl Actor {
             self.notice(&format!("Couldn't start the agent: {e:#}"), NoticeStyle::Error);
         }
         // Any other start that failed gives its wake back too (M5); one the person stopped isn't offered again now.
-        crate::cards::resume::not_started(&self.hub, &self.start_entries, !stopped);
+        // A host-native bot's refusal is final, like a Stop: its wake is dropped and its cards withdrawn, not offered
+        // again (the retry would only post the same notice).
+        let final_refusal = self.cfg.is_native();
+        crate::cards::resume::not_started(&self.hub, &self.start_entries, !(stopped || final_refusal));
         self.release_turn_claim();
         self.turn = None;
         if self.routine_completion.is_none() {
@@ -585,7 +513,6 @@ impl Actor {
             r.message = None;
             r.session = None;
         });
-        self.hub.team.cancel_from(&self.rt);
     }
 
     /// When `e` asks for signing in: marks the harness signed out and puts a sign-in card in the
@@ -603,12 +530,6 @@ impl Actor {
                 |error| tracing::warn!(bot = %self.cfg.id, error = format!("{error:#}"), "couldn't ask to sign in"),
             )
             .is_ok()
-    }
-
-    pub(super) fn complete_request(&mut self, result: Result<String>, cancelled: bool) {
-        if let Some(ask) = self.active_request.take() {
-            ask.complete(result, cancelled);
-        }
     }
 
     pub(super) fn complete_group(&mut self, result: Result<Option<String>>) {

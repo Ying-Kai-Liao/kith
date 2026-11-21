@@ -118,8 +118,7 @@ pub fn run(cmd: Command, env: &Env, stdin: Option<&str>, limit: Duration) -> Res
     })
 }
 
-/// The interpreter of the Python helpers, by absolute path, as the launch picks it for the read fence hook
-/// (`launch::settings::python3_abs`): the first executable `python3` in an absolute directory of the PATH the run has after
+/// The interpreter of the Python helpers, by absolute path: the first executable `python3` in an absolute directory of the PATH the run has after
 /// `guest_scrub` (so none in the guest's folders), else `/usr/bin/python3`. A bare `python3` would be searched on the run's own
 /// PATH, which a guest can point at a program of their own.
 pub(super) fn interpreter(env: &Env, kernel: &Path) -> String {

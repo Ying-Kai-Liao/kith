@@ -2,7 +2,7 @@
 # kith-footguns-check — bare `kith backup`, `kith update` and `kith migrate` print usage (exit 2) and act on nothing; the
 # explicit verbs (backup run, update self, migrate run) and the flagged forms reach the right program with the right args;
 # an unknown word after `kith` never starts a run. The kernel is a throwaway copy whose kith-state, kith-self-update,
-# kith-migrate, kith-pkg, kith-account and kith-info are stubs that only log their arguments, so a wrong dispatch shows
+# kith-migrate, kith-pkg and kith-info are stubs that only log their arguments, so a wrong dispatch shows
 # up in the log and nothing real is touched. Throwaway HOME and KITH_HOME.
 #
 #   kernel/tests/kith-footguns-check     a few seconds; prints each check, exits 1 when one fails
@@ -21,7 +21,7 @@ printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$KITH_
 K=$T/kernel
 cp -R "$KERNEL" "$K"
 LOG=$T/calls.log
-for p in kith-state kith-self-update kith-migrate kith-pkg kith-account kith-info; do
+for p in kith-state kith-self-update kith-migrate kith-pkg kith-info; do
   printf '#!/bin/sh\necho "%s $*" >> "%s"\nexit 0\n' "$p" "$LOG" > "$K/bin/$p"; chmod +x "$K/bin/$p"
 done
 # a claude on PATH that logs: any run an unknown word started would show here
@@ -47,7 +47,13 @@ run backup --yes;             check "flagged: backup --yes" "[[ \$calls == 'kith
 run backup --check;           check "flagged: backup --check" "[[ \$calls == 'kith-state backup --check' ]]"
 run backup --nightly;         check "flagged: backup --nightly" "[[ \$calls == 'kith-state backup --nightly' ]]"
 run backup --nightly off;     check "flagged: backup --nightly off" "[[ \$calls == 'kith-state backup --nightly off' ]]"
-run backup list --json;       check "backup list still goes to kith-account" "[[ \$calls == 'kith-account backup list --json' ]]"
+# `kith backup list|add|remove` is `kith kernel account backup ...` (R3): a fake kith program that lists the module gets
+# the line; with none the router says so in one line and exits 1, never a run.
+printf '#!/bin/sh\ncase "$1 $2" in "kernel version") echo %s ;; "memory hook") echo phase ;; *) echo "kith $*" >> "%s" ;; esac\n' "'{\"abi\":1,\"modules\":[\"account\"]}'" "$LOG" > "$T/fakekith"; chmod +x "$T/fakekith"
+KITH_BIN=$T/fakekith run backup list --json
+check "backup list goes to kith kernel account backup list" "[[ \$rc == 0 && \$calls == 'kith kernel account --kernel $K backup list --json' ]]"
+CARGO_TARGET_DIR=$T/no-build PATH=$T/bin:/usr/bin:/bin KITH_BIN=$T/nonexistent run backup list --json
+check "backup list with no kith program: one line, exit 1, nothing called" "[[ \$rc == 1 && -z \$calls ]] && grep -q 'needs the kith program' $T/err"
 
 run update self;              check "update self -> kith-self-update" "[[ \$calls == 'kith-self-update' ]]"
 run update self --check;      check "update self --check passes the flag" "[[ \$calls == 'kith-self-update --check' ]]"

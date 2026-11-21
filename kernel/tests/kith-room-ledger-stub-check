@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# kith-room-ledger-stub-check — bin/kith-room-ledger with NO kith program: it prints nothing and exits 0 for every call, except a
+# `pre` for a file_path under the run's own <home>/memory/rooms/, which says "deny" in the PreToolUse JSON (a hook that does
+# nothing would leave a note's older, wider record in place). Not a file whose content mentions rooms/, not another folder named
+# rooms, not a `post`. The stub looks for a program in KITH_BIN, PATH, ~/.kith/serve/bin and a build in the checkout: all are made
+# to find none here. Throwaway HOME.
+#
+#   kernel/tests/kith-room-ledger-stub-check     a second; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+STUB=$KERNEL/bin/kith-room-ledger
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-room-ledger-stub-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/home/agents/echo/memory/rooms/grp1" "$T/home/agents/echo/memory/other" "$T/bin" "$T/target" "$T/outside/rooms"
+H=$T/home/agents/echo
+ln -s "$H/memory/rooms/grp1" "$T/link"
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+# run MODE JSON: the stub with no program anywhere; its stdout, and its exit code in $rc
+run() {
+  out=$(printf '%s' "$2" | env -i PATH=/usr/bin:/bin HOME="$T" CARGO_TARGET_DIR="$T/target" /bin/sh "$STUB" "$1" --agent echo --home "$H" 2>"$T/err"); rc=$?
+}
+j() { printf '{"tool_name":"Write","tool_input":{"file_path":"%s","content":"%s"}}' "$1" "${2:-x}"; }
+
+run pre "$(j "$H/memory/rooms/grp1/a.md")"
+check "pre on a room note: the deny JSON, exit 0" "[ \$rc = 0 ] && grep -q '\"permissionDecision\":\"deny\"' <<<\"\$out\""
+run pre "$(j "$T/link/a.md")"
+check "pre through a link into a room folder: denied" "[ \$rc = 0 ] && grep -q '\"permissionDecision\":\"deny\"' <<<\"\$out\""
+run pre "$(j "$H/memory/MEMORY.md")"
+check "pre on a memory file outside rooms: nothing" "[ \$rc = 0 ] && [ -z \"\$out\" ]"
+run pre "$(j "$H/memory/other/b.md" "see memory/rooms/grp1/a.md and rooms/ too")"
+check "pre on a file whose content mentions rooms/: nothing" "[ \$rc = 0 ] && [ -z \"\$out\" ]"
+run pre "$(j "$T/outside/rooms/c.md")"
+check "pre on another folder named rooms: nothing" "[ \$rc = 0 ] && [ -z \"\$out\" ]"
+run post "$(j "$H/memory/rooms/grp1/a.md")"
+check "post on a room note: nothing" "[ \$rc = 0 ] && [ -z \"\$out\" ]"
+run pre 'not json'
+check "bad stdin: nothing, exit 0" "[ \$rc = 0 ] && [ -z \"\$out\" ]"
+run pre ''
+check "empty stdin: nothing, exit 0" "[ \$rc = 0 ] && [ -z \"\$out\" ]"
+check "it prints nothing on stderr" "[ ! -s '$T/err' ]"
+
+echo
+if [ "$fails" = 0 ]; then echo "all checks passed"; else echo "$fails check(s) failed"; exit 1; fi

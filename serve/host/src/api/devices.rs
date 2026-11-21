@@ -48,18 +48,11 @@ pub(super) const LOCAL_ONLY: &[&str] = &[
     // So is the message router's Jev key.
     "setRouterKey",
     "pairing",
-    "computerCall",
-    "computerTools",
     "chatCall",
     "callPerson",
     "runEnv",
-    "teamCall",
-    "memoryCall",
-    "routineCall",
-    "composioCall",
     "connectorTarget",
     "connectorRuntime",
-    "connectorCall",
     "claimSign",
     "unclaim",
     // Who owns this computer is decided on it, never by the cloud alone. Local is one token for the app and every

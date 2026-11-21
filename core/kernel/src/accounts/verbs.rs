@@ -22,7 +22,7 @@ pub struct Verb {
 }
 
 impl Verb {
-    fn out(text: String) -> Verb {
+    pub(super) fn out(text: String) -> Verb {
         Verb {
             stdout: text,
             ..Verb::default()
@@ -30,7 +30,7 @@ impl Verb {
     }
 
     /// `die(msg, code)`.
-    fn die(msg: &str, code: i32) -> Verb {
+    pub(super) fn die(msg: &str, code: i32) -> Verb {
         Verb {
             stderr: format!("kith: {msg}\n"),
             code,
@@ -40,7 +40,7 @@ impl Verb {
 }
 
 /// `flag(args, name)`.
-fn flag(args: &mut Vec<String>, name: &str) -> bool {
+pub(super) fn flag(args: &mut Vec<String>, name: &str) -> bool {
     match args.iter().position(|a| a == name) {
         Some(i) => {
             args.remove(i);
@@ -51,7 +51,7 @@ fn flag(args: &mut Vec<String>, name: &str) -> bool {
 }
 
 /// `option(args, name)`: the value after the first `name`, both taken out of `args`.
-fn option(args: &mut Vec<String>, name: &str) -> Result<Option<String>, Verb> {
+pub(super) fn option(args: &mut Vec<String>, name: &str) -> Result<Option<String>, Verb> {
     let Some(i) = args.iter().position(|a| a == name) else {
         return Ok(None);
     };
@@ -63,13 +63,13 @@ fn option(args: &mut Vec<String>, name: &str) -> Result<Option<String>, Verb> {
     Ok(Some(v))
 }
 
-fn valid_id(entry: &str) -> Result<(), Verb> {
+pub(super) fn valid_id(entry: &str) -> Result<(), Verb> {
     super::parse(entry)
         .map(|_| ())
         .map_err(|e| Verb::die(&e, 2))
 }
 
-fn agent_arg(ctx: &Ctx<'_>, agent: Option<String>) -> Result<String, Verb> {
+pub(super) fn agent_arg(ctx: &Ctx<'_>, agent: Option<String>) -> Result<String, Verb> {
     let agent = agent.unwrap_or_default();
     if !agent.is_empty() && super::agent_md_of(ctx, &agent).is_none() {
         return Err(Verb::die(&format!("no agent '{agent}' (kith ls)"), 2));
@@ -118,7 +118,7 @@ fn checked(ctx: &Ctx<'_>) -> Result<Map, Verb> {
 
 /// A settings file in the older shape is rewritten in the new one before every command (`kith_settings.migrate_file()`
 /// at the top of `kith-account`'s `main`); a failure is noted and the command goes on.
-fn migrate(ctx: &Ctx<'_>) {
+pub(super) fn migrate(ctx: &Ctx<'_>) {
     if let Err(e) = settings::migrate_file(ctx) {
         crate::log::note(&format!(
             "settings migration: couldn't lock or write {}: {e}",

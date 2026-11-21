@@ -148,7 +148,6 @@ pub enum Field {
     Agent,
     Model,
     ModelOptions,
-    Fast,
     Folder,
     Approvals,
     Notify,
@@ -159,13 +158,12 @@ pub enum Field {
     Skills,
 }
 
-pub const FIELDS: [Field; 14] = [
+pub const FIELDS: [Field; 13] = [
     Field::Name,
     Field::Instructions,
     Field::Agent,
     Field::Model,
     Field::ModelOptions,
-    Field::Fast,
     Field::Folder,
     Field::Approvals,
     Field::Notify,
@@ -174,6 +172,18 @@ pub const FIELDS: [Field; 14] = [
     Field::Shape,
     Field::Connectors,
     Field::Skills,
+];
+
+/// What a new agent is asked: the kernel owns the rest (its folder, permissions, tools and skills).
+pub const NEW_FIELDS: [Field; 8] = [
+    Field::Name,
+    Field::Instructions,
+    Field::Agent,
+    Field::Model,
+    Field::ModelOptions,
+    Field::Notify,
+    Field::Color,
+    Field::Shape,
 ];
 
 pub struct Toggle {
@@ -191,7 +201,6 @@ pub struct Form {
     pub model: Editor,
     /// Model settings (effort, fast…) and the model they were picked for.
     pub model_options: (String, BTreeMap<String, String>),
-    pub fast: bool,
     pub cwd: String,
     /// Index into `model::PERMISSION_MODES`.
     pub mode: usize,
@@ -211,8 +220,13 @@ pub struct Form {
 }
 
 impl Form {
+    /// The fields this form shows, in order: a new agent has fewer.
+    pub fn fields(&self) -> &'static [Field] {
+        if self.bot_id.is_some() { &FIELDS } else { &NEW_FIELDS }
+    }
+
     pub fn current(&self) -> Field {
-        FIELDS[self.field]
+        self.fields()[self.field]
     }
 
     /// The settings picked for the model now in the field; another model has none yet.

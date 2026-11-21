@@ -1,6 +1,5 @@
-//! Built-in stdio MCP servers: `chat` sends the user messages and changes the bot's name and instructions; `team` discovers and asks other bots; `computer`
-//! operates the desktop when enabled. Calls go through authenticated loopback
-//! HTTP to the running host, which owns delegation and screen control.
+//! Built-in stdio MCP servers: `files` shares files and rings the user; `local` and `remote` front a connector.
+//! Calls go through authenticated loopback HTTP to the running host.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -12,21 +11,8 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 
 #[derive(Clone, Copy)]
 pub enum Server {
-    Chat,
     Files,
-    Connectors,
-    Routines,
-    Computer,
-    Team,
-    Memory,
-    Composio,
 }
-
-const INSTRUCTIONS: &str = "Operate this computer's apps like a person would, in the background where you can: \
-find the window (list_windows, list_apps, launch_app), look at it (get_window_state: its controls and a screenshot), \
-act on a control by its element_token, then look again. Use pixel coordinates only for what has no control. \
-Never type a password yourself: use type_login with a saved login (request_login asks the user for one). \
-Don't approve payments: ask the user to do that from their phone.";
 
 /// Serves MCP on stdio until the agent closes it.
 pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
@@ -34,7 +20,7 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
     let token: Arc<str> = token.trim().into();
     let bot: Arc<str> = bot.into();
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    // Requests run side by side (an ask_bot can take minutes); their replies share stdout.
+    // Requests run side by side (a send_file can take minutes); their replies share stdout.
     let (replies, mut outbox) = mpsc::unbounded_channel::<Value>();
     tokio::spawn(async move {
         let mut out = tokio::io::stdout();
@@ -47,20 +33,6 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
         anyhow::Ok(())
     });
     let (name, instructions, available_tools) = match server {
-        Server::Connectors => {
-            ("kith-connectors", crate::market::requests::INSTRUCTIONS, crate::market::requests::tools())
-        }
-        // Listed by the host: they depend on this computer's driver.
-        Server::Computer => ("kith-computer", INSTRUCTIONS, Value::Null),
-        Server::Routines => ("kith-routines", crate::routines::INSTRUCTIONS, crate::routines::tools()),
-        Server::Chat => {
-            let mut tools = crate::chat::outbox::tools();
-            if let Some(list) = tools.as_array_mut() {
-                list.extend(crate::chat::profile::tools());
-                list.push(crate::cards::secret::tool());
-            }
-            ("kith-chat", crate::chat::outbox::INSTRUCTIONS, tools)
-        }
         // An hq agent's chat: its words already reach the user as its reply, so it gets only the way to share files.
         Server::Files => {
             let tools = crate::chat::outbox::tools();
@@ -70,9 +42,6 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
             files.push(crate::cards::secret::tool());
             ("kith-files", crate::chat::outbox::FILES_INSTRUCTIONS, Value::Array(files))
         }
-        Server::Team => ("kith-team", crate::chat::team::INSTRUCTIONS, crate::chat::team::tools()),
-        Server::Memory => ("kith-memory", crate::chat::memory::INSTRUCTIONS, crate::chat::memory::tools()),
-        Server::Composio => ("kith-composio", crate::market::composio::INSTRUCTIONS, crate::market::composio::tools()),
     };
     while let Some(line) = lines.next_line().await? {
         let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
@@ -91,10 +60,7 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
                     "instructions": instructions,
                 })),
                 "ping" => Ok(json!({})),
-                "tools/list" => Ok(match server {
-                    Server::Computer => computer_tools(port, &token).await,
-                    _ => json!({"tools": available_tools}),
-                }),
+                "tools/list" => Ok(json!({"tools": available_tools})),
                 "tools/call"
                     if matches!(server, Server::Files)
                         && !["send_file", "call_person", crate::cards::secret::TOOL]
@@ -117,21 +83,6 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
     Ok(())
 }
 
-/// The `computer` tools the host offers; none when it can't be reached.
-async fn computer_tools(port: u16, token: &str) -> Value {
-    let res = crate::http()
-        .post(format!("http://127.0.0.1:{port}/api/computerTools"))
-        .bearer_auth(token)
-        .json(&json!({}))
-        .timeout(Duration::from_secs(30))
-        .send()
-        .await;
-    match res {
-        Ok(r) if r.status().is_success() => r.json::<Value>().await.unwrap_or_else(|_| json!({"tools": []})),
-        _ => json!({"tools": []}),
-    }
-}
-
 /// One tool call through the host. Failures are tool errors the agent can read, not protocol errors.
 /// `actor`: the `--bot` this server was started with, the key of the bot's actor that runs it
 /// (see `agent::bot::actor_key`), so a call reaches the turn of the place it came from.
@@ -144,10 +95,7 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
         "arguments": params.get("arguments").filter(|a| a.is_object()).cloned().unwrap_or_else(|| json!({})),
     });
     let (method, timeout) = match server {
-        Server::Connectors => ("connectorCall", Duration::from_secs(90)),
-        Server::Routines => ("routineCall", Duration::from_secs(30)),
-        Server::Computer => ("computerCall", Duration::from_secs(60)),
-        Server::Chat | Server::Files => (
+        Server::Files => (
             "chatCall",
             Duration::from_secs(if params["name"] == "send_file" {
                 crate::chat::outbox::SEND_FILE_TIMEOUT.as_secs() + 10
@@ -155,9 +103,6 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
                 30
             }),
         ),
-        Server::Team => ("teamCall", crate::chat::team::ASK_TIMEOUT + Duration::from_secs(30)),
-        Server::Memory => ("memoryCall", Duration::from_secs(120)),
-        Server::Composio => ("composioCall", Duration::from_secs(120)),
     };
     let res = crate::http()
         .post(format!("http://127.0.0.1:{port}/api/{method}"))
@@ -171,19 +116,7 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
             let ok = r.status().is_success();
             match r.json::<Value>().await {
                 Ok(v) if ok => {
-                    return match server {
-                        Server::Computer if v["isError"] == true => json!({"content": v["content"], "isError": true}),
-                        Server::Computer => json!({"content": v["content"]}),
-                        Server::Chat
-                        | Server::Files
-                        | Server::Team
-                        | Server::Memory
-                        | Server::Routines
-                        | Server::Connectors => {
-                            json!({"content": [{"type": "text", "text": v.to_string()}]})
-                        }
-                        Server::Composio => json!({"content": [{"type": "text", "text": v["result"].to_string()}]}),
-                    };
+                    return json!({"content": [{"type": "text", "text": v.to_string()}]});
                 }
                 Ok(v) => v["error"].as_str().unwrap_or("the Kith host refused the call").to_owned(),
                 Err(e) => format!("bad response from the Kith host: {e}"),

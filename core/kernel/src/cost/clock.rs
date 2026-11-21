@@ -45,6 +45,11 @@ impl Now {
             .unwrap_or(self.0)
     }
 
+    /// Today's first instant, in this instant's own offset.
+    pub fn midnight(&self) -> DateTime<FixedOffset> {
+        self.at_midnight(self.date())
+    }
+
     /// `utc(t)`: the instant as the ledger writes it, `2026-11-05T12:00:00`.
     pub fn utc_text(t: DateTime<FixedOffset>) -> String {
         t.with_timezone(&Utc)

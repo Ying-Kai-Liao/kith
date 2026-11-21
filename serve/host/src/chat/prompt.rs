@@ -35,7 +35,7 @@ fn call_note() -> &'static str {
          sentences, with no markdown, lists, tables, code blocks, URLs or emoji. Say what you are about to do before \
          doing it; for anything that takes more than a minute, ask first and offer to message the result. Read \
          numbers, dates and units naturally. If the person needs a file, image, link or code, send it to the chat \
-         with send_file / send_message and just say you've sent it.]"
+         with send_file and just say you've sent it.]"
 }
 
 /// What a bot guest's message asks the agent. The first message of a conversation says where it comes from, once,
@@ -75,7 +75,7 @@ mod tests {
         let prompt = of_message(&store, &cfg, "what's on today", &[], true);
         assert!(prompt.starts_with("what's on today\n\n[Kith: You are on a live voice call with the person."));
         assert!(prompt.contains("no markdown, lists, tables, code blocks, URLs or emoji"));
-        assert!(prompt.contains("send_file / send_message"));
+        assert!(prompt.contains("with send_file and just say"));
     }
 
     #[test]

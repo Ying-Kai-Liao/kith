@@ -271,7 +271,7 @@ def _tag(path, text, scope):
 #
 # A room note (memory/rooms/<room>/...) loads or is recalled only where everyone present was there when it was written.
 # The record lives in the state folder (<state>/room-ledger/<agent>/<room>.json: note path under memory/ -> sorted person
-# ids, the owner implied), written by the kith-room-ledger hook of the run itself from the host's environment, never from
+# ids, the owner implied), written by the kith-room-ledger hook of the run itself (`kith kernel room-ledger`, core/kernel/src/room_ledger/; bin/kith-room-ledger forwards) from the host's environment, never from
 # the note's own frontmatter, and a guest's sandbox can neither read nor write the state folder's ledger. A note with no
 # record (written before this, by a shell, or in an unknown room) is owner-only: it loads only where nobody but the owner
 # is present. Only a Kith app group the host read just now can be owner-only (KITH_ROOM_OWNER_ONLY=1, set by the host

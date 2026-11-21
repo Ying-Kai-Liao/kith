@@ -286,3 +286,10 @@ Park and wake (q217/q218): `r4-edge`, `r4-parkclaim-*`, `c4-fix-*` (`P3`). Take-
 - `results4.md`: the architect's result table, plus what M3-0a added.
 - `checks.tsv`: the table `run.sh` enforces. `run.sh`: runner (tools from `verification/threads/run.sh --tools`).
   `drift.sh`: sync commit and covered files.
+
+## One bot model C5, the host-native arms removed (2026-11-20) - prose only, no model row
+`agent/bot/writer.rs`'s `writer_agent` no longer falls back to `bot:<id>` for a host-native bot: the host refuses to start one
+(`BotConfig::refuse_native`), so every claim the actor makes names a kith agent. `writer_tests.rs` now runs kith agents (a
+stand-in kernel, `tests/fixtures/kernel_agents.py`) instead of native bots; its claims assert the agent's name. The claim
+transaction, the stub's lock and the holder are untouched, and no row of `checks.tsv` reads the agent's name. Drift was read for
+`writer.rs`; SYNC not moved.

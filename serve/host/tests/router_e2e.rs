@@ -31,7 +31,10 @@ impl Host {
     async fn start(jev: &str) -> Self {
         let home = std::env::temp_dir().join(format!("kith-router-e2e-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
-        let (child, base) = common::serve_env(&home, &[("JEV_API_KEY", "test-key"), ("JEV_BASE_URL", jev)]).await;
+        let agents = common::agents_env(&home);
+        let mut env: Vec<(&str, &str)> = agents.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        env.extend([("JEV_API_KEY", "test-key"), ("JEV_BASE_URL", jev)]);
+        let (child, base) = common::serve_env(&home, &env).await;
         let token = common::read_token(&home).trim().to_owned();
         Self { child, base, token, home }
     }
@@ -51,12 +54,7 @@ impl Host {
     }
 
     async fn bot(&self) -> String {
-        let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/slow_agent.py");
-        let bot = json!({
-            "name": "Slow", "backend": "custom", "tasks": false, "command": common::python_agent(&agent),
-            "cwd": self.home, "permission": "auto", "notify": false,
-        });
-        self.call("createBot", bot).await["bot"]["id"].as_str().unwrap().to_owned()
+        common::agent_bot(&self.base, &self.token, &self.home, "slow", "slow_agent.py", "").await
     }
 
     async fn send(&self, bot: &str, text: &str) -> String {

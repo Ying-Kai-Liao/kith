@@ -32,7 +32,8 @@ PUBLIC = {
     ("lib.rs", "Embedded"), ("lib.rs", "Migrated"), ("lib.rs", "Via"),
     ("lib.rs", "start"), ("lib.rs", "migrate"), ("lib.rs", "open_embedded"), ("lib.rs", "stateless_through_core"),
     ("lib.rs", "reach"), ("lib.rs", "note_once"),
-    ("lib.rs", "reach_as_host"),   # the host proves its in-memory secret (M2-10b/c); a different crate, so not pub(crate)
+    ("lib.rs", "use:runtools::set_kernel_finder"), ("runtools.rs", "set_kernel_finder"),   # the host tells run.sock where the kernel is (M2(c)); a different crate
+    ("lib.rs", "reach_as_host"),  # the host proves its in-memory secret (M2-10b/c); a different crate, so not pub(crate)
     ("daemon.rs", "spawn_as_host"),   # the serve's own daemon makes that secret (M2-10c); a standalone daemon has none
     ("lib.rs", "route_kernel_notes"),   # the host's main.rs sends every kernel verb's notes to core.log
     # The service layer (via core_front) names the holder's folder and secret file in the opt-in job that makes the
@@ -70,10 +71,13 @@ RUST_USERS = {"serve/host/src/main.rs", "serve/host/src/core_front.rs", "serve/h
               # P11's --direct park e2e drives a temp core directly (marks claims switched, reads turns); Kai 2026-11-15.
               "serve/host/tests/direct_park_e2e.rs",
               # M4-5 F's schedules e2e makes owner calls of its temp core (schedule.runNow) and reads its turns and fire rows; Kai 2026-11-18.
-              "serve/host/tests/schedules_cutover_e2e.rs"}
+              "serve/host/tests/schedules_cutover_e2e.rs",
+              # R5 ports 1/4 (PR #1083): the threads-writer e2e drives a temp core's thread writer and reads its claims.
+              "serve/host/tests/threads_writer_e2e.rs"}
 # Files that may say "core.db": docs, this check, and the protected-paths list (runtime-design 9b rules 1 and 2).
 EXEMPT_NAME = ("kernel/tests/kith-core-boundary-check", "kernel/lib/kith_guard.py",
                "serve/host/tests/direct_park_e2e.rs",   # opens its own temp core's db (P11; Kai 2026-11-15)
+               "serve/host/tests/threads_writer_e2e.rs",   # reads its own temp core's thread claims (R5 ports 1/4, PR #1083)
                "serve/host/tests/schedules_cutover_e2e.rs")   # reads its own temp core's fires and turns (M4-5 F; Kai 2026-11-18)
 NAMES = re.compile(r"core\.db|core\.lock|core\.marker")
 SKIP_DIRS = {".git", "target", "node_modules", ".target-core", "worktrees", "build", ".build", "DerivedData"}

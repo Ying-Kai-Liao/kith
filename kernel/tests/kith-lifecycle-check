@@ -17,6 +17,14 @@ trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_LOGS=$T/logs CLAUDE_CONFIG_DIR=$T/claude KITH_WAKE_NO_KICK=1
 unset KITH_PERSON KITH_AGENT KITH_ROOM KITH_RESUME KITH_VIA CLAUDE_CODE_SESSION_ID HQ_HOME HQ_STATE KITH_CACHE_LIFE KITH_SLEEP_MINUTES
 mkdir -p "$HOME" "$KITH_STATE/live/terminal" "$CLAUDE_CONFIG_DIR/projects/p" "$CLAUDE_CONFIG_DIR/sessions" "$T/work"
+# With KITH_BIN set (the kith program), every call to it is logged by a wrapper. KITH_LIFECYCLE_EXPECT=rust (with KITH_CORE=rust): the
+# script forwards to `kith kernel lifecycle`, and the end of this check asserts the program was asked; otherwise (KITH_CORE=python in
+# CI) the end asserts it never was.
+if [[ -n ${KITH_BIN:-} ]]; then
+  printf '#!/bin/sh\necho "$*" >> "%s/kith-calls"\nexec "%s" "$@"\n' "$T" "$KITH_BIN" > "$T/kith-wrap"
+  chmod +x "$T/kith-wrap"
+  export KITH_BIN=$T/kith-wrap
+fi
 SK=$KERNEL/bin/kith-sessions
 LC=$KERNEL/bin/kith-lifecycle
 W=$KERNEL/bin/kith-wake
@@ -252,8 +260,10 @@ else
   fx l-e75 55 150000 "$Q"
   is "a claude that itself exits 75 is a failure, not busy" "$(STUB_MODE=e75 python3 "$LC" sweep --session l-e75)" "l-e75 compact failed: exit 75"
   fx l-lockerr 55 150000 "$Q"
-  : > "$T/afile"
-  is "a lock error is reported with its reason" "$(KITH_MACHINE=$T/afile python3 "$LC" sweep --session l-lockerr | sed 's/ (kith-stub exit [0-9]*)//')" "l-lockerr compact failed: the conversation lock could not be taken"
+  # (the lock folder is a file: a machine folder that is itself a file would read as an unreadable switch, which the Rust takers
+  # answer as Writer mode)
+  mkdir -p "$T/amachine/core"; : > "$T/amachine/core/locks"
+  is "a lock error is reported with its reason" "$(KITH_MACHINE=$T/amachine python3 "$LC" sweep --session l-lockerr | sed 's/ (kith-stub exit [0-9]*)//')" "l-lockerr compact failed: the conversation lock could not be taken"
 
   # the lock is held for the compaction's whole life, and the claim names the stub (claude descends from it)
   fx l-life 55 150000 "$Q"
@@ -431,6 +441,13 @@ python3 "$W" wait --on mcp-task:t9 --session t-side --agent designer >/dev/null 
 is "a wait on an MCP task is refused" "$?" 1
 KITH_PERSON=anna python3 "$W" wait --on at:+1m --session g1 --agent coder >/dev/null 2>&1
 is "a guest's waiter stays refused (no sandbox to run its check in)" "$?" 1
+
+if [[ ${KITH_LIFECYCLE_EXPECT:-} == rust ]]; then
+  # (the program is also asked `kernel version` and `memory hook` whenever the script looks it up)
+  [[ $(grep -c '^kernel lifecycle ' "$T/kith-calls" 2>/dev/null) -ge 10 ]] && ok "the Rust core answered the sweeps" || bad "the Rust core answered the sweeps" "$(grep -c '^kernel lifecycle ' "$T/kith-calls" 2>/dev/null) calls"
+elif [[ -n ${KITH_BIN:-} ]]; then
+  [[ $(grep -c '^kernel lifecycle ' "$T/kith-calls" 2>/dev/null) -eq 0 ]] && ok "the Python answered" || bad "the Python answered" "the kith program was asked for the lifecycle"
+fi
 
 [[ $fail == 0 ]] && echo "all ok" || echo "FAILED"
 exit $fail

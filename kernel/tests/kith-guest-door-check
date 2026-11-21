@@ -223,7 +223,7 @@ expect "kith door ls with no doors" "$("$KERNEL/bin/kith-door" ls)" "[]"
 # --- the box (macOS)
 NODE=$(command -v node || true)
 if [ ! -x /usr/bin/sandbox-exec ] || [ -z "$NODE" ]; then
-  expect "no sandbox-exec: a sweep ends nothing" "$("$KERNEL/bin/kith-door" sweep)" '{"ended": []}'
+  expect "no sandbox-exec: a sweep ends nothing" "$("$KERNEL/bin/kith-door" sweep)" '{"ended": [], "unknown": false}'
   [ "$fails" -eq 0 ] && echo "all ok (no box on this machine)" || { echo "$fails FAIL"; exit 1; }
   exit 0
 fi

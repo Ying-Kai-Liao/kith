@@ -3,9 +3,15 @@
 # owner's run is never refused at the limit unless this Mac chose hold; a guest's budget is unchanged.
 # Throwaway HOME, KITH_HOME, KITH_STATE, auth.json and ledger; a stub claude that logs that it ran.
 #
-#   kernel/tests/kith-limit-check     a few seconds; prints each check, exits 1 when one fails
+# kernel/bin/kith-cost is a stub for the kith program, so the check needs one (KITH_DIFFTEST_BIN; without it the check says so and
+# exits 0). The launch under test is the script's own (its program lists only `cost-ledger`, and answers `kernel cost` with the
+# real program), so the limit it reads is the core's, and a run without a program is its own row.
+#
+#   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-limit-check     a few seconds; prints each check, exits 1 when one fails
 set -uo pipefail
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+REAL=${KITH_DIFFTEST_BIN:-}
+if [ -z "$REAL" ] || [ ! -x "$REAL" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN): kernel/bin/kith-cost forwards to it"; exit 0; fi
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-limit-check.XXXXXX"); T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/root KITH_AUTH=$T/auth.json KITH_STATE=$T/state
@@ -21,11 +27,20 @@ case "$*" in *--append-system-prompt*) echo ran >> "$RAN_LOG";; esac
 exit 0
 EOF
 chmod +x "$T/bin/claude"
-printf '#!/bin/sh\nexit 0\n' > "$T/bin/kith-stub"; chmod +x "$T/bin/kith-stub"
+# The program the launch finds: lists the ledger's module only (so no Rust launch, no memory hook) and runs the real `kernel cost`.
+cat > "$T/bin/kith-stub" <<STUB
+#!/bin/sh
+case "\$1 \$2" in
+  "kernel version") echo '{"abi":1,"modules":["cost","cost-ledger"]}' ;;
+  "kernel cost") exec "$REAL" "\$@" ;;
+esac
+exit 0
+STUB
+chmod +x "$T/bin/kith-stub"
 export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH RAN_LOG=$T/ran
 
 K() { "$KERNEL/bin/kith" "$@"; }
-C() { python3 "$KERNEL/bin/kith-cost" "$@"; }
+C() { KITH_BIN=$T/bin/kith-stub "$KERNEL/bin/kith-cost" "$@"; }
 A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
 J() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 fail=0

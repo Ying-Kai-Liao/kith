@@ -38,6 +38,26 @@ describe("GET /i/:cid/:iid", () => {
     expect(html).toContain("Don't have Kith yet?");
   });
 
+  it("wears the site's look from its own files only, and adds no link out", async () => {
+    const res = await get("/i/cmp_abc-1/inv_XYZ_2");
+    // Exactly the old policy plus the site's own images and fonts.
+    expect(res.headers.get("content-security-policy")).toMatch(
+      /^default-src 'none'; script-src 'sha256-[A-Za-z0-9+/=]+'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'$/,
+    );
+    const html = await res.text();
+    expect(html).toContain('<meta name="robots" content="noindex">');
+    expect(html).toContain("<h1>You're invited to Kith</h1>");
+    expect(html).toContain('src="/img/mark.png"');
+    expect(html).toContain("/fonts/nunito-800-latin.woff2");
+    expect(html).toContain("prefers-color-scheme:dark");
+    expect(html).toContain("[hidden]{display:none!important}");
+    // The only anchor is the open button, which has no href until the script sets it.
+    expect([...html.matchAll(/<a\b[^>]*>/g)].map((m) => m[0])).toEqual(['<a id="open" hidden>']);
+    expect(html).not.toContain("<nav");
+    expect(html).not.toMatch(/[\u2013\u2014]/);
+    expect(html).not.toMatch(/\bAI\b|\bplatform\b|\bbot\b/i);
+  });
+
   it("never sees a token: the fragment is not sent, and a query token is not echoed", async () => {
     const html = await (await get("/i/cmp_1/inv_1?t=SECRETSECRET")).text();
     expect(html).not.toContain("SECRETSECRET");

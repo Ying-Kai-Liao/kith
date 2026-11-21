@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "a04de8abd0a0da6eb7e07b7eb1146f44214035f99ee7351f9e5d750507cdcdce"
+    public static let sha256 = "15dbde169b01dba72070adde5c9306aa4603cbeaaba4f228e4d108f861666205"
 }
 
 extension HostContract {
@@ -350,8 +350,9 @@ extension HostContract {
         public var analytics: JSONValue?
         public var urls: JSONValue?
         public var cli: JSONValue?
+        public var nativeBots: Int64?
 
-        public init(hostId: String, computerId: String, signKey: String, boxKey: String, name: String, version: String, `protocol`: Int64, minProtocol: Int64, os: String, rev: Int64, store: StoreHealth, grantedAgents: [GrantedAgent]? = nil, cloud: String? = nil, device: Device? = nil, home: String? = nil, backends: JSONValue? = nil, screen: JSONValue? = nil, analytics: JSONValue? = nil, urls: JSONValue? = nil, cli: JSONValue? = nil) {
+        public init(hostId: String, computerId: String, signKey: String, boxKey: String, name: String, version: String, `protocol`: Int64, minProtocol: Int64, os: String, rev: Int64, store: StoreHealth, grantedAgents: [GrantedAgent]? = nil, cloud: String? = nil, device: Device? = nil, home: String? = nil, backends: JSONValue? = nil, screen: JSONValue? = nil, analytics: JSONValue? = nil, urls: JSONValue? = nil, cli: JSONValue? = nil, nativeBots: Int64? = nil) {
             self.hostId = hostId
             self.computerId = computerId
             self.signKey = signKey
@@ -372,6 +373,7 @@ extension HostContract {
             self.analytics = analytics
             self.urls = urls
             self.cli = cli
+            self.nativeBots = nativeBots
         }
     }
 
@@ -429,7 +431,7 @@ extension HostContract {
         }
     }
 
-    /// A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev.
+    /// A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev. Deprecated: fastMode, fastModeSupport and fastModeIssue. Fast mode is gone; the host always sends false, "unsupported" and null so an older app hides its switch, and ignores a fastMode it is sent.
     public struct Bot: Codable, Hashable, Sendable {
         public var id: String
         public var kind: BotKind
@@ -461,6 +463,7 @@ extension HostContract {
         public var tasks: Bool?
         public var hqAgent: String?
         public var builtin: Bool?
+        public var needsKithAgent: Bool?
         public var project: String?
         public var person: String?
         public var createdAt: Int64
@@ -483,7 +486,7 @@ extension HostContract {
         public var lastAt: Int64
         public var botGuest: BotGuestRef?
 
-        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, builtin: Bool? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastSummary: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
+        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, builtin: Bool? = nil, needsKithAgent: Bool? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastSummary: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
             self.id = id
             self.kind = kind
             self.members = members
@@ -514,6 +517,7 @@ extension HostContract {
             self.tasks = tasks
             self.hqAgent = hqAgent
             self.builtin = builtin
+            self.needsKithAgent = needsKithAgent
             self.project = project
             self.person = person
             self.createdAt = createdAt
