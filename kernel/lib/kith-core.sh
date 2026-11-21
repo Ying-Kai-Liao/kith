@@ -72,7 +72,7 @@ kith_paths_bin() {
 }
 # kith_need_bin   kith_find_bin, or one line and exit 1: every call's folders come from the program.
 kith_need_bin() {
-  kith_find_bin || { echo "kith: kith needs the kith program, which was not found: kith serve install" >&2; exit 1; }
+  kith_find_bin || { echo "kith: kith needs the kith program, which was not found: kith update self or scripts/install.sh (kith serve start in a checkout)" >&2; exit 1; }
 }
 # kith_machine   this Mac's own folder (KITH_MACHINE): the caller's value, else what the program says.
 kith_machine() {

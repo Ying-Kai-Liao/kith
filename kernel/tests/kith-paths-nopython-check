@@ -77,6 +77,15 @@ check "no program: kith paths says so and exits 1" "[ $rc = 1 ] && printf '%s' \
 check "no program: no kith_paths.py" no_paths_py
 check "core-switched.txt has no paths line" "! grep -q '^paths	' '$KERNEL/lib/core-switched.txt'"
 
+# --- the verbs that install or diagnose the program run with none (a stub launchctl first on PATH: nothing real is reached)
+mkdir -p "$T/lbin"; printf '#!/bin/sh\nexit 0\n' > "$T/lbin/launchctl"; chmod +x "$T/lbin/launchctl"
+out=$(env PATH="$T/lbin:/usr/bin:/bin" "$DEV/bin/kith" serve help 2>&1); rc=$?
+check "no program: kith serve help still runs" "printf '%s' \"\$out\" | grep -q 'kith serve start' && ! printf '%s' \"\$out\" | grep -q 'needs the kith program'"
+out=$(env PATH="$T/lbin:/usr/bin:/bin" "$DEV/bin/kith" doctor 2>&1); rc=$?
+check "no program: kith doctor still runs (and does not stop at the refusal line)" "[ -n \"\$out\" ] && ! printf '%s' \"\$out\" | grep -q 'needs the kith program'"
+out=$(env PATH="$T/lbin:/usr/bin:/bin" "$DEV/bin/kith" ls 2>&1)
+check "no program: the refusal names a way out" "printf '%s' \"\$out\" | grep -q 'kith update self' && ! printf '%s' \"\$out\" | grep -q 'serve install'"
+
 # --- a KITH_BIN that is no usable program (/bin/true answers nothing, a plain file is not executable) with no other program:
 # one line, exit 1, and nothing written under HOME or the state folder; with a working program on PATH the bad KITH_BIN is
 # skipped and that one is used.

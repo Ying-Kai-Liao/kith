@@ -136,7 +136,7 @@ fi
 # the program is missing or older, and the Python below answers (docs/plans/core-design.md section 3).
 . "$KITH/lib/kith-core.sh"
 kith_find_bin_set   # the program, looked up once: every call's folders come from it (`kith kernel paths`), and no program is one line and exit 1
-if [[ $1 == paths ]]; then kith_need_bin >/dev/null || exit 1; kbin=$(kith_paths_bin) || exit 1; KITH_BIN=$kbin exec "$kbin" kernel paths --kernel "$KITH" "${@:2}"; fi
+if [[ $1 == paths ]]; then kith_need_bin >/dev/null || exit 1; kbin=$(kith_paths_bin) || { echo "kith: the kith program at $(kith_find_bin) does not answer \`kernel paths\`; update it (kith update self, or scripts/install.sh; kith serve start in a checkout)" >&2; exit 1; }; KITH_BIN=$kbin exec "$kbin" kernel paths --kernel "$KITH" "${@:2}"; fi
 if [[ $1 == engines ]]; then . "$KITH/lib/kith-core.sh"; kith_core_exec engines "${@:2}" || true; echo "kith: \`kith engines\` needs the kith program (kith serve install); this one has no engines table" >&2; exit 1; fi
 . "$KITH/lib/kith-env.sh"   # KITH_X and the old HQ_X agree (role repos read HQ_X)
 export KITH_ROOT=$KITH
@@ -145,10 +145,17 @@ export KITH_ROOT=$KITH
 # for agents' tools.
 # What the caller gave for the folders: the Rust launch starts from these, as this call did, not from the answer below.
 kith_in=(); for v in KITH_HOME KITH_STATE KITH_AGENTS HQ_HOME HQ_STATE HQ_AGENTS; do [[ -n ${!v+x} ]] && kith_in+=("$v=${!v}"); done
-kith_need_bin >/dev/null || exit 1
-kbin=$(kith_paths_bin) || { echo "kith: the kith program at $(kith_find_bin) does not answer \`kernel paths\`; update it (kith serve install)" >&2; exit 1; }
-kith_paths_sh=$("$kbin" kernel paths --kernel "$KITH" --sh) && [[ -n $kith_paths_sh ]] || { echo "kith: the kith program at $kbin does not answer \`kernel paths\`; update it (kith serve install)" >&2; exit 1; }
-eval "$kith_paths_sh"
+# The verbs that install or diagnose the program run without one (they work out their own folders): `serve` builds it from a
+# checkout, `update self` / `update --dev` fetch it, `doctor` says it is missing, `rollback` goes back to Python's files.
+kith_offline_verb() { case ${1:-} in serve|doctor|rollback) return 0 ;; update) [[ ${2:-} == self || ${2:-} == --dev ]] ;; *) return 1 ;; esac; }
+if kith_offline_verb "$@" && ! kbin=$(kith_paths_bin); then
+  :   # no program that gives the folders: this verb goes on without them
+else
+  kith_need_bin >/dev/null || exit 1
+  kbin=$(kith_paths_bin) || { echo "kith: the kith program at $(kith_find_bin) does not answer \`kernel paths\`; update it (kith update self, or scripts/install.sh; kith serve start in a checkout)" >&2; exit 1; }
+  kith_paths_sh=$("$kbin" kernel paths --kernel "$KITH" --sh) && [[ -n $kith_paths_sh ]] || { echo "kith: the kith program at $kbin does not answer \`kernel paths\`; update it (kith update self, or scripts/install.sh; kith serve start in a checkout)" >&2; exit 1; }
+  eval "$kith_paths_sh"
+fi
 
 case $1 in
   attach)             . "$KITH/lib/kith-core.sh"; kith_held_attach_cmd "${@:2}"; exit $? ;;   # held terminals (kith AGENT --held)
@@ -1550,7 +1557,13 @@ if [[ -n $csid ]]; then
     # Beside the program where it really lives first: install.sh links only `kith` into ~/.local/bin, so the stub sits next to
     # the link's target (cli/<version>/bin); then beside the path as given.
     if [[ -n $kbin ]]; then
-      for d in "$(python3 -I -c 'import os, sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "$kbin" 2>/dev/null)" "$(dirname "$kbin")"; do
+      kf=$kbin; kn=0
+      while [[ -L $kf && $kn -lt 16 ]]; do   # follow the link by hand: the folder the program really lives in
+        kl=$(readlink "$kf") || break
+        case $kl in /*) kf=$kl ;; *) kf=$(dirname "$kf")/$kl ;; esac
+        kn=$((kn + 1))
+      done
+      for d in "$(cd "$(dirname "$kf")" 2>/dev/null && pwd -P)" "$(dirname "$kbin")"; do
         [[ -n $d && -x $d/kith-stub ]] && { stub_bin=$d/kith-stub; break; }
       done
     fi

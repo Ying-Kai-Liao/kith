@@ -201,6 +201,7 @@ check "kith serve help prints usage" "echo \"\$out\" | grep -q 'kith serve start
 ln -s "$KERNEL/bin/kith" "$T/stubs/kith"
 check "kith through a symlink dispatches serve too" "KITH_BIN=$T/stubs/kith-prog kith serve help | grep -q 'kith serve start'"
 check "the stub program was asked only for the hook probe and the folders" "! grep -q unexpected '$STUB_LOG.prog'"
+check "the stub program did answer kernel paths (so no real program was used)" "grep -q '^kernel paths' '$STUB_LOG.prog'"
 
 # a packaged install (no serve/ source): installs the kith binary beside share/ under the name kith-serve, no cargo
 P=$T/pkg; mkdir -p "$P/bin" "$P/share/kith/kernel/bin" "$HOME/.kith/serve"

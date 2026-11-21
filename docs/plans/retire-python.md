@@ -416,6 +416,6 @@ three-layer gate) is the dropped Gates above; "R9" means P5.
   (rule 6), `kith-info`'s module loads add P3-10 dependencies (P2-6, P3-9, P4-1), and P1-10 repoints `kith cost` and drops
   the cost-hook fallbacks. The six smaller points (P0-15, P0-11, P3-7, P0-12 owner, P1-7 count, drift path) are applied.
   P1-11 first half: `uv run --no-project -- /bin/echo ok` printed ok with uv 0.13.0.
-- 2026-11-21: P1-7 (#1113): `kith` finds the program in sh (`kith_find_bin`, same order as `kith_paths.py --bin`) and its folders from
+- 2026-11-21: P1-7 (#1113): `kith` finds the program in sh (`kith_find_bin`; the order is `kith_paths.py --bin`'s plus the release beside the kernel as the second candidate, and every PATH entry is tried, not only the first `kith`; the Python keeps its order until P5-3) and its folders from
   `kith kernel paths --sh` (`kith_paths_bin` takes the next candidate that answers when a stand-in program does not); with no program it is one
-  line and exit 1. The host's two `python3 kith_paths.py` calls are gone. `--guest-sandbox` and `--guest-tmp` stay on Python.
+  line and exit 1, except `serve`, `doctor`, `update self|--dev` and `rollback`, which run without one. The host's two `python3 kith_paths.py` calls are gone. `--guest-sandbox` and `--guest-tmp` stay on Python.
