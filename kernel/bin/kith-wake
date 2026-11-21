@@ -41,7 +41,7 @@ the next turn. A woken turn runs as the person the session serves (decisions 202
 
 Rule T: Kith delivers only the results of waits it registered (a waiter, Kith's own long jobs). A Claude MCP task (the
 sidecar under <session>/mcp-tasks/) is Claude's to deliver in the session's own turn: nothing here reads, waits on or
-removes it, and a headless wake doesn't claim it (kith-lifecycle only counts it as outstanding work).
+removes it, and a headless wake doesn't claim it (the lifecycle sweep only counts it as outstanding work).
 
 A waiter is code, not a model: the tick checks it and, when what it waits for happened or its timeout passed, it becomes
 one wake request (WaiterResult) and is gone. A CI wake's id names the PR's head commit, so two waiters on one PR wake the
@@ -435,11 +435,19 @@ def spawn_drain():
 
 
 def spawn_lifecycle():
-    """The tick also lets kith-lifecycle make the 54-minute decision of sessions nobody runs (F12 rule 5); detached, so a
-    compaction never holds the tick up."""
+    """The tick also lets the lifecycle (`kith kernel lifecycle sweep`) make the 54-minute decision of sessions nobody runs
+    (F12 rule 5); detached, so a compaction never holds the tick up. Housekeeping: with no kith program it is skipped."""
     if os.environ.get('KITH_WAKE_NO_KICK'):
         return
-    subprocess.Popen([sys.executable, str(BIN / 'kith-lifecycle'), 'sweep'], stdin=subprocess.DEVNULL,
+    try:
+        from kith_paths import kith_bin
+        prog = kith_bin()
+    except Exception:  # noqa: BLE001
+        prog = ''
+    if not prog:
+        print('kith-wake: no kith program on this Mac, so the lifecycle sweep is skipped', file=sys.stderr)
+        return
+    subprocess.Popen([prog, 'kernel', 'lifecycle', '--kernel', str(BIN.parent), 'sweep'], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 

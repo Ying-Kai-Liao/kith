@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kith-json-misc-check — `--json` on doctor, remote ls|add|rm, ask ls, bug create|list|show, backup add|remove|list,
-# update self --check, wake status, lifecycle status, chain seen|sig|ls and project (bare) and project notes. CLI lines in,
+# update self --check, wake status, chain seen|sig|ls and project (bare) and project notes. CLI lines in,
 # stdout / exit code / state out, so the same lines can check another implementation. Throwaway HOME, KITH_HOME and
 # KITH_STATE; fake ssh, gh, launchctl, claude and codex on PATH; the update check runs against a local git remote.
 # Nothing touches the real ~/.kith, launchd, the Keychain or the network, and no `kith backup run` / `update self` runs.
@@ -180,12 +180,6 @@ OUT=$("$KITH" wake status w-2 --json)
 check "wake status --json of a queued request" "[ \"\$(jv '(d[\"state\"], d[\"run\"])')\" = \"('queued', None)\" ] && [ \"\$(\"$KITH\" wake status w-2)\" = queued ]"
 OUT=$("$KITH" wake ls --json)
 check "wake ls --json: the owed item" "[ \"\$(jv 'len(d)')\" = 1 ]"
-
-# ---- lifecycle status ----
-OUT=$("$KERNEL/bin/kith-lifecycle" status nosuch --json 2>"$T/err"); rc=$?
-check "lifecycle status --json of a session nothing scheduled: one object, empty outstanding" \
-  "[ $rc = 0 ] && oneobj && [ \"\$(jv '(d[\"session\"], d[\"outstanding\"])')\" = \"('nosuch', [])\" ]"
-check "lifecycle status without --json prints the same object" "[ \"\$(\"$KERNEL/bin/kith-lifecycle\" status nosuch)\" = \"\$(jv 'json.dumps(d)' 2>/dev/null || echo \"\$OUT\")\" ] || [ \"\$(\"$KERNEL/bin/kith-lifecycle\" status nosuch)\" = \"\$OUT\" ]"
 
 # ---- chain ----
 CH=$KERNEL/bin/kith-chain

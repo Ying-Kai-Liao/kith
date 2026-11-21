@@ -347,27 +347,6 @@ check "W9 claim files from before the switch neither block nor crash" "[ $rc -eq
 out=$(SKR sweep sam 2>&1)
 check "W9 the sweep does not read them either (the old file's holder lives)" "kill -0 $O1 2>/dev/null"
 
-# ---- the compaction's check ---------------------------------------------------------------------------------------------
-out=$(python3 - "$KERNEL/bin/kith-lifecycle" "$O1" <<'PY' 2>&1
-import importlib.machinery, importlib.util, sys
-l = importlib.machinery.SourceFileLoader('klc', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('klc', l)); l.exec_module(m)
-ks = m.sessions_mod()
-e = {'sessionId': 'old1', 'pid': 0}
-print('writer_mode', ks.writer_mode())
-print('free', m.writer_free(ks, e))   # old1.claim names a live pid, but the files are not the claims any more
-PY
-)
-check "W10 the compaction's writer_free reads no claim files in Writer mode" "grep -q 'writer_mode True' <<<\"$out\" && grep -q 'free True' <<<\"$out\""
-files_mode
-out=$(python3 - "$KERNEL/bin/kith-lifecycle" <<'PY' 2>&1
-import importlib.machinery, importlib.util, sys
-l = importlib.machinery.SourceFileLoader('klc', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('klc', l)); l.exec_module(m)
-ks = m.sessions_mod()
-print('free', m.writer_free(ks, {'sessionId': 'old1', 'pid': 0}))
-PY
-)
-check "W10 and in Files mode it still does (the old file's holder lives)" "grep -q 'free False' <<<\"$out\""
-
 # ---- the launcher's proc gate (bin/kith): with the marker, any failure of proc stops a person's run -------------------------
 reset
 python3 - "$KERNEL/bin/kith" > "$T/gate.sh" <<'PY'

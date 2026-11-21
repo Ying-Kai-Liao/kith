@@ -56,17 +56,46 @@ Listable = the owner's own run of one of these kinds (the file's "kind", with "l
             (kith-ask, kith-sched: KITH_LAUNCH_KIND) or, started by another run of the owner's, `helper`.
 Never listed: KITH_PERSON runs, the host's own runs (KITH_VIA=serve, channels, tidying), KITH_HIDE_SESSION, agent worktrees.
 """
-import datetime as dt, fcntl, json, os, signal, subprocess, sys, time, urllib.error, urllib.request
+import datetime as dt, fcntl, json, os, re, signal, subprocess, sys, time, urllib.error, urllib.request
 from pathlib import Path
 
 
-def lifecycle():
-    """kernel/lib/kith_lifecycle.py: intent, the idle clock, outstanding work (F12)."""
-    lib = str(Path(__file__).resolve().parent.parent / 'lib')
-    if lib not in sys.path:
-        sys.path.insert(0, lib)
-    import kith_lifecycle
-    return kith_lifecycle
+def lifecycle_run(*args, wait=False):
+    """`kith kernel lifecycle ARGS` on this Mac's kith program (the lifecycle's Rust core; there is no Python of it left).
+    Housekeeping only: with no program it says one line and skips, and a failure never reaches the caller. Returns the
+    process's stdout (wait) or None."""
+    try:
+        lib = str(Path(__file__).resolve().parent.parent / 'lib')
+        if lib not in sys.path:
+            sys.path.insert(0, lib)
+        from kith_paths import kith_bin
+        prog = kith_bin()
+    except Exception:  # noqa: BLE001
+        prog = ''
+    if not prog:
+        print('kith-sessions: no kith program on this Mac, so the lifecycle step is skipped', file=sys.stderr)
+        return None
+    cmd = [prog, 'kernel', 'lifecycle', '--kernel', str(Path(__file__).resolve().parent.parent), *args]
+    try:
+        if not wait:
+            subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            return None
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def taken(sid):
+    """A process took the session's writer claim: the intent it ends (rule 14) and the decision it answers (rule 12) are over.
+    Best effort: the claim must never fail on bookkeeping."""
+    state = os.environ.get('KITH_STATE')
+    if not state or not re.fullmatch(r'[A-Za-z0-9-]{1,64}', sid or ''):
+        return
+    for sub in ('intent', 'decisions'):
+        try:
+            (Path(state) / 'sessions' / sub / f'{sid}.json').unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def now():
@@ -403,7 +432,7 @@ def core_take(sid, pid, person=None, agent=None, lifecycle_owner=False, engine=N
         sys.exit('kith: the Kith core gave no claim for that session')
     if not lifecycle_owner:   # a taker ends the intent and the 54-minute decision of the period before it (rules 12, 14)
         try:
-            lifecycle().taken(sid)
+            taken(sid)
         except Exception:  # noqa: BLE001 — bookkeeping must never stop a session from starting
             pass
     return None
@@ -446,7 +475,7 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_own
     """Take the writer claim on sid for pid. Returns None when taken, else the live claim that holds it. The claim is made
     whole in a temp file and linked into place (exclusive); a stale one is removed and replaced under a lock file next
     to it, so two takers never both judge it stale and one deletes the other's fresh claim. A taker ends the session's intent and
-    pending decision (F12 rules 12, 14); kith-lifecycle, taking it to compact or end, is the one that keeps them."""
+    pending decision (F12 rules 12, 14); the lifecycle sweep, taking it to compact or end, is the one that keeps them."""
     if writer_mode():
         return core_take(sid, pid, person, agent, lifecycle_owner, held_when_down=lifecycle_owner)
     dest = claim_path(sid)
@@ -477,7 +506,7 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_own
                 prune_stale(dest)
                 if not lifecycle_owner:   # a taker ends the intent and the 54-minute decision of the period before it (rules 12, 14)
                     try:
-                        lifecycle().taken(sid)
+                        taken(sid)
                     except Exception:  # noqa: BLE001 — bookkeeping (even a missing lib) must never stop a session from starting
                         pass
                 return None
@@ -933,47 +962,26 @@ def engine_pid(child, cmd):
 
 
 def idle_stop(child, born, eng=None):
-    """Rule 3: the one place a human session sleeps. The idle clock is the latest of the last turn, the process start and
-    the last keystroke (the terminal's access time); after `sleep_after` of it, with nothing outstanding (rule 7), the
-    wrapper writes its intent and ends its own child. Nothing outside the terminal's own process tree ever signals a
-    terminal session on a timer. True once the signal is sent."""
-    try:
-        lc, e = lifecycle(), None
-        eng = eng or child
-        e = entry_of(eng)
-        if not e or not e.get('transcriptPath'):
-            return False   # not a session we can judge (not listed, or it has not written yet): never slept
-        key = os.fstat(0).st_atime if os.isatty(0) else None
-        since = lc.idle_since(e['transcriptPath'], born, key)
-        if time.time() - since < lc.sleep_after() or lc.outstanding(e['transcriptPath'], eng):
-            return False
-        lc.write_intent(e['sessionId'], 'idle', eng)
-        # Kai may have typed since the check above: looked at again just before the signal (S2).
-        if os.isatty(0) and os.fstat(0).st_atime > (key or 0):
-            lc.clear_intent(e['sessionId'])
-            return False
-        os.kill(child, signal.SIGTERM)
-        return True
-    except Exception as ex:  # noqa: BLE001 — a failing check must never end a session
-        print(f'kith-sessions: idle check: {ex}', file=sys.stderr)
-        return False
+    """Rule 3 (the idle stop of a human session) is the Rust wrapper's (`kith kernel threads run`). This wrapper has no
+    transcript judgment left, so it never sleeps a session: never stopping is the safe side."""
+    return False
 
 
 def asleep(child):
     """The wrapper just put its session to sleep: on a 5-minute cache there is no timer, so the decision to compact is made
-    now (F12 rule 5). Detached; a cache with a timer needs nothing here, the tick decides at 54 minutes."""
+    now (F12 rule 5). Detached; a long cache has no decision to make before the tick, which the sweep knows."""
     e = entry_of(child)
-    if not e or lifecycle().cache_life() > lifecycle().SHORT_CACHE:
-        return
-    subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / 'kith-lifecycle'), 'sweep', '--session', e['sessionId'],
-                      '--at-sleep'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     start_new_session=True)
+    if e:
+        lifecycle_run('sweep', '--session', e['sessionId'], '--at-sleep')
 
 
 def record_quit(child):
     e = entry_of(child)
-    if e and not lifecycle().read_intent(e['sessionId']):
-        lifecycle().write_intent(e['sessionId'], 'quit', child)
+    state = os.environ.get('KITH_STATE')
+    if not e or not state or not re.fullmatch(r'[A-Za-z0-9-]{1,64}', e['sessionId'] or ''):
+        return
+    if not (Path(state) / 'sessions' / 'intent' / f"{e['sessionId']}.json").exists():
+        lifecycle_run('intent', e['sessionId'], 'quit', str(child), wait=True)
 
 
 def run(agent, cmd):
