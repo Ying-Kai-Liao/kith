@@ -444,8 +444,7 @@ def spawn_lifecycle():
         prog = kith_bin()
     except Exception:  # noqa: BLE001
         prog = ''
-    if not prog:
-        print('kith-wake: no kith program on this Mac, so the lifecycle sweep is skipped', file=sys.stderr)
+    if not prog:   # silent: this runs every minute from the tick, and checks count its stderr lines
         return
     subprocess.Popen([prog, 'kernel', 'lifecycle', '--kernel', str(BIN.parent), 'sweep'], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
