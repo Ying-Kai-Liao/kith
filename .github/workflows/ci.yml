@@ -407,6 +407,7 @@ jobs:
               CI names check (every kernel/tests/kith-*-check is run here or exempt with a reason)|kernel/tests/kith-ci-names-check
               CI names self-test (a check dropped from ci.yml fails it)|kernel/tests/kith-ci-names-check --selftest
               Install drain check|kernel/tests/kith-install-drain-check
+              Install gate check (install.sh asks the new release for cutover status --require before cli/current moves)|kernel/tests/kith-install-gate-check
               Agent dirs check|kernel/tests/kith-agent-dirs-check
               Market check|kernel/tests/kith-market-check
               Cutover check|kernel/tests/kith-cutover-check

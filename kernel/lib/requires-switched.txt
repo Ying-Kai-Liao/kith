@@ -9,3 +9,6 @@
 # (The host's own start-up check uses a list built into the host binary, not this file.)
 #
 # No module is required yet: the first deletion release adds its lines.
+# This file stays empty until a release deletes a module's Python reader: the PR that deletes it adds that module's line.
+# scripts/install.sh runs this release's own `status --require` on this file before it moves cli/current (an install with
+# no earlier version passes without asking).

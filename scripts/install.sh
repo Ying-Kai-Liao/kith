@@ -114,6 +114,19 @@ case $VERSION in
 esac
 case $VERSION in *[!0-9A-Za-z.+-]*) die "odd version '$VERSION'" ;; esac
 
+# The cutover gate (retire-python): a release whose Python readers are gone lists the modules that must already be switched
+# to core.db on this Mac (share/kith/kernel/lib/requires-switched.txt). The NEW program is asked, not the installed one (an
+# older one answers --require with a usage error), and before anything is copied or cli/current moves, so a refusal leaves
+# the old version current and nothing new on disk. No list, an empty list, or no earlier install (nothing to strand) passes.
+REQ=$SRC/share/kith/kernel/lib/requires-switched.txt
+if [ -f "$REQ" ] && [ -n "$(sed 's/#.*//; s/[[:space:]]//g; /^$/d' "$REQ")" ] \
+   && { [ -e "$PREFIX/cli/current" ] || [ -e "$PREFIX/bin/kith" ] || [ -e "$PREFIX/share/kith/kernel" ]; }; then
+  if ! "$SRC/bin/kith" kernel cutover status --require "$REQ" > "$WORK/gate.out" 2> "$WORK/gate.err"; then
+    cat "$WORK/gate.err" "$WORK/gate.out" >&2
+    die "kith $VERSION needs state that is not switched to the new core on this Mac yet; the installed version stays current. Switch each module named above (kith migrate step MODULE, with the installed kith), then run the installer again"
+  fi
+fi
+
 # The install, run under the auth.json lock: the version folder is built beside the others as <version>.partial and
 # renamed into place (a half-copied folder is never <version>, and the next install removes it), then cli/current is
 # flipped by rename, a flat layout of before is turned into links, and old versions are pruned. A version that is

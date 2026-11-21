@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# kith-install-gate-check — scripts/install.sh asks the NEW release's program `kernel cutover status --require
+# <release>/share/kith/kernel/lib/requires-switched.txt` before it copies anything or moves cli/current (retire-python
+# P0). A refusal exits non-zero, names the missing modules and leaves the old version current with no new folder; an
+# accepting program, an empty list, no list, and a first install (no earlier version) all install. Fake releases
+# whose program is a shell script; no Rust program needed.
+#
+#   kernel/tests/kith-install-gate-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$KERNEL/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-gate.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home
+unset KITH_HOME HQ_HOME KITH_STATE HQ_STATE KITH_PREFIX KITH_VERSION KITH_INSTALL_DIR KITH_KEEP_VERSIONS KITH_AUTH KITH_KERNEL
+export KITH_INSTALL_YES=1 KITH_INSTALL_CLI_ONLY=1
+M=$HOME/.kith
+mkdir -p "$HOME/.local/bin"
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+INSTALL="$ROOT/scripts/install.sh"
+
+# release <version> <list|empty|none> <accept|refuse>: a fake release; its program answers --require by exit code like the real verb
+release() {
+  local v=$1 d=$T/rel/kith-$1-darwin-arm64
+  rm -rf "$d"; mkdir -p "$d/bin" "$d/share/kith/kernel/bin" "$d/share/kith/kernel/lib"
+  cat > "$d/bin/kith" <<P
+#!/bin/sh
+if [ "\$1 \$2 \$3" = "kernel cutover status" ]; then
+  [ "$3" = accept ] && { echo "all required modules switched"; exit 0; }
+  echo "accounts: not switched; run: kith migrate step accounts" >&2; exit 1
+fi
+echo "kith $v"
+P
+  chmod 755 "$d/bin/kith"
+  case $2 in
+    none) ;;
+    empty) printf '# nothing yet\n' > "$d/share/kith/kernel/lib/requires-switched.txt" ;;
+    *) printf '# needs\naccounts # why\n' > "$d/share/kith/kernel/lib/requires-switched.txt" ;;
+  esac
+  echo "$v" > "$d/share/kith/kernel/VERSION"
+  tar -C "$T/rel" -czf "$T/rel/kith-$v-darwin-arm64.tar.gz" "kith-$v-darwin-arm64"
+}
+inst() { KITH_INSTALL_TARBALL=$T/rel/kith-$1-darwin-arm64.tar.gz sh "$INSTALL" 2>&1; }
+
+release 0.1.0 list refuse
+out=$(inst 0.1.0); rc=$?
+check "a first install passes without asking (nothing to strand)" '[[ $rc == 0 && $(readlink "$M/cli/current") == 0.1.0 ]]'
+
+release 0.2.0 list refuse
+out=$(inst 0.2.0); rc=$?
+check "a refusing program: exit non-zero" '[[ $rc != 0 ]]'
+check "cli/current is unchanged" '[[ $(readlink "$M/cli/current") == 0.1.0 ]]'
+check "no new version folder was made" '[ ! -e "$M/cli/0.2.0" ] && [ ! -e "$M/cli/0.2.0.partial" ]'
+check "the missing module and its step are printed" '[[ $out == *"accounts: not switched; run: kith migrate step accounts"* ]]'
+check "the old command still answers" '[[ $("$M/cli/current/bin/kith") == "kith 0.1.0" ]]'
+
+release 0.2.0 list accept
+out=$(inst 0.2.0); rc=$?
+check "an accepting program installs and moves current" '[[ $rc == 0 && $(readlink "$M/cli/current") == 0.2.0 ]]'
+out=$(inst 0.2.0); rc=$?
+check "running it again is harmless" '[[ $rc == 0 && $(readlink "$M/cli/current") == 0.2.0 ]]'
+
+release 0.3.0 empty refuse
+out=$(inst 0.3.0); rc=$?
+check "an empty list passes without asking the program" '[[ $rc == 0 && $(readlink "$M/cli/current") == 0.3.0 ]]'
+
+release 0.4.0 none refuse
+out=$(inst 0.4.0); rc=$?
+check "a release with no list (v0.1.3 style) installs" '[[ $rc == 0 && $(readlink "$M/cli/current") == 0.4.0 ]]'
+
+[ "$fail" = 0 ] && echo "kith-install-gate-check: all ok" || { echo "kith-install-gate-check: failed"; exit 1; }
