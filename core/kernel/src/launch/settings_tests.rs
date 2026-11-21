@@ -15,7 +15,7 @@ struct Tree {
     root: PathBuf,
     /// The program the room-ledger hooks name (None: bin/kith-room-ledger, the stub).
     ledger_bin: Option<&'static str>,
-    /// The program the `SessionStart` hook of the cost ledger names (None: bin/kith-cost, the Python).
+    /// The program the `SessionStart` hook of the cost ledger names (None: bin/kith-cost, the stub).
     cost_bin: Option<&'static str>,
     threads_bin: Option<&'static str>,
 }
