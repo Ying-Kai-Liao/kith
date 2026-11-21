@@ -70,7 +70,7 @@ impl Breakers {
     }
 
     /// Closes the breaker of `core`: a test of the server asks again at once, as the breaker would not let it.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn forget(&self, core: &Path) {
         self.map().remove(core);
     }
