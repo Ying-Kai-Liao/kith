@@ -277,6 +277,7 @@ impl Rig {
             now_ms: 1_800_000_000_000.0,
             sandbox: Sandbox::Fixed(false),
             serve: ServeDir::Fixed(m.join("serve")),
+            packages: kith_kernel::secrets::Packages::Disk,
         };
         let mut r = Self {
             _t: t,

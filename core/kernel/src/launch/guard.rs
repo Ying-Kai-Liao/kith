@@ -1,6 +1,6 @@
 //! What a run may not touch, as permission rules: the part of `kernel/lib/kith_guard.py` that a launch writes into the
-//! settings (the secret paths, rule W, and the must-ask rules). The judging half of that file (`must_ask`, the grants of
-//! an escape card) stays in Python until the host moves.
+//! settings (the secret paths, rule W, and the must-ask rules). The judging half (`must_ask`) is `judge.rs`; the grants of
+//! an escape card stay in Python until the host moves.
 
 use std::fs;
 use std::path::Path;
@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::paths::realpath;
 
 /// Under the Kith state folder and the machine folder: whole folders that hold logins, tokens and every audience's index.
-const SECRET_DIRS: [&str; 7] = [
+pub(super) const SECRET_DIRS: [&str; 7] = [
     "secrets",
     "serve",
     "browsers",
@@ -58,7 +58,7 @@ const HOME_FILES: [&str; 9] = [
     ".claude.json",
 ];
 const ABS_TREES: [&str; 2] = ["/opt/homebrew", "/usr/local/bin"];
-const HOME_SECRETS: [&str; 8] = [
+pub(super) const HOME_SECRETS: [&str; 8] = [
     ".ssh/id_*",
     ".aws/credentials",
     ".netrc",
@@ -175,7 +175,7 @@ pub fn edit_rules(trees: &[String], files: &[String]) -> Vec<String> {
 
 // ---- must ask
 
-const SECRET_CMDS: [&str; 22] = [
+pub(super) const SECRET_CMDS: [&str; 22] = [
     "security find-generic-password",
     "security find-internet-password",
     "security dump-keychain",
@@ -199,8 +199,8 @@ const SECRET_CMDS: [&str; 22] = [
     "kith-auth set",
     "kith-auth get",
 ];
-const SECRET_CMDS_LAST: &str = "kith-auth once";
-const TRUST_CMDS: [&str; 23] = [
+pub(super) const SECRET_CMDS_LAST: &str = "kith-auth once";
+pub(super) const TRUST_CMDS: [&str; 23] = [
     "kith allow",
     "kith-allow",
     "kith-auth grant",
@@ -226,7 +226,7 @@ const TRUST_CMDS: [&str; 23] = [
     "kith people deny",
     "kith-people deny",
 ];
-const DESTROY_CMDS: [&str; 10] = [
+pub(super) const DESTROY_CMDS: [&str; 10] = [
     "shred",
     "srm",
     "mkfs",
@@ -238,7 +238,7 @@ const DESTROY_CMDS: [&str; 10] = [
     "git reset --hard",
     "git clean",
 ];
-const OUTWARD_CMDS: [&str; 24] = [
+pub(super) const OUTWARD_CMDS: [&str; 24] = [
     "gh pr merge",
     "gh repo delete",
     "gh release create",
@@ -264,7 +264,7 @@ const OUTWARD_CMDS: [&str; 24] = [
     "sendmail",
     "mail",
 ];
-const CODE_CMDS: [&str; 13] = [
+pub(super) const CODE_CMDS: [&str; 13] = [
     "npx",
     "pnpx",
     "bunx",
@@ -279,6 +279,24 @@ const CODE_CMDS: [&str; 13] = [
     "eval",
     "deno eval",
 ];
+/// Interpreters and the flags that hand them code inline.
+pub(super) const INLINE: [(&str, &[&str]); 12] = [
+    ("python", &["-c"]),
+    ("node", &["-e", "--eval", "-p", "--print"]),
+    ("deno", &["eval"]),
+    ("bun", &["-e", "--eval", "eval"]),
+    ("ruby", &["-e"]),
+    ("perl", &["-e", "-E"]),
+    ("php", &["-r"]),
+    ("osascript", &["-e"]),
+    ("bash", &["-c", "-s"]),
+    ("sh", &["-c", "-s"]),
+    ("zsh", &["-c", "-s"]),
+    ("dash", &["-c", "-s"]),
+];
+pub(super) const INLINE_FISH: (&str, &[&str]) = ("fish", &["-c"]);
+pub(super) const SHELLS: [&str; 5] = ["bash", "sh", "zsh", "dash", "fish"];
+
 /// One sentence per class for the auto-mode classifier (`autoMode.soft_deny`), for what the rules cannot spell.
 pub const SOFT_DENY: [&str; 5] = [
     "Never read, print or send a password, token, key or login (Keychain, kith-auth values, ~/.ssh, cloud logins).",
@@ -287,8 +305,6 @@ pub const SOFT_DENY: [&str; 5] = [
     "Never do something public or past the owner without the owner's yes: a force push or a push to main or master, a merge, a release, a publish or deploy, a network post, a message to anyone but the owner, spending money.",
     "Never run code fetched from outside without the owner's yes: a package fetched and run (npx, uvx, dlx, pipx run), eval, a download piped or substituted into a shell or interpreter, or a download saved to a file and then run.",
 ];
-/// The shells whose bare form, `-` and `-s` take their code from stdin (an ask rule each, as `SHELLS` of `kith_guard.py`).
-const SHELLS: [&str; 5] = ["bash", "sh", "zsh", "dash", "fish"];
 /// The kernel's own `autoMode.allow` sentence for owner runs (guests get none): `OWNER_ALLOW` of `kith_guard.py`. An allow
 /// sentence overrides `soft_deny`, so it is narrow and names what it does not cover.
 pub const OWNER_ALLOW: &str = "Running a script or inline code the agent wrote itself (python3 -c, node -e, bash -c, a heredoc) is routine when it does nothing but read and write ordinary files in the agent's own folders, the run's scratch folder or the project the run works in. It covers no secret (a project .env, a key, a token), no trust file (.claude, .github, kith's protected paths, shell start-up files), no delete outside the run's own writable folders and its working copy, no network post and no code fetched from outside.";
@@ -302,11 +318,16 @@ pub struct Places {
     pub repos: Vec<String>,
     pub kernel: Vec<String>,
     pub package: Vec<String>,
+    /// `KITH_SECRETS`: the folder of logins and tokens (`secret_trees` and the judge read it).
+    pub secrets_dir: String,
+    /// The `KITH_SECRETS` variable's own value, which a call may not name.
+    pub kith_secrets: Option<String>,
 }
 
 impl Places {
     /// `state`, `machine`, `agents` and `kith_home` as the paths rules name them; `kernel` is the kernel folder
     /// (`kith_paths.KERNEL`, resolved).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         home: &str,
         state: &str,
@@ -315,6 +336,7 @@ impl Places {
         kith_home: &str,
         kernel: &Path,
         package: &str,
+        secrets: &str,
     ) -> Self {
         let state_both = both(state);
         let roots: Vec<String> = std::iter::once(agents.to_owned())
@@ -342,11 +364,21 @@ impl Places {
             repos,
             kernel: both(&s(&kernel_real)),
             package: both(package),
+            secrets_dir: secrets.to_owned(),
+            kith_secrets: std::env::var("KITH_SECRETS").ok(),
         }
     }
 
+    /// The same places with the secrets folder and `KITH_SECRETS` given, not read from the process.
+    #[must_use]
+    pub fn with_secrets(mut self, dir: &str, env: Option<&str>) -> Self {
+        self.secrets_dir = dir.to_owned();
+        self.kith_secrets = env.map(str::to_owned);
+        self
+    }
+
     /// `(trees, files)` of the repo's protected paths, under each live checkout of the kith repo.
-    fn protected(&self) -> (Vec<String>, Vec<String>) {
+    pub(super) fn protected(&self) -> (Vec<String>, Vec<String>) {
         let (mut t, mut f) = (vec![], vec![]);
         for r in &self.repos {
             let Ok(text) = fs::read(Path::new(r).join(".github/kith-protected-paths")) else {
@@ -373,7 +405,7 @@ impl Places {
     }
 
     /// `(trees, files)`: absolute trees and files that decide what later runs may do.
-    fn trust(&self) -> (Vec<String>, Vec<String>) {
+    pub(super) fn trust(&self) -> (Vec<String>, Vec<String>) {
         let (mut trees, mut files) = self.protected();
         for h in both(&self.home) {
             files.push(format!("{h}/.claude/settings.json"));

@@ -177,6 +177,7 @@ mod tests {
             now_ms: 0.0,
             sandbox: Sandbox::Fixed(false),
             serve: ServeDir::Fixed(root.path().join("serve")),
+            packages: kith_kernel::secrets::Packages::Disk,
         };
         let auth = json!({
             "people": {"a": {"name": null, "provider": null}, "b": {}},
