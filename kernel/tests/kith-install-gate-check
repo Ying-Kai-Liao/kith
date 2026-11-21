@@ -29,6 +29,7 @@ release() {
 if [ "\$1 \$2 \$3" = "kernel cutover status" ]; then
   [ -z "\$GATE_LOG" ] || echo "\$KITH_GATE_PHASE" >> "\$GATE_LOG"
   [ "$3" = accept ] && { echo "all required modules switched"; exit 0; }
+  [ "$3" = swaponly ] && [ "\$KITH_GATE_PHASE" = pre ] && { echo "pre ok"; exit 0; }
   echo "accounts: not switched; run: kith migrate step accounts" >&2; exit 1
 fi
 echo "kith $v"
@@ -78,14 +79,14 @@ state() {
   case $1 in
     dev) mkdir -p "$h/.kith/secrets"; echo '{}' > "$h/.kith/secrets/auth.json"; : > "$h/.kith/.migrated" ;;
     hqonly) mkdir -p "$h/.hq/secrets" ;;
-    coredb) mkdir -p "$h/.kith"; : > "$h/.kith/core.db" ;;
+    migrated) mkdir -p "$h/.kith"; : > "$h/.kith/.migrated" ;;
     cutover) mkdir -p "$h/.kith/cutover" ;;
     cfgkith) mkdir -p "$h/.config/kith"; echo '{}' > "$h/.config/kith/auth.json" ;;
     cfghq) mkdir -p "$h/.config/hq"; echo '{}' > "$h/.config/hq/auth.json" ;;
   esac
   echo "$h"
 }
-for kind in dev hqonly coredb cutover cfgkith cfghq; do
+for kind in dev hqonly migrated cutover cfgkith cfghq; do
   h=$(state $kind)
   out=$(HOME=$h inst 0.5.0); rc=$?
   last=$(printf '%s\n' "$out" | tail -n 1)
@@ -104,5 +105,13 @@ h=$(state dev)
 release 0.6.0 list accept
 out=$(HOME=$h inst 0.6.0); rc=$?
 check "state only (dev), accepting program: installs" '[[ $rc == 0 && $(readlink "$h/.kith/cli/current") == 0.6.0 ]]'
+
+# Only the swap's re-check (under the lock) refuses: the pre-check was answered yes, as if a rollback landed between them.
+release 0.7.0 list swaponly
+h=$(state dev)
+out=$(HOME=$h inst 0.7.0); rc=$?
+last=$(printf '%s\n' "$out" | tail -n 1)
+check "swap-phase refusal: exit non-zero, no new version, nothing current" '[[ $rc != 0 && ! -e "$h/.kith/cli/0.7.0" && ! -e "$h/.kith/cli/current" ]]'
+check "swap-phase refusal: the last line is the gate's" '[[ $last == *"cutover check said no"* && $last == *"eopen the app"* ]]'
 
 [ "$fail" = 0 ] && echo "kith-install-gate-check: all ok" || { echo "kith-install-gate-check: failed"; exit 1; }

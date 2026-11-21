@@ -128,7 +128,7 @@ REQ=$SRC/share/kith/kernel/lib/requires-switched.txt
 [ -f "$REQ" ] && [ -n "$(sed 's/#.*//; s/[[:space:]]//g; /^$/d' "$REQ")" ] || exit 0
 earlier=
 for f in "$PREFIX/cli/current" "$PREFIX/bin/kith" "$PREFIX/share/kith/kernel" \
-         "$PREFIX/secrets/auth.json" "$PREFIX/core.db" "$PREFIX/cutover" \
+         "$PREFIX/secrets/auth.json" "$PREFIX/.migrated" "$PREFIX/cutover" \
          "$HOME/.config/kith/auth.json" "$HOME/.config/hq/auth.json"; do
   [ ! -e "$f" ] && [ ! -L "$f" ] || earlier=1
 done
@@ -137,7 +137,8 @@ done
 if ! KITH_GATE_PHASE=${KITH_GATE_PHASE:-} "$SRC/bin/kith" kernel cutover status --require "$REQ" > "$WORK/gate.out" 2> "$WORK/gate.err"; then
   cat "$WORK/gate.err" "$WORK/gate.out" >&2
   # The last line is the one the Mac app shows.
-  printf '%s\n' "install: the new kith's cutover check said no, so nothing was changed and the old version stays current. If this Mac runs v0.1.3 or older (no 'kith migrate step'), first install the last release whose requires-switched.txt is empty (KITH_VERSION=<that release>, named in the comment of that file), switch each module named above, then run the installer again. Reopen the app afterwards" | tee "$WORK/gate.last" >&2
+  BRIDGE=$(sed -n 's/^# Bridge release: //p' "$REQ" | sed -n 1p)
+  printf '%s\n' "install: the new kith's cutover check said no, so nothing was changed and the old version stays current. If this Mac runs v0.1.3 or older (no 'kith migrate step') or has no kith program, first install the bridge release, the last one whose requires-switched.txt is empty (${BRIDGE:-not recorded}; KITH_VERSION=<that release>), switch each module named above, then run the installer again. Reopen the app afterwards" | tee "$WORK/gate.last" >&2
   exit 1
 fi
 GATE

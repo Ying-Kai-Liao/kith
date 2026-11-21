@@ -16,4 +16,4 @@
 # The PR that deletes a Python reader and adds its first line here also records, in this comment, the BRIDGE release: the
 # last release whose list is empty. A Mac on v0.1.3 or older has no `kith migrate step`, so the installer's refusal
 # sends it to install that release first (KITH_VERSION=<bridge>), switch its modules, then update again.
-# Bridge release: none yet (the list is empty).
+# Bridge release: none yet (the list is empty)
