@@ -416,8 +416,5 @@ three-layer gate) is the dropped Gates above; "R9" means P5.
   (rule 6), `kith-info`'s module loads add P3-10 dependencies (P2-6, P3-9, P4-1), and P1-10 repoints `kith cost` and drops
   the cost-hook fallbacks. The six smaller points (P0-15, P0-11, P3-7, P0-12 owner, P1-7 count, drift path) are applied.
   P1-11 first half: `uv run --no-project -- /bin/echo ok` printed ok with uv 0.13.0.
-<<<<<<< HEAD
 - 2026-11-21: P1-8 (#1111): `must_ask`, `must_ask_rule` and `sentence_class` are Rust (`core/kernel/src/launch/judge.rs`, with `pyport.rs` for shlex, fnmatch and redact); `pkg/problems.rs` no longer runs `python3` and `pkg::Ctx` lost its `python` field. The Python's 1044 calls, 102 rules and 64 sentences are frozen in `golden-lib/guard-must-ask.json` (generator kept beside it).
-=======
 - 2026-11-21: Engine decision (Kai: "I use codex hermes and claude code"): Claude Code, Codex and Hermes are the first-class engines; Hermes runs over `hermes acp` with no Rust adapter, unused engines stay behind the generic ACP path or are refused, and dsh is dropped (P1-16). Designs agreed: P1-12 one run path (`/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-21-one-run-path/design.md`), P1-15 mcp-exec (`/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-21-mcp-exec/design.md`), P1-16 harness one-shots (`/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-21-harness-oneshots/design.md`).
->>>>>>> origin/main
