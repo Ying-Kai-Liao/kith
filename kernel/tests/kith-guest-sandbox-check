@@ -24,7 +24,7 @@ printf -- '---\nname: other\ndescription: another agent\n---\nYou other.\n' > "$
 printf '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)"\n[ "$1 $2" = "plugin list" ] && echo "[]"\nexit 0\n' > "$T/bin/claude"; chmod +x "$T/bin/claude"
 # A guest run refuses to start without a kith program that answers `memory hook` (fail closed, no unchecked memory writes);
 # CI has no host build, so a stub stands in for it (macOS dev machines pass without one only because a real kith is installed).
-# It also has the cost ledger (a guest's budget is read through bin/kith-cost, which is a stub for `kith kernel cost`: with no
+# It also has the cost ledger (a guest's budget is read through `kith kernel cost`: with no
 # program that has `cost-ledger` the launch refuses the guest) and answers `spent` with 0.
 printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\n[ "$1 $2" = "kernel version" ] && echo %s\ncase "$*" in "kernel cost "*" spent "*) [ ! -e "$0.fail" ] || exit 1; echo 0 ;; esac\nexit 0\n' "'{\"abi\":1,\"modules\":[\"cost-ledger\"]}'" > "$T/bin/kith-fake-host"; chmod +x "$T/bin/kith-fake-host"
 export KITH_BIN=$T/bin/kith-fake-host
