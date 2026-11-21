@@ -305,7 +305,6 @@
     "Edit(/<R>/serve/host/src/store/cards.rs)",
     "Edit(/<R>/serve/host/src/api/cards.rs)",
     "Edit(/<R>/serve/host/src/api/bots.rs)",
-    "Edit(/<K>/bin/kith-lifecycle)",
     "Edit(/<R>/serve/host/src/terminal/mod.rs)",
     "Edit(/<R>/serve/host/src/terminal/registry.rs)",
     "Edit(/<R>/serve/host/src/terminal/sync.rs)",
