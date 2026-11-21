@@ -264,18 +264,6 @@ pub fn turn_on_installed_once(store: &crate::store::Store) -> Result<()> {
     store.kv_set(DONE, "1")
 }
 
-/// The skills block of a bot's profile: what each is for and where to read it.
-pub fn skills_brief(store: &crate::store::Store, enabled: &[String]) -> Option<String> {
-    let lines: Vec<String> = skills(store)
-        .iter()
-        .filter(|s| enabled.contains(&s.id))
-        .map(|s| {
-            format!("- {}: {} (read {} before using it)", s.name, s.description, s.dir().join("SKILL.md").display())
-        })
-        .collect();
-    (!lines.is_empty()).then(|| format!("Skills you can use when they fit the task:\n{}", lines.join("\n")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

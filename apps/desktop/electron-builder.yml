@@ -4,8 +4,7 @@
 #   build/native/kith/             macOS: bin/kith (universal) + share/kith/kernel, as in the release tarball
 #   build/native/kith-serve.exe    Windows: the host, and kith-servew.exe that runs it at sign-in
 #   build/native/kith-speech      macOS on-device speech helper
-#   build/native/KithScreen.app   macOS screen helper (Xcode `Screen` target, with cua-driver inside)
-#   build/native/cua-driver.exe     Windows: the computer-use driver and its UI Automation helper
+#   build/native/KithScreen.app   macOS screen helper (Xcode `Screen` target)
 beforePack: tools/verify-build.cjs
 appId: com.yingkailiao.kith
 productName: Kith
@@ -47,9 +46,6 @@ mac:
   # refuses unless it is named here.
   x64ArchFiles: Contents/Resources/kith-tts
   hardenedRuntime: true
-  # The computer-use driver keeps its maker's Developer ID signature (packaging/cua-driver).
-  signIgnore:
-    - KithScreen\.app/Contents/Helpers/cua-driver$
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
   extendInfo:
@@ -125,13 +121,6 @@ win:
     # The conversation lock's launcher and the process holder (kith/bin/*.exe), where the core finds them beside the host.
     - from: build/native/kith
       to: kith
-    # The computer-use driver bots act through; the host starts it from beside itself.
-    - from: build/native/cua-driver.exe
-      to: cua-driver.exe
-    - from: build/native/cua-driver-uia.exe
-      to: cua-driver-uia.exe
-    - from: build/native/cua-driver.LICENSE
-      to: cua-driver.LICENSE
     # The tray icon (template glyphs are for macOS).
     - from: resources/icon.png
       to: icon.png

@@ -11,7 +11,7 @@ item names the code responsible, so you can check it yourself.
 - **Your agents' memory and files**, under `~/.kith` and in each agent's folder
   ([docs/architecture.md](docs/architecture.md)).
 - **What your runs cost.** The budget ledger, `~/.kith/cost.db`, records each request's agent, model, token counts
-  and price. It doesn't record what was said (`kernel/bin/kith-cost`).
+  and price. It doesn't record what was said (`core/kernel/src/cost/`).
 - **Secrets.** Account and API keys are kept in the macOS Keychain (`kernel/bin/kith-auth`). Connector credentials
   are encrypted in the host's database, with the key in the Keychain (`serve/host/src/market/vault.rs`).
 

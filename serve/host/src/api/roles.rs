@@ -203,7 +203,7 @@ fn owned_bot_chat_agent(hub: &Hub, person: &str, chat: &str) -> Option<String> {
     let row = hub.store.bot(chat).ok().flatten().filter(|r| !r.deleted)?;
     let bot = hub.store.bot_guest_of_person(row.config.person.as_deref()?)?;
     (bot.owner_person.as_deref() == Some(person)).then_some(())?;
-    row.config.hq_agent
+    row.config.hq_agent.map(String::from)
 }
 
 /// The group room a member call names, for the methods a person may use in one (`history`, `thread`, `send`, and

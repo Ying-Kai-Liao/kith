@@ -5,7 +5,7 @@ use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::super::app::{App, Click, Editor, Mark, PERMISSION_MODES, SlashAction, Status};
+use super::super::app::{App, Click, Editor, Mark, PERMISSION_MODES, Status};
 use super::super::md::{truncate, width as w};
 use super::buffer::{fill, hline, put, put_line, rput, u};
 use super::set_cursor;
@@ -50,14 +50,8 @@ pub(super) fn chat(buf: &mut Buffer, r: Rect, app: &mut App, narrow: bool) {
         put(buf, x, r.y, room, &truncate(&format!("group · {}", names.join(", ")), usize::from(room)), t.secondary);
     } else if !narrow {
         let mode = PERMISSION_MODES[b.mode.min(PERMISSION_MODES.len() - 1)];
-        let fast = match (b.fast_mode, b.fast_refusal().is_some()) {
-            (true, true) => " · ⚡ refused",
-            (true, false) => " · ⚡ fast",
-            _ => "",
-        };
-        let cwd =
-            truncate(&b.folder(&app.home), usize::from(room).saturating_sub(w(&b.backend) + w(mode) + w(fast) + 6));
-        put(buf, x, r.y, room, &format!("{} · {cwd} · {mode}{fast}", b.backend), t.secondary);
+        let cwd = truncate(&b.folder(&app.home), usize::from(room).saturating_sub(w(&b.backend) + w(mode) + 6));
+        put(buf, x, r.y, room, &format!("{} · {cwd} · {mode}", b.backend), t.secondary);
     }
     let mut top = r.y + 1;
     if !narrow {
@@ -211,11 +205,7 @@ fn command_menu(buf: &mut Buffer, body: Rect, app: &App) {
         fill(buf, Rect::new(body.x, y, body.width, 1), bg);
         let name = if i == sel { t.bold } else { t.text };
         let x = put(buf, body.x + 3, y, 26, &truncate(&format!("/{}", c.name), 26), name.patch(bg)) + 2;
-        let hint = match (i == sel, c.action) {
-            (false, _) => "",
-            (true, SlashAction::Skill) => "tab fills in",
-            (true, _) => "↵ runs",
-        };
+        let hint = if i == sel { "tab fills in" } else { "" };
         let rx = rput(buf, body.right() - 1, y, hint, t.dim.patch(bg));
         let room = usize::from(rx.saturating_sub(x + 1));
         put(buf, x, y, u(room), &truncate(&c.about(), room), t.secondary.patch(bg));

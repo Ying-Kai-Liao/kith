@@ -28,7 +28,7 @@ fail CI, so they do not pile up.
 ## Vendored code and things that ship outside a lockfile
 
 Copy code into the repo only when a dependency will not do. Put it in its own folder with its `LICENSE` beside it
-(for example `apps/packaging/cua-driver/LICENSE`), keep upstream copyright headers in the files, and add one entry to
+(for example `apps/ios/Kit/Sources/KithKit/Resources/ThirdPartyNotices/inter-LICENSE.txt`), keep upstream copyright headers in the files, and add one entry to
 `vendored` in `policy.json` (`name`, `file`, `url`, optional `license` and `note`). A port of someone's code (the
 ThinkingOrb) keeps their license file next to the port. A runtime that ships inside the app but is not in a lockfile
 (Electron) goes in `extras`.

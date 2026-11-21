@@ -73,7 +73,7 @@ impl Kernel {
     async fn launch_with(
         &self,
         person: Option<&str>,
-        access: Option<&(RunGrant, [(String, String); 2])>,
+        access: Option<&(RunGrant, Vec<(String, String)>)>,
     ) -> anyhow::Result<hq::Launch> {
         hq::launch(
             &self.kith,

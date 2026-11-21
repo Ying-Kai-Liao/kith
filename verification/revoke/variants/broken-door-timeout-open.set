@@ -1,0 +1,9 @@
+\* BROKEN: a start whose core call timed out starts the box anyway (no row)
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE
+CoreDoorStart = TRUE
+CoreSlow = TRUE
+TimeoutOpen = TRUE

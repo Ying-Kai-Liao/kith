@@ -38,7 +38,7 @@ struct BotDetailsView: View {
     @State private var access: AccessStore?
     private let call: CallAction?
     /// Cards that kith's sections repeat go once kith has the fact on screen.
-    private var shown: BotSections { BotSections(hqAgent: bot?.hqAgent, info: kith?.info, unsupportedHost: kith?.unavailable ?? true) }
+    private var shown: BotSections { BotSections(info: kith?.info, unsupportedHost: kith?.unavailable ?? true) }
 
     init(botId: String, request: DetailsRequest, call: CallAction? = nil) {
         self.botId = botId
@@ -99,7 +99,7 @@ struct BotDetailsView: View {
     /// Create template at the top left, close at the top right; the pill leaves once the identity scrolls away.
     private var actions: some View {
         HStack(spacing: 8) {
-            if let bot {
+            if let bot, !bot.isFlagged {
                 Button { template = EditorRequest(BotDraft(bot)) } label: {
                     Label("Create template", systemImage: "square.on.square")
                         .font(.system(size: 12, weight: .medium))
@@ -139,8 +139,10 @@ struct BotDetailsView: View {
                 .padding(.top, 14)
                 .transition(.opacity)
             }
-            SegmentedChoice(selection: $tab, options: tabs)
-                .padding(.horizontal, 16)
+            if bot?.isFlagged != true {
+                SegmentedChoice(selection: $tab, options: tabs)
+                    .padding(.horizontal, 16)
+            }
         }
         .padding(.top, scrolled ? 0 : 18)
         .padding(.bottom, 10)
@@ -190,7 +192,7 @@ struct BotDetailsView: View {
             .font(.system(size: 11.5))
             .foregroundStyle(Palette.muted)
             if let agent = bot.hqAgent, let kith { KithIdentityLine(agent: agent, store: kith).padding(.top, 4) }
-            if let call { callButton(call).padding(.top, 12) }
+            if let call, !bot.isFlagged { callButton(call).padding(.top, 12) }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 64)
@@ -236,6 +238,14 @@ struct BotDetailsView: View {
     }
 
     @ViewBuilder private var page: some View {
+        if let bot, bot.isFlagged {
+            NativeBotNotice(bot: bot).padding(.horizontal, -16)
+        } else {
+            pageBody
+        }
+    }
+
+    @ViewBuilder private var pageBody: some View {
         switch tab {
         case .details:
             detailsPage
@@ -245,8 +255,6 @@ struct BotDetailsView: View {
                 if let bot {
                     if let agent = bot.hqAgent, !agent.isEmpty, !bot.isGroup {
                         HqMemoryCard(botId: botId, kith: kith)
-                    } else {
-                        MemoryCard(botId: botId, showsHarnessTab: shown.harnessMemoryTab)
                     }
                 }
             }

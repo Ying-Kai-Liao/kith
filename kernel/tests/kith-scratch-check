@@ -76,7 +76,9 @@ check "none of that edited agent.md" "[ \"\$(cksum < '$SUM')\" = \"$sum_before\"
 check "kith scratch set harness is refused (per-chat choice, not a persistent one)" "[ $rc != 0 ] && grep -q 'built in' '$T/err' && [ \"\$(cksum < '$SUM')\" = \"$sum_before\" ]"
 
 # --- a thread keeps its engine and model --------------------------------------------------------------------------------
-tag() { printf '{"session_id":"%s"}' "$1" | KITH_AGENT=${5:-scratch} KITH_MODEL=$2 KITH_PROVIDER=$3 KITH_EFFORT=$4 KITH_AGENT_VERSION=v "$KERNEL/bin/kith-cost" tag; }
+# The ledger's `tag` is the kith program's (bin/kith-cost forwards to it): without one the thread rows are skipped.
+tag() { printf '{"session_id":"%s"}' "$1" | KITH_BIN=${KITH_DIFFTEST_BIN:-} KITH_AGENT=${5:-scratch} KITH_MODEL=$2 KITH_PROVIDER=$3 KITH_EFFORT=$4 KITH_AGENT_VERSION=v "$KERNEL/bin/kith-cost" tag; }
+if [ -z "${KITH_DIFFTEST_BIN:-}" ] || [ ! -x "$KITH_DIFFTEST_BIN" ]; then echo "skip: the thread rows (no Rust program: KITH_DIFFTEST_BIN)"; else
 tag t-claude haiku claude "" ; tag t-codex gpt-5 codex "" ; tag t-other sonnet claude "" other
 printf '{"cwd":"%s"}\n' "$T" > "$HOME/.claude/projects/x/t-claude.jsonl"
 OUT=$("$KITH" scratch thread t-claude --json 2>/dev/null)
@@ -91,6 +93,7 @@ OUT=$("$KITH" scratch --resume t-claude hi 2>/dev/null)
 check "resume keeps the thread's model" "echo \"\$OUT\" | grep -q -- '--model haiku' && echo \"\$OUT\" | grep -q -- '--resume t-claude'"
 OUT=$("$KITH" scratch -m sonnet --resume t-claude hi 2>/dev/null)
 check "resume with -m overrides it" "echo \"\$OUT\" | grep -q -- '--model sonnet'"
+fi
 
 # --- never backed up, never shared ------------------------------------------------------------------------------------
 git -C "$KITH_STATE" init -q && git -C "$KITH_STATE" commit -qm init --allow-empty

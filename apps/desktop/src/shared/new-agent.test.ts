@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { madeButFailed, newAgentDescriptionError, newAgentNameError, newAgentParams, parseKernelStatus, parseNewAgentResult, type NewAgentForm } from './new-agent.ts'
+import { madeButFailed, newAgentDescriptionError, newAgentNameError, newAgentParams, parseKernelStatus, prefillOf, parseNewAgentResult, type NewAgentForm } from './new-agent.ts'
 
 const form = (over: Partial<NewAgentForm> = {}): NewAgentForm => ({
   name: ' trip-planner ', description: ' Plans trips ', harness: '', model: '', effort: 'default', ...over,
@@ -50,4 +50,12 @@ test('kernel status and the made-but error', () => {
   assert.equal(parseKernelStatus({ ok: true, bin: '/x/kith' }).ok, true)
   assert.ok(madeButFailed("trip was made, but its effort couldn't be set: no", 'trip'))
   assert.ok(!madeButFailed('name taken', 'trip'))
+})
+
+test('a flagged row prefills the form: name, one-line description, a kith engine and its model', () => {
+  assert.deepEqual(prefillOf({ name: 'Trip', description: '\nPlans trips: books them.\nNever pays.', backend: 'codex', model: 'gpt-5' }), {
+    name: 'Trip', description: 'Plans trips - books them.', harness: 'codex', model: 'gpt-5',
+  })
+  assert.deepEqual(prefillOf({ name: 'Odd', description: '', backend: 'gemini', model: 'x' }), { name: 'Odd', description: '', harness: '', model: '' }, 'an engine kith cannot run stays on its default')
+  assert.equal(newAgentDescriptionError(prefillOf({ name: 'a', description: '- a: b', backend: 'claude' }).description), null)
 })

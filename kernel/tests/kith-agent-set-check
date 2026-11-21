@@ -111,29 +111,35 @@ for line in "set effort loud" "set model 'bad model!'" "set harness nope" "set a
 done
 
 # ---- a model per backup entry ----
-mkdir -p "$KITH_STATE/accounts/claude/school"
-"$KITH" backup add claude@sonnet --agent echo >/dev/null 2>&1
-"$KITH" backup add claude:school@haiku --agent echo >/dev/null 2>&1
-"$KITH" backup add codex --agent echo >/dev/null 2>&1
-"$KITH" backup add codex@sonnet --agent echo >/dev/null 2>"$T/err"; rc=$?
-check "backup add codex@<Claude model> refused" "[ $rc != 0 ] && grep -q 'Claude model' '$T/err'"
-"$KITH" backup add 'claude@' --agent echo >/dev/null 2>&1; rc=$?
-check "backup add with an empty model refused" "[ $rc != 0 ]"
-OUT=$("$KITH" backup list --agent echo --json)
-check "backup list --json: model as its own field, plain ids stay plain" "[ \"\$(jv '[(b[\"id\"],b[\"model\"]) for b in d[\"backups\"]]')\" = \"[('claude@sonnet', 'sonnet'), ('claude:school@haiku', 'haiku'), ('codex', None)]\" ]"
-OUT=$("$KITH" echo --backups-json)
-check "--backups-json: ids round-trip with the model, model field" "[ \"\$(jv '[(c[\"id\"],c[\"model\"]) for c in d[\"chain\"]]')\" = \"[('claude', None), ('claude@sonnet', 'sonnet'), ('claude:school@haiku', 'haiku'), ('codex', None)]\" ]"
+# `kith backup` and `--backup` go through the Rust program (R3), so a run without one skips this section.
+if [ -n "${KITH_DIFFTEST_BIN:-}" ]; then
+  export KITH_BIN=$KITH_DIFFTEST_BIN
+  mkdir -p "$KITH_STATE/accounts/claude/school"
+  "$KITH" backup add claude@sonnet --agent echo >/dev/null 2>&1
+  "$KITH" backup add claude:school@haiku --agent echo >/dev/null 2>&1
+  "$KITH" backup add codex --agent echo >/dev/null 2>&1
+  "$KITH" backup add codex@sonnet --agent echo >/dev/null 2>"$T/err"; rc=$?
+  check "backup add codex@<Claude model> refused" "[ $rc != 0 ] && grep -q 'Claude model' '$T/err'"
+  "$KITH" backup add 'claude@' --agent echo >/dev/null 2>&1; rc=$?
+  check "backup add with an empty model refused" "[ $rc != 0 ]"
+  OUT=$("$KITH" backup list --agent echo --json)
+  check "backup list --json: model as its own field, plain ids stay plain" "[ \"\$(jv '[(b[\"id\"],b[\"model\"]) for b in d[\"backups\"]]')\" = \"[('claude@sonnet', 'sonnet'), ('claude:school@haiku', 'haiku'), ('codex', None)]\" ]"
+  OUT=$("$KITH" echo --backups-json)
+  check "--backups-json: ids round-trip with the model, model field" "[ \"\$(jv '[(c[\"id\"],c[\"model\"]) for c in d[\"chain\"]]')\" = \"[('claude', None), ('claude@sonnet', 'sonnet'), ('claude:school@haiku', 'haiku'), ('codex', None)]\" ]"
 
-printf -- '---\nname: echo\ndescription: test agent\nmodel: opus\neffort: medium\n---\nYou echo.\n' > "$A/agent.md"
-check "launch without --backup: the agent's own model" "[ \"\$(launch)\" = 'claude opus medium' ]"
-check "--backup claude@sonnet: the entry's model, the agent's effort" "[ \"\$(launch --backup claude@sonnet)\" = 'claude sonnet medium' ]"
-check "--backup claude (no model) finds claude@sonnet" "[ \"\$(launch --backup claude)\" = 'claude sonnet medium' ]"
-OUT=$("$KITH" echo --launch-json --backup claude@sonnet 2>/dev/null)
-check "launch json: backup id as given, account_id without the model" "[ \"\$(jv '(d[\"backup\"],d[\"account_id\"],d[\"env\"][\"KITH_MODEL\"])')\" = \"('claude@sonnet', 'claude', 'sonnet')\" ]"
-check "--backup claude:school@haiku" "[ \"\$(launch --backup claude:school@haiku)\" = 'claude haiku medium' ]"
-check "--backup codex (no model): a Claude model never reaches it" "[ \"\$(launch --backup codex)\" = 'codex None medium' ]"
-"$KITH" backup remove claude@sonnet --agent echo >/dev/null
-"$KITH" backup add claude --agent echo >/dev/null 2>&1
-check "an old plain entry behaves as before: the agent's own model" "[ \"\$(launch --backup claude)\" = 'claude opus medium' ]"
+  printf -- '---\nname: echo\ndescription: test agent\nmodel: opus\neffort: medium\n---\nYou echo.\n' > "$A/agent.md"
+  check "launch without --backup: the agent's own model" "[ \"\$(launch)\" = 'claude opus medium' ]"
+  check "--backup claude@sonnet: the entry's model, the agent's effort" "[ \"\$(launch --backup claude@sonnet)\" = 'claude sonnet medium' ]"
+  check "--backup claude (no model) finds claude@sonnet" "[ \"\$(launch --backup claude)\" = 'claude sonnet medium' ]"
+  OUT=$("$KITH" echo --launch-json --backup claude@sonnet 2>/dev/null)
+  check "launch json: backup id as given, account_id without the model" "[ \"\$(jv '(d[\"backup\"],d[\"account_id\"],d[\"env\"][\"KITH_MODEL\"])')\" = \"('claude@sonnet', 'claude', 'sonnet')\" ]"
+  check "--backup claude:school@haiku" "[ \"\$(launch --backup claude:school@haiku)\" = 'claude haiku medium' ]"
+  check "--backup codex (no model): a Claude model never reaches it" "[ \"\$(launch --backup codex)\" = 'codex None medium' ]"
+  "$KITH" backup remove claude@sonnet --agent echo >/dev/null
+  "$KITH" backup add claude --agent echo >/dev/null 2>&1
+  check "an old plain entry behaves as before: the agent's own model" "[ \"\$(launch --backup claude)\" = 'claude opus medium' ]"
+else
+  echo "skip the backup rows: kith backup is the Rust program's since R3 (KITH_DIFFTEST_BIN=/path/to/kith runs them; CI's host-build does)"
+fi
 
 [ $fails = 0 ] && echo "all agent-set checks passed" || { echo "$fails check(s) failed"; exit 1; }

@@ -22,7 +22,7 @@ impl Actor {
                 .map(|d| Depleted { resets_at: d.resets_at.or(seen.and_then(|s| s.resets_at)) })
                 .or(seen.copied()),
             // A rejected limit that still ended the turn with an answer is not one that stopped it.
-            Ok(_) if self.last_text.is_none() && self.sent.is_empty() => seen.copied(),
+            Ok(_) if self.last_text.is_none() => seen.copied(),
             Ok(_) => None,
         }
     }
@@ -30,7 +30,7 @@ impl Actor {
     /// Takes a turn that ended out of usage to the next entry. Whether it did (the turn then runs on, and the caller
     /// leaves it alone); otherwise the turn finishes as it always did.
     pub(super) async fn failover(&mut self, done: &Done, done_tx: &mpsc::UnboundedSender<Done>) -> bool {
-        if !self.is_hq() || self.stop_requested || self.compacting.is_some() || self.turn.is_none() {
+        if self.stop_requested || self.turn.is_none() {
             return false;
         }
         let Some(Depleted { resets_at }) = self.depletion(done) else { return false };
@@ -50,7 +50,7 @@ impl Actor {
         self.hub.backups.mark_out(&failed, resets_at, RATE_LIMIT);
         self.turn_tried.insert(failed.clone());
         // What the attempt already did can't be done twice: the entry is out for the next turn, this one ends here.
-        if self.attempt_effects || !self.sent.is_empty() {
+        if self.attempt_effects {
             tracing::info!(bot = %self.cfg.id, entry = %failed, "turn ran out of usage after acting; not repeating it");
             return false;
         }

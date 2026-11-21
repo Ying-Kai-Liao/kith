@@ -447,6 +447,8 @@ export class FakeHost {
         const bot = this.saveBot({ avatarColor: '', avatarShape: 'blob', avatarSource: 'auto', backend: 'claude', cwd: '', permission: 'auto', name: str('name'), description: str('description'), hqAgent: str('name') } as unknown as BotDraft)
         return { agent: str('name'), botId: bot.id, bot }
       }
+      case 'exportHostBot':
+        return { path: `/Users/demo/.kith/bots/${str('botId')}/kith-export` }
       case 'createBot':
       case 'updateBot':
         return { bot: this.saveBot(b as unknown as BotDraft | GroupDraft) }

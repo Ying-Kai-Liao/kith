@@ -58,7 +58,7 @@ pub fn recipient(store: &Store, room: &str, to: &str) -> Option<Recipient> {
     }
     let cfg = store.bot(to).ok().flatten().filter(|r| !r.deleted && r.config.kind == BotKind::Agent)?.config;
     let agent = cfg.hq_agent.clone()?;
-    Some(Recipient { kind: SecretTo::Agent, agent: Some(agent), name: cfg.name })
+    Some(Recipient { kind: SecretTo::Agent, agent: Some(agent.into()), name: cfg.name })
 }
 
 fn clean_label(s: Option<&str>) -> Option<String> {

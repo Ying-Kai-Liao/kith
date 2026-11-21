@@ -181,6 +181,7 @@ check "every dev.hq.* job became dev.kith.*" \
   "[ \"\$(ls $LA | tr '\n' ' ')\" = 'dev.kith.backup.plist dev.kith.cost.plist dev.kith.house.plist dev.kith.live.plist dev.kith.monitor.plist dev.kith.sched.plist dev.kith.serve.plist ' ]"
 check "sched plist came from its installer (new label, kith-sched, launcher is ~/.kith/bin/kith-uv)" \
   "plist_has $LA/dev.kith.sched.plist $HOME/.kith/bin/kith-uv && plist_has $LA/dev.kith.sched.plist kernel/bin/kith-sched"
+# dev.kith.cost still runs `kith-uv run --script .../kith-cost`: the stub is valid Python too (it re-runs itself under sh), so the plist stays as it is
 check "rewritten plists name ~/.kith and kith-* only" \
   "plist_has $LA/dev.kith.cost.plist $HOME/.kith/bin/kith-uv && plist_has $LA/dev.kith.cost.plist $HOME/kith/kernel/bin/kith-cost && ! grep -l '/.hq' $LA/*.plist"
 check "the launcher was renamed (not copied) to kith-uv" "[ -x $HOME/.kith/bin/kith-uv ] && [ ! -e $HOME/.kith/bin/hq-uv ]"

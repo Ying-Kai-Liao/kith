@@ -20,8 +20,15 @@ design). This skill is its only documentation.
 ```
 verification/revoke/run.sh                          # every row of checks.tsv (228 rows), then the 7 Reconcile.tla rows
 verification/revoke/run.sh --show VARIANT PROPERTY   # TLC's full output (the counterexample) for one row
+verification/revoke/run.sh --shard I/N               # one shard of N (add --smoke for its smoke rows); shard 1 also runs the Reconcile rows
+verification/revoke/run.sh --shard-check N           # no TLC: every row in exactly one of the N shards (CI runs it with N=6)
+KITH_TLC_HEAP=6g verification/revoke/run.sh --show VARIANT PROPERTY   # a bigger Java heap (default 512m; same results)
 verification/revoke/drift.sh                        # covered files changed since the sync commit?
 ```
+
+CI runs the rows as 6 parallel shards (`revoke-access (I/6)`, heap 8g), the slow liveness rows spread across them and
+`switched-always-kill NoLiveProc` alone on shard 6. To reproduce one failing leg: `run.sh --shard I/6`; one row: `--show`.
+If you add rows, `--shard-check 6` must still pass; if you change the shard count, change it in `ci.yml` too.
 
 Same pinned tools as `verification/threads/run.sh` (it is asked for them with `--tools`): `tla2tools.jar` v1.7.4,
 Temurin JRE 21 only when no Java 11+ is present, cached under `${XDG_CACHE_HOME:-$HOME/.cache}/kith-verify/`.
@@ -491,3 +498,30 @@ revoke again; `unfinished`). The apps do not render `undoNote` yet. Tests: `api/
 (`a_revoke_of_the_new_id_with_the_core_down_says_it_did_not_happen_and_what_to_do`,
 `an_undo_that_cannot_read_the_ids_leaves_a_note_until_a_later_undo_reads_them`,
 `an_owed_cut_older_than_an_undo_that_could_not_read_the_ids_is_dropped_not_paid`), `remote/core_revokes.rs` unit tests.
+
+## Guest doors on the core's rows (2026-11-19, M2(b), flow/core-followups-doors)
+
+On a switched Mac a person's own guest door is a row of the core's `doors` table (`kernel/lib/kith_door_core.py`, called by `kith_door.py`
+`run` and `sweep_report`; the host's `doors.rs` still shells `kith door sweep`). The model splits what the old rows folded into one action:
+`gdoor` is the ROW (`idle` -> `running` open -> `killed` swept -> `reaped` confirmed gone, or `done` ended), `gbox` is the BOX (`no`, `up`, `gone`,
+`never`). New switches (all FALSE in `base.consts`): `CoreDoorStart` (needs `RouterDoor`, `GuestDoor`, `CoreDoorHook`: `DoorStart` is then ONE
+step, the core's `doors.start`, so `DoorD2` holds on the row; the box starts later with no check, `BoxStart`; the supervisor's markLive and the
+sweeper's kill are `BoxKill`; its `doors.end` is `RowEnd`/`Reap`), `CoreSlow` (a core call with no answer is a step that changes nothing, in both
+forms: `DoorStartTimeout` before the commit, `StartLost` after it with the reply lost; `DoorSweepTimeout`), and the breaks `TimeoutOpen` (a start
+with no answer starts the box with no row), `TimeoutKills` (a recheck with no answer ends a live door of an allowed person) and `ReapLive` (the
+sweeper confirms a swept row gone before the box started). Properties: `NoOrphanBox` (a running box always has its row, open or swept and not
+reaped), `BoxD1` (a box up for a revoked person stops, liveness), `BoxD2` (the box starts only while not revoked: FAILS by design on
+`switched-core-door`, bounded by `BoxKill`), `LiveDoorKept` (a running door ends only because the person is revoked or has no row), and
+`DoorNoResurrect` now lets a swept row go to `reaped`. Rows: `switched-core-door` (TypeOK, DoorD2, DoorD2c, DoorD1, DoorNoResurrect,
+DoorsCutWithRevoke, DoorCutAtSweep, NoOrphanBox, BoxD1 pass; BoxD2 fails), `switched-core-door-slow` (DoorD2, DoorD2c, DoorD1, BoxD1, NoOrphanBox,
+LiveDoorKept pass), and `broken-door-timeout-open` / `broken-door-reap-live` (`NoOrphanBox` fails), `broken-door-timeout-kills` (`LiveDoorKept`
+fails). Not in the model: a room door keeps the file path (its row would have no basis), so `switched-router-door` stays the row for it; a door
+started before the switch has a claim file and no row, and the file's sweep (named person, gone supervisor, `left`, recheck) ends it.
+
+The rule for a call with no answer, in the code's words: a start with no answer starts nothing and ends the id it may have written; a sweep's
+recheck with no answer leaves running doors alone (`{"unknown": true}`, the host asks again in 10 s); a named person, a gone supervisor and a
+definite `revoked` end a door with no answer from the core; the sweeper calls `doors.end` on a swept row only when its supervisor is gone.
+`kith-auth door` with no answer (a timeout, a core that did not answer, a kith-auth that crashed or printed no state) is state `unknown` and ends no running door (it ended it before), on an unswitched Mac too: that door runs on, at most until `RUN_LIMIT_S`, and a named revoke or a gone supervisor still ends it.
+Bound left: an untick that `kith-auth` cannot judge leaves a door up to `RUN_LIMIT_S` (3600 s). Tests: `kernel/tests/kith-door-core-check`
+(a stub core: answers, refuses, down, hung; scratch edits of each rule were run and fail it). SYNC is not moved (the other covered changes since it
+have not been read).

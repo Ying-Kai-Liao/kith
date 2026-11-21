@@ -8,15 +8,17 @@
 //! --register ID [DIR] [--in PARENT] [--home [DIR]]
 //! ```
 //!
-//! The guest branch of the Python (a run for someone other than the owner asks the host over the run socket, which
-//! decides what that run may see: `serve/host/src/runauth.rs` `project_args`) is not ported: this program refuses there,
-//! so a guest run can only be answered by `kernel/bin/project-id`. Whoever switches the verb keeps that branch on Python.
+//! A run for someone other than the owner asks the core over its run socket (`KITH_CORE_RUN_SOCKET`), which decides what that
+//! run may see (`core/runtime/src/runtools.rs`): [`guest`] is that client, and it answers before the registry is opened.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde_json::{Map, Value};
+
+pub mod guest;
+pub use guest::Guest;
 
 use crate::paths::realpath;
 use crate::secrets::pyjson;
@@ -29,20 +31,19 @@ pub struct Out {
     pub code: i32,
 }
 
-/// What a run needs from its process: the state folder (`KITH_STATE`), `$HOME`, the working directory and whether this
-/// is a guest run (`KITH_RUN_TOKEN` and `KITH_RUN_SOCKET` both set and not empty).
+/// What a run needs from its process: the state folder (`KITH_STATE`), `$HOME`, the working directory and, for a guest run
+/// (`KITH_RUN_TOKEN` set and not empty: the token alone), its token and the core's run socket. A run whose core socket is
+/// missing is still a guest, answered with nothing, never as the owner.
 pub struct Ctx {
     pub state: PathBuf,
     pub home: PathBuf,
     pub cwd: PathBuf,
-    pub guest: bool,
+    pub guest: Option<Guest>,
 }
 
-/// Whether the environment makes this a guest run. Takes the raw values (`var_os`): a token that is not UTF-8 still
-/// counts, as it does for the Python.
+/// Whether the environment makes this a guest run (see [`Guest::from_env`]).
 pub fn is_guest(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
-    let set = |n: &str| get(n).is_some_and(|v| !v.is_empty());
-    set("KITH_RUN_TOKEN") && set("KITH_RUN_SOCKET")
+    Guest::from_env(get).is_some()
 }
 
 /// Where a new project's home goes unless projects.json says "homes".
@@ -532,12 +533,9 @@ impl Run<'_> {
 /// `kith kernel project-id ARGS...`.
 pub fn run(ctx: &Ctx, argv: &[String]) -> Out {
     let mut out = Out::default();
-    if ctx.guest {
-        out.err(
-            "project-id: a run for someone other than the owner is answered by the host through kernel/bin/project-id \
-             (KITH_CORE=python); the core does not take that branch",
-        );
-        return out.with_code(2);
+    // Before anything is read: a guest never reaches the registry, whatever the arguments.
+    if let Some(g) = &ctx.guest {
+        return guest::ask(g, argv);
     }
     let file = ctx.state.join("projects.json");
     // The verbs that write; the lock is released when `_hold` drops (the file closes).

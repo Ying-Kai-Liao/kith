@@ -258,9 +258,9 @@ pub async fn apply(
     result
 }
 
-/// Linux helpers in the host's archive: the Remote screen helper and the computer-use driver.
+/// Linux helpers in the host's archive: the Remote screen helper.
 /// The host starts them from beside itself, so an update replaces them there too.
-const HELPERS: &[&str] = &["kith-screen", "cua-driver"];
+const HELPERS: &[&str] = &["kith-screen"];
 
 /// Swaps a helper beside the host for the staged one, keeping a copy to roll back to.
 struct Helper {

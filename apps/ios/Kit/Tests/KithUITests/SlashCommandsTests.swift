@@ -16,21 +16,12 @@ private let installed = [("pdf", "PDF"), ("code-review", "Code Review"), ("xlsx"
     #expect(SlashCommands.query("hi /pdf") == nil)
 }
 
-@Test func builtInCommandsComeFirstThenOnlyTheBotsOwnSkills() throws {
-    let offered = try bot(#"{"id":"b","skills":["pdf","code-review"],"fastModeSupport":"offered"}"#)
-    #expect(SlashCommands.list(for: offered, query: "", skills: installed).map(\.name) == ["fast", "pdf", "code-review"])
-    #expect(SlashCommands.list(for: offered, query: "review", skills: installed).map(\.name) == ["code-review"])
-    #expect(SlashCommands.list(for: offered, query: "new", skills: installed).isEmpty, "a new session is in the bot's menu")
+@Test func theListHoldsOnlyTheBotsOwnSkills() throws {
+    let own = try bot(#"{"id":"b","skills":["pdf","code-review"]}"#)
+    #expect(SlashCommands.list(for: own, query: "", skills: installed).map(\.name) == ["pdf", "code-review"])
+    #expect(SlashCommands.list(for: own, query: "review", skills: installed).map(\.name) == ["code-review"])
+    #expect(SlashCommands.list(for: own, query: "fast", skills: installed).isEmpty, "Fast mode is gone")
     #expect(SlashCommands.list(for: try bot(#"{"id":"b","skills":["pdf"]}"#), query: "xl", skills: installed).isEmpty)
-    #expect(SlashCommands.list(for: try bot(#"{"id":"b"}"#), query: "", skills: []).map(\.name) == ["fast"], "offered until the agent says otherwise")
-    #expect(SlashCommands.list(for: try bot(#"{"id":"b","fastModeSupport":"unsupported"}"#), query: "", skills: []).isEmpty, "no Fast mode on offer")
-    #expect(SlashCommands.list(for: try bot(#"{"id":"g","kind":"group","fastModeSupport":"offered"}"#), query: "", skills: installed).isEmpty)
-}
-
-@Test func sendingJustABuiltInCommandRunsIt() throws {
-    let offered = try bot(#"{"id":"b","fastModeSupport":"offered"}"#)
-    #expect(SlashCommands.builtIn(for: offered, draft: "/fast ")?.action == .fast)
-    #expect(SlashCommands.builtIn(for: offered, draft: "/new") == nil, "reaches the agent as typed")
-    #expect(SlashCommands.builtIn(for: offered, draft: "/fast please") == nil)
-    #expect(SlashCommands.builtIn(for: try bot(#"{"id":"b","fastModeSupport":"unsupported"}"#), draft: "/fast") == nil, "without Fast mode it reaches the agent")
+    #expect(SlashCommands.list(for: try bot(#"{"id":"b"}"#), query: "", skills: []).isEmpty)
+    #expect(SlashCommands.list(for: try bot(#"{"id":"g","kind":"group"}"#), query: "", skills: installed).isEmpty)
 }
