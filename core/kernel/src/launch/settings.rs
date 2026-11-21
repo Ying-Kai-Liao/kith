@@ -147,6 +147,9 @@ pub struct Input<'a> {
     /// The program that has the `cost-ledger` module (see `assemble::cost_hook_bin`), else None: the `SessionStart` hook is then
     /// the stub, `bin/kith-cost tag`, which forwards to a program and does nothing when it finds none.
     pub cost_bin: Option<&'a str>,
+    /// The program that has the `permit` module, when `permit` is switched (see `assemble::permit_hook_bin`): the auto-mode hooks run
+    /// its `kernel permit` verbs. None: they name the script `bin/kith-permit`, the Python.
+    pub permit_bin: Option<&'a str>,
     /// `kith_bin` when `threads` is switched and it has the `threads-writer` module (see `assemble::threads_hook_bin`), else
     /// None: the registry's `SessionStart` hook then stays `bin/kith-sessions record`.
     pub threads_bin: Option<&'a str>,
@@ -1002,7 +1005,14 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         }
         // Auto mode has no prompt: a PermissionDenied hook turns a refusal into a card, a PreToolUse hook lets one retry through.
         if run_mode == "auto" {
-            let permit = shquote(&format!("{kernel}/bin/kith-permit"));
+            let permit = match i.permit_bin.filter(|b| !b.is_empty()) {
+                Some(bin) => format!(
+                    "{} kernel permit --kernel {}",
+                    shquote(bin),
+                    shquote(&kernel)
+                ),
+                None => shquote(&format!("{kernel}/bin/kith-permit")),
+            };
             let once_dir = shquote(&format!("{machine}/run/once/{}", i.once_id));
             let hooks = obj(sm, "hooks")?;
             list(hooks, "PermissionDenied")?.push(json!({"hooks": [{"type": "command", "command": format!("{permit} denied --dir {once_dir}"), "timeout": 660}]}));
