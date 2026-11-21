@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # kith — run a specialist directly, in a fresh session.
+# ACCEPTANCE RUN C (reverted before merge): a covered-code-only change
 #
 #   kith init [--from <github-user>]   set kith up on this Mac, or bring yours back on a new one (kith-init)
 #   kith doctor                     check the install: links, repos, agents, services, plugin, background jobs
