@@ -849,6 +849,7 @@ pub(super) fn tick(
     // depends on what else went through.
     let mut failed: Vec<(usize, String)> = Vec::new();
     let mut went_through = false;
+    let mut need: Option<Error> = None;
     for (i, w) in work.iter().enumerate() {
         let a = &agents[w.agent];
         // An agent planned from its index has no file to compare with.
@@ -893,14 +894,22 @@ pub(super) fn tick(
                 }
                 report.push(outcome_json(&a.agent, &w.job, w.slot.as_deref(), &out));
             }
-            // Not the job's failure: the call runs again once the facts are read (see `packages::run_call`).
-            Err(e @ Error::NeedPackages(_)) => return Err(e),
+            // Not the job's failure: the call runs again once the facts are read (see `packages::run_call`). The jobs after
+            // this one are still looked at, so every agent whose fact was missed is refreshed in one round (not two a
+            // round); the watermark stays (`blocked`) so a later fire of this pass cannot move it past this slot.
+            Err(e @ Error::NeedPackages(_)) => {
+                need = Some(e);
+                blocked = true;
+            }
             Err(e) => {
                 let why = e.to_string();
                 problems.push(json!({"agent": a.agent, "job": w.job, "error": why}));
                 failed.push((i, why));
             }
         }
+    }
+    if let Some(e) = need {
+        return Err(e);
     }
     // Every failing tick counts. Whether the job is likely the fault decides only how soon it is given up on: something
     // else went through this tick, or it was the only job due, is the job's own failure; otherwise it may be the core,

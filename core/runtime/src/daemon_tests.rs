@@ -3026,6 +3026,43 @@ fn a_recheck_sweep_keeps_a_guest_door_on_a_healthy_disk_and_when_the_refresher_i
 #[cfg(unix)]
 #[test]
 #[allow(clippy::unwrap_used)]
+fn one_tick_refreshes_every_agent_with_a_due_guest_job_not_two_a_round() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let (d, _hold) = door_daemon(&m);
+    for a in ["garden", "shed"] {
+        put(
+            &m.join(format!("{a}/role/agent.md")),
+            &format!("---\nname: {a}\n---\n"),
+        );
+        answered(read(
+            &p,
+            "people.grant",
+            &json!({"agent": a, "person": "sam", "preset": "member"}),
+        ));
+    }
+    for a in ["house", "garden", "shed"] {
+        put(
+            &m.join(format!("{a}/jobs.json")),
+            &json!([{"id": "j", "cron": "* * * * *", "tz": "UTC", "task": "do j", "person": "sam"}])
+                .to_string(),
+        );
+    }
+    let v = answered(read(&p, "schedule.tick", &json!({})));
+    let fired: Vec<&str> = v["fires"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["outcome"] == "fired")
+        .map(|f| f["agent"].as_str().unwrap())
+        .collect();
+    assert_eq!(fired.len(), 3, "{v}");
+    drop(d);
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used)]
 fn a_tick_fires_a_due_guest_job_on_a_healthy_disk_and_writes_no_skip_when_the_refresher_is_blocked()
 {
     use std::sync::atomic::Ordering;
