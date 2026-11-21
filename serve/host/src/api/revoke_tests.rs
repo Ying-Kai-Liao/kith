@@ -426,7 +426,7 @@ fn revoked_tom(r: &Rig) -> i64 {
 /// Whether kith-auth and the kept stamp agree on tom.
 fn tom_agrees(r: &Rig) -> bool {
     let kept = r.hub.store.handle_revokes().unwrap();
-    kept.len() == 1 && kept[0].revoked == !r.allowed("tom", "house")
+    kept.len() == 1 && kept[0].revoked != r.allowed("tom", "house")
 }
 
 #[tokio::test]
