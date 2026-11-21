@@ -32,6 +32,8 @@ chrono = "0.4.45"
 chrono-tz = "0.10.4"
 croner = "3"
 serde = { version = "1.0.229", features = ["derive"] }
+# The must-ask judge (launch/judge.rs) ports the guard's regexes; the host links regex 1.x already.
+regex = "1"
 
 [lints.rust]
 # `deny`, not `forbid`: threads/os.rs allows its kill(2) calls (a process check has no safe std spelling).

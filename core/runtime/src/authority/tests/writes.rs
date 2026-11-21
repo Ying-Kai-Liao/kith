@@ -30,6 +30,8 @@ pub(super) struct Rig {
     pub(super) machine_dir: tempfile::TempDir,
     pub(super) core: Core,
     pub(super) c: Ctx,
+    /// What `call` asks the package facts of, as the daemon does: the whole suite of verbs runs through the cache.
+    pub(super) cache: std::sync::Arc<crate::packages::PackageCache>,
 }
 
 pub(super) fn plain(e: &Error) -> String {
@@ -47,6 +49,7 @@ impl Rig {
             machine_dir,
             core,
             c,
+            cache: crate::packages::PackageCache::start(None),
         }
     }
 
@@ -73,7 +76,20 @@ impl Rig {
     }
 
     pub(super) fn call(&mut self, method: &str, params: &Value) -> Result<Value, String> {
-        call_with(&mut self.core, &self.c, method, params).map_err(|e| plain(&e))
+        // As the daemon runs a call: the package facts come from the cache, the call is decided "under the lock" (marked,
+        // so a read of a package folder there panics), and a fact the cache lacked is asked for and the call run again.
+        crate::packages::forbid_disk_under_lock();
+        let mut cached = self.c.clone();
+        cached.packages = secrets::Packages::Source(self.cache.clone());
+        let roots = (cached.agents.clone(), cached.kernel.clone());
+        let core = &mut self.core;
+        crate::packages::run_call_in(&self.cache, Some(&roots), params, || {
+            crate::daemon::mark_lock_held(true);
+            let out = call_with(core, &cached, method, params);
+            crate::daemon::mark_lock_held(false);
+            out
+        })
+        .map_err(|e| plain(&e))
     }
 
     pub(super) fn lines(&mut self, method: &str, params: &Value) -> Result<Vec<String>, String> {

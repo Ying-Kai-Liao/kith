@@ -1,5 +1,4 @@
 # verb-path	module: the verbs the Rust core answers (kernel/lib/kith-core.sh). A line is the switch, removing it the rollback.
-paths	paths
 engines	engines
 launch	launch
 settings	settings
@@ -12,3 +11,4 @@ room-ledger	room-ledger
 # `threads` also sends bin/kith's last exec (`kith-sessions run`) to `kernel threads run`, when the program lists `threads-run` too.
 threads	threads-writer
 lifecycle	lifecycle
+permit	permit
