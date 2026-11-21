@@ -65,7 +65,6 @@ serve/host/src/store/cards.rs
 serve/host/src/api/cards.rs
 serve/host/src/api/bots.rs
 # thread-writers
-kernel/bin/kith-lifecycle
 serve/host/src/terminal/mod.rs
 serve/host/src/terminal/registry.rs
 serve/host/src/terminal/sync.rs

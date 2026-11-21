@@ -17,7 +17,6 @@ SYNC=f9b5e509f476bb88f6203a125ae863369ba03aa9
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
   kernel/bin/kith                     # --resume: resolve + r_sid; csid: claim / terminal before claude; exec run (the Rust `kernel threads run` when the program lists threads-run, else the Python)
-  kernel/bin/kith-lifecycle           # compact: take_claim for the parked child's pid, still(), then it execs claude; end
   core/kernel/src/lifecycle/sweep.rs  # the Rust compact and end: Taker::take (lifecycle_owner) for the parked child's pid, still(), then it execs claude; end
   core/kernel/src/lifecycle/proc.rs   # parked(): the fork that is claude (or the stub), held before its exec; reap
   kernel/bin/kith-wake                # deliver/drain: kith AGENT --resume SESSION (resolve claims), skip writer_live; take: host-door items

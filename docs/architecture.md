@@ -326,15 +326,15 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   `CLAUDE_CODE_SESSION_ID` set), so they are refused for the owner typing them in a Claude Code terminal too: raise the
   cap with the card's Raise, or from a plain terminal. A parked cross-Mac ask stays open on the caller's Mac. Not yet
   in the architect's model (ChainDesign.tla): reply kinds, built from Kai's standing default.
-- **8. Lifecycle owns every stop.** Built as F12 (designs/2026-10-24-lifecycle.md; `kernel/lib/kith_lifecycle.py`,
-  `kernel/bin/kith-lifecycle`, `kernel/tests/kith-lifecycle-check`). The writer claim (`live/terminal/<sid>.claim`) is the
+- **8. Lifecycle owns every stop.** Built as F12 (designs/2026-10-24-lifecycle.md; `core/kernel/src/lifecycle/`, the Rust
+  port of the former `kernel/bin/kith-lifecycle`; `kernel/tests/kith-lifecycle-check`). The writer claim (`live/terminal/<sid>.claim`) is the
   lease. Every Kith stop writes `sessions/intent/<sid>.json` (why, at, pid and start time) before the signal: the wrapper's
   idle stop and Kai's `/exit`, the host's idle release and Stop, a revoke's kill; a process taking the claim clears it, and a
   session gone with no intent reads as a crash (none, from before this: unknown, never ended). A human session sleeps only
   through the `kith-sessions run` wrapper: after 60 minutes since the latest of its last turn, its start and the last
   keystroke, with nothing outstanding (a background shell with no task-notification, an `mcp-tasks` sidecar, a running
   subagent, a detached child), the wrapper stops its own child; no sweep signals a terminal process and a bare `claude` is
-  never slept by a timer. For a session no process runs, `kith-wake drain` starts `kith-lifecycle sweep`, which decides
+  never slept by a timer. For a session no process runs, `kith-wake drain` starts `kith kernel lifecycle sweep`, which decides
   once per idle period, from structure only, at 0.9 of the cache life (none on a 5-minute cache: it decides as the
   session goes to sleep): compact (over 100k tokens and a sign of return), stay asleep, or end. `/compact` runs as
   `claude -p --resume SID /compact` only under the writer claim, after checking again under it; "end" is recorded only

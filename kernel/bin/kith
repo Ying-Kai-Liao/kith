@@ -124,12 +124,21 @@ kith_account_missing() {
   exit 1
 }
 
+# `kith migrate step|status|check|rollback ...` and `kith rollback MODULE`: straight to the program's cutover.
+kith_cutover() {
+  . "$KITH/lib/kith-core.sh"; kith_core_prime
+  [[ -n ${_kith_core_bin:-} ]] || { echo "kith migrate: this Mac has no kith program, and the cutover steps run in it (kith update)" >&2; exit 1; }
+  exec "$_kith_core_bin" kernel cutover "$@"
+}
+
 [[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,77p' "$0" | sed 's/^#   //'; exit 0; }
 # migrate runs before the paths below are exported: it moves what they point at, and its children must see the new ones
 if [[ $1 == migrate ]]; then
   [[ $# -eq 1 ]] && { echo "usage: kith migrate run [--dry-run|--undo|--force]   move this Mac from ~/.hq to ~/.kith (--dry-run shows the steps first)
        kith migrate --status               where it stands" >&2; exit 2; }
   [[ $2 == run ]] && shift
+  # The module cutover steps are the program's (`kith kernel cutover`, core/runtime/src/cutover/); the rest is the hq -> kith move.
+  case ${2:-} in step|status|check|rollback) kith_cutover "${@:2}" ;; esac
   exec "$KITH/bin/kith-migrate" "${@:2}"
 fi
 # Verbs the Rust core has taken over are listed in lib/core-switched.txt; kith_core_exec returns when this one isn't, or
@@ -158,7 +167,10 @@ case $1 in
   versions|pin|unpin|install|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
   rollback)           shift
                       # A cutover module's name (kith migrate status) goes back to Python's files; anything else is an agent.
-                      if [[ -n ${1:-} && $1 != -* ]] && "$KITH/bin/kith-migrate" is-module "$1" >/dev/null 2>&1; then exec "$KITH/bin/kith-migrate" rollback "$@"; fi
+                      if [[ -n ${1:-} && $1 != -* ]]; then
+                        . "$KITH/lib/kith-core.sh"; kith_core_prime
+                        if [[ -n ${_kith_core_bin:-} ]] && "$_kith_core_bin" kernel cutover modules 2>/dev/null | grep -qxF -- "$1"; then exec "$_kith_core_bin" kernel cutover rollback "$@"; fi
+                      fi
                       exec "$KITH/bin/kith-pkg" pin "$@" ;;
   auth)               shift; exec "$KITH/bin/kith-auth" "${@:-ls}" ;;
   connectors)         exec "$KITH/bin/kith-auth" "$@" ;;

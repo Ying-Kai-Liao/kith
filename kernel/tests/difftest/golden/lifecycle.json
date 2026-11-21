@@ -3,10 +3,6 @@
   "name": "lifecycle-compact-sweep-compacted",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -79,10 +75,6 @@
   "name": "lifecycle-compact-rc0",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -146,10 +138,6 @@
   "name": "lifecycle-compact-claude-failed",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -226,10 +214,6 @@
   "name": "lifecycle-compact-claude-failed-direct",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -297,10 +281,6 @@
   "name": "lifecycle-compact-folder-gone",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -368,10 +348,6 @@
   "name": "lifecycle-compact-held-by-claim",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -435,10 +411,6 @@
   "name": "lifecycle-compact-held-sweep-leaves-it",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -506,10 +478,6 @@
   "name": "lifecycle-compact-skipped-resumed",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -573,10 +541,6 @@
   "name": "lifecycle-compact-skipped-newturn",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -640,10 +604,6 @@
   "name": "lifecycle-compact-skipped-self",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -707,10 +667,6 @@
   "name": "lifecycle-compact-skipped-under-floor",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -774,10 +730,6 @@
   "name": "lifecycle-compact-claude-missing",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -841,10 +793,6 @@
   "name": "lifecycle-compact-sweep-twice",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -913,10 +861,6 @@
   "name": "lifecycle-compact-under-stub",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -989,10 +933,6 @@
   "name": "lifecycle-compact-busy",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1077,10 +1017,6 @@
   "name": "lifecycle-compact-no-stub-required",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1149,10 +1085,6 @@
   "name": "lifecycle-compact-bad-session-id",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1221,10 +1153,6 @@
   "name": "lifecycle-sweep-sleep",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1299,10 +1227,6 @@
   "name": "lifecycle-sweep-sleep-big-no-question",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1372,10 +1296,6 @@
   "name": "lifecycle-sweep-end-ask",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1450,10 +1370,6 @@
   "name": "lifecycle-sweep-end-schedule-big",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1524,10 +1440,6 @@
   "name": "lifecycle-sweep-end-helper-question-compacts",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1597,10 +1509,6 @@
   "name": "lifecycle-sweep-ask-waiting-by-wait-file",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1678,10 +1586,6 @@
   "name": "lifecycle-sweep-ask-waiting-by-queue",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1759,10 +1663,6 @@
   "name": "lifecycle-sweep-too-early",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1832,10 +1732,6 @@
   "name": "lifecycle-sweep-short-cache-needs-at-sleep",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1912,10 +1808,6 @@
   "name": "lifecycle-sweep-at-sleep-default-life",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -1986,10 +1878,6 @@
   "name": "lifecycle-sweep-cache-life-garbage",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2060,10 +1948,6 @@
   "name": "lifecycle-sweep-all-sessions-sorted-and-quiet",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2174,10 +2058,6 @@
   "name": "lifecycle-sweep-unsafe-session-id-state",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2243,10 +2123,6 @@
   "name": "lifecycle-sweep-settled-and-stale",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2337,10 +2213,6 @@
   "name": "lifecycle-sweep-pending-compact-retried",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2412,10 +2284,6 @@
   "name": "lifecycle-sweep-ended-stays-ended",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2490,10 +2358,6 @@
   "name": "lifecycle-sweep-live-claim-skips-all",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2566,10 +2430,6 @@
   "name": "lifecycle-sweep-takeover-claim-skips",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2639,10 +2499,6 @@
   "name": "lifecycle-sweep-stale-claim-is-free",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2712,10 +2568,6 @@
   "name": "lifecycle-sweep-no-state-dir",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2771,10 +2623,6 @@
   "name": "lifecycle-status-unknown",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2836,10 +2684,6 @@
   "name": "lifecycle-status-outstanding",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2908,10 +2752,6 @@
   "name": "lifecycle-intent-then-status",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -2998,10 +2838,6 @@
   "name": "lifecycle-intent-for-other-pid-is-a-crash",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -3072,10 +2908,6 @@
   "name": "lifecycle-cli-usage-errors",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -3153,10 +2985,6 @@
   "name": "lifecycle-compact-stub-claude-did-not-start",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -3231,10 +3059,6 @@
   "name": "lifecycle-compact-stub-lock-error",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -3309,10 +3133,6 @@
   "name": "lifecycle-compact-stub-pass-then-claude-fails",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -3396,10 +3216,6 @@
   "name": "lifecycle-compact-stub-require-stub-ok",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -3475,10 +3291,6 @@
   "name": "lifecycle-compact-claude-from-path",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -3550,10 +3362,6 @@
   "name": "lifecycle-compact-require-stub-not-1",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -3620,10 +3428,6 @@
   "name": "lifecycle-compact-uses-session-login-dir",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",
@@ -3696,10 +3500,6 @@
   "name": "lifecycle-cli-compact-is-no-verb",
   "command": "lifecycle",
   "program": {
-   "old": [
-    "python3",
-    "{KERNEL}/tests/difftest/lifecycle-old.py"
-   ],
    "new": [
     "python3",
     "{KERNEL}/tests/difftest/lifecycle-new.py",

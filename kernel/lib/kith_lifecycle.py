@@ -1,6 +1,6 @@
 """The session lifecycle's parts that need no claim (F12, designs/2026-10-24-lifecycle.md): intent before signal, the idle
 clock, outstanding work, and the 54-minute decision. bin/kith-sessions (the wrapper that stops its own child) and
-bin/kith-lifecycle (the sweep that compacts or ends sessions nobody runs) use it; the host's Rust side writes the same
+(until it goes in P1-19) use it; the sweep that compacts or ends sessions nobody runs is `kith kernel lifecycle` now; the host's Rust side writes the same
 intent file (serve/host/src/terminal/intent.rs).
 
 Files under $KITH_STATE/sessions/:

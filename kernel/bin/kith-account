@@ -1,7 +1,0 @@
-#!/bin/sh
-# kith-account: the accounts verbs are `kith account` (the Rust core). This stays one release for a caller that runs the file
-# by path (an old host, an agent's own hook): it hands the line to the kernel's `kith` entry, which finds the program and
-# says so in one line when there is none (docs/plans/retire-python.md, R3).
-src=$0
-while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
-exec "$(cd "$(dirname "$src")" && pwd)/kith" account "$@"
