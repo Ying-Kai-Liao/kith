@@ -14,7 +14,7 @@ export function optionLabel(o: PermissionOption, edge?: EntryData['edge']) {
   if (edge && o.name) return o.name
   switch (o.kind) {
     case 'allow_once':
-      return 'Allow once'
+      return 'Allow'
     case 'allow_session':
       return 'This session'
     case 'allow_always':

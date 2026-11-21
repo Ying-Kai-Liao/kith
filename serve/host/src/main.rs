@@ -1414,6 +1414,8 @@ async fn main() -> Result<()> {
         }
         Sub::Install { port } => {
             open_store()?;
+            // Before the status line below: a refused install changes nothing.
+            service::guard()?;
             // Windows: the shell Claude Code runs status lines in varies (Git Bash, PowerShell), so
             // the line stays the user's; usage still comes from `claude -p /usage` and ACP.
             if cfg!(unix)
@@ -1484,7 +1486,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Sub::Uninstall => {
-            service::uninstall();
+            service::uninstall()?;
             if let Some(home) = dirs::home_dir()
                 && let Err(e) = service::restore_statusline(&home.join(".claude/settings.json"))
             {

@@ -241,7 +241,8 @@ export function OpenCard({ entry }: { entry: Entry }) {
       </div>
     )
   }
-  return <PermissionCard entry={entry} hostName={store.hostName} answering={store.answering.get(entry.id) ?? null} respond={(o) => store.respond(entry, o)} waiting={waitingFor(entry, ownerName, store.isOwner)} pair={pairOf(store.bots.get(entry.data.author ?? entry.botId)?.avatarColor)} held={heldFor(entry, store, ownerName)} removeGrant={store.isOwner ? (id) => store.removeSessionGrant(id) : undefined} />
+  const author = store.bots.get(entry.data.author ?? entry.botId)
+  return <PermissionCard entry={entry} hostName={store.hostName} answering={store.answering.get(entry.id) ?? null} respond={(o) => store.respond(entry, o)} waiting={waitingFor(entry, ownerName, store.isOwner)} pair={pairOf(author?.avatarColor)} agent={author ? { name: author.name, avatar: <BotAvatar bot={author} size={24} animated={false} /> } : undefined} held={heldFor(entry, store, ownerName)} removeGrant={store.isOwner ? (id) => store.removeSessionGrant(id) : undefined} />
 }
 
 /** An approved card's held row (an old run holds its session): Stop is the owner's, others read who can stop it. */
