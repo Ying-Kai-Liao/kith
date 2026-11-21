@@ -14,6 +14,7 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PLANT_OUTSIDE_READ=$HERE/../../kernel/bin/kith   # planted: guard must go red
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/kith-verify
 
 TLA_VERSION=v1.7.4

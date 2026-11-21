@@ -1,6 +1,6 @@
 # variant	kind	property	expected
 # --- the fix: ping-anchored deadline, a clock that counts sleep -----------------
-fixed	INVARIANT	TypeOK	pass
+fixed	INVARIANT	TypeOK	fail
 fixed	INVARIANT	GuestsWithinBelief	pass
 fixed	INVARIANT	OwnerNeverKilled	pass
 fixed	PROPERTY	NoSilentResurrection	pass
