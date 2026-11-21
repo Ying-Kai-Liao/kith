@@ -81,6 +81,15 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var callLive: Bool?
     /// notice (divider): who started or stopped writing. Open string; see `WriterChange`.
     public var writerChange: String?
+    /// permission: the agent's own description of the call, one plain line (host `cards/intent.rs`). A label, never what
+    /// is granted. Nil when it gave none, and from an older host.
+    public var intent: String?
+    /// permission: what the host read from the call, at most four lines. Nil from an older host: the plain card shows.
+    public var facts: [CardFact]?
+    /// permission, auto mode: the classifier's tag as a sentence ("Safety check stopped it: ...").
+    public var check: String?
+    /// permission: the host could not read the call in full, so Details starts open.
+    public var detailsOpen: Bool?
     /// permission, answered: an old run still holds the session this approval resumes in (host `cards/resume.rs`). Nil
     /// otherwise, and on entries from an older host.
     public var held: HeldRun?

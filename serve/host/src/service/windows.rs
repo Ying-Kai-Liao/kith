@@ -123,10 +123,16 @@ pub fn install(port: u16) -> Result<()> {
     start()
 }
 
+/// No launchd/systemd here, so nothing to guard.
+pub fn guard() -> Result<()> {
+    Ok(())
+}
+
 /// Best effort: every step tolerates "already gone".
-pub fn uninstall() {
+pub fn uninstall() -> Result<()> {
     let _ = Command::new("reg").args(["delete", RUN_KEY, "/v", VALUE, "/f"]).stderr(Stdio::null()).status();
     let _ = stop();
+    Ok(())
 }
 
 pub fn installed() -> bool {
