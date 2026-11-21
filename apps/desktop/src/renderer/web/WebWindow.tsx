@@ -17,6 +17,7 @@ import { ThreadView } from '../views/thread/ThreadView'
 import type { Unsupported } from './detect'
 import { emptyAccountText, noticeFor } from './notice'
 import { webSession } from './session'
+import { SharedWithYou } from './SharedWithYou'
 import './web.css'
 
 /**
@@ -287,6 +288,7 @@ function MemberApp() {
                     <span>Asking {c.name} for access…{access.kind === 'code' ? <> Your code: <span className="web-code">{spaced(access.code)}</span>. {CODE_HINT}</> : null}</span>
                   </div>
                 ) : null}
+                {store ? <SharedWithYou computerId={c.computerId} ownerName={c.name} store={store} /> : null}
                 {store ? (
                   store.roster.length === 0 ? (
                     <p className="web-fine web-pad">{store.shownConnection.kind === 'online' ? 'No chats yet. Start one with New chat.' : waitingText(store.shownConnection)}</p>
