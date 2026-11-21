@@ -15,7 +15,7 @@ unset KITH_STATE HQ_STATE KITH_PERSON KITH_AGENT HQ_HOME KITH_PERSON_WAS
 mkdir -p "$HOME" "$KITH_HOME/agents/house/role"
 printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
 A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
-C() { KITH_BIN=$BIN "$KERNEL/bin/kith-cost" "$@"; }
+C() { KITH_BIN=$BIN "$BIN" kernel cost --kernel "$KERNEL" "$@"; }
 fail=0
 check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
 

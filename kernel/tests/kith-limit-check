@@ -40,7 +40,7 @@ chmod +x "$T/bin/kith-stub"
 export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH RAN_LOG=$T/ran
 
 K() { "$KERNEL/bin/kith" "$@"; }
-C() { KITH_BIN=$T/bin/kith-stub "$KERNEL/bin/kith-cost" "$@"; }
+C() { KITH_BIN=$T/bin/kith-stub "$REAL" kernel cost --kernel "$KERNEL" "$@"; }
 A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
 J() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 fail=0

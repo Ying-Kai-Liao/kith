@@ -446,8 +446,7 @@ pub(crate) fn knows_module(bin: &Path, module: &str) -> bool {
 }
 
 /// The program the `SessionStart` hook runs for the cost ledger (`kith kernel cost tag`): `kith_bin` when it has the `cost-ledger`
-/// module, else this program (it always does). `kernel/bin/kith-cost tag`, the forwarding stub, stays for the runs that hold the
-/// old hook path. `kith_cost_bin` in lib/kith-core.sh decides the same way for the bash launch.
+/// module, else this program (it always does). `kith_cost_bin` in lib/kith-core.sh decides the same way for the bash launch.
 pub fn cost_hook_bin(kith_bin: Option<&str>) -> Option<String> {
     kith_bin
         .filter(|b| !b.is_empty() && knows_module(Path::new(b), "cost-ledger"))

@@ -338,11 +338,11 @@ entry's readiness and `kith <agent> --launch-json --backup <id>` launches one (e
 programs. The ledger records the harness and login of each run (`provider`, `account`).
 
 ## Cost
-`kith cost` (the Rust `kith kernel cost`, reached through `bin/kith-cost`) keeps every Claude Code request's cost (list API prices) in `~/.kith/cost.db`, so it outlives
+`kith cost` (the Rust `kith kernel cost`) keeps every Claude Code request's cost (list API prices) in `~/.kith/cost.db`, so it outlives
 transcript cleanup. Each session `kith` starts is tagged with the agent, package version, model, effort and caller
 (terminal or discord); `kith:<name>` subagents are recognised by their type. `kith cost agents [today|week|month|all]`
 compares agents; `kith cost agent video` shows one agent by day, by version/model/effort and its costliest runs;
-`kith-cost csv` exports every request with its agent for analysis elsewhere.
+`kith cost csv` exports every request with its agent for analysis elsewhere.
 
 ## Asking an agent from a script or another session
 `kith ask house "what expires this week?"` runs the agent exactly as `kith house "…"` does (its own package, settings,

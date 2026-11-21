@@ -345,7 +345,7 @@ OUT=$("$KITH" echo "hi" 2>"$T/err"); check "a plain run picked on a Codex accoun
 
 # resume: no start noted on an account the run doesn't use; a handed-on session stays on its account when it is ready
 "$KITH" account policy fill >/dev/null
-printf '{"session_id":"sess-b"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=b KITH_ACCOUNT_ID=claude:b KITH_STATE=$M KITH_BIN=$BIN "$KERNEL/bin/kith-cost" tag
+printf '{"session_id":"sess-b"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=b KITH_ACCOUNT_ID=claude:b KITH_STATE=$M KITH_BIN=$BIN "$BIN" kernel cost --kernel "$KERNEL" tag
 mkdir -p "$HOME/.claude/projects/p" "$T/work"
 printf '{"type":"user","cwd":"%s","message":{"content":"hi"}}\n' "$T/work" > "$HOME/.claude/projects/p/sess-b.jsonl"
 mkdir -p "$M/accounts/claude/b/projects/p"; cp "$HOME/.claude/projects/p/sess-b.jsonl" "$M/accounts/claude/b/projects/p/"
