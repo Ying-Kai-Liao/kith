@@ -36,6 +36,7 @@ fn ctx(t: &Tmp) -> Ctx {
         now_ms: NOW,
         sandbox: Sandbox::Fixed(false),
         serve: ServeDir::Fixed(t.0.join("serve")),
+        packages: Packages::Disk,
     }
 }
 

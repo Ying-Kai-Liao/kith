@@ -102,6 +102,7 @@ fn world() -> World {
         now_ms: NOW,
         sandbox: Sandbox::Fixed(false),
         serve: ServeDir::Fixed(agents.path().join("serve")),
+        packages: kith_kernel::secrets::Packages::Disk,
     };
     let mut w = World {
         _t: t,
