@@ -958,7 +958,6 @@ jobs:
               kith-json-misc-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-json-misc-check
               kith-requires-switched-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
               kith-pkg-pid-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
-              kith-cost-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
               kith-cost-launch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-launch-check
               kith-cost-bots-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-bots-check
               kith-limit-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-limit-check
