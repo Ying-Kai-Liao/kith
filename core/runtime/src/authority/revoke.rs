@@ -437,7 +437,12 @@ fn personal(life: &Life, svc: &str) -> R<bool> {
 /// `rename`: a person's new id, carried through every table that names them. The old id stays in `was`, so what
 /// outside the tables still says old (a chat thread they started, the cost ledger) keeps meaning them. The folders
 /// follow after the commit (`move_life`).
-pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str) -> R<Vec<String>> {
+pub(crate) fn person_rename(
+    auth: &mut Value,
+    life: &Life,
+    old: &str,
+    new: &str,
+) -> R<(Vec<String>, Vec<String>)> {
     check_id(old)?;
     tables(auth);
     need_person(auth, old)?;
@@ -462,6 +467,7 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
             was.push(w);
         }
     }
+    let earlier = words(Some(&Value::Array(was.clone())));
     if let Some(o) = p.as_object_mut() {
         o.insert("was".to_owned(), Value::Array(was));
     }
@@ -523,7 +529,10 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
     } else {
         format!("; owns {}", owned.join(", "))
     };
-    Ok(vec![format!("{old} is now {new}{owns}{RENAMED_TAIL}")])
+    Ok((
+        vec![format!("{old} is now {new}{owns}{RENAMED_TAIL}")],
+        earlier,
+    ))
 }
 
 /// What a rename's line ends with; the folders that really moved are said before it (`renamed` in `call.rs`).

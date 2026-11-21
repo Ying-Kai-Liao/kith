@@ -176,12 +176,22 @@ type Log = Arc<dyn Fn(&str) + Send + Sync>;
 pub(crate) struct MoveWait {
     rx: Receiver<MoveReport>,
     mv: LifeMove,
+    /// The mover thread is gone (it never started, or ended): nothing moves the folders until the next start.
+    gone: bool,
 }
 
 impl MoveWait {
+    #[cfg(test)]
+    pub(crate) fn gone_for_test(rx: Receiver<MoveReport>, mv: LifeMove) -> MoveWait {
+        MoveWait { rx, mv, gone: true }
+    }
+
     /// The rename's answer with the move's report in it; a move the disk has not finished by `bound` is said so (the
     /// rename itself stands, and the move will still run).
     pub(crate) fn finish(self, said: Value, bound: Duration) -> Value {
+        if self.gone {
+            return crate::authority::call::finish_unmoved(said, &self.mv);
+        }
         let report = self.rx.recv_timeout(bound).ok();
         crate::authority::call::finish_move(said, &self.mv, report.as_ref())
     }
@@ -245,7 +255,11 @@ impl PackageCache {
                         MoveMsg::Move(job) => {
                             let (report, repair) = run_move(&job.mv);
                             say(&s, &l, repair);
-                            let _ = job.report.send(report);
+                            // A caller that gave up waiting (or went) is not told: the notes (a folder that did not
+                            // move) go to the log, or nobody would ever read them.
+                            if let Err(lost) = job.report.send(report) {
+                                say(&s, &l, lost.0.notes);
+                            }
                         }
                         MoveMsg::Repair(list) => {
                             for mv in list {
@@ -282,11 +296,14 @@ impl PackageCache {
     pub(crate) fn queue_move(&self, mv: LifeMove) -> MoveWait {
         let (report, rx) = sync_channel(1);
         // A thread that is gone drops the job with its sender: the wait then ends at once and says the move is owed.
-        let _ = self.mover.send(MoveMsg::Move(MoveJob {
-            mv: mv.clone(),
-            report,
-        }));
-        MoveWait { rx, mv }
+        let gone = self
+            .mover
+            .send(MoveMsg::Move(MoveJob {
+                mv: mv.clone(),
+                report,
+            }))
+            .is_err();
+        MoveWait { rx, mv, gone }
     }
 
     /// Queues the repair: each old id's folders go to the person's current id when it has none of its own.
@@ -310,9 +327,23 @@ impl PackageCache {
 
     /// [`Self::refresh`] for several facts in one request, and one wait.
     pub(crate) fn refresh_all(&self, roots: &Roots, wants: Vec<Want>) -> bool {
+        match self.ask(roots, wants) {
+            Some(answered) => answered.recv_timeout(self.wait).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Asks the refresher for facts a call will only read softly (a line that tells what is kept) and does not wait: a
+    /// removal never waits on the disk. What the refresher has read by the time the line is worded is used; else the
+    /// line says it can't tell.
+    pub(crate) fn prefetch(&self, roots: &Roots, wants: Vec<Want>) {
+        drop(self.ask(roots, wants));
+    }
+
+    fn ask(&self, roots: &Roots, wants: Vec<Want>) -> Option<Receiver<()>> {
         if self.queued.fetch_add(1, Ordering::SeqCst) >= MAX_QUEUED {
             self.queued.fetch_sub(1, Ordering::SeqCst);
-            return false;
+            return None;
         }
         let (done, answered) = sync_channel(1);
         let req = Req {
@@ -322,9 +353,9 @@ impl PackageCache {
         };
         if self.tx.send(req).is_err() {
             self.queued.fetch_sub(1, Ordering::SeqCst);
-            return false;
+            return None;
         }
-        answered.recv_timeout(self.wait).is_ok()
+        Some(answered)
     }
 }
 
@@ -712,16 +743,24 @@ fn named(params: &Value) -> Vec<String> {
 }
 
 /// The person ids a method looks the folders of up, which the first refresh asks for. A narrowing (suspend, undo,
-/// removeBot) is not here, and a removal only words a line with them (it reads them without waiting or running again).
+/// removeBot) is not here, and neither is a removal: it only words a line with them (see [`soft_wants`]).
 fn life_ids<'a>(method: &str, params: &'a Value) -> Vec<&'a str> {
     let keys: &[&str] = match method {
-        "people.addPerson" | "people.retired" | "people.removePerson" => &["id"],
+        "people.addPerson" | "people.retired" => &["id"],
         "people.renamePerson" => &["to"],
         _ => &[],
     };
     keys.iter()
         .filter_map(|k| params.get(*k).and_then(Value::as_str))
         .collect()
+}
+
+/// What a call only reads softly, asked for without a wait: the folders a removal tells are kept.
+fn soft_wants(method: &str, params: &Value, state: &Path) -> Vec<Want> {
+    match (method, params.get("id").and_then(Value::as_str)) {
+        ("people.removePerson", Some(id)) => vec![Want::Life(state.to_path_buf(), id.to_owned())],
+        _ => Vec::new(),
+    }
 }
 
 /// The kernel service a secret writer's params name (`service`, or the front of `profile`).
@@ -775,6 +814,12 @@ pub(crate) fn run_call<R>(
         Ok((folders, kernel)) => (Some((folders.agents, kernel)), Some(folders.state)),
         Err(_) => (None, None),
     };
+    if let (Some(roots), Some(state)) = (roots.as_ref(), state.as_deref()) {
+        let soft = soft_wants(method, params, state);
+        if !soft.is_empty() {
+            cache.prefetch(roots, soft);
+        }
+    }
     run_call_in(
         cache,
         roots.as_ref(),

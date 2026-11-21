@@ -391,6 +391,49 @@ fn a_rename_with_the_mover_blocked_answers_with_the_note_and_the_folders_follow_
 }
 
 #[test]
+fn a_move_that_finishes_after_the_caller_gave_up_logs_its_notes() {
+    let (t, _c) = machine();
+    let life = life_of(&t);
+    write(&t.path().join("agents/house/memory/people/sam/n.md"), "x");
+    write(&t.path().join("agents/house/memory/people/anna/o.md"), "taken");
+    let (hold, probe) = hold_mover();
+    hold.store(true, Ordering::SeqCst);
+    let cache = PackageCache::start(Some(probe));
+    let said: Arc<Mutex<Vec<String>>> = Arc::default();
+    let s = said.clone();
+    cache.set_log(Arc::new(move |n| s.lock().unwrap().push(n.to_owned())));
+    let wait = cache.queue_move(mv(&life, "sam", "anna", &["sam"]));
+    // the caller's wait ends first: its answer cannot carry the move's notes any more
+    let _ = wait.finish(json!({"lines": ["sam is now anna"]}), Duration::from_millis(50));
+    hold.store(false, Ordering::SeqCst);
+    wait_for("the notes in the log", || !said.lock().unwrap().is_empty());
+    let said = said.lock().unwrap().clone();
+    assert!(said[0].contains("is already there"), "{said:?}");
+}
+
+#[test]
+fn a_rename_with_no_mover_thread_says_the_folders_move_at_the_next_start() {
+    let (t, _c) = machine();
+    let life = life_of(&t);
+    let cache = PackageCache::start(None);
+    // the mover's channel is closed the way a thread that never started closes it
+    let wait = {
+        let (report, rx) = std::sync::mpsc::sync_channel(1);
+        drop(report);
+        crate::packages::MoveWait::gone_for_test(rx, mv(&life, "sam", "anna", &["sam"]))
+    };
+    drop(cache);
+    let said = wait.finish(json!({"lines": ["sam is now anna"]}), Duration::from_secs(1));
+    assert_eq!(
+        said["lines"],
+        json!([
+            "sam is now anna",
+            "note: the folders of sam move to anna at the next start"
+        ])
+    );
+}
+
+#[test]
 fn a_chain_of_renames_queued_behind_a_blocked_mover_ends_under_the_last_id_and_nothing_under_the_middle()
  {
     let (t, _c) = machine();

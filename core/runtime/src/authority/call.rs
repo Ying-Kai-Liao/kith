@@ -488,6 +488,18 @@ pub(crate) fn finish_move(
     }
 }
 
+/// [`finish_move`] for a move that has no thread to run on: the startup repair moves the folders at the next start.
+pub(crate) fn finish_unmoved(said: Value, mv: &revoke::LifeMove) -> Value {
+    renamed(
+        said,
+        &[],
+        vec![format!(
+            "note: the folders of {} move to {} at the next start",
+            mv.old, mv.new
+        )],
+    )
+}
+
 /// Takes the move a rename left in its answer.
 fn take_move(said: &mut Value, life: &Life) -> Option<revoke::LifeMove> {
     let m = said.as_object_mut()?.remove("lifeMove")?;
@@ -876,11 +888,13 @@ fn call_in_deferred(
             if m == "people.renamePerson"
                 && let (Some(old), Some(new)) = (word(params, "id"), word(params, "to"))
             {
-                // The person's old ids, as the row the rename just committed keeps them.
-                let earlier = store::read(core, |a| {
-                    write::words(write::people(a).get(new).and_then(|p| p.get("was")))
-                })?;
+                // The person's old ids, as the rename wrote them to the row it committed. A second read failing must
+                // not answer an error for a rename that stands, and leave its move to a restart.
                 let mut said = said;
+                let earlier = said
+                    .as_object_mut()
+                    .and_then(|o| o.remove("lifeWas"))
+                    .unwrap_or_else(|| json!([]));
                 said["lifeMove"] = json!({ "old": old, "new": new, "earlier": earlier });
                 return Ok(said);
             }
@@ -1178,12 +1192,14 @@ pub(super) fn write_in(
             out["joining"] = json!(joining);
             Ok(out)
         }
-        "people.renamePerson" => Ok(lines(revoke::person_rename(
-            a,
-            life,
-            need(params, "id")?,
-            need(params, "to")?,
-        )?)),
+        "people.renamePerson" => {
+            let (said, was) =
+                revoke::person_rename(a, life, need(params, "id")?, need(params, "to")?)?;
+            let mut out = lines(said);
+            // The old ids the rename itself wrote to the row: the move is built from these, not from a second read.
+            out["lifeWas"] = json!(was);
+            Ok(out)
+        }
         "people.removePerson" if switch(params, "unused") => Ok(lines(
             revoke::person_remove_unused(a, life, need(params, "id")?)?,
         )),
