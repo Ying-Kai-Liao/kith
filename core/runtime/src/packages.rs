@@ -176,12 +176,22 @@ type Log = Arc<dyn Fn(&str) + Send + Sync>;
 pub(crate) struct MoveWait {
     rx: Receiver<MoveReport>,
     mv: LifeMove,
+    /// The mover thread is gone (it never started, or ended): nothing moves the folders until the next start.
+    gone: bool,
 }
 
 impl MoveWait {
+    #[cfg(test)]
+    pub(crate) fn gone_for_test(rx: Receiver<MoveReport>, mv: LifeMove) -> MoveWait {
+        MoveWait { rx, mv, gone: true }
+    }
+
     /// The rename's answer with the move's report in it; a move the disk has not finished by `bound` is said so (the
     /// rename itself stands, and the move will still run).
     pub(crate) fn finish(self, said: Value, bound: Duration) -> Value {
+        if self.gone {
+            return crate::authority::call::finish_unmoved(said, &self.mv);
+        }
         let report = self.rx.recv_timeout(bound).ok();
         crate::authority::call::finish_move(said, &self.mv, report.as_ref())
     }
@@ -245,7 +255,11 @@ impl PackageCache {
                         MoveMsg::Move(job) => {
                             let (report, repair) = run_move(&job.mv);
                             say(&s, &l, repair);
-                            let _ = job.report.send(report);
+                            // A caller that gave up waiting (or went) is not told: the notes (a folder that did not
+                            // move) go to the log, or nobody would ever read them.
+                            if let Err(lost) = job.report.send(report) {
+                                say(&s, &l, lost.0.notes);
+                            }
                         }
                         MoveMsg::Repair(list) => {
                             for mv in list {
@@ -282,11 +296,14 @@ impl PackageCache {
     pub(crate) fn queue_move(&self, mv: LifeMove) -> MoveWait {
         let (report, rx) = sync_channel(1);
         // A thread that is gone drops the job with its sender: the wait then ends at once and says the move is owed.
-        let _ = self.mover.send(MoveMsg::Move(MoveJob {
-            mv: mv.clone(),
-            report,
-        }));
-        MoveWait { rx, mv }
+        let gone = self
+            .mover
+            .send(MoveMsg::Move(MoveJob {
+                mv: mv.clone(),
+                report,
+            }))
+            .is_err();
+        MoveWait { rx, mv, gone }
     }
 
     /// Queues the repair: each old id's folders go to the person's current id when it has none of its own.
@@ -325,6 +342,32 @@ impl PackageCache {
             return false;
         }
         answered.recv_timeout(self.wait).is_ok()
+    }
+
+    /// A removal's answer with the line that tells what is kept. The removal is committed and the lock let go: only
+    /// this wording waits for the folders (at most [`REFRESH_WAIT`]); the line says it can't tell when they don't come.
+    pub(crate) fn finish_kept(
+        &self,
+        said: Value,
+        note: &crate::authority::revoke::KeptNote,
+    ) -> Value {
+        let roots = (note.life.agents.clone(), note.life.kernel.clone());
+        let want = Want::Life(note.life.state.clone(), note.pid.clone());
+        // Outside a call nothing is "fresh" (see `fresh`): a fact read after this was asked for is the one to use.
+        let asked = Instant::now();
+        self.refresh_all(&roots, vec![want]);
+        let key = (
+            note.life.agents.clone(),
+            note.life.state.clone(),
+            note.pid.clone(),
+        );
+        let folders = self
+            .lock()
+            .lives
+            .get(&key)
+            .filter(|(at, _)| *at >= asked)
+            .map(|(_, f)| (**f).clone());
+        crate::authority::call::finish_kept(said, folders)
     }
 }
 
@@ -712,10 +755,10 @@ fn named(params: &Value) -> Vec<String> {
 }
 
 /// The person ids a method looks the folders of up, which the first refresh asks for. A narrowing (suspend, undo,
-/// removeBot) is not here, and a removal only words a line with them (it reads them without waiting or running again).
+/// removeBot) is not here, and neither is a removal: its line is worded after the commit ([`PackageCache::finish_kept`]).
 fn life_ids<'a>(method: &str, params: &'a Value) -> Vec<&'a str> {
     let keys: &[&str] = match method {
-        "people.addPerson" | "people.retired" | "people.removePerson" => &["id"],
+        "people.addPerson" | "people.retired" => &["id"],
         "people.renamePerson" => &["to"],
         _ => &[],
     };

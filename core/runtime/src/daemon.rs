@@ -529,19 +529,24 @@ impl Shared {
         {
             if crate::authority::call::serves(method) {
                 // The tokens of a revoked or removed person end in the same locked call that committed it.
-                let (answer, moving) = self.with_packages(method, params, || {
+                let (answer, moving, kept) = self.with_packages(method, params, || {
                     self.with_core(|c| {
-                        let (answer, mv) =
+                        let (answer, mv, kept) =
                             crate::authority::call::call_deferred(c, method, params)?;
                         self.runs.after_authority_write(method, params, &answer);
                         // A rename's folders move once the lock is let go. Queued here, so the order of the moves is
                         // the order of the commits.
-                        Ok((answer, mv.map(|mv| self.packages.queue_move(mv))))
+                        Ok((answer, mv.map(|mv| self.packages.queue_move(mv)), kept))
                     })
                 })?;
                 // The lock is let go: this caller waits for its folders, but not for ever.
                 let answer = match moving {
                     Some(wait) => wait.finish(answer, crate::packages::MOVE_WAIT),
+                    None => answer,
+                };
+                // A removal is committed and its revoke done: only the wording of what is kept waits for the disk.
+                let answer = match kept {
+                    Some(note) => self.packages.finish_kept(answer, &note),
                     None => answer,
                 };
                 self.served.fetch_add(1, Ordering::SeqCst);
