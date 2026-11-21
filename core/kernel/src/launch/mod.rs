@@ -11,9 +11,12 @@
 pub mod assemble;
 pub mod facets;
 pub mod guard;
+pub mod judge;
 pub mod machine;
 pub mod mcp;
 pub mod prompt;
+#[allow(clippy::many_single_char_names)]
+pub mod pyport;
 pub mod room;
 pub mod settings;
 
@@ -24,3 +27,7 @@ mod tests;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::many_single_char_names)]
 mod settings_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod judge_tests;

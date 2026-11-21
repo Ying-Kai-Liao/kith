@@ -74,8 +74,6 @@ pub struct Ctx {
     pub store: PathBuf,
     /// `KITH_GITHUB_GIT`, else GitHub, without a trailing slash.
     pub github: String,
-    /// Where the Python helper is found (`python3`).
-    pub python: String,
 }
 
 impl Ctx {
@@ -92,7 +90,6 @@ impl Ctx {
             state: p.state,
             store: p.store,
             github,
-            python: "python3".to_owned(),
         }
     }
 }

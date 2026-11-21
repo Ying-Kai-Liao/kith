@@ -910,9 +910,6 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
                 .map_or("https://github.com", String::as_str)
                 .trim_end_matches('/')
                 .to_owned(),
-            // The must-ask python runs in this process's environment, not in the launch's env map that the old kith-pkg
-            // subprocess had; the two differ only by what the launch edits (KITH_RUN_TOKEN, KITH_AGENT*).
-            python: "python3".to_owned(),
         };
         let out = crate::pkg::cli::run(&ctx, &["resolve".to_owned(), agent.to_owned()]);
         eprint!("{}", out.stderr);
