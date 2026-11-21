@@ -8,6 +8,7 @@ use crate::store::{BotConfig, Entry, EntryKind, Store};
 use anyhow::Result;
 use kith_mem::tidy::Message;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -145,10 +146,36 @@ fn waiting(store: &Store, bot: &str) -> usize {
         .map_or(0, |entries| entries.iter().filter(|e| e.kind == EntryKind::User.as_str()).count())
 }
 
+/// Whether a review check is out on a blocking thread, for any bot. One at a time: the check reads the agent's folder, and
+/// when that disk hangs every tick of every bot would otherwise park another blocking thread on it for good (25 of them
+/// in the 2026-11-21 freeze). The bots whose tick finds it taken skip that tick and look again at the next one.
+static REVIEW_CHECK_OUT: AtomicBool = AtomicBool::new(false);
+
 /// [`review_due`] off the async workers: an hq agent's answer reads files.
 async fn review_due_blocking(hub: &Arc<Hub>, bot: &str) -> bool {
     let (hub, bot) = (hub.clone(), bot.to_owned());
-    tokio::task::spawn_blocking(move || review_due(&hub.store, &bot)).await.unwrap_or(false)
+    one_check(&REVIEW_CHECK_OUT, move || review_due(&hub.store, &bot)).await
+}
+
+/// Runs `check` on a blocking thread unless one is out on `slot` already, which answers "not due" without spawning. The slot
+/// is given back when the check ends (even by a panic, or when the caller stopped waiting), never before.
+async fn one_check(slot: &'static AtomicBool, check: impl FnOnce() -> bool + Send + 'static) -> bool {
+    struct Give(&'static AtomicBool);
+    impl Drop for Give {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::Release);
+        }
+    }
+    if slot.swap(true, Ordering::AcqRel) {
+        return false;
+    }
+    let given = Give(slot);
+    tokio::task::spawn_blocking(move || {
+        let _given = given;
+        check()
+    })
+    .await
+    .unwrap_or(false)
 }
 
 /// Once a day, when the bot's memory holds a dated entry it may rewrite (the time review).
@@ -267,7 +294,7 @@ fn typed(data: &serde_json::Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{dated, message, waiting};
+    use super::{dated, message, one_check, waiting};
     use crate::store::Store;
     use crate::store::{EntryKind, Lane};
     use serde_json::json;
@@ -296,5 +323,49 @@ mod tests {
         assert!(dated("Dentist on Oct 21"));
         assert!(!dated("Prompt is too long: Provided 10,389 tokens"));
         assert!(!dated("Has 2 cats"));
+    }
+
+    fn block_on<T>(f: impl Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(f)
+    }
+
+    #[test]
+    fn with_one_review_check_blocked_another_bots_tick_skips_and_spawns_nothing() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, mpsc};
+        static SLOT: AtomicBool = AtomicBool::new(false);
+        let ran = Arc::new(AtomicUsize::new(0));
+        let (started_tx, started) = mpsc::channel::<()>();
+        let (unblock, blocked) = mpsc::channel::<()>();
+        let count = ran.clone();
+        // Bot one's check hangs on the disk.
+        let first = std::thread::spawn(move || {
+            block_on(one_check(&SLOT, move || {
+                count.fetch_add(1, Ordering::SeqCst);
+                started_tx.send(()).unwrap();
+                blocked.recv().unwrap();
+                true
+            }))
+        });
+        started.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        // Bot two's tick: skipped, its check never runs.
+        let count = ran.clone();
+        let second = block_on(one_check(&SLOT, move || {
+            count.fetch_add(1, Ordering::SeqCst);
+            true
+        }));
+        assert!(!second, "a skipped tick is not due");
+        assert_eq!(ran.load(Ordering::SeqCst), 1, "no second thread was spawned");
+        unblock.send(()).unwrap();
+        assert!(first.join().unwrap());
+        // Positive control: with none blocked, both run.
+        for _ in 0..2 {
+            let count = ran.clone();
+            assert!(block_on(one_check(&SLOT, move || {
+                count.fetch_add(1, Ordering::SeqCst);
+                true
+            })));
+        }
+        assert_eq!(ran.load(Ordering::SeqCst), 3);
     }
 }

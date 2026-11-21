@@ -139,6 +139,9 @@ fn edits_and_run_now_are_refused_while_the_core_owns_the_schedules_and_work_as_b
     assert!(said(hub.routines.run_now(&hub, "someone-else", &id)).contains("not found"));
     fake.says(|_, _| Answer::Done(json!({"outcome": "busy", "retry": true})));
     assert!(said(hub.routines.run_now(&hub, &bot, &id)).contains("active run"));
+    // The core could not read what the fire needed: the same retry as busy, not "did not start (unavailable)".
+    fake.says(|_, _| Answer::Done(json!({"outcome": "unavailable", "retry": true})));
+    assert!(said(hub.routines.run_now(&hub, &bot, &id)).contains("active run"));
     fake.says(|_, _| Answer::Down { why: "no core is running".into(), lost: false });
     assert!(said(hub.routines.run_now(&hub, &bot, &id)).contains("not started"));
 }

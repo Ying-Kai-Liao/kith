@@ -278,7 +278,8 @@ impl Routines {
                 "fired" => {
                     Ok(json!({"run": {"id": key, "routineId": id, "botId": owner, "status": "pending"}, "core": v}))
                 }
-                "busy" => bail!(Refused::Busy),
+                // `unavailable`: the core could not read what the fire needed (nothing ran), the same retry as busy.
+                "busy" | "unavailable" => bail!(Refused::Busy),
                 other => bail!("the core did not start the routine ({other})"),
             },
             Answer::Refused(why) => bail!("the core refused to run the routine: {why}"),

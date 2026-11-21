@@ -134,3 +134,89 @@ fn stop_does_not_wait_for_a_client_in_the_middle_of_a_call() {
         "{r:?}"
     );
 }
+
+/// A handler that counts the calls it gets and says `busy` while `busy` is set.
+fn counting(
+    busy: Arc<std::sync::atomic::AtomicBool>,
+) -> (Arc<Handler>, Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::Ordering;
+    let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = seen.clone();
+    let handler: Arc<Handler> = Arc::new(move |_, method, _| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        if busy.load(Ordering::SeqCst) {
+            Err(crate::error::Error::Busy(
+                "lock held; nothing ran".to_owned(),
+            ))
+        } else {
+            Ok(json!({"ran": method}))
+        }
+    });
+    (handler, seen)
+}
+
+#[test]
+fn a_busy_read_opens_one_connection_not_two() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (_t, m) = machine();
+    let (handler, seen) = counting(Arc::new(AtomicBool::new(true)));
+    let (l, server) = serving(&m, handler);
+    let r = super::reach(&l, "paths", &json!({}), true);
+    assert!(
+        matches!(r, Reached::Refused(crate::error::Error::Busy(_))),
+        "{r:?}"
+    );
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        1,
+        "a busy answer is not retried"
+    );
+    server.stop();
+}
+
+#[test]
+fn while_the_breaker_is_open_calls_open_no_connection_and_one_test_call_goes_through_per_window() {
+    use std::sync::atomic::Ordering;
+    let (_t, m) = machine();
+    let busy = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (handler, seen) = counting(busy.clone());
+    let (l, server) = serving(&m, handler);
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), true),
+        Reached::Refused(_)
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 1);
+    // Open: reads and writes alike are "core down", nothing sent, no connection.
+    for repeatable in [true, false, true] {
+        assert!(matches!(
+            super::reach(&l, "paths", &json!({}), repeatable),
+            Reached::NoDaemon
+        ));
+    }
+    assert_eq!(seen.load(Ordering::SeqCst), 1, "no connection while open");
+    // The first window is 1 s: then one test call goes through, which is busy again and doubles the wait.
+    std::thread::sleep(Duration::from_millis(1100));
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), true),
+        Reached::Refused(_)
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 2, "one test call per window");
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), true),
+        Reached::NoDaemon
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 2);
+    // The core frees up: the next test call (after 2 s) is answered and closes the breaker.
+    busy.store(false, Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(2100));
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), false),
+        Reached::Answered(_)
+    ));
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), true),
+        Reached::Answered(_)
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 4);
+    server.stop();
+}

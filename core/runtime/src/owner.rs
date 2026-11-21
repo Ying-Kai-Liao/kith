@@ -32,7 +32,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use kith_api::Principal;
 use kith_holder::auth;
@@ -40,6 +40,7 @@ use kith_holder::platform::{self, Stream};
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
+use crate::breaker::{self, Gate};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
 use crate::perms;
@@ -54,6 +55,8 @@ const MAX_CONNECTIONS: usize = 64;
 const MAX_REFUSING: usize = 32;
 const STEP_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
+/// What a wait that ran out says; it opens the client's breaker.
+const NO_ANSWER: &str = "no answer in time";
 
 /// Where the daemon of this layout listens.
 #[cfg(unix)]
@@ -745,21 +748,58 @@ pub(crate) fn reach_with(
     rows: Option<&serde_json::Map<String, Value>>,
     who: Principal,
 ) -> Reached {
+    // One breaker per core in this process: a core that said `busy` or did not answer is not asked again at once.
+    let core = endpoint(layout);
+    let breakers = breaker::process();
+    if breakers.gate(&core, Instant::now()) == Gate::Hold {
+        // Core down, nothing sent.
+        return Reached::NoDaemon;
+    }
+    let (reached, tripped) = reach_tries(layout, method, params, repeatable, identity, rows, who);
+    breakers.end(&core, tripped, Instant::now());
+    reached
+}
+
+/// The tries of one call. The second flag: it came to `busy` or a timeout, which opens the breaker. A `busy` is never
+/// tried again (the core said nothing ran, and asking at once is what it is asking us not to do), nor is a timeout.
+fn reach_tries(
+    layout: &Layout,
+    method: &str,
+    params: &Value,
+    repeatable: bool,
+    identity: (u32, &str),
+    rows: Option<&serde_json::Map<String, Value>>,
+    who: Principal,
+) -> (Reached, bool) {
     let mut tried = 0;
     loop {
         match attempt(layout, method, params, identity, rows, who) {
-            Attempt::Done(r) => return r,
+            Attempt::Done(r) => {
+                let busy = matches!(r, Reached::Refused(Error::Busy(_)));
+                return (r, busy);
+            }
             Attempt::Failed { sent, why } => {
                 tried += 1;
-                if sent && !repeatable {
-                    return Reached::Lost(why);
+                let timed_out = why == NO_ANSWER;
+                if (sent && !repeatable) || timed_out {
+                    return (
+                        if sent {
+                            Reached::Lost(why)
+                        } else {
+                            Reached::NoDaemon
+                        },
+                        timed_out,
+                    );
                 }
                 if tried >= 2 {
-                    return if sent {
-                        Reached::Lost(why)
-                    } else {
-                        Reached::NoDaemon
-                    };
+                    return (
+                        if sent {
+                            Reached::Lost(why)
+                        } else {
+                            Reached::NoDaemon
+                        },
+                        false,
+                    );
                 }
                 std::thread::sleep(Duration::from_millis(150));
             }
@@ -814,7 +854,7 @@ impl Conn {
             Ok(None) | Err(RecvTimeoutError::Disconnected) => {
                 Err("the connection closed".to_owned())
             }
-            Err(RecvTimeoutError::Timeout) => Err("no answer in time".to_owned()),
+            Err(RecvTimeoutError::Timeout) => Err(NO_ANSWER.to_owned()),
         }
     }
 }

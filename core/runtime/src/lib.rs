@@ -64,6 +64,7 @@ mod doors;
 // Held terminals start on Unix only for now; elsewhere the relay has nothing to relay.
 #[cfg_attr(not(unix), allow(dead_code))]
 mod attach;
+mod breaker;
 mod db;
 mod error;
 mod gate;
@@ -468,6 +469,10 @@ pub fn stateless_through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T,
 /// Where nothing answers (no daemon, a stale socket) the answer is [`Reached::NoDaemon`] and the caller runs the verb
 /// embedded as it did before; where a daemon answers but disagrees about the protocol or the method table it is
 /// [`Reached::Mismatch`] with a note, and nothing has run.
+///
+/// A core that answered `busy` or did not answer in time is not asked again at once: the process keeps one circuit
+/// breaker per core, open for 1 s and doubling to 30 s, with one test call per window. While it is open the answer is
+/// [`Reached::NoDaemon`] and nothing was sent. A `busy` answer (`Refused(Error::Busy)`) is never retried.
 pub fn reach(paths: &Paths, method: &str, params: &serde_json::Value, repeatable: bool) -> Reached {
     owner::reach(&Layout::new(&paths.machine), method, params, repeatable)
 }

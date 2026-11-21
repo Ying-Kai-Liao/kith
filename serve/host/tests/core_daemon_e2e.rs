@@ -92,6 +92,69 @@ fn status(home: &Path) -> Value {
     serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)))
 }
 
+/// How many `kith-owner-read` threads this process has: one per connection a client of the owner socket has open (Linux; other
+/// systems have no cheap count and the test then checks the answers alone).
+fn owner_connections() -> Option<usize> {
+    let tasks = std::fs::read_dir("/proc/self/task").ok()?;
+    Some(
+        tasks
+            .filter_map(Result::ok)
+            .filter(|t| std::fs::read_to_string(t.path().join("comm")).is_ok_and(|c| c.trim() == "kith-owner-read"))
+            .count(),
+    )
+}
+
+/// A core that does not answer for 15 s (stopped, as a core under a lock held through a hung disk looks to a client): the
+/// callers of this process share one circuit breaker, so the connections they open stay within the number of distinct callers
+/// instead of growing with every retry, and the core answers normally once it runs again. The server's own `busy` answers
+/// are in `core/runtime/src/daemon_tests.rs`.
+#[test]
+fn callers_back_off_a_core_that_does_not_answer_and_it_answers_normally_afterwards() {
+    const CALLERS: usize = 6;
+    let home = sandbox("backoff");
+    std::fs::create_dir_all(machine(&home)).expect("machine");
+    let p = kith_kernel::paths::paths(&home, &home.join("kith/kernel"), &|k: &str| match k {
+        "KITH_HOME" => Some(home.join("kith").to_string_lossy().into_owned()),
+        _ => None,
+    });
+    let daemon = Daemon::start(&home, &[]).expect("daemon");
+    let pid = daemon.child.id().to_string();
+    let signal = |sig: &str| {
+        assert!(Command::new("kill").args([sig, &pid]).status().expect("kill").success());
+    };
+    let ask = |p: &kith_kernel::paths::Paths| kith_core::reach(p, "kernel.version", &serde_json::json!({}), true);
+    assert!(matches!(ask(&p), kith_core::Reached::Answered(_)), "it answers before");
+
+    signal("-STOP");
+    let stop_at = Instant::now() + Duration::from_secs(15);
+    let callers: Vec<_> = (0..CALLERS)
+        .map(|_| {
+            let p = p.clone();
+            std::thread::spawn(move || {
+                while Instant::now() < stop_at {
+                    let _ = kith_core::reach(&p, "kernel.version", &serde_json::json!({}), true);
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            })
+        })
+        .collect();
+    let mut most = 0;
+    while Instant::now() < stop_at {
+        most = most.max(owner_connections().unwrap_or(0));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    signal("-CONT");
+    for c in callers {
+        c.join().expect("caller");
+    }
+    assert!(most <= CALLERS, "{most} connections for {CALLERS} callers");
+
+    // The breaker lets a test call through each window; one is answered as soon as the core runs, and closes it.
+    until("the core answering again", || matches!(ask(&p), kith_core::Reached::Answered(_)));
+    daemon.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 fn until(what: &str, mut f: impl FnMut() -> bool) {
     let end = Instant::now() + Duration::from_secs(40);
     while Instant::now() < end {
