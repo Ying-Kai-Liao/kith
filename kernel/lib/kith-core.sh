@@ -80,21 +80,6 @@ kith_cost_bin() {
   printf '%s' "$bin"
 }
 
-# kith_permit_bin   prints the kith program that has `kernel permit` (`permit` in `kith kernel version`) and returns 0, or returns 1.
-# The launch then writes `<program> kernel permit --kernel K ...` for the permit hooks, the guest's MCP server and `apply`; a Mac
-# whose program has none yet keeps the script path (`bin/kith-permit`, still a file for sessions started before the update).
-kith_permit_bin() {
-  local bin ver
-  if [[ -n ${_kith_core_primed:-} ]]; then
-    bin=$_kith_core_bin ver=$_kith_core_ver
-  else
-    bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
-    ver=$("$bin" kernel version 2>/dev/null)
-  fi
-  [[ -n $bin && $ver == *'"permit"'* ]] || return 1
-  printf '%s' "$bin"
-}
-
 # kith_core_bin VERB   prints the program kith_core_exec VERB would run (and returns 0), or returns 1 when the Python answers:
 # the same rule without the exec, for a caller that has to name the program (the SessionStart hook of `kith AGENT`).
 kith_core_bin() {

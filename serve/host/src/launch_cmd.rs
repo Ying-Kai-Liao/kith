@@ -214,7 +214,7 @@ pub fn print_settings(a: &Args) -> Result<()> {
         .collect();
     let ledger_bin = kith_kernel::launch::assemble::ledger_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
     let cost_bin = kith_kernel::launch::assemble::cost_hook_bin(kith_bin.as_deref());
-    let permit_bin = kith_kernel::launch::assemble::permit_hook_bin(kith_bin.as_deref());
+    let permit_bin = kith_kernel::launch::assemble::permit_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
     let threads_bin = kith_kernel::launch::assemble::threads_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
     let input = settings::Input {
         agent: &a.agent,
@@ -291,7 +291,10 @@ pub fn print_mcp(a: &Args) -> Result<()> {
         .kith_bin
         .clone()
         .or_else(|| kith_kernel::paths::process_env("KITH_BIN").filter(|b| !b.is_empty()));
-    let permit_bin = kith_kernel::launch::assemble::permit_hook_bin(kith_bin.as_deref());
+    let process_env: kith_kernel::launch::assemble::Env = std::env::vars_os()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+        .collect();
+    let permit_bin = kith_kernel::launch::assemble::permit_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
     let merged = mcp::merged(c.member.owner, permit_bin.as_deref(), &c.kernel, granted.as_ref(), &c.pkg).map_err(|e| anyhow!(e))?;
     println!("{}", json!({ "mcp_servers": merged["mcpServers"] }));
     Ok(())

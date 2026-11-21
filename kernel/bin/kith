@@ -944,12 +944,12 @@ fi
 # so both launch paths write the same bytes.
 cost_hook="\"$KITH/bin/kith-cost\" tag"
 if cbin=$(kith_cost_bin); then cost_hook=$(printf '%q kernel cost --kernel %q tag' "$cbin" "$KITH"); fi
-# The permit hooks, the guest's MCP server and `apply`: `kith kernel permit --kernel K ...` on the program that has the module, else
-# the script. permit_cmd is the command words; KITH_PERMIT_BIN carries the program to the settings builder below.
+# The permit hooks, the guest's MCP server and `apply`: `kith kernel permit --kernel K ...` while `permit` is switched (a line in
+# lib/core-switched.txt, no KITH_CORE=python) and the program has the module, else the script (the Python, the rollback).
+# permit_cmd is the command words; permit_prog the program for the settings builder below.
 permit_cmd=("$KITH/bin/kith-permit")
-KITH_PERMIT_BIN=""
-if pbin=$(kith_permit_bin); then permit_cmd=("$pbin" kernel permit --kernel "$KITH"); KITH_PERMIT_BIN=$pbin; fi
-export KITH_PERMIT_BIN
+permit_prog=""
+if pbin=$(kith_core_bin permit); then permit_cmd=("$pbin" kernel permit --kernel "$KITH"); permit_prog=$pbin; fi
 # The registry's SessionStart hook: the same side of `kith-sessions` as the rest of this launch (kthreads, decided above).
 sessions_hook="\"$KITH/bin/kith-sessions\" record"
 if [[ -n $kthreads ]]; then sessions_hook=$(printf '%q kernel threads --kernel %q record' "$kthreads" "$KITH"); fi
@@ -965,7 +965,7 @@ if [[ $p_owner == 0 && -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX && -d $KIT
 fi
 [[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
 # The live folder (a launch without a package snapshot) may have no settings.json: an empty one then.
-fill < <([[ -f $pkg/settings.json ]] && cat "$pkg/settings.json" || echo "{}") | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK=$cost_hook SESSIONS_HOOK=$sessions_hook WRITABLE="$writable
+fill < <([[ -f $pkg/settings.json ]] && cat "$pkg/settings.json" || echo "{}") | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp KITH_PERMIT_BIN=$permit_prog HOOK=$cost_hook SESSIONS_HOOK=$sessions_hook WRITABLE="$writable
 $learned
 $state_projects" python3 -I -c '
 import json, os, re, sys
@@ -1358,8 +1358,8 @@ kith_env_sync   # the exports above reach role repos under their old HQ_ names t
 # The agent's MCP servers for a launch-json run: the granted shared services plus its own mcp.json, as one {"mcpServers": {...}}.
 # Anyone but the owner gets kith-permit and nothing else: no shared services (their logins), no server of the agent's own.
 permit_mcp() {
-  if [[ -n $KITH_PERMIT_BIN ]]; then
-    python3 -I -c 'import json,sys; print(json.dumps({"mcpServers": {"kithpermit": {"command": sys.argv[1], "args": ["kernel", "permit", "--kernel", sys.argv[2]]}}}, separators=(",", ":")), end="")' "$KITH_PERMIT_BIN" "$KITH"
+  if [[ -n $permit_prog ]]; then
+    python3 -I -c 'import json,sys; print(json.dumps({"mcpServers": {"kithpermit": {"command": sys.argv[1], "args": ["kernel", "permit", "--kernel", sys.argv[2]]}}}, separators=(",", ":")), end="")' "$permit_prog" "$KITH"
   else
     printf '{"mcpServers":{"kithpermit":{"command":"%s/bin/kith-permit","args":[]}}}' "$KITH"
   fi

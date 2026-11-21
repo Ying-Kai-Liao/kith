@@ -146,8 +146,8 @@ pub struct Input<'a> {
     /// The program that has the `cost-ledger` module (see `assemble::cost_hook_bin`), else None: the `SessionStart` hook is then
     /// the stub, `bin/kith-cost tag`, which forwards to a program and does nothing when it finds none.
     pub cost_bin: Option<&'a str>,
-    /// The program that has the `permit` module (see `assemble::permit_hook_bin`): the auto-mode hooks run its `kernel permit`
-    /// verbs. None: they name the script `bin/kith-permit`, which forwards.
+    /// The program that has the `permit` module, when `permit` is switched (see `assemble::permit_hook_bin`): the auto-mode hooks run
+    /// its `kernel permit` verbs. None: they name the script `bin/kith-permit`, the Python.
     pub permit_bin: Option<&'a str>,
     /// `kith_bin` when `threads` is switched and it has the `threads-writer` module (see `assemble::threads_hook_bin`), else
     /// None: the registry's `SessionStart` hook then stays `bin/kith-sessions record`.

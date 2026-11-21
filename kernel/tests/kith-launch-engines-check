@@ -79,6 +79,8 @@ done
 if [ -n "$BIN" ]; then
   check "KITH_CORE=python writes the same cost hook" "[ \"\$(KITH_CORE=python launch cl | grep -o 'kernel cost --kernel [^\"]* tag' | head -1)\" = \"\$(launch cl | grep -o 'kernel cost --kernel [^\"]* tag' | head -1)\" ] && launch cl | grep -q 'kernel cost --kernel .* tag'"
   check "the default launch tags with the core's cost verb" "launch cl | grep -q 'kernel cost --kernel .* tag'"
+  # KITH_CORE=python hands permit back: the hooks name the script again (the rollback).
+  check "KITH_CORE=python keeps the permit hooks on the script" "(export KITH_CORE=python; launch cl) | grep -q 'bin/kith-permit denied --dir' && ! (export KITH_CORE=python; launch cl) | grep -q 'kernel permit'"
   # The permit hooks name the program's `kernel permit`, never the script as a command (the script's only mention is the deny rule).
   check "an owner run's permit hooks call kernel permit, not kith-permit" "launch cl | grep -q 'kernel permit --kernel [^ ]* denied --dir' && launch cl | grep -q 'exec [^ ]* kernel permit --kernel [^ ]* once --dir' && ! launch cl | grep -q 'kith-permit [a-z]\\|bin/kith-permit \\(denied\\|once\\)'"
 fi

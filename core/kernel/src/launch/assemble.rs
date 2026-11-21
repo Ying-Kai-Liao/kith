@@ -455,14 +455,23 @@ pub fn cost_hook_bin(kith_bin: Option<&str>) -> Option<String> {
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)))
 }
 
-/// The program the permit hooks, the `kithpermit` MCP server and `apply` run (`kith kernel permit`): `kith_bin` when it lists the
-/// `permit` module, else this program (it always does). `kith_permit_bin` in lib/kith-core.sh decides the same way for the bash
-/// launch. `bin/kith-permit` stays for the runs that hold the old path and for `kith bug`, which loads it.
-pub fn permit_hook_bin(kith_bin: Option<&str>) -> Option<String> {
-    kith_bin
-        .filter(|b| !b.is_empty() && knows_module(Path::new(b), "permit"))
-        .map(str::to_owned)
-        .or_else(|| std::env::current_exe().ok().map(|e| s(&e)))
+/// The `--mcp-config` text of anyone but the owner: the bytes bin/kith's `permit_mcp` prints (command before args, no spaces).
+fn guest_mcp_arg(permit_bin: Option<&str>, kernel: &Path) -> String {
+    let (command, args) = mcp::permit_command(permit_bin, kernel);
+    let q = |x: &str| serde_json::to_string(x).unwrap_or_default();
+    format!(
+        "{{\"mcpServers\":{{\"kithpermit\":{{\"command\":{},\"args\":[{}]}}}}}}",
+        q(&command),
+        args.iter().map(|a| q(a)).collect::<Vec<_>>().join(",")
+    )
+}
+
+/// The program the permit hooks, the `kithpermit` MCP server and `apply` run (`kith kernel permit`): `kith_bin` when `permit` is
+/// switched (a line in `lib/core-switched.txt` and no `KITH_CORE=python`) and the program lists the module. `None` keeps the
+/// script (`bin/kith-permit`, the whole Python and the rollback). `kith_core_bin permit` in lib/kith-core.sh decides the same way
+/// for the bash launch. `bin/kith-permit` stays for the runs that hold the old path and for `kith bug`, which loads it.
+pub fn permit_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Option<String> {
+    switched_bin(kernel, env, kith_bin, "permit", "permit")
 }
 
 /// The program the `SessionStart` hook runs for the session registry (`kith kernel threads record`): `kith_bin` when `threads`
@@ -1380,7 +1389,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
     let ledger_bin = ledger_hook_bin(kernel, &env, kith_bin.as_deref());
     let cost_bin = cost_hook_bin(kith_bin.as_deref());
-    let permit_bin = permit_hook_bin(kith_bin.as_deref());
+    let permit_bin = permit_hook_bin(kernel, &env, kith_bin.as_deref());
     let threads_bin = threads_hook_bin(kernel, &env, kith_bin.as_deref());
     if perm_mode.is_empty() {
         perm_mode.clear();
@@ -1510,14 +1519,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     let mcp_arg = if p_owner {
         pyjson::dumps(&json!({"mcpServers": mcp_servers}))
     } else {
-        // the bytes bin/kith's permit_mcp prints
-        let (command, args) = mcp::permit_command(permit_bin.as_deref(), kernel);
-        let q = |x: &str| serde_json::to_string(x).unwrap_or_default();
-        format!(
-            "{{\"mcpServers\":{{\"kithpermit\":{{\"command\":{},\"args\":[{}]}}}}}}",
-            q(&command),
-            args.iter().map(|a| q(a)).collect::<Vec<_>>().join(",")
-        )
+        guest_mcp_arg(permit_bin.as_deref(), kernel)
     };
     let call_model = if claude && p_model.is_empty() {
         call_model(&p.machine, agent)
@@ -1679,6 +1681,19 @@ mod tests {
 
     fn v(a: &[&str]) -> Vec<String> {
         a.iter().map(|x| (*x).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_guests_mcp_arg_names_the_program_or_the_script() {
+        let k = Path::new("/k");
+        assert_eq!(
+            guest_mcp_arg(Some("/b/kith"), k),
+            r#"{"mcpServers":{"kithpermit":{"command":"/b/kith","args":["kernel","permit","--kernel","/k"]}}}"#
+        );
+        assert_eq!(
+            guest_mcp_arg(None, k),
+            r#"{"mcpServers":{"kithpermit":{"command":"/k/bin/kith-permit","args":[]}}}"#
+        );
     }
 
     #[test]

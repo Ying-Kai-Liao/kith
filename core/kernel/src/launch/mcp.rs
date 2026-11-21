@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::{Map, Value, json};
 
 /// The command that starts the `kithpermit` server: `<program> kernel permit --kernel K` (no verb, so the MCP server). `None`
-/// (this program could not name itself) leaves the script at the old path, which forwards to a program.
+/// (`permit` not switched, or no program that lists it) names the script at the old path, the Python.
 pub fn permit_command(permit_bin: Option<&str>, kernel: &Path) -> (String, Vec<String>) {
     match permit_bin.filter(|b| !b.is_empty()) {
         Some(bin) => (
