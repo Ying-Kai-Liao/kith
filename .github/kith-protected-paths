@@ -65,6 +65,8 @@ serve/host/src/store/cards.rs
 serve/host/src/api/cards.rs
 serve/host/src/api/bots.rs
 # thread-writers
+core/kernel/src/lifecycle/sweep.rs
+core/kernel/src/lifecycle/proc.rs
 serve/host/src/terminal/mod.rs
 serve/host/src/terminal/registry.rs
 serve/host/src/terminal/sync.rs

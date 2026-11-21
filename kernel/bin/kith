@@ -169,7 +169,9 @@ case $1 in
                       # A cutover module's name (kith migrate status) goes back to Python's files; anything else is an agent.
                       if [[ -n ${1:-} && $1 != -* ]]; then
                         . "$KITH/lib/kith-core.sh"; kith_core_prime
-                        if [[ -n ${_kith_core_bin:-} ]] && "$_kith_core_bin" kernel cutover modules 2>/dev/null | grep -qxF -- "$1"; then exec "$_kith_core_bin" kernel cutover rollback "$@"; fi
+                        # The list goes into a variable first: grep -q ending the pipe early can SIGPIPE the program (exit 101 under pipefail).
+                        mods=; [[ -z ${_kith_core_bin:-} ]] || mods=$("$_kith_core_bin" kernel cutover modules 2>/dev/null) || mods=
+                        if [[ -n $mods ]] && grep -qxF -- "$1" <<<"$mods"; then exec "$_kith_core_bin" kernel cutover rollback "$@"; fi
                       fi
                       exec "$KITH/bin/kith-pkg" pin "$@" ;;
   auth)               shift; exec "$KITH/bin/kith-auth" "${@:-ls}" ;;
