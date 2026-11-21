@@ -457,6 +457,7 @@ def spawn_lifecycle():
         if not marker.exists():
             log('lifecycle_unavailable', prog=prog, why='this kith program has no `kernel lifecycle`; update kith')
             try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
                 marker.touch()
             except OSError:
                 pass

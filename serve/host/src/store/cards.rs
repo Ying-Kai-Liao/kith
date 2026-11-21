@@ -777,6 +777,29 @@ mod tests {
     }
 
     #[test]
+    fn a_bash_retry_with_a_reworded_description_joins_the_card_and_uses_its_yes() {
+        use crate::cards::resource::{Classified, Roots, classify};
+        let resource = |description: &str| {
+            let input = serde_json::json!({"command": "ls", "description": description});
+            let Classified::Card { key, .. } = classify("Bash", &input, &Roots::default()) else { panic!("a card") };
+            key
+        };
+        let s = temp_store();
+        let a = new(&s, "s1", &resource("list files"));
+        let Opened::Joined(j) = s.card_open(&ask("s1", &resource("show what is here")), 101).unwrap() else {
+            panic!("joins")
+        };
+        assert_eq!(j.id, a.id);
+        s.card_live(&a.id, Some("e1"), None).unwrap();
+        s.card_answer(&a.id, true, "allow", "kai", None, 200, false).unwrap();
+        let Opened::Granted(g) = s.card_open(&ask("s1", &resource("list the folder")), 201).unwrap() else {
+            panic!("uses the yes")
+        };
+        assert_eq!(g.id, a.id);
+        assert_eq!(s.cards_open(None).len(), 0);
+    }
+
+    #[test]
     fn the_first_answer_wins_and_a_closed_card_takes_none() {
         let s = temp_store();
         let a = new(&s, "s1", "Bash:ls");
