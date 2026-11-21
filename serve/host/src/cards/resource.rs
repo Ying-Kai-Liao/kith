@@ -145,49 +145,27 @@ impl Roots {
     }
 }
 
-/// The folders for this Mac, asked of the kernel (`kith_paths.py --json`). A lookup that failed is not remembered:
-/// the next ask tries again, and meanwhile the host's own reading of the rules stands.
+/// The folders for this Mac, by the kernel's rules in process (`kith-kernel` paths, the port of the kernel's old
+/// `kith_paths.py`): there is no program to ask, so the answer is always settled and kept.
 pub fn roots() -> Roots {
     static CACHE: Mutex<Option<Roots>> = Mutex::new(None);
     if let Some(r) = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
         return r;
     }
     let mut r = Roots::default();
-    Roots::add(&mut r.kith, crate::kernel::state_dir(&dirs::home_dir().unwrap_or_default()));
+    let home = dirs::home_dir().unwrap_or_default();
     Roots::add(&mut r.whole, crate::service::data_dir());
-    let mut settled = true;
-    if let Some(k) = crate::kernel::current_kernel() {
-        let asked = std::process::Command::new("python3")
-            .arg(k.join("lib/kith_paths.py"))
-            .arg("--json")
-            .output()
-            .ok()
-            .and_then(|o| o.status.success().then_some(o.stdout))
-            .and_then(|out| serde_json::from_slice::<Value>(&out).ok());
-        match asked {
-            Some(v) => {
-                for key in ["KITH_STATE", "KITH_MACHINE"] {
-                    if let Some(p) = v[key].as_str() {
-                        Roots::add(&mut r.kith, PathBuf::from(p));
-                    }
-                }
-                if let Some(sec) = v["KITH_SECRETS"].as_str() {
-                    Roots::add(&mut r.secrets_folder, PathBuf::from(sec));
-                }
-                // The older layout keeps the secrets among the machine things: the patterns cover `env` and
-                // `auth.json` there, and the folder is only secret whole when it is a folder of its own.
-                if let (Some(sec), Some(machine)) = (v["KITH_SECRETS"].as_str(), v["KITH_MACHINE"].as_str())
-                    && sec != machine
-                {
-                    Roots::add(&mut r.whole, PathBuf::from(sec));
-                }
-            }
-            None => settled = false,
-        }
+    let p = crate::kernel::folders(&home);
+    for folder in [&p.state, &p.machine] {
+        Roots::add(&mut r.kith, folder.clone());
     }
-    if settled {
-        *CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r.clone());
+    Roots::add(&mut r.secrets_folder, p.secrets.clone());
+    // The older layout keeps the secrets among the machine things: the patterns cover `env` and
+    // `auth.json` there, and the folder is only secret whole when it is a folder of its own.
+    if p.secrets != p.machine {
+        Roots::add(&mut r.whole, p.secrets.clone());
     }
+    *CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r.clone());
     r
 }
 

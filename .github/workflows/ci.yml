@@ -956,6 +956,7 @@ jobs:
               kith-auth-mixed-race-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
               kith-account-state-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
               kith-agent-set-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-agent-set-check
+              kith-paths-nopython-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-paths-nopython-check
               kith-json-misc-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-json-misc-check
               kith-requires-switched-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
               kith-pkg-pid-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check

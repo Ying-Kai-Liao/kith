@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# kith-paths-nopython-check — every `kith` call finds its folders and the kith program without Python (retire-python P1).
+# A python3 on PATH that logs its arguments and fails stands in for the interpreter; none of the path lookups may reach it
+# (kith_paths.py --sh / --bin / --machine). Three layouts: a dev checkout (the program from KITH_BIN, or a build in the
+# checkout's target folder), an installed release (<prefix>/cli/<ver>/share/kith/kernel with <prefix>/cli/<ver>/bin/kith, found
+# with no KITH_BIN and no PATH entry), and no program at all (one line and exit 1, never a fall back to Python).
+# Needs the Rust program: KITH_DIFFTEST_BIN=/path/to/kith (without one the check says so and exits 0).
+#
+#   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-paths-nopython-check
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+REAL=${KITH_DIFFTEST_BIN:-}
+if [ -z "$REAL" ] || [ ! -x "$REAL" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN)"; exit 0; fi
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-paths-nopython-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home TZ=UTC
+unset CARGO_TARGET_DIR KITH_STATE HQ_STATE KITH_HOME HQ_HOME KITH_AGENTS HQ_AGENTS KITH_MACHINE KITH_BIN KITH_DEV_BIN KITH_CORE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_RUN_TOKEN
+mkdir -p "$HOME" "$T/shim"
+LOG=$T/python.log
+: > "$LOG"
+printf '#!/bin/sh\necho "$*" >> "%s"\nexit 127\n' "$LOG" > "$T/shim/python3"
+chmod +x "$T/shim/python3"
+SAFE=$T/shim:/usr/bin:/bin
+
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+no_paths_py() { ! grep -q 'kith_paths' "$LOG"; }
+
+# A kernel folder by layout. Dev: <checkout>/kernel. Installed: <prefix>/cli/1.0/share/kith/kernel beside cli/1.0/bin/kith.
+mkdir -p "$T/co" "$T/prefix/cli/1.0/share/kith" "$T/prefix/cli/1.0/bin"
+cp -R "$KERNEL" "$T/co/kernel"
+cp -R "$KERNEL" "$T/prefix/cli/1.0/share/kith/kernel"
+cp "$REAL" "$T/prefix/cli/1.0/bin/kith"
+DEV=$T/co/kernel
+REL=$T/prefix/cli/1.0/share/kith/kernel
+WANT=$("$REAL" kernel paths --kernel "$DEV" --json)
+
+# --- dev checkout, the program named by KITH_BIN
+: > "$LOG"
+got=$(env PATH=$SAFE KITH_BIN="$REAL" "$DEV/bin/kith" paths --json 2>/dev/null)
+check "dev checkout: kith paths --json is the program's answer" "[ \"\$got\" = \"\$WANT\" ]"
+env PATH=$SAFE KITH_BIN="$REAL" "$DEV/bin/kith" ls >/dev/null 2>&1
+check "dev checkout: a launch-path verb (kith ls) runs no kith_paths.py" no_paths_py
+: > "$LOG"
+got=$(env PATH=$SAFE KITH_BIN="$REAL" bash -c 'KITH=$1; . "$1/lib/kith-core.sh"; kith_find_bin; echo; kith_machine' _ "$DEV" 2>/dev/null)
+want_machine=$(eval "$("$REAL" kernel paths --kernel "$DEV" --sh)"; printf '%s' "$KITH_MACHINE")
+check "dev checkout: kith-core.sh finds the program and the machine folder" "[ \"\$got\" = \"$REAL
+$want_machine\" ]"
+check "dev checkout: kith-core.sh starts no kith_paths.py" no_paths_py
+
+# --- dev checkout, the program is a build in the checkout's own target folder (no KITH_BIN, nothing on PATH)
+mkdir -p "$T/co/serve/host/target/debug"
+cp "$REAL" "$T/co/serve/host/target/debug/kith"
+: > "$LOG"
+got=$(env PATH=$SAFE "$DEV/bin/kith" paths --json 2>/dev/null)
+check "dev checkout: the build under serve/host/target is found" "[ \"\$got\" = \"\$WANT\" ]"
+check "dev checkout build: no kith_paths.py" no_paths_py
+
+# --- installed release: found beside the kernel with no KITH_BIN and no PATH entry
+: > "$LOG"
+got=$(env PATH=$SAFE "$REL/bin/kith" paths --json 2>/dev/null)
+check "installed: kith paths --json runs the program in cli/<ver>/bin" "[ -n \"\$got\" ] && [ \"\${got#\{}\" != \"\$got\" ]"
+env PATH=$SAFE "$REL/bin/kith" ls >/dev/null 2>&1
+check "installed: a launch-path verb (kith ls) runs no kith_paths.py" no_paths_py
+found=$(env PATH=$SAFE bash -c 'KITH=$1; . "$1/lib/kith-core.sh"; kith_find_bin' _ "$REL" 2>/dev/null)
+check "installed: kith_find_bin names the release's program" "[ \"\$found\" = '$REL/../../../bin/kith' ]"
+
+# --- no program anywhere: one line, exit 1, no Python
+rm -rf "$T/co/serve"
+: > "$LOG"
+out=$(env PATH=$SAFE "$DEV/bin/kith" ls 2>&1); rc=$?
+check "no program: kith ls says so and exits 1" "[ $rc = 1 ] && [ \"\$(printf '%s\n' \"\$out\" | wc -l | tr -d ' ')\" = 1 ] && printf '%s' \"\$out\" | grep -q 'needs the kith program'"
+out=$(env PATH=$SAFE "$DEV/bin/kith" paths 2>&1); rc=$?
+check "no program: kith paths says so and exits 1" "[ $rc = 1 ] && printf '%s' \"\$out\" | grep -q 'needs the kith program'"
+check "no program: no kith_paths.py" no_paths_py
+check "core-switched.txt has no paths line" "! grep -q '^paths	' '$KERNEL/lib/core-switched.txt'"
+
+echo
+[ "$fails" = 0 ] && echo "all checks passed" || { echo "$fails check(s) failed"; exit 1; }
