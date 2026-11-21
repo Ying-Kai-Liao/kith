@@ -7,32 +7,100 @@ use std::process::{Command, Stdio};
 
 const LABEL: &str = crate::environment::SERVICE_LABEL;
 const UNIT: &str = crate::environment::SYSTEMD_UNIT;
+/// A test names its own job with this; only a label starting with `TEST_LABEL_PREFIX` is accepted.
+const TEST_LABEL_ENV: &str = "KITH_SERVE_TEST_LABEL";
+const TEST_LABEL_PREFIX: &str = "dev.kith.serve.test-";
+
+/// The job this process may install, start or stop. launchd and systemd --user are per account, not per `$HOME`: a
+/// throwaway HOME does not isolate them, and an install from one replaces the account's real job. So the real job
+/// is only touched when `$HOME` is the account's own home; a test names a test job instead.
+struct Job {
+    label: String,
+    unit: String,
+}
+
+fn job() -> Result<Job> {
+    let real = real_home();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    choose_job(std::env::var(TEST_LABEL_ENV).ok().as_deref(), home.as_deref(), real.as_deref())
+}
+
+fn choose_job(test_label: Option<&str>, home: Option<&Path>, real_home: Option<&Path>) -> Result<Job> {
+    if let Some(label) = test_label.filter(|l| !l.is_empty()) {
+        let plain = label.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+        if !label.starts_with(TEST_LABEL_PREFIX) || label.len() == TEST_LABEL_PREFIX.len() || !plain {
+            bail!(
+                "{TEST_LABEL_ENV} must look like {TEST_LABEL_PREFIX}<id>, not {label:?}: the real job {LABEL} is never a test label"
+            );
+        }
+        return Ok(Job { label: label.to_owned(), unit: format!("{label}.service") });
+    }
+    let (Some(home), Some(real)) = (home, real_home) else {
+        bail!(
+            "refusing to touch the job {LABEL}: cannot tell HOME ({}) from this account's home ({}); a test sets {TEST_LABEL_ENV}={TEST_LABEL_PREFIX}<id>",
+            home.map_or("unset".into(), |h| h.display().to_string()),
+            real_home.map_or("unknown".into(), |h| h.display().to_string()),
+        );
+    };
+    let same = match (home.canonicalize(), real.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => home == real,
+    };
+    if !same {
+        bail!(
+            "refusing to touch the job {LABEL}: HOME is {} but this account's home is {}; a test sets {TEST_LABEL_ENV}={TEST_LABEL_PREFIX}<id>",
+            home.display(),
+            real.display()
+        );
+    }
+    Ok(Job { label: LABEL.to_owned(), unit: UNIT.to_owned() })
+}
+
+/// The account's home from the password database (not `$HOME`, which is what is being checked).
+fn real_home() -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt as _;
+    // SAFETY: getpwuid_r fills `pwd` and `buf`, which outlive the read of pw_dir below.
+    unsafe {
+        let mut pwd: libc::passwd = std::mem::zeroed();
+        let mut buf = vec![0u8; 16 * 1024];
+        let mut out: *mut libc::passwd = std::ptr::null_mut();
+        let rc = libc::getpwuid_r(libc::getuid(), &raw mut pwd, buf.as_mut_ptr().cast(), buf.len(), &raw mut out);
+        if rc != 0 || out.is_null() || pwd.pw_dir.is_null() {
+            return None;
+        }
+        let dir = std::ffi::CStr::from_ptr(pwd.pw_dir);
+        Some(PathBuf::from(std::ffi::OsStr::from_bytes(dir.to_bytes())))
+    }
+}
 
 /// Stops the installed job, preserving its configuration for a later start.
 /// A manually started daemon is never mistaken for the service we own.
 pub fn stop() -> Result<()> {
+    let job = job()?;
     if cfg!(target_os = "macos") {
-        launchd::unload(&mut launchctl, &target())?;
-    } else if installed() {
-        run("systemctl", &["--user", "stop", UNIT])?;
+        launchd::unload(&mut launchctl, &target(&job))?;
+    } else if systemd_unit(&job).exists() {
+        run("systemctl", &["--user", "stop", &job.unit])?;
     }
     wait_for_host_exit()
 }
 
 pub fn start() -> Result<()> {
+    let job = job()?;
     if cfg!(target_os = "macos") {
-        launchd::reload(&mut launchctl, &domain(), &target(), &launchd_plist())
+        launchd::reload(&mut launchctl, &domain(), &target(&job), &launchd_plist(&job))
     } else {
-        run("systemctl", &["--user", "start", UNIT])
+        run("systemctl", &["--user", "start", &job.unit])
     }
 }
 
 /// Refuse to replace one installation while restarting a service owned by another.
 pub fn require_executable(expected: &Path) -> Result<()> {
+    let job = job()?;
     let configured = if cfg!(target_os = "macos") {
         let output = Command::new("/usr/bin/plutil")
             .args(["-extract", "ProgramArguments", "json", "-o", "-"])
-            .arg(launchd_plist())
+            .arg(launchd_plist(&job))
             .output()?;
         if !output.status.success() {
             bail!("cannot read the installed host service");
@@ -40,7 +108,7 @@ pub fn require_executable(expected: &Path) -> Result<()> {
         let words: Vec<String> = serde_json::from_slice(&output.stdout).context("invalid service ProgramArguments")?;
         PathBuf::from(host_program(&words).context("service has no executable")?)
     } else {
-        let unit = std::fs::read_to_string(systemd_unit())?;
+        let unit = std::fs::read_to_string(systemd_unit(&job))?;
         let command =
             unit.lines().find_map(|line| line.strip_prefix("ExecStart=")).context("service has no ExecStart")?;
         let args = shlex::split(command).context("invalid service ExecStart")?;
@@ -53,12 +121,12 @@ pub fn require_executable(expected: &Path) -> Result<()> {
     Ok(())
 }
 
-fn launchd_plist() -> PathBuf {
-    home().join(format!("Library/LaunchAgents/{LABEL}.plist"))
+fn launchd_plist(job: &Job) -> PathBuf {
+    home().join(format!("Library/LaunchAgents/{}.plist", job.label))
 }
 
-fn systemd_unit() -> PathBuf {
-    dirs::config_dir().unwrap_or_else(|| home().join(".config")).join("systemd/user").join(UNIT)
+fn systemd_unit(job: &Job) -> PathBuf {
+    dirs::config_dir().unwrap_or_else(|| home().join(".config")).join("systemd/user").join(&job.unit)
 }
 
 fn xml_escape(s: &str) -> String {
@@ -103,6 +171,7 @@ fn program_arguments(launcher: &[String], exe: &str, port: u16) -> String {
 /// `KITH_KERNEL` (a host built from a checkout runs agents on it), kept so the job starts with what installed it.
 #[allow(clippy::too_many_arguments)] // one value per key of the job file
 fn plist_text(
+    label: &str,
     launcher: &[String],
     exe: &str,
     port: u16,
@@ -117,7 +186,7 @@ fn plist_text(
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>{LABEL}</string>
+  <key>Label</key><string>{label}</string>
   <key>ProgramArguments</key><array>{args}</array>
   <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string><key>KITH_SERVE_HOME</key><string>{data}</string>{hq}</dict>
   <key>RunAtLoad</key><true/>
@@ -128,6 +197,7 @@ fn plist_text(
 </dict>
 </plist>
 "#,
+        label = xml_escape(label),
         args = program_arguments(launcher, exe, port),
         path = xml_escape(path),
         data = xml_escape(data),
@@ -177,6 +247,7 @@ fn unit_text(
 /// Installs and starts the host as a per-user background service. The current
 /// PATH is captured so the service finds `npx`, `claude`, `codex`, …
 pub fn install(port: u16) -> Result<()> {
+    let job = job()?;
     let exe = current_exe().context("locating the kith-serve binary")?;
     let exe = exe.to_string_lossy();
     let path = std::env::var("PATH").unwrap_or_default();
@@ -189,6 +260,7 @@ pub fn install(port: u16) -> Result<()> {
     let holder = holder_words()?.unwrap_or_default();
     if cfg!(target_os = "macos") {
         let plist = plist_text(
+            &job.label,
             &[launcher(), holder.clone()].concat(),
             &exe,
             port,
@@ -198,23 +270,23 @@ pub fn install(port: u16) -> Result<()> {
             kernel.as_deref(),
             &log.to_string_lossy(),
         );
-        let file = launchd_plist();
+        let file = launchd_plist(&job);
         create_parent(&file)?;
         // Not loaded yet is the normal case here.
-        launchd::unload(&mut launchctl, &target())?;
+        launchd::unload(&mut launchctl, &target(&job))?;
         wait_for_host_exit()?;
         std::fs::write(&file, plist).with_context(|| format!("writing {}", file.display()))?;
-        launchd::reload(&mut launchctl, &domain(), &target(), &file)?;
+        launchd::reload(&mut launchctl, &domain(), &target(&job), &file)?;
     } else {
         let unit =
             unit_text(&holder, &exe, port, &path, &data_dir().to_string_lossy(), hq_bin.as_deref(), kernel.as_deref());
-        let file = systemd_unit();
+        let file = systemd_unit(&job);
         create_parent(&file)?;
         std::fs::write(&file, unit).with_context(|| format!("writing {}", file.display()))?;
         run("systemctl", &["--user", "daemon-reload"])?;
-        run("systemctl", &["--user", "stop", UNIT])?;
+        run("systemctl", &["--user", "stop", &job.unit])?;
         wait_for_host_exit()?;
-        run("systemctl", &["--user", "enable", "--now", UNIT])?;
+        run("systemctl", &["--user", "enable", "--now", &job.unit])?;
         println!("Tip: `loginctl enable-linger $USER` keeps the host running while you're logged out.");
     }
     Ok(())
@@ -222,26 +294,33 @@ pub fn install(port: u16) -> Result<()> {
 
 /// Best effort: every step tolerates "already gone".
 pub fn uninstall() {
+    let job = match job() {
+        Ok(job) => job,
+        Err(e) => return eprintln!("kith-serve: {e}"),
+    };
     if cfg!(target_os = "macos") {
-        let _ = launchd::unload(&mut launchctl, &target());
-        let _ = std::fs::remove_file(launchd_plist());
+        let _ = launchd::unload(&mut launchctl, &target(&job));
+        let _ = std::fs::remove_file(launchd_plist(&job));
     } else {
-        let _ = run("systemctl", &["--user", "disable", "--now", UNIT]);
-        let _ = std::fs::remove_file(systemd_unit());
+        let _ = run("systemctl", &["--user", "disable", "--now", &job.unit]);
+        let _ = std::fs::remove_file(systemd_unit(&job));
         let _ = run("systemctl", &["--user", "daemon-reload"]);
     }
 }
 
 pub fn installed() -> bool {
-    if cfg!(target_os = "macos") { launchd_plist().exists() } else { systemd_unit().exists() }
+    // A refused job (a throwaway HOME) is not installed as far as this process can say.
+    job().is_ok_and(
+        |job| if cfg!(target_os = "macos") { launchd_plist(&job).exists() } else { systemd_unit(&job).exists() },
+    )
 }
 
 fn domain() -> String {
     format!("gui/{}", current_uid())
 }
 
-fn target() -> String {
-    format!("gui/{}/{LABEL}", current_uid())
+fn target(job: &Job) -> String {
+    format!("gui/{}/{}", current_uid(), job.label)
 }
 
 /// Runs the real `launchctl`: (exit code, stderr).
@@ -426,7 +505,9 @@ fn current_uid() -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::{LABEL, choose_job};
     use super::{plist_text, program_arguments, systemd_quote, unit_text};
+    use std::path::Path;
 
     #[test]
     fn the_job_runs_behind_a_launcher_when_one_is_set() {
@@ -474,6 +555,7 @@ mod tests {
     #[test]
     fn the_job_files_keep_hq_bin_when_it_is_set() {
         let plist = plist_text(
+            LABEL,
             &[],
             "/h/kith-serve",
             19224,
@@ -498,8 +580,54 @@ mod tests {
     #[test]
     fn the_job_files_have_no_hq_bin_when_it_is_not_set() {
         assert!(
-            !plist_text(&[], "/h/kith-serve", 19224, "/usr/bin", "/d", None, None, "/d/host.log").contains("HQ_BIN")
+            !plist_text(LABEL, &[], "/h/kith-serve", 19224, "/usr/bin", "/d", None, None, "/d/host.log")
+                .contains("HQ_BIN")
         );
         assert!(!unit_text(&[], "/h/kith-serve", 19224, "/usr/bin", "/d", None, None).contains("HQ_BIN"));
+    }
+
+    #[test]
+    fn the_real_job_is_only_touched_from_the_accounts_own_home() {
+        let home = Path::new("/Users/me");
+        let job = choose_job(None, Some(home), Some(home)).unwrap();
+        assert_eq!(job.label, LABEL);
+        let err = choose_job(None, Some(Path::new("/var/folders/x/home")), Some(home)).err().unwrap().to_string();
+        assert!(err.contains("/var/folders/x/home") && err.contains("/Users/me") && !err.contains('\n'), "{err}");
+        assert!(choose_job(None, None, Some(home)).is_err(), "HOME unset");
+        assert!(choose_job(None, Some(home), None).is_err(), "no passwd entry");
+        assert!(choose_job(Some(""), Some(Path::new("/tmp/x")), Some(home)).is_err(), "an empty label is no opt-in");
+    }
+
+    #[test]
+    fn a_symlink_to_the_real_home_is_the_real_home() {
+        let dir = std::env::temp_dir().join(format!("kith-guard-{}", std::process::id()));
+        let real = dir.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(choose_job(None, Some(&link), Some(&real)).is_ok());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_test_names_its_own_job_and_never_the_real_one() {
+        let (elsewhere, home) = (Path::new("/tmp/throwaway"), Path::new("/Users/me"));
+        let job = choose_job(Some("dev.kith.serve.test-ab12"), Some(elsewhere), Some(home)).unwrap();
+        assert_eq!(job.label, "dev.kith.serve.test-ab12");
+        assert_eq!(job.unit, "dev.kith.serve.test-ab12.service");
+        for bad in [
+            "dev.kith.serve",
+            "dev.kith.serve.test-",
+            "dev.kith.serve.test-a b",
+            "dev.kith.cost",
+            "x/dev.kith.serve.test-1",
+        ] {
+            assert!(choose_job(Some(bad), Some(elsewhere), Some(home)).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_account_home_comes_from_the_password_database() {
+        assert!(super::real_home().is_some_and(|h| h.is_absolute()));
     }
 }
