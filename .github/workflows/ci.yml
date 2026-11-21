@@ -863,11 +863,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.host_core == 'true'
     runs-on: ubuntu-latest
-    # 80: the test archive plus the parity, router and stepped-props steps below took 36 of the old 45 minutes before the router rows grew; each step is named to show the slow one.
-    timeout-minutes: 80
+    # Only builds: the archive and the three programs the checks run. Every check is in host-checks, in parallel.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
       - name: Install pinned toolchain
         working-directory: serve
         run: rustup show active-toolchain || rustup toolchain install
@@ -884,125 +883,170 @@ jobs:
       - name: Build the test archive
         working-directory: serve/host
         run: cargo nextest archive --workspace --exclude kith-guest --exclude kith-tts --archive-file "$RUNNER_TEMP/host-tests.tar.zst"
-      # The Rust core against the Python kernel, the same CLI line both ways (kernel/tests/difftest): the test binaries above
-      # already built the host's dependencies, so this adds the one kith program. Its router finds it through KITH_BIN.
-      - name: Build the kith program
-        run: cargo build --manifest-path serve/host/Cargo.toml --bin kith
-      - name: Core parity (difftest --rust)
-        run: |
-          kernel/tests/difftest/kith-difftest --rust --bin "$PWD/serve/host/target/debug/kith"
-          # The same corpus again with the core database made first, so every Rust verb runs inside an embedded core.
-          kernel/tests/difftest/kith-difftest --rust --core --bin "$PWD/serve/host/target/debug/kith"
-          # And once more with a daemon running in each NEW sandbox, so the verbs the daemon answers go through its owner socket.
-          kernel/tests/difftest/kith-difftest --rust --daemon --bin "$PWD/serve/host/target/debug/kith"
-      - name: Core parity, frozen access-verb cases (difftest --golden)
-        run: |
-          # The frozen access-verb cases (recorded from Python, never re-recorded): the Rust program alone against the record.
-          # --golden takes its cases from its DIR, so it does not combine with --core or --daemon.
-          kernel/tests/difftest/kith-difftest --golden kernel/tests/difftest/golden --rust --bin "$PWD/serve/host/target/debug/kith"
-      - name: Launch, switch and revoke-stopgap checks
-        run: |
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
-          # `kith <agent> --launch-json` per engine against the recorded fixtures; the claude one needs this Rust program for its memory hooks.
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-engines-check
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
-          # The accounts step: the account verbs and the Python readers through the core, nothing reading the tombstone.
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
-          # `kith backup` is the Rust program's: the rows of these two checks that drive it skip in the kernel shards.
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-agent-set-check
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-json-misc-check
-          # The retire-python gate: kernel/lib/requires-switched.txt is shipped and valid, and cutover status answers by exit code.
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
-          # The pkg switch and the project-id stub: the launch's pkg lookup is the core's, per verb, and project-id (a stub for the
-          # Rust verb) is the program's in the bash launch and in process in the Rust one.
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
-          # The cost stub: every kith-cost verb (tag and record too) goes stub -> the program, KITH_CORE=python changes nothing, with no
-          # program tag is silent and the rest say so (exit 3), and the launch's budget checks hold on both paths.
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
-          # These three read the ledger through kith-cost, which is a stub now: they skip or fail without a program, so they run here.
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-bots-check
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-limit-check
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-scratch-check
-          # The revoke stopgap: kith-auth reaches the core with no daemon, through the embedded core-call.
-          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-embedded-check
-          # The memory and summary verbs and the settings switch run the built kith.
-          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-memory-check
-          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-summary-check
-          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-settings-switch-check
-          # The load filter, with the room-note ledger written by the real hook: bin/kith-room-ledger is a stub for `kith kernel room-ledger`, and
-          # most of its rows are negative greps that a hook doing nothing would pass, so the check fails without a program.
-          KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-load-check
-      # Its own step so a slow run shows which check it is (the router check and the stepped props took most of the old single step's time).
-      - name: Authority router check (kith-auth on the tombstone)
-        # The authority router (M2-23): on the tombstone kith-auth answers its read verbs from the core, the same as the file, and refuses the rest.
-        run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-router-check
-      - name: Access properties, stepped home (kith-auth-props)
-        # The access properties again on a home stepped for real (kith migrate step authority): the same answers as the file, and back after a rollback.
-        run: PROPS_EXAMPLES=40 PROPS_STEPPED_EXAMPLES=10 KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-props
-      - name: Switched-Mac end to end (stepped scratch home, switch off)
-        # P2 of the migration blockers: a scratch home is stepped for real with KITH_CORE_AUTHORITY off (the runbook's own
-        # configuration) and invites, access, revoke and undo, cards, secrets and the rollback run against the real kith-auth,
-        # daemon and `kith rollback authority` (serve/host/src/api/stepped_e2e_tests.rs). The test is #[ignore]d (so no other job reports it as passed) and this step runs it
-        # with --run-ignored only: a missing kith binary is a failure, never a skip. Same flags as the archive build above, so the test binary is cached.
-        working-directory: serve/host
-        env:
-          KITH_BIN: ${{ github.workspace }}/serve/host/target/debug/kith
-        run: |
-          test -x "$KITH_BIN" || { echo "no kith binary at $KITH_BIN"; exit 1; }
-          cargo nextest run --profile ci --no-tests=fail --run-ignored only --workspace --exclude kith-guest --exclude kith-tts -E 'test(stepped_e2e_tests::a_stepped_mac)'
-      - name: Direct lock, stub and held checks
-        run: |
-          # A direct run holds its conversation's lock under kith-stub (M1-3).
-          cargo build --manifest-path serve/host/Cargo.toml -p kith-stub
-          # The interactive rows run again through the Rust `run` (`kith kernel threads run`) and `bin/kith` is launched under a pty.
-          KITH_BIN="$PWD/serve/host/target/debug/kith" KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check
-          # A compaction (kith-lifecycle) holds the conversation's lock the same way: busy, held for its whole life, killed with claude.
-          KITH_CORE=python KITH_BIN="$PWD/serve/host/target/debug/kith" KITH_REAL_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-lifecycle-check
-          # ... and again with the Rust core answering (`kith kernel lifecycle`), which the check asserts by the calls the program saw.
-          KITH_LIFECYCLE_EXPECT=rust KITH_CORE=rust KITH_BIN="$PWD/serve/host/target/debug/kith" KITH_REAL_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-lifecycle-check
-          # An installed kith finds its stub through the ~/.local/bin link; kith serve puts one beside the host.
-          kernel/tests/kith-stub-install-check
-          # kith --held and kith attach: the real daemon, holder, stub and attach client with a fake engine (M1-7).
-          cargo build --manifest-path serve/host/Cargo.toml -p kith-holder
-          T="$PWD/serve/host/target/debug"
-          KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" KITH_HOLDER_BIN="$T/kith-holder" kernel/tests/kith-held-check
-      - name: Run-once cost and kernel notes
-        run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-once-cost-check
-      # The guest door check's kill -9 case (the Rust server's door goes with it) needs a built kith; the kernel shard has none.
-      - name: Guest door check with the built kith (kill -9 of the server)
-        run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-guest-door-check
-      # kith-sessions and the Rust threads module claiming one thread at once: never more than one writer.
-      - name: Thread writers, Python and Rust as two actors
-        run: kernel/tests/kith-threads-race --bin "$PWD/serve/host/target/debug/kith" --iterations 60
-      - name: Core dependency rules
-        run: kernel/tests/kith-core-deps-check
-      # The schedules cutover on real processes (kith serve, the core daemon, the holder, the real kith-sched from a kernel copy):
-      # slot due while the host is down, a host start during the step, a rollback under a detached run, an old tick holding the
-      # step up (serve/host/tests/schedules_cutover_e2e.rs). It waits on the clock (about 2 minutes), so it runs here from the
-      # archive on every PR that changes the host or core, not in the heavy host-e2e shards (which leave it out).
-      - name: Schedules cutover end to end (real processes)
-        working-directory: serve/host
-        run: >-
-          cargo nextest run --profile ci --no-tests=fail
-          --archive-file "$RUNNER_TEMP/host-tests.tar.zst"
-          --extract-to . --extract-overwrite
-          --workspace-remap .
-          -E 'binary(schedules_cutover_e2e)'
+      # Ship the archive as soon as it exists; the tests of host-test and host-e2e start from it.
       - uses: actions/upload-artifact@v4
         with:
           name: host-tests
           path: ${{ runner.temp }}/host-tests.tar.zst
           retention-days: 1
           compression-level: 0
+      # The Rust core against the Python kernel (difftest, the switch checks) runs the built kith; the direct-lock and held checks
+      # run kith-stub and kith-holder. The test binaries above already built the host's dependencies, so this adds only those.
+      - name: Build the kith program, its stub and its holder
+        run: |
+          cargo build --manifest-path serve/host/Cargo.toml --bin kith
+          cargo build --manifest-path serve/host/Cargo.toml -p kith-stub
+          cargo build --manifest-path serve/host/Cargo.toml -p kith-holder
+      # A tar keeps the exec bit, which upload-artifact does not.
+      - name: Pack the programs
+        run: tar -C serve/host/target/debug -cf "$RUNNER_TEMP/host-bins.tar" kith kith-stub kith-holder
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-bins
+          path: ${{ runner.temp }}/host-bins.tar
+          retention-days: 1
+          compression-level: 0
 
-  # Unit tests of the host (cheap tier). The test binaries bake in absolute paths (CARGO_MANIFEST_DIR, CARGO_BIN_EXE_kith-serve), so the
-  # archive is unpacked into serve/host/target, where it was built.
-  # The slow integration tests (tests/*.rs, each spawns a real kith-serve and python fixtures) are host-e2e.
-  host-test:
+  # The checks that ran in host-build one after another, split by their measured times so the slowest shard sets the wall clock.
+  # Each shard gets the programs at serve/host/target/debug (the path the checks and the test binaries expect); the shards that
+  # run tests (stepped e2e, schedules cutover) also get the archive. All of them run on every host_core change, not only heavy.
+  host-checks:
+    name: host-checks (${{ matrix.name }})
     needs: [changes, host-build]
     if: needs.changes.outputs.host_core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The Rust core against the Python kernel, the same CLI line both ways (kernel/tests/difftest), in three passes of about
+          # the same length (plain, with the core database made first so every Rust verb runs in an embedded core, and with a daemon
+          # running in each sandbox so the daemon's verbs go through its owner socket), then the frozen access-verb cases
+          # (recorded from Python, never re-recorded; --golden takes its cases from its DIR, so it does not combine with --core or --daemon).
+          - name: difftest plain, golden
+            checks: |
+              Core parity (difftest --rust)|kernel/tests/difftest/kith-difftest --rust --bin "$PWD/serve/host/target/debug/kith"
+              Core parity, frozen access-verb cases (difftest --golden)|kernel/tests/difftest/kith-difftest --golden kernel/tests/difftest/golden --rust --bin "$PWD/serve/host/target/debug/kith"
+          - name: difftest core, short checks
+            checks: |
+              Core parity (difftest --rust --core)|kernel/tests/difftest/kith-difftest --rust --core --bin "$PWD/serve/host/target/debug/kith"
+              Run-once cost and kernel notes|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-once-cost-check
+              Guest door check with the built kith (kill -9 of the server)|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-guest-door-check
+              Thread writers, Python and Rust as two actors|kernel/tests/kith-threads-race --bin "$PWD/serve/host/target/debug/kith" --iterations 60
+              Core dependency rules|kernel/tests/kith-core-deps-check
+          - name: difftest daemon, launch and switch
+            checks: |
+              Core parity (difftest --rust --daemon)|kernel/tests/difftest/kith-difftest --rust --daemon --bin "$PWD/serve/host/target/debug/kith"
+              kith-launch-once-race-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
+              kith-launch-engines-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-engines-check
+              kith-auth-mixed-race-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
+              kith-account-state-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
+              kith-agent-set-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-agent-set-check
+              kith-json-misc-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-json-misc-check
+              kith-requires-switched-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
+              kith-pkg-pid-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
+              kith-cost-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
+              kith-cost-bots-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-bots-check
+              kith-limit-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-limit-check
+              kith-scratch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-scratch-check
+              kith-auth-embedded-check|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-embedded-check
+              kith-memory-check|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-memory-check
+              kith-summary-check|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-summary-check
+              kith-settings-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-settings-switch-check
+              kith-load-check|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-load-check
+          # The authority router (M2-23): on the tombstone kith-auth answers its read verbs from the core, the same as the file, and
+          # refuses the rest. The 794-call matrix is run three times (over the file, switched embedded, switched through a daemon),
+          # so ROUTER_PART gives each pass a machine and the rest of the script (sequences, writes, negatives) a third.
+          - name: router, embedded matrix
+            checks: |
+              Authority router check, golden and embedded matrix|ROUTER_PART=embedded KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-router-check
+          - name: router, daemon matrix
+            checks: |
+              Authority router check, golden and daemon matrix|ROUTER_PART=daemon KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-router-check
+          - name: router, the rest
+            checks: |
+              Authority router check, sequences, writes and negatives|ROUTER_PART=rest KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-router-check
+          # The access properties again on a home stepped for real (kith migrate step authority): the same answers as the file, and back
+          # after a rollback. P2 of the migration blockers: a scratch home is stepped for real with KITH_CORE_AUTHORITY off (the
+          # runbook's own configuration) and invites, access, revoke and undo, cards, secrets and the rollback run against the real
+          # kith-auth, daemon and `kith rollback authority` (serve/host/src/api/stepped_e2e_tests.rs). That test is #[ignore]d (so no
+          # other job reports it as passed) and runs here with --run-ignored only, from the archive: a missing kith binary or no
+          # test run is a failure, never a skip.
+          - name: props, stepped e2e
+            archive: true
+            checks: |
+              Access properties, stepped home (kith-auth-props)|PROPS_EXAMPLES=40 PROPS_STEPPED_EXAMPLES=10 KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-props
+              Switched-Mac end to end (stepped scratch home, switch off)|export KITH_BIN="$PWD/serve/host/target/debug/kith"; test -x "$KITH_BIN" || { echo "no kith binary at $KITH_BIN"; exit 1; }; cd serve/host && cargo nextest run --profile ci --no-tests=fail --run-ignored only --archive-file "$RUNNER_TEMP/host-tests.tar.zst" --extract-to . --extract-overwrite --workspace-remap . -E 'test(stepped_e2e_tests::a_stepped_mac)'
+          # The direct run holds its conversation's lock under kith-stub (M1-3); a compaction holds it the same way; an installed kith
+          # finds its stub through the ~/.local/bin link; kith --held and kith attach run the real daemon, holder, stub and attach client
+          # with a fake engine (M1-7). Then the schedules cutover on real processes (kith serve, the core daemon, the holder, the real
+          # kith-sched from a kernel copy: slot due while the host is down, a host start during the step, a rollback under a detached run,
+          # an old tick holding the step up; serve/host/tests/schedules_cutover_e2e.rs). It waits on the clock (about 2 minutes), so it runs
+          # here from the archive on every PR that changes the host or core, not in the heavy host-e2e shards (which leave it out).
+          - name: direct lock, schedules cutover
+            archive: true
+            checks: |
+              Direct lock, stub and held checks|T="$PWD/serve/host/target/debug"; KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" kernel/tests/kith-direct-lock-check && KITH_CORE=python KITH_BIN="$T/kith" KITH_REAL_STUB_BIN="$T/kith-stub" kernel/tests/kith-lifecycle-check && KITH_LIFECYCLE_EXPECT=rust KITH_CORE=rust KITH_BIN="$T/kith" KITH_REAL_STUB_BIN="$T/kith-stub" kernel/tests/kith-lifecycle-check && kernel/tests/kith-stub-install-check && KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" KITH_HOLDER_BIN="$T/kith-holder" kernel/tests/kith-held-check
+              Schedules cutover end to end (real processes)|cd serve/host && cargo nextest run --profile ci --no-tests=fail --archive-file "$RUNNER_TEMP/host-tests.tar.zst" --extract-to . --extract-overwrite --workspace-remap . -E 'binary(schedules_cutover_e2e)'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - uses: taiki-e/install-action@v2
+        if: matrix.archive
+        with:
+          tool: cargo-nextest@0.9.100
+      - uses: actions/download-artifact@v4
+        with:
+          name: host-bins
+          path: ${{ runner.temp }}
+      - uses: actions/download-artifact@v4
+        if: matrix.archive
+        with:
+          name: host-tests
+          path: ${{ runner.temp }}
+      - name: Put the programs where the build left them
+        run: |
+          mkdir -p serve/host/target/debug
+          tar -C serve/host/target/debug -xf "$RUNNER_TEMP/host-bins.tar"
+          ls -l serve/host/target/debug/kith serve/host/target/debug/kith-stub serve/host/target/debug/kith-holder
+      # cargo comes with the runner image; the stepped e2e and the schedules cutover need the pinned toolchain only to run the
+      # archive's test binaries, which nextest does not rebuild.
+      - name: Checks
+        env:
+          CHECKS: ${{ matrix.checks }}
+        run: |
+          failed=0
+          while IFS='|' read -r name cmd; do
+            [ -n "$name" ] || continue
+            echo "::group::$name"
+            # stdin from /dev/null: a check that reads stdin must not eat the rest of the list.
+            if bash -c "$cmd" </dev/null; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error title=host check failed::$name ($cmd)"
+              failed=$((failed + 1))
+            fi
+          done <<< "$CHECKS"
+          [ "$failed" = 0 ] || { echo "$failed check(s) failed in this shard, see the ::error lines above"; exit 1; }
+
+  # Unit tests of the host (cheap tier). The test binaries bake in absolute paths (CARGO_MANIFEST_DIR, CARGO_BIN_EXE_kith-serve), so the
+  # archive is unpacked into serve/host/target, where it was built.
+  # The slow integration tests (tests/*.rs, each spawns a real kith-serve and python fixtures) are host-e2e.
+  # Three partitions of the one filter, so every unit test runs exactly once (the single job took 14 minutes).
+  host-test:
+    name: host-test (${{ matrix.part }}/3)
+    needs: [changes, host-build]
+    if: needs.changes.outputs.host_core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - name: Install system libraries
@@ -1021,7 +1065,7 @@ jobs:
           --archive-file "$RUNNER_TEMP/host-tests.tar.zst"
           --extract-to . --extract-overwrite
           --workspace-remap .
-          -E 'not kind(test)'
+          -E 'not kind(test)' --partition count:${{ matrix.part }}/3
 
   # A kernel-only change (kernel/bin, kernel/lib) runs just the host unit tests that run real kernel files, listed in
   # scripts/ci/host-kernel-tests.txt, instead of the whole host suite. Builds and runs in one job on the same cache as
@@ -1451,7 +1495,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
-    needs: [changes, kernel, kernel-program, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, registry-step, schedule-fire, procstart-macos, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, kernel-program, host, windows, host-build, host-checks, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, registry-step, schedule-fire, procstart-macos, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
