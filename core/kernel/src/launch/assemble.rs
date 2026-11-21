@@ -4,7 +4,7 @@
 //! the prompt, the login (`accounts`), the settings, the MCP servers, then one JSON object on stdout.
 //!
 //! Programs it still asks, because their logic stays in Python until their step of the plan: `kith-pkg resolve` (the
-//! snapshot), `kith-cost limit|spent`, `project-id` (finding the project of the working folder), `kith-auth mcp-config`
+//! snapshot), `kith-cost limit|spent`, `kith-auth mcp-config`
 //! (A5), `kith-permit apply` (a guest's grants), `claude` and `xcode-select`.
 //!
 //! The environment is a map this module edits as the bash entry edits its exports; the launch object's `env` is read from it.
@@ -197,8 +197,7 @@ fn pyrepr(x: &str) -> String {
 ///
 /// Bash also runs `kith_cutover_refuse` under `KITH_CORE=python`, refusing the rollback of a module whose files the core
 /// owns after its cutover. It is left out here on purpose: that refusal only matters for a module that has a cutover step,
-/// and `pkg`, `project-id` and `cost` have none (the core does not own the cost ledger), so the rollback is always
-/// allowed for these verbs. Add the refusal when one of them gets a cutover.
+/// and `pkg` has none, so the rollback is always allowed for this verb. Add the refusal when it gets a cutover.
 fn switched(kernel: &Path, env: &Env, verb: &str) -> bool {
     match get(env, "KITH_CORE") {
         "python" => return false,
@@ -211,7 +210,7 @@ fn switched(kernel: &Path, env: &Env, verb: &str) -> bool {
     })
 }
 
-/// `kith-cost ARGS` answered by the core in process (`cost` in lib/core-switched.txt): its stdout without the last newline when it
+/// `kith-cost ARGS` answered by the core in process: its stdout without the last newline when it
 /// exits 0, else `None`, which the callers read as `kith-cost` failing. Only the verbs the launch asks (`spent`, `limit --sh`).
 fn cost_core(
     kernel: &Path,
@@ -229,6 +228,7 @@ fn cost_core(
     let cenv = crate::cost::Env {
         now: env.get("KITH_COST_NOW").cloned(),
         person_was: person_was.to_owned(),
+        ..crate::cost::Env::default()
     };
     let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
     let out = crate::cost::run(&paths, &cenv, &args);
@@ -392,8 +392,25 @@ pub(crate) fn usable_kith_bin(bin: &Path) -> bool {
     .is_some_and(|o| o.to_lowercase().contains("phase"))
 }
 
+/// Whether `bin`'s `kernel version` lists `module`: the running program, or one that says so.
+pub(crate) fn lists_module(bin: &Path, module: &str) -> bool {
+    let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
+    if std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .is_ok_and(|me| me == real)
+    {
+        return true;
+    }
+    secrets::run_with_timeout(
+        bin,
+        &["kernel", "version"],
+        std::time::Duration::from_secs(10),
+    )
+    .is_some_and(|o| o.contains(&format!("\"{module}\"")))
+}
+
 /// Whether `bin` has the `kernel readfence` verb: the running program, or one that answers `kernel readfence --help`. An older
-/// kith would read `kernel` as an agent name, so the launch keeps the Python fence for it.
+/// kith would read `kernel` as an agent name, so the launch uses the running program for the fence instead.
 pub(crate) fn knows_readfence(bin: &Path) -> bool {
     let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
     if std::env::current_exe()
@@ -408,6 +425,70 @@ pub(crate) fn knows_readfence(bin: &Path) -> bool {
         std::time::Duration::from_secs(10),
     )
     .is_some_and(|o| o.contains("kith kernel readfence"))
+}
+
+/// Whether `bin` lists `module` in `kernel version`: the running program, or one whose `kernel version` names it. An older kith
+/// has `kernel cost` (the read verbs) but not the `cost-ledger` module, which `tag` and `record` are part of.
+pub(crate) fn knows_module(bin: &Path, module: &str) -> bool {
+    let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
+    if std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .is_ok_and(|me| me == real)
+    {
+        return crate::MODULES.contains(&module);
+    }
+    secrets::run_with_timeout(
+        bin,
+        &["kernel", "version"],
+        std::time::Duration::from_secs(10),
+    )
+    .is_some_and(|o| o.contains(&format!("\"{module}\"")))
+}
+
+/// The program the `SessionStart` hook runs for the cost ledger (`kith kernel cost tag`): `kith_bin` when it has the `cost-ledger`
+/// module, else this program (it always does). `kernel/bin/kith-cost tag`, the forwarding stub, stays for the runs that hold the
+/// old hook path. `kith_cost_bin` in lib/kith-core.sh decides the same way for the bash launch.
+pub fn cost_hook_bin(kith_bin: Option<&str>) -> Option<String> {
+    kith_bin
+        .filter(|b| !b.is_empty() && knows_module(Path::new(b), "cost-ledger"))
+        .map(str::to_owned)
+        .or_else(|| std::env::current_exe().ok().map(|e| s(&e)))
+}
+
+/// The program the `SessionStart` hook runs for the session registry (`kith kernel threads record`): `kith_bin` when `threads`
+/// is switched and the program has the `threads-writer` module (every `kith-sessions` verb in both modes of the claims, not the
+/// Files-mode `threads` an older program lists). `None` keeps `bin/kith-sessions record`. `kith_core_bin threads` in
+/// lib/kith-core.sh decides the same way for the bash launch.
+pub fn threads_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Option<String> {
+    switched_bin(kernel, env, kith_bin, "threads", "threads-writer")
+}
+
+fn switched_bin(
+    kernel: &Path,
+    env: &Env,
+    kith_bin: Option<&str>,
+    verb: &str,
+    module: &str,
+) -> Option<String> {
+    kith_bin
+        .filter(|b| {
+            !b.is_empty() && switched(kernel, env, verb) && knows_module(Path::new(b), module)
+        })
+        .map(str::to_owned)
+}
+
+/// The program the Pre/PostToolUse room-ledger hooks run (`kith kernel room-ledger`): `kith_bin` when `room-ledger` is
+/// switched (a line in `lib/core-switched.txt` and no `KITH_CORE=python`) and the program lists the module. `None` keeps the
+/// hooks on `bin/kith-room-ledger`, a stub that forwards, for runs that hold the old path. `kith_core_bin room-ledger` in
+/// lib/kith-core.sh decides the same way for the bash launch.
+pub fn ledger_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Option<String> {
+    kith_bin
+        .filter(|b| {
+            !b.is_empty()
+                && switched(kernel, env, "room-ledger")
+                && knows_module(Path::new(b), "room-ledger")
+        })
+        .map(str::to_owned)
 }
 
 /// `kith_paths.guest_tmp_ready`: the guest's Claude Code temp folder, made.
@@ -717,29 +798,15 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
                 ));
                 return Err(3);
             }
-            // `cost` in lib/core-switched.txt: the core's own `spent` (kith-cost spent is the rollback, KITH_CORE=python).
-            let spent = if switched(kernel, &env, "cost") {
-                cost_core(
-                    kernel,
-                    &p,
-                    &env,
-                    &home_dir,
-                    &p_was,
-                    &["spent", &spend_who, &p_budget_agent],
-                )
-            } else {
-                let sys = Sys { env: &env };
-                let mut c = sys.cmd(
-                    kernel.join("bin/kith-cost"),
-                    &["spent", &spend_who, &p_budget_agent],
-                );
-                c.env("KITH_PERSON_WAS", &p_was).stderr(Stdio::null());
-                c.output().ok().filter(|o| o.status.success()).map(|o| {
-                    String::from_utf8_lossy(&o.stdout)
-                        .trim_end_matches('\n')
-                        .to_owned()
-                })
-            };
+            // The core's own `spent`, in process (there is no program to ask and no Python to go back to).
+            let spent = cost_core(
+                kernel,
+                &p,
+                &env,
+                &home_dir,
+                &p_was,
+                &["spent", &spend_who, &p_budget_agent],
+            );
             let spent = match spent {
                 None if p_owner => "0".to_owned(),
                 None => {
@@ -830,10 +897,9 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     let _ = (&mem, &files);
 
     // ---- the pinned package
-    let sys = Sys { env: &env };
     let mut pkg = src_pkg.clone();
-    // `pkg` in lib/core-switched.txt: the core's own `resolve` (kith-pkg resolve is the rollback, KITH_CORE=python).
-    let resolved = if switched(kernel, &env, "pkg") {
+    // The core's own `resolve`, in process. The Python `kith-pkg resolve` is no longer a fallback (retire-python R2).
+    let resolved = {
         let ctx = crate::pkg::Ctx {
             kernel: kernel.to_path_buf(),
             agents: p.agents.clone(),
@@ -851,8 +917,6 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         let out = crate::pkg::cli::run(&ctx, &["resolve".to_owned(), agent.to_owned()]);
         eprint!("{}", out.stderr);
         (out.code == 0).then(|| out.stdout.trim_end_matches('\n').to_owned())
-    } else {
-        sys.out(kernel.join("bin/kith-pkg"), &["resolve", agent], true)
     };
     match resolved
         .map(PathBuf::from)
@@ -905,17 +969,10 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .unwrap_or_else(|| get(&env, "KITH_PERMISSION_MODE").to_owned());
 
     // ---- the agent's monthly limit
-    let sys = Sys { env: &env };
-    let limit_line = if !p_owner {
-        None
-    } else if switched(kernel, &env, "cost") {
+    let limit_line = if p_owner {
         cost_core(kernel, &p, &env, &home_dir, "", &["limit", agent, "--sh"])
     } else {
-        sys.out(
-            kernel.join("bin/kith-cost"),
-            &["limit", agent, "--sh"],
-            false,
-        )
+        None
     };
     if let Some(lim) = limit_line.filter(|l| !l.is_empty()) {
         let v = assignments(&lim);
@@ -943,28 +1000,20 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         1
     })?;
     let mut project = a.project.clone();
-    let mut no_token = env.clone();
-    no_token.remove("KITH_RUN_TOKEN");
     if project.is_empty() {
-        // `project-id` in lib/core-switched.txt: the core answers. Never as a guest: the token is dropped above, and a guest's
-        // own calls stay with bin/project-id, which asks the host.
-        project = if switched(kernel, &env, "project-id") {
-            let ctx = crate::project::Ctx {
-                state: p.state.clone(),
-                home: home_dir.clone(),
-                cwd: std::env::current_dir().unwrap_or_default(),
-                guest: false,
-            };
-            let out = crate::project::run(&ctx, &[]);
-            if out.code == 0 {
-                out.stdout.trim_end_matches('\n').to_owned()
-            } else {
-                String::new()
-            }
+        // The core answers, in process. Never as a guest (`guest: None`): the launch's own lookup is the kernel's, whoever the run
+        // is for; a guest's own `project-id` calls go through the stub to `kith kernel project-id`, which asks the host.
+        let ctx = crate::project::Ctx {
+            state: p.state.clone(),
+            home: home_dir.clone(),
+            cwd: std::env::current_dir().unwrap_or_default(),
+            guest: None,
+        };
+        let out = crate::project::run(&ctx, &[]);
+        project = if out.code == 0 {
+            out.stdout.trim_end_matches('\n').to_owned()
         } else {
-            Sys { env: &no_token }
-                .out(kernel.join("bin/project-id"), &[], false)
-                .unwrap_or_default()
+            String::new()
         };
     } else if !reg.has(&project) {
         let known: String = reg.known().iter().map(|k| format!("{k} ")).collect();
@@ -1304,7 +1353,24 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         .filter(|b| usable_kith_bin(Path::new(b)))
         .map(str::to_owned)
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
-    let fence_bin = kith_bin.clone().filter(|b| knows_readfence(Path::new(b)));
+    // A guest's `project-id` is the stub at bin/project-id, which only takes a program whose `kernel version` lists project-guest
+    // and runs inside the sandbox, where the program this opens is the only one it can start: so a guest's program is the launch's
+    // only when it lists the module, else this one (it always does).
+    let kith_bin = if p_owner {
+        kith_bin
+    } else {
+        kith_bin
+            .filter(|b| lists_module(Path::new(b), "project-guest"))
+            .or_else(|| std::env::current_exe().ok().map(|e| s(&e)))
+    };
+    // An older kith has no `kernel readfence`; this program always has it.
+    let fence_bin = kith_bin
+        .clone()
+        .filter(|b| knows_readfence(Path::new(b)))
+        .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
+    let ledger_bin = ledger_hook_bin(kernel, &env, kith_bin.as_deref());
+    let cost_bin = cost_hook_bin(kith_bin.as_deref());
+    let threads_bin = threads_hook_bin(kernel, &env, kith_bin.as_deref());
     if perm_mode.is_empty() {
         perm_mode.clear();
     }
@@ -1335,6 +1401,9 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             user_home: &home_dir,
             kith_bin: kith_bin.as_deref(),
             fence_bin: fence_bin.as_deref(),
+            ledger_bin: ledger_bin.as_deref(),
+            cost_bin: cost_bin.as_deref(),
+            threads_bin: threads_bin.as_deref(),
             plugins_json: &plugins_json,
             owner_terminal: false,
             api_helper: &bget(&be, "backup_api_helper"),
@@ -1374,6 +1443,14 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         "KITH_OWNER".to_owned(),
         if p_owner { "1" } else { "0" }.to_owned(),
     );
+    // A guest's `project-id` is the stub at bin/project-id, which runs `kith kernel project-id`: it needs the program the launch
+    // checked, and the settings open it (and the links to it) to the sandbox's reads.
+    if claude
+        && !p_owner
+        && let Some(b) = &kith_bin
+    {
+        env.insert("KITH_BIN".to_owned(), b.clone());
+    }
     if claude
         && !p_owner
         && !get(&env, "KITH_RUN_TOKEN").is_empty()
@@ -1463,14 +1540,22 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     sync_env(&mut env);
     let mut names: Vec<String> = p.entries().into_iter().map(|(k, _)| k).collect();
     names.extend(
-        "KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_GEN KITH_ROOM_OWNER_ONLY KITH_COST_PERSON KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT"
+        "KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_CORE_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_GEN KITH_ROOM_OWNER_ONLY KITH_COST_PERSON KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT"
             .split(' ')
             .map(str::to_owned),
     );
     names.push(cfg_var);
     names.extend(p_env_names.split_whitespace().map(str::to_owned));
     if !p_owner {
-        names.extend(["CLAUDE_CODE_TMPDIR", "KITH_WORK", "CLAUDE_ENV_FILE"].map(str::to_owned));
+        names.extend(
+            [
+                "CLAUDE_CODE_TMPDIR",
+                "KITH_WORK",
+                "CLAUDE_ENV_FILE",
+                "KITH_BIN",
+            ]
+            .map(str::to_owned),
+        );
     }
     names.extend(
         "HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA"

@@ -336,7 +336,7 @@ async fn a_room_that_no_longer_takes_people_says_so_not_that_the_grant_is_short(
     let (invite, token) = accepted(&r, json!({"house": "member"}), std::slice::from_ref(&room)).await;
     let plain = r
         .hub
-        .create_bot(
+        .create_native_row(
             serde_json::from_value(
                 json!({"id": "", "name": "Plain", "backend": "claude", "cwd": r.dir.to_string_lossy()}),
             )

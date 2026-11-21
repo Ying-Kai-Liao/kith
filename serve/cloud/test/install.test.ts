@@ -24,6 +24,21 @@ describe("GET /install", () => {
     expect(html).toContain("kith update");
     expect(html).not.toMatch(/<script/i);
   });
+
+  it("sits in the site frame, names every engine, and does not offer an iPhone app", async () => {
+    const res = await get("/install");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=300");
+    const html = await res.text();
+    expect(html).toContain('<nav class="top"');
+    expect(html).toContain('<a href="/install" aria-current="page">');
+    expect(html).toContain("<footer>");
+    expect(html).toContain("Codex or pi");
+    // Bare `kith update` only prints its usage (kernel/bin/kith): the command that updates kith is `kith update self`.
+    expect(html).toContain("kith update self");
+    expect(html).not.toMatch(/[\u2013\u2014]/);
+    expect(html).not.toMatch(/\bAI\b|\bplatform\b/i);
+    expect(html).not.toMatch(/iPhone|TestFlight/);
+  });
 });
 
 describe("GET /install.sh", () => {

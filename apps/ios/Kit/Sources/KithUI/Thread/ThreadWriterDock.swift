@@ -63,12 +63,15 @@ enum ChatBottom: Equatable {
     /// the thread stays single-writer), and New task starts another.
     case writerBannerAndComposer(rootId: String)
     case readOnly
+    /// A native row the host no longer runs: its notice (Make a kith agent like this, Export) takes the box's place.
+    case flagged
     case composer
 }
 
 extension ThreadFeed {
-    static func chatBottom(held: Entry?, mismatch: Bool, guest: Bool) -> ChatBottom {
+    static func chatBottom(held: Entry?, mismatch: Bool, guest: Bool, flagged: Bool = false) -> ChatBottom {
         if mismatch { return .updateNeeded }
+        if flagged { return .flagged }
         if let held { return guest ? .writerBanner(rootId: held.id) : .writerBannerAndComposer(rootId: held.id) }
         return guest ? .readOnly : .composer
     }

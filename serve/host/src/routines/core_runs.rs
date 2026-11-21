@@ -81,9 +81,9 @@ pub(super) enum Started {
     Failed(String),
 }
 
-/// The agent a bot's claims name (`Actor::writer_agent`): its hq agent's, or `bot:<id>` for a native bot.
+/// The agent a bot's claims name (`Actor::writer_agent`): `BotConfig::claim_agent`.
 fn agent_of(cfg: &crate::store::BotConfig) -> String {
-    cfg.hq_agent.clone().unwrap_or_else(|| format!("bot:{}", cfg.id))
+    cfg.claim_agent()
 }
 
 /// The imported routine a core job id names, if any: the import names a routine's jobs `<id>` (one trigger) or `<id>-<n>`.

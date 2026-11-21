@@ -1,6 +1,5 @@
 //! Agent → client: `session/update`s, permission requests and streamed text mapped onto entries.
 
-use super::fast_mode::Listing;
 use super::{Actor, Seg, SegKind};
 use crate::access::{self, Ask, Request};
 use crate::agent::acp::{self, Incoming};
@@ -77,12 +76,9 @@ impl Actor {
                 crate::cards::bot_exited(&self.hub, &self.cfg.id);
             }
             Some(Incoming::Notification { method, params }) => {
-                // Any session's, turn or not: the agent changed an option itself.
-                if method == "session/update"
-                    && params["update"]["sessionUpdate"] == "config_option_update"
-                    && let Some(sid) = params["sessionId"].as_str()
-                {
-                    self.note_options(sid, &params["update"], Listing::Update);
+                // Any session's, turn or not: the agent changed an option itself, which is not turn output.
+                if method == "session/update" && params["update"]["sessionUpdate"] == "config_option_update" {
+                    // Ignored on purpose: nothing here tracks agent-set options any more.
                 } else if method == "session/update" && params["sessionId"].as_str() == self.turn_session.as_deref() {
                     if self.turn.is_none() && super::offturn::wakes(self, &params["update"]) {
                         // The agent woke itself (a background task finished): its work goes where the last turn was.
@@ -152,7 +148,6 @@ impl Actor {
                     "locations": u["locations"].clone(),
                 });
                 merge_tool_content(&mut data, &u["content"]);
-                crate::chat::memory::files::touched(&self.hub.store, &self.cfg, &data);
                 let title = data["title"].as_str().unwrap_or("Tool").to_owned();
                 // A call a This session grant let through says so on its row (the owner's own chat only).
                 let grant = match (&self.cfg.hq_agent, &self.cfg.person) {
@@ -184,7 +179,6 @@ impl Actor {
                     e.data["locations"] = u["locations"].clone();
                 }
                 merge_tool_content(&mut e.data, &u["content"]);
-                crate::chat::memory::files::touched(&self.hub.store, &self.cfg, &e.data);
                 let status = e.data["status"].as_str().unwrap_or_default().to_owned();
                 let title = e.data["title"].as_str().unwrap_or_default().to_owned();
                 self.hub.set_entry(&entry_id, &e.data);
@@ -198,11 +192,7 @@ impl Actor {
                 }
                 // Claude's adapter carries the summary on one of its completed updates.
                 if u["status"] == "completed" {
-                    let summary = acp::content_text(&u["summary"]);
-                    self.compacted(
-                        u["compactionId"].as_str().unwrap_or_default(),
-                        (!summary.trim().is_empty()).then_some(summary),
-                    );
+                    self.compacted();
                 }
             }
             "usage_update" => {
@@ -393,7 +383,11 @@ impl Actor {
             bot_id: Some(self.cfg.id.clone()),
             run_id: None,
             person: whose.as_ref().map(|w| w.0.clone()).unwrap_or_default(),
-            agent: whose.as_ref().map(|w| w.1.clone()).or_else(|| self.cfg.hq_agent.clone()).unwrap_or_default(),
+            agent: whose
+                .as_ref()
+                .map(|w| w.1.to_string())
+                .or_else(|| self.cfg.hq_agent.as_ref().map(ToString::to_string))
+                .unwrap_or_default(),
             answerable_by: answerable_by.clone(),
             in_grants,
             tool: tool_name,
@@ -565,29 +559,6 @@ impl Actor {
         });
     }
 
-    /// A `send_message`: the user's next bubble, in the turn's lane, right away. Only in the
-    /// bot's own chat and threads, including independent messages; a room, an ask or a
-    /// routine reads the turn's reply.
-    pub(super) fn send_to_user(&mut self, text: String) -> anyhow::Result<()> {
-        let Some(turn) = self.turn else { anyhow::bail!("no turn is running") };
-        if self.active_request.as_ref().is_some_and(crate::chat::team::BotRequest::expects_reply) {
-            anyhow::bail!(
-                "send_message isn't available in an ask: return your answer to the requesting bot as your final reply"
-            );
-        }
-        if self.active_group.is_some() || self.active_routine.is_some() {
-            anyhow::bail!("send_message isn't available in this turn: write your answer as your reply");
-        }
-        self.close_seg();
-        let entry = self
-            .add(EntryKind::Agent, turn, json!({"text": text, "final": true}))
-            .ok_or_else(|| anyhow::anyhow!("couldn't save the message"))?;
-        self.last_agent = Some(entry.id);
-        self.sent.push(text);
-        self.set_activity("Working…");
-        Ok(())
-    }
-
     // MARK: streaming text segments
 
     pub(super) fn append(&mut self, kind: SegKind, text: &str) {
@@ -619,16 +590,15 @@ impl Actor {
 
     /// Persists streamed text at most every 300 ms (or immediately with `force`).
     pub(super) fn flush(&mut self, force: bool) {
-        let (hq, serving) = (self.is_hq(), self.serving.clone());
+        let serving = self.serving.clone();
         if let Seg::Open { kind, entry_id, buf, flushed, dirty } = &mut self.seg
             && *dirty
             && (force || flushed.elapsed() >= Duration::from_millis(300))
         {
             let data = match kind {
-                SegKind::Text if hq => {
+                SegKind::Text => {
                     json!({"text": buf, "final": false, "author": self.cfg.id, "answeredBy": serving})
                 }
-                SegKind::Text => json!({"text": buf, "final": false, "author": self.cfg.id}),
                 SegKind::Thought => json!({"text": buf, "author": self.cfg.id}),
             };
             self.hub.set_entry(entry_id, &data);

@@ -91,7 +91,7 @@ pub(super) fn build_chat(app: &App, b: &Bot, width: usize) -> Built {
         let side = width.saturating_sub(w(&label) + 4);
         out.lines.push(Line::from(Span::styled(format!(" ───{label}{}", "─".repeat(side)), t.dim)));
     }
-    // A bot's messages arrive whole (Grok Bot's `send_message`); what it writes along the way is trace.
+    // A bot's messages arrive whole (once Grok Bot's `send_message`); what it writes along the way is trace.
     for item in group(&b.id, &entries, thread.is_none()) {
         match item {
             Item::Entry(e) => entry_lines(&mut out, app, b, e, &info, thread.is_none(), width),

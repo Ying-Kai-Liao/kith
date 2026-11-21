@@ -38,6 +38,7 @@ import { TraceView } from './TraceView'
 import { useReading } from './reading'
 import { PlaceFolderControl } from '../bots/PlaceFolderPicker'
 import { GroupEditorView } from '../bots/GroupEditorView'
+import { isFlagged, NativeBotNotice } from '../bots/NativeBotNotice'
 import { BotTemplateView } from '../bots/BotTemplateView'
 import { CallView } from '../call/CallView'
 import { START_CALL_EVENT } from '../../lib/call-event'
@@ -89,7 +90,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
     void botGuestsFor(store).load()
   }, [store, botId, group, online])
   // A bot guest's chat is read-only here (v1): no calls, no composer, no place picker.
-  const callBlocked = guestChat ? 'Read only' : callBlockedReason(store)
+  const callBlocked = guestChat ? 'Read only' : bot && isFlagged(bot) ? 'This bot no longer runs' : callBlockedReason(store)
   // One call per chat window: a second press (double click, or the details page while in a call) does nothing.
   const startCall = () => {
     if (calling || callBlocked) return
@@ -274,6 +275,8 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
           <div className="composer-fade" />
           {bot && guestChat ? (
             <Text as="div" size="footnote" tone="secondary" className="composer-read-only">{botGuestReadOnlyLine(guestChat, bot.name)}</Text>
+          ) : bot && isFlagged(bot) ? (
+            <NativeBotNotice bot={bot} />
           ) : store.mismatch ? (
             <div className="composer-update-needed">
               <UpdateNeededCard />

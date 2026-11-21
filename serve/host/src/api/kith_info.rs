@@ -150,7 +150,7 @@ pub(super) enum Agent {
 pub(super) fn bot_agent(hub: &Hub, id: &str) -> Result<Agent> {
     let row = hub.store.bot(id)?.filter(|r| !r.deleted).ok_or_else(|| anyhow!("no such bot"))?;
     let cfg = row.config;
-    let Some(name) = cfg.hq_agent.clone().filter(|_| !cfg.is_group()) else {
+    let Some(name) = cfg.hq_agent.clone().map(String::from).filter(|_| !cfg.is_group()) else {
         return Ok(Agent::None);
     };
     let gone = hub.store.kv_get(&crate::hub::hq::gone_key(id)).is_some();

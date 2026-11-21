@@ -2,18 +2,16 @@ import Foundation
 
 /// Which of Kith's own cards an hq bot's page still shows. The kith sections carry the same facts,
 /// read from the agent's package, so each fact shows once and kith's copy wins. A card goes only once
-/// kith has the fact on screen: while the details load, fail or lack it, every card stays, and a plain
-/// bot (no `hqAgent`) always shows all of them. Mirrors the desktop's `botSections`.
+/// kith has the fact on screen: while the details load, fail or lack it, every card stays. Every bot is a kith
+/// agent but a room. Mirrors the desktop's `botSections`.
 public struct BotSections: Equatable, Sendable {
     /// "Standing instructions": kith's About shows the agent's role.
     public var instructions = true
-    /// The agent (backend) picker: kith's Model & permissions shows the harness.
-    public var backendPicker = true
     /// The harness's own notes tab in Memory. For an hq bot it is Claude Code's MEMORY.md of the bot's working
     /// folder (the host's `projectMemory`), not the agent's memory: kith's "Agent memory" lists the real files.
     /// Gone for every hq bot, loaded or not.
     public var harnessMemoryTab = true
-    /// Kith's own permission, model, effort and Fast mode controls. hq is the one source for an hq bot's settings
+    /// Kith's own permission, model and effort controls. hq is the one source for an hq bot's settings
     /// (the host ignores its stored copy), so they go and the `HqSetting` rows take their place. A host that predates
     /// `kithInfo` can't serve those, so the controls stay there.
     public var kithSettings = true
@@ -22,24 +20,22 @@ public struct BotSections: Equatable, Sendable {
 
     public init() {}
 
-    public init(hqAgent: String?, info: KithInfo?, unsupportedHost: Bool = false) {
-        guard let hqAgent, !hqAgent.isEmpty else { return }
+    public init(info: KithInfo?, unsupportedHost: Bool = false) {
         harnessMemoryTab = false
         kithSettings = unsupportedHost
         guard let info else { return }
         instructions = (info.role == nil && (info.description ?? "").isEmpty) || info.errors["role"] != nil
-        backendPicker = (info.harness ?? "").isEmpty
     }
 }
 
 /// One of an hq bot's settings as the apps show it, read from hq. Mirrors the desktop's `hqSettings`.
 public struct HqSetting: Equatable, Sendable {
-    public enum Key: String, Sendable { case permission, callModel, harness, model, effort, fastMode }
+    public enum Key: String, Sendable { case permission, callModel, harness, model, effort }
     public var key: Key
     public var label: String
     /// What hq reports, or plain words when it has nothing.
     public var value: String
-    /// Written through to hq (`kith <agent> set …`). Fast mode has no kith setting, so it is no row at all.
+    /// Written through to hq (`kith <agent> set …`).
     public var editable: Bool
     public var hint: String
 
@@ -123,7 +119,6 @@ extension BotDraft {
         d.backend = bot.backend
         d.model = bot.model
         d.modelOptions = bot.modelOptions
-        d.fastMode = bot.fastMode
         d.connectors = bot.connectors
         d.skills = bot.skills
         return d

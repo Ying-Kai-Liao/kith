@@ -381,6 +381,82 @@ fn the_jobs_lock_is_free_again_when_a_write_is_answered() {
         .expect("the write let the jobs lock go before it answered");
 }
 
+fn routine_jobs(r: &Rig, triggers: &[&str]) {
+    let jobs: Vec<Value> = triggers
+        .iter()
+        .map(|t| {
+            json!({"id": t, "cron": "0 8 * * *", "task": "t", "routine": {"id": "daily", "bot": "b"}})
+        })
+        .collect();
+    std::fs::write(r.file("mel"), Value::Array(jobs).to_string()).unwrap();
+}
+
+fn set_paused(r: &mut Rig, agent: &str, id: &str, paused: bool) -> Value {
+    call(
+        &mut r.core,
+        "schedule.setPaused",
+        &json!({"agent": agent, "id": id, "paused": paused}),
+        NOW,
+    )
+    .unwrap()
+}
+
+#[test]
+fn pausing_or_resuming_one_trigger_of_a_routine_warns_that_a_rollback_loses_it() {
+    let mut r = Rig::new();
+    routine_jobs(&r, &["t1", "t2"]);
+    // One of two paused: the triggers differ, and a rollback writes one flag for the routine.
+    let out = set_paused(&mut r, "mel", "t1", true);
+    let w = out["warning"].as_str().unwrap();
+    assert!(
+        w.contains("paused: t1") && w.contains("on: t2") && w.contains("rolling back"),
+        "{w}"
+    );
+    // Everything paused agrees: the rollback writes "off", which is right.
+    let out = set_paused(&mut r, "mel", "t2", true);
+    assert!(out.get("warning").is_none(), "{out}");
+    // Resuming one of two paused ones is as lost: the routine would be enabled whole.
+    let out = set_paused(&mut r, "mel", "t1", false);
+    assert!(
+        out["warning"].as_str().unwrap().contains("paused: t2"),
+        "{out}"
+    );
+    // Everything back on agrees again.
+    let out = set_paused(&mut r, "mel", "t2", false);
+    assert!(out.get("warning").is_none(), "{out}");
+}
+
+#[test]
+fn only_true_counts_as_paused_when_comparing_triggers() {
+    let mut r = Rig::new();
+    routine_jobs(&r, &["t1", "t2"]);
+    // A hand-edited flag that is not a boolean: the rollback does not read it as paused, so neither does the warning.
+    let mut jobs: Vec<Value> =
+        serde_json::from_str(&std::fs::read_to_string(r.file("mel")).unwrap()).unwrap();
+    jobs[1]["paused"] = json!("yes");
+    std::fs::write(r.file("mel"), Value::Array(jobs).to_string()).unwrap();
+    let out = set_paused(&mut r, "mel", "t1", true);
+    let w = out["warning"].as_str().unwrap();
+    assert!(w.contains("paused: t1") && w.contains("on: t2"), "{w}");
+}
+
+#[test]
+fn a_one_trigger_routine_or_a_plain_job_pauses_without_a_warning() {
+    let mut r = Rig::new();
+    routine_jobs(&r, &["only"]);
+    assert!(
+        set_paused(&mut r, "mel", "only", true)
+            .get("warning")
+            .is_none()
+    );
+    r.put(&json!({"agent": "ops", "id": "p", "cron": "0 8 * * *", "task": "x"}));
+    assert!(
+        set_paused(&mut r, "ops", "p", true)
+            .get("warning")
+            .is_none()
+    );
+}
+
 #[test]
 fn a_job_the_routine_import_made_is_not_replaced_by_put() {
     let mut r = Rig::new();

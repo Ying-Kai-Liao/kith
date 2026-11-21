@@ -87,6 +87,15 @@ class SelfTest(unittest.TestCase):
         self.assertEqual([e['facet'] for e in stale], ['step*.exit'])
         self.assertIn('STALE', out)
 
+    def test_same_after_excuses_only_the_rewritten_difference(self):
+        sa = {'old': [['<A>', '<X>']], 'new': [['<B>', '<X>']]}
+        e = {'case': 'c', 'facet': 'f', 'why': 'w', 'same_after': sa}
+        self.assertTrue(D.holds(e, 'hook <A> end', 'hook <B> end'))
+        self.assertFalse(D.holds(e, 'hook <A> end', 'hook <B> other'), 'a second difference is not excused')
+        self.assertFalse(D.holds(e, 'hook <B> end', 'hook <B> end'), 'each side must hold its own token')
+        self.assertFalse(D.holds(e, 'hook <A> end', 'hook <A> end'))
+        self.assertTrue(D.holds({'case': 'c', 'facet': 'f', 'why': 'w'}, 'a', 'b'), 'no same_after: the whole facet is listed')
+
     def test_exit_code_and_stderr_are_compared(self):
         with tempfile.TemporaryDirectory() as t:
             w = Path(t) / 'fail'

@@ -14,8 +14,6 @@ export interface ModelOption {
 export interface AgentModels {
   models: { id: string; name: string; description?: string | null; options?: ModelOption[] }[]
   currentModelId?: string | null
-  /** The agent offers Fast mode (absent on older hosts). */
-  fastMode?: boolean
 }
 
 /** What the agent behind `backend` offers, loaded from the selected computer. */

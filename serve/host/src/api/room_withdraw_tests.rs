@@ -171,6 +171,20 @@ async fn an_access_change_withdraws_the_card_of_the_room_turn_it_ended() {
     assert_eq!(state(&r, &kept), CardState::Live);
 }
 
+/// `kith people revoke` writes the core, then asks the host to end what the rows no longer allow: the same ending as an
+/// access change made in the app, and a person who only gained an agent loses nothing.
+#[tokio::test]
+async fn enforce_person_access_ends_the_room_turn_when_an_agent_was_lost_and_not_when_one_was_gained() {
+    let (r, room) = rig().await;
+    let c = open_cards(&r, &room);
+    let key = running(&r, &room, &c);
+    call(&r, "enforcePersonAccess", json!({"personId": "sam", "lost": false})).await.unwrap();
+    assert!(r.hub.room_turn_registered(&key), "a grant ends nothing");
+    assert_eq!(state(&r, &c.with_sam), CardState::Live);
+    call(&r, "enforcePersonAccess", json!({"personId": "sam", "lost": true})).await.unwrap();
+    assert_only_sams_turn_ended(&r, &c);
+}
+
 /// A card under a secret write is left to its own steps.
 #[tokio::test]
 async fn a_secret_card_being_written_is_left_alone() {

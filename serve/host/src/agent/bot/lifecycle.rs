@@ -64,7 +64,6 @@ impl Actor {
             return;
         }
         self.idle_checked = Instant::now();
-        self.tend_idle();
         if !self.queue.is_empty() {
             return;
         }
@@ -138,7 +137,6 @@ impl Actor {
         let unused = self.at_rest()
             && self.conn.is_none()
             && self.deferred.is_empty()
-            && self.compacting.is_none()
             && self.parked_prompts.is_empty()
             && self.files.is_idle()
             && self.admission.is_none()
@@ -162,7 +160,6 @@ impl Actor {
         self.turn.is_none()
             && self.queue.is_empty()
             && self.perms.is_empty()
-            && self.active_request.is_none()
             && self.active_group.is_none()
             && self.active_routine.is_none()
             && self.routine_completion.is_none()
@@ -208,10 +205,8 @@ impl Actor {
                 if let Some(proc) = conn.writer.as_mut() {
                     proc.closed.insert(sid.to_owned());
                 }
-                conn.fast_options.remove(sid);
                 conn.usage.remove(sid);
                 conn.profiles.remove(sid);
-                self.applied_system.remove(sid);
             }
             Err(error) => {
                 tracing::warn!(bot = %self.cfg.id, session = sid, error = format!("{error:#}"), "couldn't close a session");

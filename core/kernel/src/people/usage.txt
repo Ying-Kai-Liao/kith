@@ -4,6 +4,16 @@ kith-people — the people you invited, and the app invites that bring them in.
                                              agents they have and as what, and their bots. Read from kith-auth, the one
                                              place that says who a person is.
   kith people show <id> [--json]             one person in full
+  kith people grant <person> <agent[,agent]> [--preset P] [--mode M] [--budget N] [--deny T] [--model X] [--helpers H]
+                     [--trusted] [--json]
+                                             let one invited person use an agent. Where authority is the core's: the core
+                                             writes the row, then the host ends what the rows no longer allow.
+  kith people revoke <person> <agent[,agent]> [--json]   take their use of an agent away (then ends their turns on it)
+  kith people suspend <person> [--json]      cut them off from everything, bots included, until `undo` (the cloud is told
+                                             first: refused when it cannot be reached)
+  kith people undo <person> [--json]         give back exactly what a suspend took
+  kith people requests [--json]              devices asking to pair with this computer
+  kith people approve|deny <requestId|code> [--json]   answer one
   kith invite add <name> --agent A[=member|guest] ... [--person ID] [--json]
                                              invite someone to the app: prints the link to send them. --agent is repeated,
                                              one per agent, the role after = (default guest, the narrower one). With
@@ -13,5 +23,5 @@ kith-people — the people you invited, and the app invites that bring them in.
   kith invite revoke <inviteId> [--json]     take one back before it is used (already gone: changed false)
 
 Not this: `kith auth invite <id>` makes a one-time /link code for a chat channel. A bot's invite: `kith bot invite`.
-Exit: 0 done, 1 refused / host unreachable / not found, 2 usage. --json: one object {"ok": true, ...} on stdout, or
+Exit: 0 done, 1 refused / host unreachable / not found, 2 usage, 3 no core daemon (grant, revoke: nothing ran). --json: one object {"ok": true, ...} on stdout, or
 {"ok": false, "error": "..."} with the same exit codes.

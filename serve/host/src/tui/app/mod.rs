@@ -15,7 +15,6 @@ mod ui;
 pub use editor::Editor;
 pub use exchange::{ConversationRow, Exchange, Item, Outcome, conversation, group, rows};
 pub use model::{After, AgentModel, Bot, Entry, Kind, Mark, ModelOption, Msg, PERMISSION_MODES, Status};
-pub use slash::SlashAction;
 pub use ui::{
     ACTIONS, Action, AgentPicker, COLORS, Click, Confirm, ConfirmAct, Dir, FIELDS, FILTERS, Field, Focus, FolderPicker,
     Form, Goto, GotoItem, GroupField, GroupForm, Hits, NEW_GROUP, Overlay, SHAPES, Toast, Toggle, TraceMode, Width,
@@ -96,8 +95,6 @@ pub struct App {
     pub plugins: (Vec<Value>, Vec<Value>),
     /// Models each agent offers (`None` while loading).
     pub models: HashMap<String, Option<Vec<AgentModel>>>,
-    /// Agents whose model list came with Fast mode.
-    pub fast_mode: HashSet<String>,
     /// A setup terminal holding the screen.
     pub shell: Option<Shell>,
     /// Chats and threads (`bot` / `bot/root`) marked read since their bot's unread count last changed.
@@ -164,7 +161,6 @@ impl App {
             market: (vec![], vec![]),
             plugins: (vec![], vec![]),
             models: HashMap::new(),
-            fast_mode: HashSet::new(),
             shell: None,
             reading: HashSet::new(),
             history_busy: HashSet::new(),

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# kith-cost-stub-check — bin/kith-cost is one file in two languages: valid sh, and valid Python, because the launchd job
+# dev.kith.cost runs it as `kith-uv run --script .../kith-cost sync` (uv runs a script as Python; the Python part re-runs the file
+# under /bin/sh). Checks: `sh -n` and `ast.parse` both pass; run as sh and run as Python it forwards to a fake kith program with
+# the same exit code, stdout and stderr and the kernel folder found from $0 (also through a link); with no program, `tag` is
+# silent and exits 0 and any other verb prints one line and exits 3, as sh and as Python; an old program (no `cost-ledger`) is no
+# program. Throwaway HOME, PATH without a kith. No Rust program needed.
+#
+#   kernel/tests/kith-cost-stub-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+STUB=$KERNEL/bin/kith-cost
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-cost-stub-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+
+check "sh -n parses the stub" "sh -n '$STUB'"
+check "ast.parse parses the stub" "python3 -I -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' '$STUB'"
+check "the sh part never has three single quotes in a row (past the opening line)" "[ \"\$(tail -n +3 '$STUB' | grep -c \"'''\")\" = 1 ]"
+
+# A release folder: <rel>/share/kith/kernel/bin/kith-cost next to <rel>/bin/kith, which logs what it is asked.
+mkdir -p "$T/rel/bin" "$T/rel/share/kith/kernel/bin" "$T/home" "$T/nowhere"
+cp "$STUB" "$T/rel/share/kith/kernel/bin/kith-cost"
+S=$T/rel/share/kith/kernel/bin/kith-cost
+ln -s "$S" "$T/link"
+printf '#!/bin/sh\nif [ "$1 $2" = "kernel version" ]; then echo %s; exit 0; fi\necho "args: $*"; echo "stderr line" >&2; exit 5\n' "'{\"modules\":[\"cost-ledger\"]}'" > "$T/rel/bin/kith"
+chmod +x "$T/rel/bin/kith"
+run() { # as (sh|python3) STUB ARGS... → $out, $err, $rc
+  local as=$1; shift
+  out=$(env -i PATH=/usr/bin:/bin HOME="$T/home" "$as" "$@" 2>"$T/err"); rc=$?
+}
+for as in sh python3; do
+  run $as "$S" spent sam echo
+  check "$as: forwards to the release's program with the kernel folder, same exit code and stderr" "[ $rc = 5 ] && [ \"\$out\" = \"args: kernel cost --kernel $T/rel/share/kith/kernel spent sam echo\" ] && [ \"\$(cat '$T/err')\" = 'stderr line' ]"
+  run $as "$T/link" sync
+  check "$as: through a link the kernel folder is still the real one" "[ $rc = 5 ] && [ \"\$out\" = \"args: kernel cost --kernel $T/rel/share/kith/kernel sync\" ]"
+  run $as "$S" tag
+  check "$as: tag (what a session on the old hook path runs) forwards to the program" "[ $rc = 5 ] && [ \"\$out\" = \"args: kernel cost --kernel $T/rel/share/kith/kernel tag\" ]"
+  run $as "$S" -h
+  check "$as: an argument that looks like a flag goes through untouched" "[ \"\$out\" = \"args: kernel cost --kernel $T/rel/share/kith/kernel -h\" ]"
+done
+
+# No program: the stub alone in a folder with nothing around it.
+mkdir -p "$T/lone/share/kith/kernel/bin" "$T/old"
+cp "$STUB" "$T/lone/share/kith/kernel/bin/kith-cost"
+L=$T/lone/share/kith/kernel/bin/kith-cost
+printf '#!/bin/sh\nif [ "$1 $2" = "kernel version" ]; then echo %s; exit 0; fi\necho ran >> "%s"\nexit 0\n' "'{\"modules\":[\"cost\"]}'" "$T/old/ran" > "$T/old/kith"
+chmod +x "$T/old/kith"
+for as in sh python3; do
+  run $as "$L" tag
+  check "$as: no program: tag exits 0, silent" "[ $rc = 0 ] && [ -z \"\$out\" ] && [ ! -s '$T/err' ]"
+  run $as "$L" spent sam echo
+  check "$as: no program: any other verb prints one line on stderr and exits 3" "[ $rc = 3 ] && [ -z \"\$out\" ] && [ \"\$(wc -l < '$T/err' | tr -d ' ')\" = 1 ] && grep -q '^kith-cost: ' '$T/err'"
+  out=$(env -i PATH=/usr/bin:/bin HOME="$T/home" KITH_BIN="$T/old/kith" "$as" "$L" sync 2>"$T/err"); rc=$?
+  check "$as: an old program (no cost-ledger) is no program, and is not run" "[ $rc = 3 ] && grep -q '^kith-cost: ' '$T/err' && [ ! -e '$T/old/ran' ]"
+done
+
+echo
+if [ "$fails" = 0 ]; then echo "all checks passed"; else echo "$fails check(s) failed"; exit 1; fi

@@ -324,6 +324,17 @@ fn dispatch(hub: &Arc<Hub>) -> Result<()> {
             hub.routines.disable_bot(&hub.store, &run.bot_id)?;
             continue;
         }
+        // C5: a host-native bot is not run; its due slot is skipped, not failed at every tick.
+        if hub.store.bot(&run.bot_id)?.is_some_and(|r| r.config.is_native()) {
+            hub.routines.complete(
+                hub,
+                &run.id,
+                Status::Cancelled,
+                Some("Skipped: this is a host-native bot. Make it a kith agent.".into()),
+                None,
+            )?;
+            continue;
+        }
         if !hub.routines.active.locked().insert(run.bot_id.clone()) {
             continue;
         }

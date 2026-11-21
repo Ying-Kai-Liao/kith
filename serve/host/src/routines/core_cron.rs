@@ -195,7 +195,13 @@ pub(super) fn command_with(
     let mut cmd = Command::new(kernel.join("bin/kith-sched"));
     // The run's identity comes from `kith-sched` (`KITH_PERSON` is built from the turn's person; a run token is issued to a run,
     // not inherited from whatever started the host), as every other kernel spawn of the host does.
-    for var in [crate::runauth::TOKEN_ENV, crate::runauth::SOCKET_ENV, "KITH_PERSON", "HQ_PERSON"] {
+    for var in [
+        crate::runauth::TOKEN_ENV,
+        crate::runauth::SOCKET_ENV,
+        crate::runauth::CORE_SOCKET_ENV,
+        "KITH_PERSON",
+        "HQ_PERSON",
+    ] {
         cmd.env_remove(var);
     }
     cmd.args(["run-turn", agent, job, "--turn", &turn.to_string(), "--claim", &claim.to_string()])

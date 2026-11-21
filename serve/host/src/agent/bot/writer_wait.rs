@@ -5,7 +5,7 @@
 
 use super::writer::{Why, WriterWait, core};
 use super::{Actor, Done, NoticeStyle};
-use crate::chat::team::RequestStatus;
+use crate::chat::status::RequestStatus;
 use crate::hub::BotStatus;
 use crate::store::{EntryKind, Lane, now_ms};
 use crate::terminal::core_writer::Mode;
@@ -78,7 +78,6 @@ impl Actor {
         }
         self.turn = None;
         self.set_inflight(false);
-        self.hub.team.cancel_from(&self.rt);
         let text = wait.to_string();
         let (lane, session) = (args.lane.clone(), self.turn_session.clone().unwrap_or_default());
         self.hub.set_runtime(&self.rt, |r| {
@@ -185,11 +184,11 @@ impl Actor {
             self.start_failed(&anyhow::anyhow!("the routine expired while it waited for its session"));
             return;
         }
-        // An ask or a room turn that nobody waits for any more is not started.
-        let closed = self.active_request.as_ref().is_some_and(crate::chat::team::BotRequest::reply_closed)
-            || self.active_group.as_ref().is_some_and(|g| {
-                g.reply.is_closed() || !crate::chat::group::current(&self.hub.store, &g.lane, g.epoch)
-            });
+        // A room turn that nobody waits for any more is not started.
+        let closed = self
+            .active_group
+            .as_ref()
+            .is_some_and(|g| g.reply.is_closed() || !crate::chat::group::current(&self.hub.store, &g.lane, g.epoch));
         if closed {
             self.writer_drop_parked();
             return;

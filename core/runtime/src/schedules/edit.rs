@@ -113,7 +113,11 @@ pub(crate) fn call(core: &mut Core, method: &str, params: &Value, now: i64) -> R
                 if pause {
                     job.insert("paused".into(), json!(true));
                 }
-                Ok(json!({"changed": was != pause}))
+                let mut out = json!({"changed": was != pause});
+                if let Some(w) = mixed_triggers(jobs, at) {
+                    out["warning"] = json!(w);
+                }
+                Ok(out)
             })?
         }
     };
@@ -184,6 +188,38 @@ fn new_job(params: &Value) -> Result<Value> {
         }
     }
     Ok(Value::Object(job))
+}
+
+/// The import made one job per trigger of a routine, and a rollback of the schedules module rebuilds the routine from them:
+/// one routine, enabled while any trigger is on. So a pause or a resume that leaves the triggers of one routine mixed (some
+/// paused, some on) is lost by a rollback; this says so, naming them. `None` for a job that is not a routine's, a routine
+/// with one trigger, or triggers that all agree.
+fn mixed_triggers(jobs: &[Value], at: usize) -> Option<String> {
+    let routine = jobs[at].get("routine")?;
+    let same = |j: &Value| {
+        j.get("routine")
+            .is_some_and(|r| r.get("id") == routine.get("id") && r.get("bot") == routine.get("bot"))
+    };
+    let paused = |j: &Value| {
+        // Only `true` is paused, as the rollback reads it.
+        j.get("paused") == Some(&Value::Bool(true))
+    };
+    let all: Vec<&Value> = jobs.iter().filter(|j| same(j)).collect();
+    let (off, on): (Vec<&Value>, Vec<&Value>) = all.iter().copied().partition(|j| paused(j));
+    if all.len() < 2 || off.is_empty() || on.is_empty() {
+        return None;
+    }
+    let names = |v: &[&Value]| {
+        v.iter()
+            .map(|j| text_of(j, "id"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    Some(format!(
+        "this routine has several triggers and they now differ (paused: {}; on: {}); rolling back the schedules module makes the routine one thing again, enabled while any trigger is on, so this is lost there (pause or resume the routine in the app)",
+        names(&off),
+        names(&on)
+    ))
 }
 
 fn find(jobs: &[Value], agent: &str, id: &str) -> Result<usize> {

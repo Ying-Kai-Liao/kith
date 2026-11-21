@@ -207,7 +207,14 @@ SECRET_CMDS = ("security find-generic-password", "security find-internet-passwor
                "gcloud auth application-default", "npm login", "npm adduser", "npm token", "docker login",
                "aws configure", "wrangler login", "kith-auth set", "kith-auth get", "kith-auth once")
 TRUST_CMDS = ("kith allow", "kith-allow", "kith-auth grant", "kith-auth revoke", "kith-auth person", "kith-auth member",
-              "kith-auth bot", "kith-auth forget", "kith-auth access", "launchctl load", "launchctl bootstrap")
+              "kith-auth bot", "kith-auth forget", "kith-auth access", "launchctl load", "launchctl bootstrap",
+              # the owner's access verbs of `kith people` (kith-auth member/person on a switched Mac), by both names
+              "kith people grant", "kith-people grant",
+              "kith people revoke", "kith-people revoke",
+              "kith people suspend", "kith-people suspend",
+              "kith people undo", "kith-people undo",
+              "kith people approve", "kith-people approve",
+              "kith people deny", "kith-people deny")
 DESTROY_CMDS = ("shred", "srm", "mkfs", "diskutil erase", "diskutil partitionDisk", "diskutil zeroDisk",
                 "diskutil secureErase", "diskutil apfs delete", "git reset --hard", "git clean")
 OUTWARD_CMDS = ("gh pr merge", "gh repo delete", "gh release create", "gh release delete", "gh release upload",
@@ -650,10 +657,15 @@ def _bash_rules(cmds, kernel=()):
         if w[0] == "kith-auth":
             names += ["hq-auth"]
             out += ["Bash(kith auth %s:*)" % " ".join(w[1:]), "Bash(hq auth %s:*)" % " ".join(w[1:])]
-        if w[0] in ("kith-auth", "kith-allow", "kith"):
+        if w[0] in ("kith-auth", "kith-allow", "kith", "kith-people"):
             names += ["%s/bin/%s" % (k, w[0]) for k in kernel] + ['"%s/bin/%s"' % (k, w[0]) for k in kernel]
         if w[0] == "kith" and w[1:2] == ["allow"]:
             out.append("Bash(hq allow:*)")
+        if w[0] == "kith" and w[1:2] == ["people"]:   # `hq` is the same program
+            tail = " ".join(w[1:])
+            out.append("Bash(hq %s:*)" % tail)
+            for k in kernel:
+                out += ["Bash(%s/bin/hq %s:*)" % (k, tail), 'Bash("%s/bin/hq" %s:*)' % (k, tail)]
         for n in names:
             out.append("Bash(%s:*)" % " ".join([n] + w[1:]))
         if w[0] == "git":

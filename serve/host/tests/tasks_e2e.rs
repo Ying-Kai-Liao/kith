@@ -11,11 +11,9 @@ use common::host::Host;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
-/// A bot as the apps create it (tasks on), running the slow fake agent.
+/// A kith agent (its bot has tasks on), running the slow fake agent.
 async fn slow_bot(host: &Host) -> String {
-    let agent = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/slow_agent.py");
-    let bot = json!({"name": "Slow", "backend": "custom", "command": common::python_agent(&agent), "connectors": [], "notify": false});
-    host.call("createBot", bot).await["bot"]["id"].as_str().unwrap().to_owned()
+    host.task_agent("slow", "slow_agent.py", "").await
 }
 
 async fn send(host: &Host, bot: &str, text: &str, new_task: bool) -> Value {

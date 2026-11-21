@@ -10,6 +10,7 @@ import * as pages from "./routes/pages";
 import * as download from "./routes/download";
 import * as install from "./routes/install";
 import * as landing from "./routes/landing";
+import * as sitepages from "./routes/sitepages";
 import type { ComputerRelay } from "./relay";
 
 export { ComputerRelay } from "./relay";
@@ -114,6 +115,12 @@ const handlers: Handlers = {
   // The CLI installation guide, and install.sh (302 to the script on GitHub).
   installPage: install.installPage,
   installScript: install.installScript,
+  // The site's inner pages, in the shared frame (routes/site.ts).
+  docsPage: sitepages.docsPage,
+  agentsPage: sitepages.agentsPage,
+  sharingPage: sitepages.sharingPage,
+  privacyPage: sitepages.privacyPage,
+  securityPage: sitepages.securityPage,
 };
 
 const routes = (Object.keys(ROUTES) as RouteName[]).map((name) => ({ name, ...ROUTES[name], handler: handlers[name] }));

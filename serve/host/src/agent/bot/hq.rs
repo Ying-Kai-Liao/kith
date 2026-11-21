@@ -2,7 +2,6 @@
 //! nothing of Kith's goes in with it — no instructions of its own, no `chat`/`memory`/`team`/`routines` servers,
 //! no memory snapshot, no tidying. The agent's reply is its turn's text.
 
-use super::fast_mode::Listing;
 use super::launch::{launch_commands, start_agent};
 use super::{Actor, NoticeStyle, Profile};
 use crate::agent::acp::Incoming;
@@ -75,10 +74,6 @@ pub(super) struct ProjectTurn {
 }
 
 impl Actor {
-    pub(super) fn is_hq(&self) -> bool {
-        self.cfg.is_hq()
-    }
-
     /// The room an hq run is for: the group chat of the turn, else the 1:1 of this bot's person (or the owner).
     pub(super) fn run_room(&self) -> String {
         let agent = self.cfg.hq_agent.as_deref().unwrap_or_default();
@@ -218,9 +213,6 @@ impl Actor {
             // Notes recalled for a thread's first message go with the turn, never into the system prefix, so the cached
             // prompt stays as it is.
             let mut prompt = recalled.map_or_else(|| text.to_owned(), |r| format!("{r}\n\n{text}"));
-            if let Some(handoff) = self.handoff.take() {
-                prompt = format!("{handoff}\n\n{prompt}");
-            }
             if let Some(intro) = self.thread_intro.take() {
                 prompt = format!("{intro}\n\n{prompt}");
             }
@@ -319,21 +311,6 @@ impl Actor {
                 tracing::warn!(mode, error = format!("{error:#}"), "couldn't set the session's permission mode");
                 current
             }
-        }
-    }
-
-    /// A non-hq bot's session starts in the bot's own permission mode, passed to the agent unchanged. Codex has its
-    /// own mode names, so it gets [`codex_mode`]'s translation. Left as it is when the agent doesn't offer the mode.
-    /// A person's bot never starts in bypass, whatever its field says.
-    pub(super) async fn set_bot_mode(&mut self, sid: &str, res: &Value) {
-        let mode = self.cfg.permission.mode_id();
-        if self.cfg.person.is_some() && mode == "bypassPermissions" {
-            return;
-        }
-        if self.cfg.backend == "codex" {
-            self.set_codex_mode(sid, res, Some(mode)).await;
-        } else {
-            self.set_claude_mode(sid, res, Some(mode)).await;
         }
     }
 
@@ -452,19 +429,31 @@ impl Actor {
             // A person's launch carries what their conversation was given beyond the box (a yes on an escape card, an
             // "always"), asked for with a token of its own: one per launch, since a run takes its access once. Its once
             // grants are reserved, and taken when the session started or loaded with them.
-            let access = person.as_deref().and_then(|p| {
-                let project = target.project.as_deref();
-                if crate::chat::room_turn::is_room_person(p) {
-                    // A room person's token holds the turn's basis, which only a room turn has (see `runauth::room`).
-                    return match &members {
-                        hq::Members::Room { people, .. } => {
-                            crate::runauth::room::grant_for_room(p, &agent, &room, people, &conversation, project)
+            let access = match person.as_deref() {
+                None => None,
+                Some(p) => {
+                    let project = target.project.as_deref();
+                    if crate::chat::room_turn::is_room_person(p) {
+                        // A room person's token holds the turn's basis, which only a room turn has (see `runauth::room`).
+                        match &members {
+                            hq::Members::Room { people, .. } => {
+                                crate::runauth::room::grant_for_room_async(
+                                    p,
+                                    &agent,
+                                    &room,
+                                    people,
+                                    &conversation,
+                                    project,
+                                )
+                                .await
+                            }
+                            _ => None,
                         }
-                        _ => None,
-                    };
+                    } else {
+                        crate::runauth::grant_for_async(p, &agent, Some(room.as_str()), &conversation, project).await
+                    }
                 }
-                crate::runauth::grant_for(p, &agent, Some(room.as_str()), &conversation, project)
-            });
+            };
             let reservation = access.as_ref().map(|(grant, _)| Reservation::open(grant.run_id(), carried));
             // A quick chat's thread keeps the engine and model it was started with, on every launch.
             let engine = slot
@@ -591,11 +580,14 @@ impl Actor {
             let mut env = process_env(crate::agent::auth::env(&self.hub.store, provider)?, &launch, backup.is_some());
             // Anyone but the owner asks the host who they are (`kith recall` over the run socket), with a token that
             // is theirs alone; the owner's process gets none.
-            let mut grant = person.as_deref().and_then(|p| {
-                let room = launch.env.get("KITH_ROOM").map(String::as_str);
-                let project = launch.env.get("KITH_PROJECT").map(String::as_str);
-                crate::runauth::grant_for(p, &agent, room, &conversation, project)
-            });
+            let mut grant = match person.as_deref() {
+                None => None,
+                Some(p) => {
+                    let room = launch.env.get("KITH_ROOM").map(String::as_str);
+                    let project = launch.env.get("KITH_PROJECT").map(String::as_str);
+                    crate::runauth::grant_for_async(p, &agent, room, &conversation, project).await
+                }
+            };
             // The owner's own 1:1 with the agent can raise approval cards (`card.py`): a cards-only token, under
             // its own env names. Not a group room, not a guest's, and not another engine's process, which has no use for it.
             if grant.is_none()
@@ -642,7 +634,7 @@ impl Actor {
                     Ok(mut conn) => {
                         if let Some((grant, _)) = grant.take() {
                             if let Some(pid) = conn.acp.pid() {
-                                grant.bind_pid(pid);
+                                grant.bind_pid(pid).await;
                             }
                             conn.run_grant = Some(grant);
                         }
@@ -682,7 +674,6 @@ impl Actor {
                             let holds = reservation.take().map(|r| r.commit(&self.hub.store)).unwrap_or_default();
                             conn.profiles.insert(sid.clone(), Profile { digest: digest.clone(), holds });
                         }
-                        self.note_options(&sid, &res, Listing::Session);
                         if launch.other_engine().is_none() {
                             self.set_claude_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str))
                                 .await;
@@ -723,7 +714,6 @@ impl Actor {
         }
         // The model and effort are hq's (launch-json): the host sets neither again. The permission mode is set once,
         // below, because the adapter starts every session in "default".
-        self.note_options(&sid, &res, Listing::Session);
         if backup.is_none() {
             hq::tag_session(&self.hub.store, &sid, launch.account_id.as_deref());
         }

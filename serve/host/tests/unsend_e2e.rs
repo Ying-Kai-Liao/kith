@@ -19,10 +19,11 @@ async fn host() -> Host {
 }
 
 async fn slow_bot(host: &Host, tasks: bool) -> String {
-    let agent = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/slow_agent.py");
-    let bot = json!({"name": "Slow", "backend": "custom", "tasks": tasks, "command": common::python_agent(&agent),
-        "connectors": [], "notify": false});
-    host.call("createBot", bot).await["bot"]["id"].as_str().unwrap().to_owned()
+    if tasks {
+        host.task_agent("slow", "slow_agent.py", "").await
+    } else {
+        host.agent("slow", "slow_agent.py", "").await
+    }
 }
 
 async fn send(host: &Host, bot: &str, text: &str) -> Value {
@@ -130,7 +131,7 @@ async fn a_message_waiting_in_a_task_can_be_unsent() {
 #[tokio::test]
 async fn only_the_users_own_messages_can_be_unsent() {
     let host = host().await;
-    let bot = host.bot("Idle", "auto").await;
+    let bot = host.agent("idle", "slow_agent.py", "").await;
     let error = host.refused("unsend", json!({"botId": bot, "entryId": "nope"})).await;
     assert!(error.contains("unknown message"), "{error}");
 }

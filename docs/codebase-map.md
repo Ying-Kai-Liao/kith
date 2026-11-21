@@ -65,7 +65,7 @@ LaunchAgents in `~/Library/LaunchAgents/`, each run through `~/.kith/bin/kith-uv
 | Label | Runs | When | Written by |
 |---|---|---|---|
 | `dev.kith.sched` | `kernel/bin/kith-sched tick` | every minute | `kith-sched --install` (not installed on this Mac) |
-| `dev.kith.cost` | `kernel/bin/kith-cost sync` | every 6 h | by hand (no installer) |
+| `dev.kith.cost` | `kith-uv run --script kernel/bin/kith-cost sync` (the stub is also valid Python and re-runs itself under sh, so the plist stays as it is; R9 must rewrite it first) | every 6 h | by hand (no installer) |
 | `dev.kith.monitor` | devops `role/tools/monitor.py run` | always (KeepAlive) | `monitor.py install` (devops' repo) |
 | `dev.kith.house` | house `role/tools/house.py remind --send` | 08:00 daily | by hand (no installer) |
 
@@ -78,7 +78,7 @@ Paths in this table are inside `kernel/`, except `install.sh` and `.claude-plugi
 | `bin/kith` | bash | Runs one agent: resolves the pinned package, fills placeholders, adds memory and project, settings + cost-tag hook, granted MCP servers, model/effort, then `exec claude`. Also the front door for `versions`, `install`, `auth`, `cost`… | you, `kith serve`, agents calling helpers |
 | `bin/kith-pkg` | python | Packages: fingerprint → check → snapshot into `~/.kith/store` (clones or hard links), gc; pin/rollback; auto-commit each good version to the agent's repo; install/update/share/search/restore; fetch third-party skills; `check --share` privacy scan; `check` fails a package `permissions.allow` rule or `autoMode.allow` sentence that a must-ask class covers (`must_ask_problems`) | `bin/kith`, the adapter (`resolve --all --json`), `install.sh` |
 | `bin/kith-auth` | python | Services and grants: which agent may use which service as which account; builds `--mcp-config`; hands out secrets (`get`, `exec`) and logs them; keeps the "always" answers to escape cards (`access`); `ledger [--person] [--agent] --json` lists every lasting grant for anyone but the owner (those answers and people's own service grants) with a stable key and when each was given, `ledger --rm <key>` takes one away: the host's `accessLedger`/`removeGrant`, the apps' Access list | `bin/kith`, agents' tools, the host |
-| `bin/kith-cost` | python | Cost ledger: syncs request usage from `~/.claude/projects` into `cost.db`; `tag` records each kith session (SessionStart hook); reports by agent, version, model, effort | you, launchd `dev.kith.cost`, the hook `bin/kith` adds |
+| `bin/kith-cost` | sh + python | A stub: runs `kith kernel cost` (`core/kernel/src/cost/`, the cost ledger: syncs request usage from `~/.claude/projects` into `cost.db`; `tag` records each kith session (SessionStart hook); reports by agent, version, model, effort) on a program that lists `cost-ledger`; with none, `tag` exits 0 and any other verb says so and exits 3. One file valid as sh and as Python, because launchd runs it through `kith-uv run --script` | you, launchd `dev.kith.cost`, the hook `bin/kith` adds (the program's own form when it has the module) |
 | `bin/kith-sessions` | python | Continue anywhere: `record` (SessionStart hook) lists a `kith <agent>` terminal session in `$KITH_STATE/live/terminal/<sid>.json` for the host; `resolve` backs `kith <agent> --resume <thread>`; `run` is the claude child that prints the take-over note | the hook and the launch tail of `bin/kith` |
 | `bin/kith-ask` | python | One-shot `kith <agent>` with `--output-format json`: prints the answer, keeps agent + directory (or `--as NAME`) → session in `~/.kith/ask.json` so `-c` resumes it with the same project/model/effort; `KITH_VIA=ask` | you, scripts, Claude Code sessions |
 | `bin/kith-remote` | python | Other machines over ssh: `add`/`ls`/`rm` (`~/.kith/remotes.json`); `ask AGENT@MACHINE` (from kith-ask; refused when `KITH_PERSON` isn't the owner): snapshot the working tree as a commit, push it to a scratch clone there, run `kith ask` there in a worktree, fetch the result branch and copy `.kith-out` back. Its agent side is `_repo` and `_run` | kith-ask, over ssh on the other machine |
@@ -195,6 +195,6 @@ core daemon and the real `kith-sched` as processes (host-build runs it).
 | An kith-wide setting that isn't secret (the default permission mode) | `lib/kith_settings.py` `DEFAULTS`; per Mac, `~/.kith/settings.json` |
 | A background job | its row in [Background jobs](#background-jobs): the installer, or the plist itself where there is none |
 | Calling agents on other machines, the code handoff | `bin/kith-remote` (`call` on the caller, `serve_run` on the agent's machine) |
-| Cost reports or prices | `bin/kith-cost` (`PRICES`) |
+| Cost reports or prices | `core/kernel/src/cost/ledger.rs` (`PRICES`) |
 | The scaffold for new agents | `bin/kith-new`, and the builder agent's `new-agent` skill (in its own repo) |
 | One agent's behaviour, skills or tools | that agent's repo, `agents/<name>/` (its own repo; the kernel ignores it) |
