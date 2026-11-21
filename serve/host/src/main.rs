@@ -463,7 +463,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
-    /// `kith account ...`, every verb of the command (`kernel/bin/kith-account` is a stub for it): the state ones (`list|pick|out|clear|usage`) and the ones that
+    /// `kith account ...`, every verb of the command (the program's own; `kernel/bin/kith-account` is gone): the state ones (`list|pick|out|clear|usage`) and the ones that
     /// write the set (`add|login|remove|order|move|set|policy|pin|unpin|cross-harness|migrate|use|backup`). `add` and `remove`
     /// with `--json` return the login command and run nothing; without it the harness's own login runs.
     // -h/--help belong to the usage text of `kith kernel account`, so clap must not answer them.
