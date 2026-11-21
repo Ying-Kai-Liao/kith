@@ -28,6 +28,7 @@ fn world() -> (Value, Places) {
         &f("kith_home"),
         Path::new(&f("kernel")),
         &f("package"),
+        &f("secrets"),
     )
     .with_secrets(&f("secrets"), None);
     (g, places)

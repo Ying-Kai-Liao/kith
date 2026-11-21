@@ -343,7 +343,7 @@ fn must_ask_problems(ctx: &Ctx, home: &Path) -> R<Vec<String>> {
     };
     let kernel = ctx.kernel.as_path();
     let p = crate::paths::from_process(kernel);
-    let home_dir = crate::paths::process_home();
+    let home_dir = crate::paths::known_home().unwrap_or_default();
     let life_dir = life(ctx, &agent);
     let life_real = crate::paths::realpath(&life_dir);
     let sp = |x: &Path| x.to_string_lossy().into_owned();
@@ -380,6 +380,7 @@ fn must_ask_problems(ctx: &Ctx, home: &Path) -> R<Vec<String>> {
         &sp(&p.home),
         kernel,
         &sp(home),
+        &sp(&p.secrets),
     );
     let mut out = vec![];
     let perms = s.get("permissions").filter(|x| x.is_object());

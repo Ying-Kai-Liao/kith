@@ -324,6 +324,7 @@ pub struct Places {
 impl Places {
     /// `state`, `machine`, `agents` and `kith_home` as the paths rules name them; `kernel` is the kernel folder
     /// (`kith_paths.KERNEL`, resolved).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         home: &str,
         state: &str,
@@ -332,6 +333,7 @@ impl Places {
         kith_home: &str,
         kernel: &Path,
         package: &str,
+        secrets: &str,
     ) -> Self {
         let state_both = both(state);
         let roots: Vec<String> = std::iter::once(agents.to_owned())
@@ -359,7 +361,7 @@ impl Places {
             repos,
             kernel: both(&s(&kernel_real)),
             package: both(package),
-            secrets_dir: s(&crate::paths::from_process(kernel).secrets),
+            secrets_dir: secrets.to_owned(),
             kith_secrets: std::env::var("KITH_SECRETS").ok(),
         }
     }

@@ -28,6 +28,7 @@ mod tests;
 #[allow(clippy::unwrap_used, clippy::many_single_char_names)]
 mod settings_tests;
 
-#[cfg(test)]
+// The golden's /kt/... paths are not absolute on Windows.
+#[cfg(all(test, unix))]
 #[allow(clippy::unwrap_used)]
 mod judge_tests;

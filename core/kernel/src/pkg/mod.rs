@@ -7,9 +7,8 @@
 //! pointer, removes versions nothing needs any more and commits the good version into the agent's own repo. The other
 //! verbs of `kith-pkg` stay with the Python.
 //!
-//! Python is still used for one thing: judging the `permissions.allow` / `autoMode.allow` rules of a package's `settings.json`
-//! against the must-ask classes (`kith_guard.must_ask_rule`), which has not moved to Rust (`launch/guard.rs` ports the other
-//! half of that file). It is asked only when `settings.json` has such rules.
+//! The judging of a package's `permissions.allow` / `autoMode.allow` rules against the must-ask classes is Rust too
+//! (`launch/judge.rs`); no Python runs here.
 //!
 //! The port keeps the shape of the Python: one function each, with the same checks in the same order, because the order of
 //! the messages and of the files written is part of what the golden record (`kernel/tests/difftest/golden/pkg-resolve.json`)

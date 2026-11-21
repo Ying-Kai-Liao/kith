@@ -869,6 +869,7 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         &s(&p.home),
         i.kernel,
         &src_pkg,
+        &sec,
     );
     let must = guard::must_ask_rules(&places);
     {
