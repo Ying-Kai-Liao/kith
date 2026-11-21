@@ -32,12 +32,14 @@ pub fn child_args(argv: &[OsString]) -> Vec<OsString> {
 
 /// The grace before SIGKILL, from `KITH_SERVE_KILL_GRACE_S`: what the Python launcher accepted. A value that does not
 /// parse, or is outside `0 <= g < 3600` (`inf` would never fire, a negative would kill at once), means 20 s.
+/// Python's `float()` also takes underscores (`1_0`) and non-ASCII digits; those give 20 s here.
 pub fn grace(value: Option<&str>) -> Duration {
     let seconds = value
         .and_then(|v| v.trim().parse::<f64>().ok())
         .filter(|g| (0.0..3600.0).contains(g))
         .unwrap_or(DEFAULT_GRACE_S);
-    Duration::from_secs_f64(seconds)
+    // `-0` passes the range check; Python reads it as "kill at once", so it is 0 here, never a negative to the Duration.
+    Duration::from_secs_f64(if seconds == 0.0 { 0.0 } else { seconds })
 }
 
 #[cfg(not(unix))]
@@ -316,6 +318,8 @@ mod tests {
         }
         assert_eq!(grace(None), s(20));
         assert_eq!(grace(Some("0")), Duration::ZERO);
+        assert_eq!(grace(Some("-0")), Duration::ZERO);
+        assert_eq!(grace(Some("1_0")), s(20));
         assert_eq!(grace(Some("1")), s(1));
         assert_eq!(grace(Some(" 2.5 ")), Duration::from_millis(2500));
         assert_eq!(grace(Some("3599")), s(3599));

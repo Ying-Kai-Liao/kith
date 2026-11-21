@@ -1354,7 +1354,9 @@ async fn main() -> Result<()> {
         }
     };
     match cli.cmd.unwrap_or(Sub::Serve { port: service::DEFAULT_PORT, bind: "0.0.0.0".into(), supervise: false }) {
-        Sub::Serve { port, bind, supervise: _ } => serve(&bind, port).await,
+        // `wanted()` takes the flag before clap; reaching here with it set would run the host unsupervised.
+        Sub::Serve { supervise: true, .. } => anyhow::bail!("--supervise reached the host unhandled"),
+        Sub::Serve { port, bind, supervise: false } => serve(&bind, port).await,
         Sub::Pair { port, json } => pair(port, json).await,
         Sub::Info { port, json } => info(port, json).await,
         Sub::Devices { port, action } => match action.unwrap_or(DevicesAction::List) {

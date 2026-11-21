@@ -151,7 +151,7 @@ fn launcher() -> (Vec<String>, bool) {
         parse(&serde_json::from_str::<serde_json::Value>(&config).ok()?.get("launcher")?.to_string())
     });
     match words {
-        Some(words) => match legacy_launcher(&words) {
+        Some(words) => match legacy_launcher(&words, |script| Path::new(script).exists()) {
             Some(mapped) => (mapped, true),
             None => (words, false),
         },
@@ -160,12 +160,13 @@ fn launcher() -> (Vec<String>, bool) {
 }
 
 /// The old launcher, `[<uv>, .., --script, <path>/kith-serve-launch]`, as the supervisor's: `[<uv>, run, --quiet,
-/// --no-project, --]`. Matched by the script's name, not by the file being there, so it keeps working once the
-/// script is deleted; a reinstall writes the new job even if nobody edits `config.json`.
-fn legacy_launcher(words: &[String]) -> Option<Vec<String>> {
+/// --no-project, --]`. Only once the script file is gone (the next release deletes it): while it ships, the
+/// launcher stays as written, so a reinstall does not change the live job and putting the old launcher back in
+/// `config.json` is a real rollback. Once it is gone, a reinstall writes the new job without a `config.json` edit.
+fn legacy_launcher(words: &[String], exists: impl Fn(&str) -> bool) -> Option<Vec<String>> {
     let [first, .., flag, script] = words else { return None };
     let named = script == "kith-serve-launch" || script.ends_with("/kith-serve-launch");
-    (flag == "--script" && named)
+    (flag == "--script" && named && !exists(script))
         .then(|| [first.as_str(), "run", "--quiet", "--no-project", "--"].map(str::to_owned).to_vec())
 }
 
@@ -645,7 +646,7 @@ mod tests {
     }
 
     #[test]
-    fn the_old_launcher_maps_to_the_supervisors_by_name() {
+    fn the_old_launcher_maps_to_the_supervisors_once_its_script_is_gone() {
         let want = words(&["/k/bin/kith-uv", "run", "--quiet", "--no-project", "--"]);
         let old = words(&[
             "/k/bin/kith-uv",
@@ -654,18 +655,21 @@ mod tests {
             "--script",
             "/k/cli/current/share/kith/kernel/bin/kith-serve-launch",
         ]);
-        assert_eq!(legacy_launcher(&old), Some(want.clone()));
-        // The script need not exist, and a bare name counts.
+        let (gone, there) = (|_: &str| false, |_: &str| true);
+        assert_eq!(legacy_launcher(&old, gone), Some(want.clone()));
+        // The script still there: the launcher stays as written.
+        assert_eq!(legacy_launcher(&old, there), None);
+        // A bare name counts when missing.
         assert_eq!(
-            legacy_launcher(&words(&["uv", "--script", "kith-serve-launch"])),
+            legacy_launcher(&words(&["uv", "--script", "kith-serve-launch"]), gone),
             Some(words(&["uv", "run", "--quiet", "--no-project", "--"]))
         );
         // Anything else is left as the owner wrote it.
-        assert_eq!(legacy_launcher(&words(&UV)), None);
-        assert_eq!(legacy_launcher(&words(&["/k/bin/kith-uv", "run", "--script", "/x/other-launch"])), None);
-        assert_eq!(legacy_launcher(&words(&["kith-serve-launch"])), None);
-        assert_eq!(legacy_launcher(&words(&["--script", "/x/kith-serve-launch"])), None);
-        assert_eq!(legacy_launcher(&[]), None);
+        assert_eq!(legacy_launcher(&words(&UV), gone), None);
+        assert_eq!(legacy_launcher(&words(&["/k/bin/kith-uv", "run", "--script", "/x/other-launch"]), gone), None);
+        assert_eq!(legacy_launcher(&words(&["kith-serve-launch"]), gone), None);
+        assert_eq!(legacy_launcher(&words(&["--script", "/x/kith-serve-launch"]), gone), None);
+        assert_eq!(legacy_launcher(&[], gone), None);
     }
 
     #[test]
