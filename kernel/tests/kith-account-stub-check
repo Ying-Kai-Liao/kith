@@ -10,6 +10,7 @@ KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-account-stub-check.XXXXXX")
 T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
+REAL_KITH=${KITH_BIN:-$(command -v kith || true)}   # `kernel paths` (bin/kith's folders) goes to the real program
 export HOME=$T/home KITH_HOME=$T/kith
 unset KITH_STATE HQ_STATE KITH_MACHINE HQ_MACHINE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CORE KITH_BIN CLAUDE_CONFIG_DIR CODEX_HOME HQ_HOME
 mkdir -p "$HOME" "$KITH_HOME/state" "$T/bin"
@@ -19,8 +20,8 @@ K=$T/kernel
 cp -R "$KERNEL" "$K"
 LOG=$T/calls.log
 # A kith program that lists the account module and answers the hook probe; every other line is logged.
-printf '#!/bin/sh\ncase "$1 $2" in "kernel version") echo %s ;; "memory hook") echo phase ;; *) echo "$*" >> "%s" ;; esac\n' \
-  "'{\"abi\":1,\"modules\":[\"account\",\"account-state\"]}'" "$LOG" > "$T/bin/kith-fake"
+printf '#!/bin/sh\ncase "$1 $2" in "kernel version") echo %s ;; "memory hook") echo phase ;; "kernel paths") exec "%s" "$@" ;; *) echo "$*" >> "%s" ;; esac\n' \
+  "'{\"abi\":1,\"modules\":[\"account\",\"account-state\"]}'" "$REAL_KITH" "$LOG" > "$T/bin/kith-fake"
 chmod +x "$T/bin/kith-fake"
 ln -s "$K/bin/kith-account" "$T/bin/linked-account"
 
@@ -45,7 +46,8 @@ none "$K/bin/kith-account" list > "$T/out" 2> "$T/err"; rc=$?
 check "no program: one line, exit 1, nothing on stdout" "[ $rc = 1 ] && [ ! -s '$T/out' ] && [ \"\$(wc -l < '$T/err' | tr -d ' ')\" = 1 ] && grep -q 'needs the kith program' '$T/err'"
 
 KITH_CORE=python none "$K/bin/kith-account" add claude work > "$T/out" 2> "$T/err"; rc=$?
-check "KITH_CORE=python with no program: the line says it reaches no Python" "[ $rc = 1 ] && grep -q 'KITH_CORE=python reaches no Python body' '$T/err'"
+# Every call's folders come from the program now (kith_need_bin), so with none it is that one line before KITH_CORE is read.
+check "KITH_CORE=python with no program: the same one line, exit 1" "[ $rc = 1 ] && grep -q 'needs the kith program' '$T/err'"
 
 echo
 if [ "$fails" = 0 ]; then echo "all checks passed"; else echo "$fails failed"; exit 1; fi

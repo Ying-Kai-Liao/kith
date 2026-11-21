@@ -20,6 +20,8 @@ fn quiet() -> Config {
         exiting: || false,
         // Much shorter than the test waits: the daemon must keep going past it behind an embedded command.
         wait_for_embedded: Duration::from_millis(100),
+        package_probe: None,
+        lock_wait: crate::daemon::LOCK_WAIT,
     }
 }
 

@@ -145,6 +145,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -326,6 +334,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -511,6 +527,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -689,6 +713,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -874,6 +906,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -1055,6 +1095,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -1239,6 +1287,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -1428,6 +1484,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -1610,6 +1674,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -1796,6 +1868,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -1978,6 +2058,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -2164,6 +2252,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -2346,6 +2442,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -2532,6 +2636,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -2714,6 +2826,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -2900,6 +3020,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -3078,6 +3206,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -3260,6 +3396,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -3434,6 +3578,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -3614,6 +3766,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -3810,6 +3970,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -4004,6 +4172,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -4184,6 +4360,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -4362,6 +4546,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -4548,6 +4740,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -4727,6 +4927,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -4910,6 +5118,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -5089,6 +5305,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -5280,6 +5504,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -5467,6 +5699,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -5658,6 +5898,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -5845,6 +6093,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -6039,6 +6295,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -6226,6 +6490,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -6417,6 +6689,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -6604,6 +6884,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -6806,6 +7094,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -6997,6 +7293,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -7192,6 +7496,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -7380,6 +7692,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -7572,6 +7892,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -7759,6 +8087,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -7950,6 +8286,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -8137,6 +8481,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -8330,6 +8682,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -8645,6 +9005,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -8958,6 +9326,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -9150,6 +9526,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -9333,6 +9717,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -9527,6 +9919,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -9710,6 +10110,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -9904,6 +10312,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -10087,6 +10503,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -10278,6 +10702,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -10466,6 +10898,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -10644,6 +11084,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -10829,6 +11277,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -11011,6 +11467,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -11201,6 +11665,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -11387,6 +11859,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -11578,6 +12058,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -11761,6 +12249,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -11953,6 +12449,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -12151,6 +12655,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -12347,6 +12859,14 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
    ],
@@ -12537,6 +13057,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
@@ -12730,6 +13258,14 @@
    [
     "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
     "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",

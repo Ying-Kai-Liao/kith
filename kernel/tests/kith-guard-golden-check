@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# kith-guard-golden-check: reruns the generator of kernel/tests/difftest/golden-lib/guard-must-ask.json and diffs it with the
+# file, so the frozen answers cannot drift from kernel/lib/kith_guard.py while that file exists. Delete it with kith_guard.py.
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+GOLD=$KERNEL/tests/difftest/golden-lib
+out=$(env -i HOME=/kt/home KITH_HOME=/kt/kith PATH=/usr/bin:/bin python3 -I "$GOLD/gen-guard-must-ask.py") || { echo "FAIL the generator"; exit 1; }
+if [[ $out == "$(cat "$GOLD/guard-must-ask.json")" ]]; then
+  echo "ok   guard-must-ask.json is current"
+else
+  echo "FAIL guard-must-ask.json differs from what kith_guard.py answers; regenerate it (see the generator's docstring)"
+  exit 1
+fi

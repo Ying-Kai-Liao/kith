@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # kith-cost-launch-check — what the bash launch (kernel/bin/kith) does with the cost ledger, which stays in bash until the launch is
-# retired: (5a) with no program that has the cost ledger a guest is refused ("not running without the budget check") and the
-# owner still runs and sees the line, (5b) a renamed person whose old id spent past the budget is refused on both launch paths,
-# (8) the SessionStart hook of a terminal launch is the program's `kernel cost ... tag` with a program and no cost hook without one.
+# retired: (5a) with no usable program `kith` refuses the launch in one line, owner or guest (its folders come from the
+# program), (5b) a renamed person whose old id spent past the budget is refused on both launch paths,
+# (8) the SessionStart hook of a terminal launch is the program's `kernel cost ... tag` with a program and, without one, a refused launch and no hook.
 # Throwaway home, auth.json and ledger.
 #
 #   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-cost-launch-check
@@ -77,10 +77,10 @@ for prog in none old; do
   case $prog in none) NB=$T/nonexistent ;; old) NB=$T/old/kith ;; esac
   "$KITH" echo set limit 0.5 >/dev/null 2>&1
   launch bash kai X=1 KITH_BIN=$NB
-  check "$prog program, bash path: the owner still runs and sees the line" "[ \"\$(cat '$T/l.rc')\" = 0 ] && grep -q '^kith-cost: ' '$T/l.err'"
+  check "$prog program, bash path: the launch is refused in one line (kith's folders come from the program)" "[ \"\$(cat '$T/l.rc')\" = 1 ] && grep -q '^kith: ' '$T/l.err'"
   "$KITH" echo set limit 0 >/dev/null 2>&1
   launch bash sam X=1 KITH_BIN=$NB
-  check "$prog program, bash path: a member is refused with the line, not run unchecked" "[ \"\$(cat '$T/l.rc')\" = 3 ] && grep -q '^kith-cost: ' '$T/l.err' && grep -q 'not running without the budget check' '$T/l.err'"
+  check "$prog program, bash path: a member is refused too, not run unchecked" "[ \"\$(cat '$T/l.rc')\" = 1 ] && grep -q '^kith: ' '$T/l.err'"
 done
 
 # 5b. A renamed person: zed spent past the budget under the old id, then became zoe. The ledger still says zed, so zoe is
@@ -119,7 +119,7 @@ hooks X=1 > "$T/h.out"
 check "terminal launch, program with cost-ledger: the hook is the program's form" "grep -q 'kernel cost --kernel .* tag\$' '$T/h.out'"
 for NB in "$T/nonexistent" "$T/old/kith"; do
   hooks KITH_BIN=$NB > "$T/h.out"
-  check "terminal launch, no usable program ($(basename "$NB")): the settings are written, with no cost hook" "[ -s '$STUB_SETTINGS' ] && [ -s '$T/h.out' ] && ! grep -q 'kernel cost\\|/bin/kith-cost' '$T/h.out'"
+  check "terminal launch, no usable program ($(basename "$NB")): refused in one line, no hook written" "[ -z '$(cat "$T/h.out")' ] && grep -q '^kith: ' '$T/hook.out'"
 done
 
 echo
