@@ -8,6 +8,8 @@
 #   - a smoke.txt names a row that is not in its checks.tsv (run.sh checks this only after fetching the tools);
 #   - the key does not behave: a drift.sh edit changes it, an input edit does not, or an edit reaches a model it is not
 #     an input of (checked on a throwaway git copy of verification/).
+# It greps run.sh for literal paths only: a path built at run time (a variable joined from parts, a read through a tool
+# the model fetches) is not seen, so a run.sh change that reads a new file that way must add it to the tsv by hand.
 #
 #   kernel/tests/kith-model-keys-check                a few seconds
 #   kernel/tests/kith-model-keys-check --selftest     plants each fault in a copy and expects this check to fail naming it

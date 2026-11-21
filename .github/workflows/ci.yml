@@ -83,21 +83,22 @@ jobs:
       lease: ${{ steps.f.outputs.lease }}
       registry: ${{ steps.f.outputs.registry }}
       schedule_fire: ${{ steps.f.outputs.schedule_fire }}
-      # <marker>_full: no pass is remembered for the model's inputs, so its job runs the full rows and saves
-      # <marker>_key when they pass. revoke_shards: the shards with no pass, or ["smoke"] when all six have one.
+      # <marker>_full: the model's filter matched and no pass is remembered for its inputs, so its job runs the full
+      # rows and saves <marker>_key when they pass (every model's inputs sit inside its own filter). revoke_shards: on a
+      # revoke match, the shards with no pass; else, or when all six have one, ["smoke"].
       revoke_key: ${{ steps.keys.outputs.revoke_key }}
       revoke_shards: ${{ steps.revoke_shards.outputs.shards }}
-      writer_lock_full: ${{ steps.pass_writer_lock.outputs.cache-hit != 'true' }}
+      writer_lock_full: ${{ steps.f.outputs.writer_lock == 'true' && steps.pass_writer_lock.outputs.cache-hit != 'true' }}
       writer_lock_key: ${{ steps.keys.outputs.writer_lock_key }}
-      threads_full: ${{ steps.pass_threads.outputs.cache-hit != 'true' }}
+      threads_full: ${{ steps.f.outputs.threads == 'true' && steps.pass_threads.outputs.cache-hit != 'true' }}
       threads_key: ${{ steps.keys.outputs.threads_key }}
-      threads_slow_full: ${{ steps.pass_threads_slow.outputs.cache-hit != 'true' }}
+      threads_slow_full: ${{ steps.f.outputs.threads == 'true' && steps.pass_threads_slow.outputs.cache-hit != 'true' }}
       threads_slow_key: ${{ steps.keys.outputs.threads_slow_key }}
-      schedule_fire_full: ${{ steps.pass_schedule_fire.outputs.cache-hit != 'true' }}
+      schedule_fire_full: ${{ steps.f.outputs.schedule_fire == 'true' && steps.pass_schedule_fire.outputs.cache-hit != 'true' }}
       schedule_fire_key: ${{ steps.keys.outputs.schedule_fire_key }}
-      lease_full: ${{ steps.pass_lease.outputs.cache-hit != 'true' }}
+      lease_full: ${{ steps.f.outputs.lease == 'true' && steps.pass_lease.outputs.cache-hit != 'true' }}
       lease_key: ${{ steps.keys.outputs.lease_key }}
-      secrets_full: ${{ steps.pass_secrets.outputs.cache-hit != 'true' }}
+      secrets_full: ${{ steps.f.outputs.secrets == 'true' && steps.pass_secrets.outputs.cache-hit != 'true' }}
       secrets_key: ${{ steps.keys.outputs.secrets_key }}
       procstart: ${{ steps.f.outputs.procstart }}
       ios: ${{ steps.h.outputs.ios }}
@@ -444,10 +445,12 @@ jobs:
       - id: pass_revoke_6
         uses: actions/cache/restore@v4
         with: { path: .model-pass, key: "${{ steps.keys.outputs.revoke_key }}-s6of6", lookup-only: true }
-      # The revoke matrix: the shards with no pass, or one unsharded smoke leg when all six have one.
+      # The revoke matrix: on a revoke filter match, the shards with no pass; else, or when all six have one, one
+      # unsharded smoke leg.
       - name: Revoke shards to run
         id: revoke_shards
         env:
+          MATCH: ${{ steps.f.outputs.revoke }}
           H1: ${{ steps.pass_revoke_1.outputs.cache-hit }}
           H2: ${{ steps.pass_revoke_2.outputs.cache-hit }}
           H3: ${{ steps.pass_revoke_3.outputs.cache-hit }}
@@ -458,7 +461,7 @@ jobs:
           miss=""
           for i in 1 2 3 4 5 6; do
             hit=H$i
-            [ "${!hit}" = true ] || miss="$miss${miss:+,}$i"
+            [ "$MATCH" != true ] || [ "${!hit}" = true ] || miss="$miss${miss:+,}$i"
           done
           echo "shards=[${miss:-\"smoke\"}]" >> "$GITHUB_OUTPUT"
           echo "revoke shards to run: [${miss:-smoke}]"
@@ -623,8 +626,8 @@ jobs:
 
   # Exits 0 when every row of verification/threads/checks.tsv matches its expected pass/fail, so green means no
   # change from the recorded baseline (some rows are known findings on purpose).
-  # Every model job below runs its full rows only when its inputs have no remembered pass (needs.changes.outputs.<m>_full,
-  # the `Model pass keys` step), and saves the marker only after those full rows passed. thread-writers, thread-writers-slow,
+  # Every model job below runs its full rows only when its filter matched and its inputs have no remembered pass
+  # (needs.changes.outputs.<m>_full, the `Model pass keys` step), and saves the marker only after those full rows passed. thread-writers, thread-writers-slow,
   # secret-cards and holder-lease have no smoke rows, so a remembered pass skips them; model-drift reports covered code.
   thread-writers:
     needs: changes
@@ -682,8 +685,8 @@ jobs:
 
   # The same for the writer lock (WriterLock4.tla) and the holder's claim rules (Holder.tla): the fast rows of
   # verification/writer-lock/checks.tsv. The two slow rows (15-30 min each) run only with `run.sh --all`.
-  # The full fast rows run only when the model's inputs have no remembered pass (writer_lock_full); every other run
-  # (a change to covered code or to ci.yml) runs the smoke rows listed in verification/writer-lock/smoke.txt. Skipped
+  # The full fast rows run only when filter writer_lock matched and the model's inputs have no remembered pass
+  # (writer_lock_full); every other run runs the smoke rows listed in verification/writer-lock/smoke.txt. Skipped
   # in check and model mode, where `changes` is skipped.
   writer-lock:
     needs: changes
@@ -715,7 +718,8 @@ jobs:
           key: ${{ needs.changes.outputs.writer_lock_key }}
 
   # The same for revoking a person: verification/revoke/checks.tsv, every row as expected.
-  # One leg per shard with no remembered pass (revoke_shards); when all six have one, a single leg runs the smoke rows
+  # On a revoke filter match, one leg per shard with no remembered pass (revoke_shards); otherwise, or when all six
+  # have one, a single leg runs the smoke rows
   # (verification/revoke/smoke.txt) unsharded, so every smoke row and the Reconcile tables run.
   revoke-access:
     name: revoke-access (${{ matrix.shard == 'smoke' && 'smoke' || format('{0}/6', matrix.shard) }})
@@ -877,8 +881,8 @@ jobs:
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         env:
-          # mode=model is the by-hand full model run; otherwise full only when the inputs have no remembered pass,
-          # else smoke rows (verification/schedule-fire/smoke.txt).
+          # mode=model is the by-hand full model run; otherwise full only when filter schedule_fire matched and the
+          # inputs have no remembered pass, else smoke rows (verification/schedule-fire/smoke.txt).
           FULL: ${{ (inputs.mode == 'model' || needs.changes.outputs.schedule_fire_full == 'true') && 'true' || '' }}
         run: verification/schedule-fire/run.sh $([ "$FULL" = true ] || echo --smoke)
       # mode=model skips `changes`, so there is no key and nothing is saved.
