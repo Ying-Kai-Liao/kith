@@ -127,8 +127,8 @@ How it is made hermetic:
   The algorithm itself is checked by the Rust unit tests against values the Python printed.
 - **Python's own error texts.** An `invalid JSON (...)` reason is Python's `json` wording (`Expecting value: line 1 column 1 (char 0)`);
   the Rust side takes it from `secrets::pyjson::error_of`. Git's own words in a failed fetch are masked.
-- **The one Python left.** The judging of `settings.json` allow rules against the must-ask classes (`kith_guard.must_ask_rule`)
-  stays in Python until the host moves; the Rust side calls it only when `settings.json` has rules to judge.
+- **The must-ask judge.** `kith_guard.must_ask_rule` is Rust (`core/kernel/src/launch/judge.rs`); `golden-lib/guard-must-ask.json`
+  freezes the Python's answers and `kernel/tests/kith-guard-golden-check` reruns its generator to catch drift.
 
 ### Schedules (M4-0)
 
