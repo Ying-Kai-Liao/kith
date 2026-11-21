@@ -131,13 +131,13 @@ thread_local! {
 }
 
 /// Whether the thread holds the core lock (a test's check that nothing reads a folder then).
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn lock_held() -> bool {
     LOCK_HELD.with(std::cell::Cell::get)
 }
 
 /// A test that runs a call without the daemon says so, for the same check.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn mark_lock_held(held: bool) {
     LOCK_HELD.with(|h| h.set(held));
 }
