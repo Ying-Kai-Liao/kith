@@ -685,9 +685,13 @@ pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<
     })?;
     // The caller's view of the folders (`home`, `kernel`, `env` of the params, as `people.*` reads them) goes in the ctx:
     // a module whose sources are the caller's own files (auth.json) is asked about those; the marker stays the daemon's.
+    // No call here goes through `packages::run_call`, so the cache has nothing validated for it: the ctx reads the disk. No
+    // cutover module asks for a package fact (only auth.json and the serve folder), so nothing is read under the lock.
+    let mut ctx = crate::authority::call::ctx_of(core, params)?;
+    ctx.packages = kith_kernel::secrets::Packages::Disk;
     serve_json(
         &registry(),
-        &Env::with_paths(folders).with_ctx(crate::authority::call::ctx_of(core, params)?),
+        &Env::with_paths(folders).with_ctx(ctx),
         core.conn(),
         name,
         opt_in_env(name),

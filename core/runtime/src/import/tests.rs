@@ -97,6 +97,7 @@ impl Fixture {
             now_ms: NOW,
             sandbox: Sandbox::Fixed(false),
             serve: ServeDir::Fixed(root.join("serve")),
+            packages: kith_kernel::secrets::Packages::Disk,
         };
         Self {
             _t: t,

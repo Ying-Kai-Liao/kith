@@ -101,6 +101,13 @@ impl Core {
     /// The folders of the caller's view (see [`Self::call`]) and its kernel folder: the params' `kernel`, `home` and
     /// `env`, else the folders this core was opened with.
     pub(crate) fn folders_for(&self, params: &Value) -> Result<(Paths, PathBuf)> {
+        folders_in(self.folders(), params)
+    }
+}
+
+/// [`Core::folders_for`] without the core: `own` are the folders the core was opened with. No disk is read.
+pub(crate) fn folders_in(own: Option<&Paths>, params: &Value) -> Result<(Paths, PathBuf)> {
+    {
         let kernel = params.get("kernel").and_then(Value::as_str);
         let home = params.get("home").and_then(Value::as_str);
         let env = params.get("env").and_then(Value::as_object);
@@ -126,7 +133,7 @@ impl Core {
                 PathBuf::from(k),
             ))
         } else {
-            let folders = self.folders().cloned().ok_or_else(|| {
+            let folders = own.cloned().ok_or_else(|| {
                 Error::NotServed("kith-core: this core was opened without its folders".into())
             })?;
             let kernel = folders.home.join("kernel");

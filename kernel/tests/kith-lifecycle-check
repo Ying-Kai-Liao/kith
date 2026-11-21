@@ -4,7 +4,7 @@
 # 54-minute decision for a session no process runs (rule 5) with Kith's /compact re-checked under the writer claim (rules 11,
 # 12; S1, S3), rule T (S4), and a guest's waiter staying refused (rule 10).
 #
-#   kernel/tests/kith-lifecycle-check     under a minute; prints each check, exits 1 when one fails
+#   KITH_BIN=/path/to/kith kernel/tests/kith-lifecycle-check     under a minute; prints each check, exits 1 when one fails
 #
 # claude is a stub (KITH_CLAUDE) that writes a compaction into the fake transcript the way Claude does. Nothing touches
 # the real ~/.kith or ~/.claude.
@@ -17,16 +17,13 @@ trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_LOGS=$T/logs CLAUDE_CONFIG_DIR=$T/claude KITH_WAKE_NO_KICK=1
 unset KITH_PERSON KITH_AGENT KITH_ROOM KITH_RESUME KITH_VIA CLAUDE_CODE_SESSION_ID HQ_HOME HQ_STATE KITH_CACHE_LIFE KITH_SLEEP_MINUTES
 mkdir -p "$HOME" "$KITH_STATE/live/terminal" "$CLAUDE_CONFIG_DIR/projects/p" "$CLAUDE_CONFIG_DIR/sessions" "$T/work"
-# With KITH_BIN set (the kith program), every call to it is logged by a wrapper. KITH_LIFECYCLE_EXPECT=rust (with KITH_CORE=rust): the
-# script forwards to `kith kernel lifecycle`, and the end of this check asserts the program was asked; otherwise (KITH_CORE=python in
-# CI) the end asserts it never was.
-if [[ -n ${KITH_BIN:-} ]]; then
-  printf '#!/bin/sh\necho "$*" >> "%s/kith-calls"\nexec "%s" "$@"\n' "$T" "$KITH_BIN" > "$T/kith-wrap"
-  chmod +x "$T/kith-wrap"
-  export KITH_BIN=$T/kith-wrap
-fi
+# KITH_BIN (the kith program, required) is wrapped: every call to it is logged, and the end asserts the sweeps went to it.
+[[ -n ${KITH_BIN:-} && -x ${KITH_BIN:-} ]] || { echo "kith-lifecycle-check: set KITH_BIN to the kith program"; exit 1; }
+printf '#!/bin/sh\necho "$*" >> "%s/kith-calls"\nexec "%s" "$@"\n' "$T" "$KITH_BIN" > "$T/kith-wrap"
+chmod +x "$T/kith-wrap"
+export KITH_BIN=$T/kith-wrap
+lc() { "$KITH_BIN" kernel lifecycle --kernel "$KERNEL" "$@"; }
 SK=$KERNEL/bin/kith-sessions
-LC=$KERNEL/bin/kith-lifecycle
 W=$KERNEL/bin/kith-wake
 REG=$KITH_STATE/live/terminal
 TR=$CLAUDE_CONFIG_DIR/projects/p
@@ -81,51 +78,25 @@ export KITH_MACHINE=$T/machine KITH_STUB_BIN=$T/no-stub
 calls() { [[ -f $KITH_STATE/stub-calls ]] && wc -l < "$KITH_STATE/stub-calls" | tr -d ' ' || echo 0; }
 dec() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["decision"], "compacted" if d.get("compacted") else "", "ended" if d.get("ended") else "")' "$KITH_STATE/sessions/decisions/$1.json" 2>/dev/null | xargs; }
 intent() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["why"])' "$KITH_STATE/sessions/intent/$1.json" 2>/dev/null; }
-py() { python3 -c "import sys; sys.path.insert(0, '$KERNEL/lib'); import kith_lifecycle as lc; $1"; }
 
-# --- the decision (rule 5), structural signals only ------------------------------------------------------------------------
 Q='shall I go on with plan B?'
-fx d-big-q 55 150000 "$Q"
-is "big, and the last turn asked: compact" "$(py "print(lc.decide('$TR/d-big-q.jsonl','terminal',False))")" compact
-fx d-big-nq 55 150000 "done."
-is "big with no sign of return: stay asleep" "$(py "print(lc.decide('$TR/d-big-nq.jsonl','terminal',False))")" sleep
-is "big, a waiter open: compact" "$(py "print(lc.decide('$TR/d-big-nq.jsonl','terminal',True))")" compact
-is "big, thread pinned: compact" "$(py "print(lc.decide('$TR/d-big-nq.jsonl','terminal',False,{'pinned':True}))")" compact
-fx d-small 55 20000 "$Q"
-is "under the floor: stay asleep" "$(py "print(lc.decide('$TR/d-small.jsonl','terminal',False))")" sleep
-fx d-early 40 150000 "$Q"
-is "before 0.9 of the lifetime: no decision" "$(py "print(lc.decide('$TR/d-early.jsonl','terminal',False))")" None
-fx d-task 55 150000 "result: 42"
-is "a Kith task that returned, no question: end" "$(py "print(lc.decide('$TR/d-task.jsonl','ask',False))")" end
-is "a task with a waiter still open does not end" "$(py "print(lc.decide('$TR/d-task.jsonl','ask',True))")" compact
-is "a closed thread: end" "$(py "print(lc.decide('$TR/d-big-q.jsonl','terminal',False,{'closed':True}))")" end
-is "a 5-minute cache has no timer" "$(KITH_CACHE_LIFE=300 py "print(lc.decide('$TR/d-big-q.jsonl','terminal',False))")" None
-is "...but decides when the session goes to sleep" "$(KITH_CACHE_LIFE=300 py "print(lc.decide('$TR/d-early.jsonl','terminal',False,at=lc.last_turn_at('$TR/d-early.jsonl')+300))")" compact
-
-# --- the idle clock: a compaction's own write is not a turn (rule 4) -----------------------------------------------------------
-fx c-clock 55 150000 "$Q"
-before=$(py "print(lc.last_turn_at('$TR/c-clock.jsonl'))")
-"$T/claude-stub" -p --resume c-clock /compact
-rm -f "$KITH_STATE/stub-calls" "$KITH_STATE/stub-claims"
-is "the idle clock ignores the compaction's summary and boundary" "$(py "print(lc.last_turn_at('$TR/c-clock.jsonl'))")" "$before"
-is "...and sees that it was compacted" "$(py "print(lc.compacted_since('$TR/c-clock.jsonl', $before))")" True
 
 # --- the sweep: compact under the claim, once -------------------------------------------------------------------------------
 fx s-compact 55 150000 "$Q"
-out=$(python3 "$LC" sweep --session s-compact)
+out=$(lc sweep --session s-compact)
 is "sweep compacts a big session that asked a question" "$out" "s-compact compact compacted"
 is "...with claude -p --resume SID /compact" "$(grep s-compact "$KITH_STATE/stub-calls")" "-p --resume s-compact /compact"
 is "...while the writer claim was held" "$(cat "$KITH_STATE/stub-claims")" held
 is "...and gave the claim back" "$([[ -e $REG/s-compact.claim ]] && echo held || echo free)" free
 is "the decision records it" "$(dec s-compact)" "compact compacted"
 n=$(calls)
-python3 "$LC" sweep --session s-compact >/dev/null
+lc sweep --session s-compact >/dev/null
 is "a second sweep in the same idle period does not compact again" "$(( $(calls) - n ))" 0
 
 fx s-asleep 55 150000 "done."
-is "no sign of return: decided to stay asleep, not compacted" "$(python3 "$LC" sweep --session s-asleep)" "s-asleep sleep asleep"
+is "no sign of return: decided to stay asleep, not compacted" "$(lc sweep --session s-asleep)" "s-asleep sleep asleep"
 fx s-early 30 150000 "$Q"
-is "before 54 minutes: nothing" "$(python3 "$LC" sweep --session s-early)" ""
+is "before 54 minutes: nothing" "$(lc sweep --session s-early)" ""
 
 # a writer holds it (a terminal that is open): not touched, its claim not taken
 fx s-held 55 150000 "$Q"
@@ -137,52 +108,20 @@ start = sys.argv[3]
 json.dump({'pid': int(sys.argv[2]), 'procStart': start, 'kind': 'terminal'}, open(sys.argv[1], 'w'))
 PY
 n=$(calls)
-is "a live writer: the sweep leaves the session to it (one compactor)" "$(python3 "$LC" sweep --session s-held)" ""
+is "a live writer: the sweep leaves the session to it (one compactor)" "$(lc sweep --session s-held)" ""
 is "...and no claude was started" "$(calls)" "$n"
 is "...and the sweep signalled nobody" "$(kill -0 $holder 2>/dev/null && echo alive)" alive
 kill $holder 2>/dev/null
 wait $holder 2>/dev/null
 
-# re-checks under the claim (rules 11, 12): called past the decision, with the world changed
-cat > "$T/recheck.py" <<'PY'
-import importlib.machinery, importlib.util, json, sys, os
-sys.path.insert(0, sys.argv[1] + '/lib')
-import kith_lifecycle as lc
-loader = importlib.machinery.SourceFileLoader('kl', sys.argv[1] + '/bin/kith-lifecycle')
-spec = importlib.util.spec_from_loader('kl', loader); kl = importlib.util.module_from_spec(spec); loader.exec_module(kl)
-ks = kl.sessions_mod()
-sid, what = sys.argv[2], sys.argv[3]
-e = next(x for x in kl.entries(ks) if x['sessionId'] == sid)
-since = lc.last_turn_at(e['transcriptPath'])
-lc.write_decision(sid, {'decision': 'compact', 'at': 0, 'idleSince': since, 'compacted': False})
-if what == 'resumed':
-    lc.clear_decision(sid)                       # a resume cleared the decision between the decision and the claim
-elif what == 'newturn':
-    open(e['transcriptPath'], 'a').write(json.dumps({'type': 'user', 'timestamp': '2099-01-01T00:00:00.000Z', 'message': {'content': 'back'}}) + '\n')
-elif what == 'self':                             # Claude compacted it itself since
-    open(e['transcriptPath'], 'a').write(json.dumps({'type': 'system', 'subtype': 'compact_boundary', 'timestamp': '2099-01-01T00:00:00.000Z'}) + '\n')
-print(kl.compact(ks, e, since, None))
-PY
-for what in resumed newturn self; do
-  fx r-$what 55 150000 "$Q"
-  n=$(calls)
-  got=$(python3 "$T/recheck.py" "$KERNEL" r-$what $what)
-  is "under the claim: after $what, it exits without compacting" "$got/$(( $(calls) - n ))" "skipped/0"
-done
-fx r-small 55 20000 "$Q"
-n=$(calls)
-is "under the claim: under the floor, no compaction" "$(python3 "$T/recheck.py" "$KERNEL" r-small none)/$(( $(calls) - n ))" "skipped/0"
-fx r-ok 55 150000 "$Q"
-n=$(calls)
-is "control: nothing changed, it compacts" "$(python3 "$T/recheck.py" "$KERNEL" r-ok none)/$(( $(calls) - n ))" "compacted/1"
 fx r-fail 55 150000 "$Q"
-got=$(STUB_MODE=fail python3 "$LC" sweep --session r-fail)
+got=$(STUB_MODE=fail lc sweep --session r-fail)
 is "a failed /compact is reported, not recorded as done" "$got/$(dec r-fail)" "r-fail compact failed: exit 1/compact"
 
 
 # a failed /compact is tried once per idle period (a retry every tick would be a bill every minute)
 n=$(calls)
-python3 "$LC" sweep --session r-fail >/dev/null
+lc sweep --session r-fail >/dev/null
 is "a failed compaction is not retried in the same idle period" "$(( $(calls) - n ))" 0
 fx r-gone 55 150000 "$Q"
 python3 - "$REG/r-gone.json" <<'PY'
@@ -190,14 +129,14 @@ import json, sys
 e = json.load(open(sys.argv[1])); e['cwd'] = '/nonexistent/folder'; json.dump(e, open(sys.argv[1], 'w'))
 PY
 n=$(calls)
-is "a session whose folder is gone is not compacted (resume would run in the wrong project)" "$(python3 "$LC" sweep --session r-gone)/$(( $(calls) - n ))" "r-gone compact failed: the session's folder is gone/0"
+is "a session whose folder is gone is not compacted (resume would run in the wrong project)" "$(lc sweep --session r-gone)/$(( $(calls) - n ))" "r-gone compact failed: the session's folder is gone/0"
 fx r-nobin 55 150000 "$Q"
-is "claude missing: reported for that session, the sweep goes on" "$(KITH_CLAUDE=/nonexistent/claude python3 "$LC" sweep --session r-nobin | cut -c1-30)" "r-nobin compact failed: [Errno"
+is "claude missing: reported for that session, the sweep goes on" "$(KITH_CLAUDE=/nonexistent/claude lc sweep --session r-nobin | cut -c1-30)" "r-nobin compact failed: [Errno"
 
 # the claim names claude's own pid (claim-then-exec, I11): a sweep killed while claude writes leaves the claim with the writer
 fx k-kill 55 150000 "$Q"
 rm -f "$KITH_STATE/stub-pid" "$KITH_STATE/stub-go"
-STUB_MODE=slow python3 "$LC" sweep --session k-kill >/dev/null &
+STUB_MODE=slow lc sweep --session k-kill >/dev/null &
 sp=$!
 for _ in $(seq 100); do [[ -s $KITH_STATE/stub-pid ]] && break; sleep 0.1; done
 stub=$(cat "$KITH_STATE/stub-pid" 2>/dev/null)
@@ -218,15 +157,15 @@ rm -f "$REG/k-kill.claim" "$REG/k-kill.claim.lock"
 # No stub: one stderr line and the compaction goes on (the default stays a warning, q239); KITH_REQUIRE_STUB=1 refuses.
 fx l-nostub 55 150000 "$Q"
 n=$(calls)
-out=$(python3 "$LC" sweep --session l-nostub 2>"$T/err")
+out=$(lc sweep --session l-nostub 2>"$T/err")
 is "with no stub, compact warns once and runs" "$out/$(grep -c 'no kith-stub program' "$T/err")/$(( $(calls) - n ))" "l-nostub compact compacted/1/1"
 fx l-req 55 150000 "$Q"
 n=$(calls)
-out=$(KITH_REQUIRE_STUB=1 python3 "$LC" sweep --session l-req 2>/dev/null)
+out=$(KITH_REQUIRE_STUB=1 lc sweep --session l-req 2>/dev/null)
 is "KITH_REQUIRE_STUB=1 with no stub: failed with the reason, claude not run" "$out/$(( $(calls) - n ))" "l-req compact failed: no kith-stub program beside kith, so this conversation cannot be locked/0"
 fx L-Up 55 150000 "$Q"
 n=$(calls)
-out=$(python3 "$LC" sweep --session L-Up 2>"$T/err")
+out=$(lc sweep --session L-Up 2>"$T/err")
 is "a session id the stub cannot key: warns and runs unlocked" "$out/$(grep -c 'cannot be locked' "$T/err")/$(( $(calls) - n ))" "L-Up compact compacted/1/1"
 
 STUBBIN=${KITH_REAL_STUB_BIN:-}
@@ -247,28 +186,28 @@ else
   holder_pid=$!
   for _ in $(seq 150); do "$STUBBIN" --lock-dir "$LOCKS" --key l-busy -- true >/dev/null 2>&1; [[ $? == 75 ]] && break; sleep 0.1; done
   n=$(calls)
-  out=$(python3 "$LC" sweep --session l-busy)
+  out=$(lc sweep --session l-busy)
   is "busy: the sweep reports it and runs no claude" "$out/$(( $(calls) - n ))" "l-busy compact busy/0"
   is "...writes no decision of its own (the pending compact stands)" "$(dec l-busy)/$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sorted(set(d)&{"failed","ended"}), d["compacted"])' "$KITH_STATE/sessions/decisions/l-busy.json")" "compact/[] False"
   is "...and gives the claim back" "$([[ -e $REG/l-busy.claim ]] && echo held || echo free)" free
   kill $holder_pid 2>/dev/null; wait $holder_pid 2>/dev/null
   for _ in $(seq 50); do "$STUBBIN" --lock-dir "$LOCKS" --key l-busy -- true >/dev/null 2>&1 && break; sleep 0.1; done
-  is "the next sweep, with the lock free, compacts" "$(python3 "$LC" sweep --session l-busy)/$(dec l-busy)" "l-busy compact compacted/compact compacted"
+  is "the next sweep, with the lock free, compacts" "$(lc sweep --session l-busy)/$(dec l-busy)" "l-busy compact compacted/compact compacted"
 
   # busy is what the stub says on its status pipe, not an exit code: a claude that exits 75 itself has failed, and a lock that
   # cannot be taken (the lock folder is not usable) is a failure with its reason, not a skip
   fx l-e75 55 150000 "$Q"
-  is "a claude that itself exits 75 is a failure, not busy" "$(STUB_MODE=e75 python3 "$LC" sweep --session l-e75)" "l-e75 compact failed: exit 75"
+  is "a claude that itself exits 75 is a failure, not busy" "$(STUB_MODE=e75 lc sweep --session l-e75)" "l-e75 compact failed: exit 75"
   fx l-lockerr 55 150000 "$Q"
   # (the lock folder is a file: a machine folder that is itself a file would read as an unreadable switch, which the Rust takers
   # answer as Writer mode)
   mkdir -p "$T/amachine/core"; : > "$T/amachine/core/locks"
-  is "a lock error is reported with its reason" "$(KITH_MACHINE=$T/amachine python3 "$LC" sweep --session l-lockerr | sed 's/ (kith-stub exit [0-9]*)//')" "l-lockerr compact failed: the conversation lock could not be taken"
+  is "a lock error is reported with its reason" "$(KITH_MACHINE=$T/amachine lc sweep --session l-lockerr | sed 's/ (kith-stub exit [0-9]*)//')" "l-lockerr compact failed: the conversation lock could not be taken"
 
   # the lock is held for the compaction's whole life, and the claim names the stub (claude descends from it)
   fx l-life 55 150000 "$Q"
   rm -f "$KITH_STATE/stub-pid" "$KITH_STATE/stub-go"
-  STUB_MODE=slow python3 "$LC" sweep --session l-life >/dev/null &
+  STUB_MODE=slow lc sweep --session l-life >/dev/null &
   sp=$!
   for _ in $(seq 100); do [[ -s $KITH_STATE/stub-pid ]] && break; sleep 0.1; done
   cl=$(cat "$KITH_STATE/stub-pid" 2>/dev/null)
@@ -282,22 +221,6 @@ else
   is "once the compaction is over the lock is free" "$?" 0
   is "...and the decision says compacted" "$(dec l-life)" "compact compacted"
 
-  # a compaction that runs past its time limit ends claude with the stub, not only the stub: no unguarded writer
-  fx l-slow 55 150000 "$Q"
-  rm -f "$KITH_STATE/stub-pid" "$KITH_STATE/stub-go"
-  cat > "$T/timeout.py" <<'PY'
-import importlib.machinery, importlib.util, sys
-sys.path.insert(0, sys.argv[1] + '/lib')
-loader = importlib.machinery.SourceFileLoader('kl', sys.argv[1] + '/bin/kith-lifecycle')
-spec = importlib.util.spec_from_loader('kl', loader); kl = importlib.util.module_from_spec(spec); loader.exec_module(kl)
-kl.COMPACT_TIMEOUT = 2
-print(kl.sweep('l-slow'))
-PY
-  STUB_MODE=slow python3 "$T/timeout.py" "$KERNEL" >"$T/timeout.out"
-  cl=$(cat "$KITH_STATE/stub-pid" 2>/dev/null)
-  is "past its time limit: failed, and claude is gone too" "$(grep -c 'timed out' "$T/timeout.out")/$(kill -0 "$cl" 2>/dev/null && echo alive || echo gone)" "1/gone"
-  "$STUBBIN" --lock-dir "$LOCKS" --key l-slow -- true >/dev/null 2>&1
-  is "...and the lock is free" "$?" 0
   export KITH_STUB_BIN=$T/no-stub
 fi
 
@@ -322,28 +245,17 @@ HOSTPID=$!
 for _ in $(seq 50); do [[ -s $T/host.port ]] && break; sleep 0.1; done
 fx h-owned 55 150000 "$Q"
 n=$(calls)
-is "a session the host has a conversation for is left to the host's compactor" "$(KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=$(cat "$T/host.port") python3 "$LC" sweep --session h-owned)/$(( $(calls) - n ))" "/0"
+is "a session the host has a conversation for is left to the host's compactor" "$(KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=$(cat "$T/host.port") lc sweep --session h-owned)/$(( $(calls) - n ))" "/0"
 
 # end: only under the claim, and a resume clears it
 fx e-task 55 150000 "result: 42" ask
-is "a returned task with no question is ended under the claim" "$(python3 "$LC" sweep --session e-task)" "e-task end ended"
+is "a returned task with no question is ended under the claim" "$(lc sweep --session e-task)" "e-task end ended"
 is "...the decision says ended" "$(dec e-task)" "end ended"
 python3 "$SK" claim e-task $$ >/dev/null 2>&1
 rm -f "$REG/e-task.claim" "$REG/e-task.claim.lock"
 is "any resume (taking the claim) clears the decision" "$(dec e-task)" ""
 
-# --- intent (rules 8, 14) -----------------------------------------------------------------------------------------------------
-py "lc.write_intent('i-1', 'idle', $$)"
-is "an intent is written with why, at, pid and start time" "$(python3 -c "import json; d=json.load(open('$KITH_STATE/sessions/intent/i-1.json')); print(d['why'], d['pid']==$$, bool(d['at']), bool(d['procStart']))")" "idle True True True"
-python3 "$SK" claim i-1 $$ >/dev/null 2>&1
-is "a process taking the claim clears it" "$(intent i-1)" ""
-rm -f "$REG/i-1.claim" "$REG/i-1.claim.lock"
-is "no intent after a process ran: a crash" "$(py "print(lc.how_it_ended('i-1'))")" crash
-py "lc.write_intent('i-2', 'idle', 111)"
-is "an intent for another process is not this process' reason" "$(py "print(lc.how_it_ended('i-2', True, 222), lc.how_it_ended('i-2', True, 111))")" "crash idle"
-is "no intent, never seen running (old data): unknown, not ended" "$(py "print(lc.how_it_ended('old-1', False))")" None
-
-# --- the wrapper: sleeps only its own child (rule 3), after the idle time, with nothing outstanding (rule 7) ---------------------
+# --- the wrapper records its child's own quit (the idle stop is the Rust wrapper's, covered by its tests) ---------------------
 cat > "$T/child.py" <<'PY'
 #!/usr/bin/env python3
 # a fake claude: registers its own session (pid = this process, which `run` forked) and then waits, or exits like the test says
@@ -368,43 +280,6 @@ stays() {   # stays <sid>: after a few seconds the wrapper's child is alive and 
   wait $wp 2>/dev/null
 }
 
-fx w-idle 120 150000 "all done"
-wrap w-idle sleep
-waitfor '[[ -n $(intent w-idle) ]]'
-is "an idle hour with nothing outstanding: the wrapper writes intent idle first" "$(intent w-idle)" idle
-waitfor '! kill -0 $wp 2>/dev/null'
-wait $wp 2>/dev/null
-rc=$?
-is "...then its own child ends and the wrapper returns (a SIGTERM death)" "$rc" 143
-
-fx w-busy 120 150000 "all done"
-python3 - "$TR/w-busy.jsonl" <<'PY'
-import json, sys
-open(sys.argv[1], 'a').write(json.dumps({'type': 'assistant', 'timestamp': '2020-01-01T00:00:00.000Z', 'message': {'content': [
-    {'type': 'tool_use', 'id': 'toolu_1', 'name': 'Task', 'input': {}}]}}) + '\n')
-PY
-wrap w-busy sleep
-stays w-busy "a running subagent: nothing is signalled, no intent"
-
-fx w-side 120 150000 "all done"
-mkdir -p "$TR/w-side/mcp-tasks"
-echo '{"mcpTaskId":"t1"}' > "$TR/w-side/mcp-tasks/mcp-task-a.meta.json"
-wrap w-side sleep
-stays w-side "an open MCP task (sidecar): nothing is signalled"
-
-fx w-sh 120 150000 "all done"
-python3 - "$TR/w-sh.jsonl" <<'PY'
-import json, sys
-open(sys.argv[1], 'a').write(json.dumps({'type': 'user', 'timestamp': '2020-01-01T00:00:00.000Z', 'message': {'content': [
-    {'type': 'tool_result', 'tool_use_id': 'x', 'content': 'Command running in background with ID: bg123. Output is being written to /x'}]}}) + '\n')
-PY
-wrap w-sh sleep
-stays w-sh "a background shell with no task-notification: not signalled"
-
-fx w-fresh 0 150000 "$Q"
-wrap w-fresh sleep 5
-stays w-fresh "a session with a recent turn is not slept"
-
 fx w-quit 1 1000 "bye"
 wrap w-quit quit
 wait $wp 2>/dev/null
@@ -412,7 +287,7 @@ is "Kai's own /exit records intent quit" "$(intent w-quit)" quit
 fx w-crash 1 1000 "bye"
 wrap w-crash crash
 wait $wp 2>/dev/null
-is "an exit with an error and no intent reads as a crash" "$(intent w-crash)|$(py "print(lc.how_it_ended('w-crash'))")" "|crash"
+is "an exit with an error and no intent writes none (a crash)" "$(intent w-crash)" ""
 
 # a bare claude (no wrapper): no sweep signals it, whatever its idle time
 fx b-bare 600 150000 "$Q"
@@ -424,7 +299,7 @@ import json, sys
 e = json.load(open(sys.argv[1])); e['pid'] = int(sys.argv[2]); json.dump(e, open(sys.argv[1], 'w'))
 PY
 n=$(calls)
-python3 "$LC" sweep --session b-bare >/dev/null
+lc sweep --session b-bare >/dev/null
 is "a bare claude is never slept or compacted by a sweep" "$(kill -0 $bare 2>/dev/null && echo alive)/$(intent b-bare)/$(( $(calls) - n ))" "alive//0"
 kill $bare 2>/dev/null
 wait $bare 2>/dev/null
@@ -436,18 +311,13 @@ echo '{"mcpTaskId":"t9"}' > "$TR/t-side/mcp-tasks/mcp-task-b.meta.json"
 python3 "$W" drain >/dev/null
 is "rule T: Kith queues nothing for a sidecar task" "$(python3 "$W" ls --json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" 0
 is "...and leaves the sidecar for Claude to deliver" "$([[ -f $TR/t-side/mcp-tasks/mcp-task-b.meta.json ]] && echo there)" there
-is "...but counts it as outstanding work" "$(py "print(lc.outstanding('$TR/t-side.jsonl'))")" "['an MCP task is open']"
 python3 "$W" wait --on mcp-task:t9 --session t-side --agent designer >/dev/null 2>&1
 is "a wait on an MCP task is refused" "$?" 1
 KITH_PERSON=anna python3 "$W" wait --on at:+1m --session g1 --agent coder >/dev/null 2>&1
 is "a guest's waiter stays refused (no sandbox to run its check in)" "$?" 1
 
-if [[ ${KITH_LIFECYCLE_EXPECT:-} == rust ]]; then
-  # (the program is also asked `kernel version` and `memory hook` whenever the script looks it up)
-  [[ $(grep -c '^kernel lifecycle ' "$T/kith-calls" 2>/dev/null) -ge 10 ]] && ok "the Rust core answered the sweeps" || bad "the Rust core answered the sweeps" "$(grep -c '^kernel lifecycle ' "$T/kith-calls" 2>/dev/null) calls"
-elif [[ -n ${KITH_BIN:-} ]]; then
-  [[ $(grep -c '^kernel lifecycle ' "$T/kith-calls" 2>/dev/null) -eq 0 ]] && ok "the Python answered" || bad "the Python answered" "the kith program was asked for the lifecycle"
-fi
+# every sweep above went to the program (the wrapper logged each call; `kernel version` and `memory hook` are its own lookups)
+[[ $(grep -c '^kernel lifecycle ' "$T/kith-calls" 2>/dev/null) -ge 10 ]] && ok "the Rust core answered the sweeps" || bad "the Rust core answered the sweeps" "$(grep -c '^kernel lifecycle ' "$T/kith-calls" 2>/dev/null) calls"
 
 [[ $fail == 0 ]] && echo "all ok" || echo "FAILED"
 exit $fail

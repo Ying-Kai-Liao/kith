@@ -48,6 +48,7 @@ impl Rig {
             now_ms: 1_800_000_000_000.0,
             sandbox: Sandbox::Fixed(false),
             serve: ServeDir::Fixed(m.join("serve")),
+            packages: kith_kernel::secrets::Packages::Disk,
         };
         mac_id(&m).unwrap();
         let mut r = Self {

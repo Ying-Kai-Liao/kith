@@ -122,6 +122,7 @@ fn rig_with(limit: Option<usize>) -> (Rig, Vec<Box<dyn Module>>) {
         now_ms: 1_800_000_000_000.0,
         sandbox: Sandbox::Fixed(false),
         serve: ServeDir::Fixed(root.join("serve")),
+        packages: kith_kernel::secrets::Packages::Disk,
     };
     std::fs::write(&ctx.auth, original().to_string()).unwrap();
     let (sealed, vault, os) = (Shared::default(), Shared::default(), Shared::default());

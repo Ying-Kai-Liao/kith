@@ -2203,6 +2203,7 @@ dependencies = [
  "fs2",
  "kith-procstart",
  "libc",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
