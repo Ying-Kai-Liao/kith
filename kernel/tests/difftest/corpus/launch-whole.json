@@ -139,16 +139,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -328,16 +320,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -517,16 +501,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -705,16 +681,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -894,16 +862,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -1083,16 +1043,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -1275,16 +1227,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -1468,16 +1412,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -1660,16 +1596,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -1852,16 +1780,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -2044,16 +1964,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -2236,16 +2148,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -2428,16 +2332,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -2620,16 +2516,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -2812,16 +2700,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3004,16 +2884,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3192,16 +3064,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3380,16 +3244,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3564,16 +3420,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3752,16 +3600,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3956,16 +3796,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -4160,16 +3992,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -4348,16 +4172,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -4536,16 +4352,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -4728,16 +4536,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -4917,16 +4717,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -5106,16 +4898,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -5295,16 +5079,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -5492,16 +5268,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -5689,16 +5457,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -5886,16 +5646,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -6083,16 +5835,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -6281,16 +6025,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -6478,16 +6214,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -6675,16 +6403,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -6872,16 +6592,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -7082,16 +6794,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -7283,16 +6987,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -7484,16 +7180,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -7682,16 +7370,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -7880,16 +7560,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -8077,16 +7749,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -8274,16 +7938,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -8471,16 +8127,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -8672,16 +8320,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -8993,16 +8633,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -9314,16 +8946,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -9514,16 +9138,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -9707,16 +9323,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -9907,16 +9515,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -10100,16 +9700,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -10300,16 +9892,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -10493,16 +10077,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -10690,16 +10266,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -10886,16 +10454,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -11074,16 +10634,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -11263,16 +10815,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -11469,16 +11013,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -11675,16 +11211,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -11866,16 +11394,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -12066,16 +11586,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -12260,16 +11772,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -12454,16 +11958,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -12645,16 +12141,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -12839,16 +12327,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -13030,16 +12510,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -13224,16 +12696,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -13418,16 +12882,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -13612,16 +13068,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -13805,16 +13253,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -13999,16 +13439,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -14195,16 +13627,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -14391,16 +13815,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -14587,16 +14003,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -14719,16 +14127,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -14860,16 +14260,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -15001,16 +14393,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -15142,16 +14526,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -15283,16 +14659,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -15481,16 +14849,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -15678,16 +15038,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -15881,16 +15233,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -16090,16 +15434,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -16287,16 +15623,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -16485,16 +15813,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -16683,16 +16003,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -16919,16 +16231,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -17155,16 +16459,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -17281,16 +16577,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -17395,16 +16683,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -17583,16 +16863,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -17715,16 +16987,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -17856,16 +17120,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -18065,16 +17321,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -18269,16 +17517,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -18460,16 +17700,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -18656,16 +17888,8 @@
     "<LEDGERHOOK> \\1 --agent"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",

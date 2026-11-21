@@ -15,7 +15,7 @@ struct Tree {
     root: PathBuf,
     /// The program the room-ledger hooks name (None: bin/kith-room-ledger, the stub).
     ledger_bin: Option<&'static str>,
-    /// The program the `SessionStart` hook of the cost ledger names (None: bin/kith-cost, the stub).
+    /// The program the `SessionStart` hook of the cost ledger names (None: no cost hook).
     cost_bin: Option<&'static str>,
     threads_bin: Option<&'static str>,
 }
@@ -512,7 +512,8 @@ fn owner_keeps_the_hooks_command_lines() {
                 .unwrap()
                 .contains("kith-permit denied")
     );
-    assert_eq!(s["hooks"]["SessionStart"].as_array().unwrap().len(), 2);
+    // no program with the cost ledger in this tree: only the registry's hook
+    assert_eq!(s["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -645,7 +646,7 @@ fn room_ledger_hook_calls_the_rust_verb_when_the_program_has_it() {
     );
 }
 
-/// The command of the `SessionStart` hook that tags the session in the cost ledger.
+/// The command of the `SessionStart` hook that tags the session in the cost ledger (the first hook, when there is one).
 fn cost_hook(out: &settings::Output) -> String {
     let s = out.settings.as_ref().unwrap();
     s["hooks"]["SessionStart"][0]["hooks"][0]["command"]
@@ -655,14 +656,16 @@ fn cost_hook(out: &settings::Output) -> String {
 }
 
 #[test]
-fn session_start_tags_with_the_python_until_the_program_has_the_ledger() {
+fn session_start_has_no_cost_hook_until_a_program_has_the_ledger() {
     let t = Tree::new();
     let out = t.settings(&t.guest("sam", "acceptEdits"), "plan").unwrap();
-    let root = t.root.to_string_lossy().into_owned();
-    assert_eq!(
-        cost_hook(&out),
-        format!("\"{root}/kernel/bin/kith-cost\" tag")
-    );
+    let hooks = out.settings.as_ref().unwrap()["hooks"]["SessionStart"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert!(hooks
+        .iter()
+        .all(|h| !h["hooks"][0]["command"].as_str().unwrap().contains("cost")));
 }
 
 #[test]
@@ -680,7 +683,12 @@ fn session_start_tags_with_the_rust_cost_verb_when_the_program_has_it() {
 
 fn sessions_hook(out: &settings::Output) -> String {
     let s = out.settings.as_ref().unwrap();
-    s["hooks"]["SessionStart"][1]["hooks"][0]["command"]
+    // the last SessionStart hook: after the cost hook when there is one
+    s["hooks"]["SessionStart"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()["hooks"][0]["command"]
         .as_str()
         .unwrap()
         .to_owned()

@@ -455,11 +455,16 @@ def jobs():
         if label.split('.')[-1] in RETIRED:
             bad(f'{label}: kith no longer has this job: launchctl bootout gui/{uid}/{label}; rm {f}')
             continue
+        if any(a.endswith('/kernel/bin/kith-cost') for a in argv):
+            bad(f'{label}: runs kernel/bin/kith-cost, which is gone; run the program instead: set ProgramArguments to '
+                f'{HOME}/.kith/bin/kith-uv run --no-project --quiet -- {HOME}/.kith/cli/current/bin/kith cost sync, '
+                f'then launchctl bootout gui/{uid}/{label}; launchctl bootstrap gui/{uid} {f}')
+            continue
         missing = [a for a in argv if a.startswith('/') and not os.path.exists(a)]
         if missing:
             bad(f'{label}: runs {missing[0]}, which is not there (reinstall the job)')
             continue
-        # A kernel script as the job's program stops working when its stub is removed (retire-python R9): it has to be rewritten first.
+        # A kernel script as the job's program stops working when its stub is removed: it has to be rewritten first.
         named = [a for a in argv if re.search(r'/kernel/bin/[^/]+$', a) and is_sh_stub(a)]
         if named:
             warn(f'{label}: runs the kernel stub {named[0]} through a launcher; a later release removes the stub, so this job needs rewriting before that')

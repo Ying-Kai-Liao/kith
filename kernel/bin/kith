@@ -164,7 +164,7 @@ case $1 in
   connectors)         exec "$KITH/bin/kith-auth" "$@" ;;
   skills)             exec "$KITH/bin/kith-skills" "$@" ;;
   door)               shift; exec "$KITH/bin/kith-door" "${@:---help}" ;;
-  cost)               shift; . "$KITH/lib/kith-core.sh"; kith_cost "${@:-agents}"; exit $? ;;   # `kith kernel cost` through the stub (bin/kith-cost)
+  cost)               shift; . "$KITH/lib/kith-core.sh"; kith_cost "${@:-agents}"; exit $? ;;   # `kith kernel cost` on the program
   ask)                shift; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
   allow)              shift; exec "$KITH/bin/kith-allow" "${@:---help}" ;;
   cards)              shift; exec "$KITH/bin/kith-cards" "${@:---help}" ;;
@@ -939,10 +939,9 @@ else
   echo "kith: no kith binary found, so memory writes by $agent are not checked or versioned (kith serve start builds it)" >&2
   [[ $p_owner == 0 ]] && { echo "kith: runs for anyone but the owner need the memory check; not running $agent for ${KITH_PERSON}" >&2; exit 3; }
 fi
-# The ledger's SessionStart hook: `kith kernel cost tag` on the program that has the module `cost-ledger`; on a Mac with none, the
-# stub (`bin/kith-cost tag`), which does nothing there and never blocks the session. Quoted with %q as the memory hook above is,
-# so both launch paths write the same bytes.
-cost_hook="\"$KITH/bin/kith-cost\" tag"
+# The ledger's SessionStart hook: `kith kernel cost tag` on the program that has the module `cost-ledger`; on a Mac with none,
+# no hook. Quoted with %q as the memory hook above is, so both launch paths write the same bytes.
+cost_hook=
 if cbin=$(kith_cost_bin); then cost_hook=$(printf '%q kernel cost --kernel %q tag' "$cbin" "$KITH"); fi
 # The registry's SessionStart hook: the same side of `kith-sessions` as the rest of this launch (kthreads, decided above).
 sessions_hook="\"$KITH/bin/kith-sessions\" record"
@@ -964,8 +963,10 @@ $learned
 $state_projects" python3 -I -c '
 import json, os, re, sys
 s = json.load(sys.stdin)
-s.setdefault("hooks", {}).setdefault("SessionStart", []).append(
-    {"hooks": [{"type": "command", "command": os.environ["HOOK"], "timeout": 10}]})
+s.setdefault("hooks", {}).setdefault("SessionStart", [])
+if os.environ["HOOK"]:   # none on a Mac with no program that has the cost ledger
+    s["hooks"]["SessionStart"].append(
+        {"hooks": [{"type": "command", "command": os.environ["HOOK"], "timeout": 10}]})
 # Lists the session in the apps when it is a listable terminal run (kith-sessions says which); never fails the session.
 s["hooks"]["SessionStart"].append(
     {"hooks": [{"type": "command", "command": os.environ["SESSIONS_HOOK"], "timeout": 5}]})

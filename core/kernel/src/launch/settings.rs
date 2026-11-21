@@ -143,8 +143,8 @@ pub struct Input<'a> {
     /// `kith_bin` when `room-ledger` is switched and it lists the `room-ledger` module (see `assemble::ledger_hook_bin`), else
     /// None: the hooks then name `bin/kith-room-ledger`, which is a stub that forwards to a program that has the module.
     pub ledger_bin: Option<&'a str>,
-    /// The program that has the `cost-ledger` module (see `assemble::cost_hook_bin`), else None: the `SessionStart` hook is then
-    /// the stub, `bin/kith-cost tag`, which forwards to a program and does nothing when it finds none.
+    /// The program that has the `cost-ledger` module (see `assemble::cost_hook_bin`), else None: the launch
+    /// then writes no cost hook.
     pub cost_bin: Option<&'a str>,
     /// `kith_bin` when `threads` is switched and it has the `threads-writer` module (see `assemble::threads_hook_bin`), else
     /// None: the registry's `SessionStart` hook then stays `bin/kith-sessions record`.
@@ -772,17 +772,17 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     let sm = st.as_object_mut().ok_or_else(|| bad("settings"))?;
     {
         let hooks = obj(sm, "hooks")?;
-        // The ledger's writer: `kith kernel cost tag` on the program, else the stub (which forwards, or does nothing without one).
-        let cost_hook = match i.cost_bin.filter(|b| !b.is_empty()) {
-            Some(bin) => format!(
+        // The ledger's writer: `kith kernel cost tag` on the program; with none, no hook (the session goes unattributed).
+        let _ = list(hooks, "SessionStart")?;
+        if let Some(bin) = i.cost_bin.filter(|b| !b.is_empty()) {
+            let cost_hook = format!(
                 "{} kernel cost --kernel {} tag",
                 bash_q(bin),
                 bash_q(&kernel)
-            ),
-            None => format!("\"{kernel}/bin/kith-cost\" tag"),
-        };
-        list(hooks, "SessionStart")?
-            .push(json!({"hooks": [{"type": "command", "command": cost_hook, "timeout": 10}]}));
+            );
+            list(hooks, "SessionStart")?
+                .push(json!({"hooks": [{"type": "command", "command": cost_hook, "timeout": 10}]}));
+        }
         // Lists the session in the apps when it is a listable terminal run; never fails the session. The Rust `kith kernel
         // threads record` when the program has it and `threads` is switched, else the Python, as the ledger's hook above.
         let sessions_hook = match i.threads_bin.filter(|b| !b.is_empty()) {
