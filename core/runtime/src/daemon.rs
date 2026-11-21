@@ -45,6 +45,10 @@ pub(crate) struct Config {
     /// Whether the process around the daemon has begun to exit: a Host daemon waiting for another daemon's lock stops
     /// waiting then.
     pub exiting: fn() -> bool,
+    /// Run by the package refresher before each read of a folder (tests block it to play an outage).
+    pub(crate) package_probe: Option<crate::packages::Probe>,
+    /// How long a call waits for the core lock before it answers `busy`.
+    pub(crate) lock_wait: Duration,
 }
 
 impl Default for Config {
@@ -56,6 +60,8 @@ impl Default for Config {
             key_load: None,
             host: false,
             exiting: || false,
+            package_probe: None,
+            lock_wait: LOCK_WAIT,
         }
     }
 }
@@ -92,6 +98,74 @@ pub(crate) struct Shared {
     loaded_key: Mutex<Option<zeroize::Zeroizing<[u8; 32]>>>,
     /// What the kill re-send remembers between ticks (`kill_resend`).
     pub(crate) resend: Mutex<crate::kill_resend::Resend>,
+    /// The call that has the core lock now, for `Error::Busy` and the status: its own small lock, never the core's.
+    lock_holder: Mutex<Option<Held>>,
+    /// Package facts, filled by a thread of their own so that no call reads an agents folder under the core lock.
+    packages: Arc<crate::packages::PackageCache>,
+    /// The folders this daemon was opened with (the base of a caller's view of them).
+    own: Paths,
+    /// How long a call waits for the core lock: [`LOCK_WAIT`], shorter in tests.
+    lock_wait: Duration,
+}
+
+/// Who holds the core lock: the call's method (or the daemon's loop) and since when.
+struct Held {
+    what: String,
+    since: Instant,
+}
+
+/// How long a call waits for the core lock before it answers `busy`. Under the client's 30 s call timeout, with room for
+/// the package refreshes a call may spend as well.
+pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(10);
+/// How long the status waits for the lock (for the claim counts) before it reports who holds it.
+const STATUS_LOCK_WAIT: Duration = Duration::from_secs(1);
+
+thread_local! {
+    /// The call this thread is running: its name, and when it stops waiting for the core lock (one deadline for all the
+    /// passes the call makes).
+    static CALL: std::cell::RefCell<Option<(String, Instant)>> = const { std::cell::RefCell::new(None) };
+    /// Whether this thread has the core lock now.
+    static LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the thread holds the core lock (a test's check that nothing reads a folder then).
+#[cfg(test)]
+pub(crate) fn lock_held() -> bool {
+    LOCK_HELD.with(std::cell::Cell::get)
+}
+
+/// A test that runs a call without the daemon says so, for the same check.
+#[cfg(test)]
+pub(crate) fn mark_lock_held(held: bool) {
+    LOCK_HELD.with(|h| h.set(held));
+}
+
+struct CallGuard;
+
+impl Drop for CallGuard {
+    fn drop(&mut self) {
+        CALL.with(|c| *c.borrow_mut() = None);
+    }
+}
+
+fn begin_call(method: &str, wait: Duration) -> CallGuard {
+    CALL.with(|c| *c.borrow_mut() = Some((method.to_owned(), Instant::now() + wait)));
+    CallGuard
+}
+
+/// Clears the holder record, then lets go of the lock (in that order, so the next holder's record is never wiped).
+struct Release<'a> {
+    holder: &'a Mutex<Option<Held>>,
+}
+
+impl Drop for Release<'_> {
+    fn drop(&mut self) {
+        LOCK_HELD.with(|h| h.set(false));
+        *self
+            .holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
 }
 
 impl Shared {
@@ -170,15 +244,78 @@ impl Shared {
         Ok(out)
     }
 
+    /// Runs `f` on the core under its lock, waiting for the lock until the deadline of the call this thread is running
+    /// (or [`LOCK_WAIT`] for the daemon's own loops). Past it the answer is `Busy` and `f` did not run.
     pub(crate) fn with_core<R>(&self, f: impl FnOnce(&mut Core) -> Result<R>) -> Result<R> {
-        let mut guard = self
-            .core
+        let (what, deadline) = CALL
+            .with(|c| c.borrow().clone())
+            .unwrap_or_else(|| ("the daemon".to_owned(), Instant::now() + self.lock_wait));
+        self.with_core_until(&what, deadline, f)
+    }
+
+    fn with_core_until<R>(
+        &self,
+        what: &str,
+        deadline: Instant,
+        f: impl FnOnce(&mut Core) -> Result<R>,
+    ) -> Result<R> {
+        let mut pause = Duration::from_millis(1);
+        let mut guard = loop {
+            match self.core.try_lock() {
+                Ok(g) => break g,
+                Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if Instant::now() >= deadline {
+                        return Err(self.busy());
+                    }
+                    std::thread::sleep(pause);
+                    pause = (pause * 2).min(Duration::from_millis(8));
+                }
+            }
+        };
+        *self
+            .lock_holder
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Held {
+            what: what.to_owned(),
+            since: Instant::now(),
+        });
+        LOCK_HELD.with(|h| h.set(true));
+        let _release = Release {
+            holder: &self.lock_holder,
+        };
         match guard.as_mut() {
             Some(core) => f(core),
             None => Err(Error::Io("kith-core: the daemon is not running".into())),
         }
+    }
+
+    /// Who has the core lock and for how long: `(call, seconds)`.
+    fn holder_now(&self) -> Option<(String, u64)> {
+        self.lock_holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|h| (h.what.clone(), h.since.elapsed().as_secs()))
+    }
+
+    fn busy(&self) -> Error {
+        let by = self.holder_now().map_or_else(
+            || "another call".to_owned(),
+            |(what, secs)| format!("{what} for {secs} s"),
+        );
+        log::note(
+            &self.logs,
+            &format!("daemon: busy: the core lock is held by {by}"),
+        );
+        Error::Busy(format!(
+            "kith-core: busy: the core's lock is held by {by}; nothing ran, try again"
+        ))
+    }
+
+    /// A call that reads package facts: see `packages::run_call`.
+    fn with_packages<R>(&self, params: &Value, pass: impl FnMut() -> Result<R>) -> Result<R> {
+        crate::packages::run_call(&self.packages, &self.own, params, pass)
     }
 
     /// The secrets master key if the key store holds one, read at most until found and never under the core lock.
@@ -241,6 +378,11 @@ impl Shared {
     }
 
     fn dispatch(&self, who: Principal, method: &str, params: &Value) -> Result<Value> {
+        let _call = begin_call(method, self.lock_wait);
+        self.dispatch_in(who, method, params)
+    }
+
+    fn dispatch_in(&self, who: Principal, method: &str, params: &Value) -> Result<Value> {
         // The row's principals decide, once, for every branch below: a connection that proved only the owner token is
         // refused a host row here, and the host's connection is refused every owner row.
         crate::call::check(who, method, params)?;
@@ -368,10 +510,12 @@ impl Shared {
         {
             if crate::authority::call::serves(method) {
                 // The tokens of a revoked or removed person end in the same locked call that committed it.
-                let answer = self.with_core(|c| {
-                    let answer = crate::authority::call::call(c, method, params)?;
-                    self.runs.after_authority_write(method, params, &answer);
-                    Ok(answer)
+                let answer = self.with_packages(params, || {
+                    self.with_core(|c| {
+                        let answer = crate::authority::call::call(c, method, params)?;
+                        self.runs.after_authority_write(method, params, &answer);
+                        Ok(answer)
+                    })
                 })?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
@@ -381,8 +525,9 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::doors::serves(method) {
-                let answer = self
-                    .with_core(|c| crate::doors::call(c, method, params, &crate::gate::System))?;
+                let answer = self.with_packages(params, || {
+                    self.with_core(|c| crate::doors::call(c, method, params, &crate::gate::System))
+                })?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
             }
@@ -436,11 +581,13 @@ impl Shared {
                 } else {
                     None
                 };
-                let answer = self.with_core(|c| {
-                    if let Some(key) = key {
-                        crate::secrets::adopt(&c.secrets, key)?;
-                    }
-                    crate::schedules::call_write(c, method, params)
+                let answer = self.with_packages(params, || {
+                    self.with_core(|c| {
+                        if let Some(key) = &key {
+                            crate::secrets::adopt(&c.secrets, key.clone())?;
+                        }
+                        crate::schedules::call_write(c, method, params)
+                    })
                 })?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
@@ -470,14 +617,27 @@ impl Shared {
     }
 
     fn running_status(&self) -> Result<Value> {
-        let (generation, schema, claims, group_held) = self.with_core(|c| {
+        // Answers without the core lock: pid, version and who holds the lock come first, and the counts only if the lock
+        // is free within a second. In an outage this is what says which call is stuck.
+        let counts = self.with_core_until("the status", Instant::now() + STATUS_LOCK_WAIT, |c| {
             Ok((
                 c.generation(),
                 c.schema_version(),
                 crate::conversations::claims::live_counts(c)?,
                 crate::conversations::claims::group_held(c, &crate::gate::System)?,
             ))
-        })?;
+        });
+        let (generation, schema, claims, group_held, busy) = match counts {
+            Ok((g, s, c, h)) => (json!(g), json!(s), c, h, None),
+            Err(Error::Busy(why)) => (
+                Value::Null,
+                Value::Null,
+                [("claimed", 0), ("running", 0), ("ending", 0)],
+                0,
+                Some(why),
+            ),
+            Err(e) => return Err(e),
+        };
         let h = self
             .holder
             .lock()
@@ -498,6 +658,11 @@ impl Shared {
                 "uptime_secs": self.started.elapsed().as_secs(),
             },
             "holder": holder_json(&h),
+            "lock": {
+                "busy": busy.is_some(),
+                "held_by": self.holder_now().map(|(what, secs)| format!("{what} for {secs} s")),
+                "note": busy,
+            },
             "claims": claims
                 .iter()
                 .map(|(s, n)| (s.to_string(), json!(n)))
@@ -576,6 +741,10 @@ impl Daemon {
                 .unwrap_or_else(|| Arc::new(crate::secrets::os_load)),
             loaded_key: Mutex::new(None),
             resend: Mutex::new(crate::kill_resend::Resend::default()),
+            lock_holder: Mutex::new(None),
+            packages: crate::packages::PackageCache::start(cfg.package_probe.clone()),
+            own: paths.clone(),
+            lock_wait: cfg.lock_wait,
         });
         let (s, p) = (shared.clone(), paths.clone());
         let spawned = std::thread::Builder::new()
@@ -703,7 +872,7 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         if shared.stopping() {
             return;
         }
-        *slot = Some(core);
+        *slot = Some(core.with_packages(shared.packages.clone()));
     }
     shared.replay_open_removals();
     let for_calls = shared.clone();

@@ -478,3 +478,9 @@ fn read_env(tx: &Connection) -> Result<Map<String, Value>> {
     }
     Ok(out)
 }
+
+/// Loads `auth` (the auth.json shape) into the tables of a core, for the daemon's tests.
+#[cfg(test)]
+pub(crate) fn load_for_tests(conn: &Connection, auth: &Value) {
+    load::load(conn, auth);
+}

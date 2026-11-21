@@ -32,7 +32,12 @@ pub(super) fn run_with<T>(
     let before = read_tables(&tx, &mut || {})?;
     let mut after = before.clone();
     write::tables(&mut after);
-    let mut said = f(&mut after).map_err(|d| refusal(&d))?;
+    let said = f(&mut after);
+    // A fact the cache lacked may be why `f` said no (or yes): decide again once it has it, with nothing committed.
+    if crate::packages::pass_missed() {
+        return Err(crate::packages::need_packages());
+    }
+    let mut said = said.map_err(|d| refusal(&d))?;
     let mut before = before;
     write::tables(&mut before);
     // A write that changed nothing (a router's refused card write answers as an answer, with the tables put back) saves
@@ -52,7 +57,11 @@ pub(super) fn read<T>(core: &mut Core, f: impl FnOnce(&Value) -> T) -> Result<T>
     let tx = core.claim_tx()?;
     let mut now = read_tables(&tx, &mut || {})?;
     write::tables(&mut now);
-    Ok(f(&now))
+    let out = f(&now);
+    if crate::packages::pass_missed() {
+        return Err(crate::packages::need_packages());
+    }
+    Ok(out)
 }
 
 /// The digest of the tables in one snapshot, under the same door as a write: `people.revision`, which the host's cards

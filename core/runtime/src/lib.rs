@@ -78,6 +78,7 @@ mod log;
 mod marker;
 mod migrations;
 mod owner;
+mod packages;
 mod perms;
 mod runs;
 mod runsock;

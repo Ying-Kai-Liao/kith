@@ -43,6 +43,8 @@ pub struct Core {
     folders: Option<Paths>,
     /// The secrets envelope, made on the first `secrets.*` call (it asks the OS key store, which may refuse).
     pub(crate) secrets: std::sync::Mutex<Option<crate::secrets::Envelope>>,
+    /// The daemon's package facts: the rules read these under the lock, never the agents' folders. None outside the daemon.
+    packages: Option<std::sync::Arc<dyn kith_kernel::secrets::PackageSource>>,
 }
 
 /// A process the holder reported, as the core noted it: the group leader's pid and the start time the system gave that
@@ -166,6 +168,7 @@ pub(crate) fn open(layout: &Layout, migrations: &[Migration], mode: Mode) -> Res
         migrated_from,
         folders: None,
         secrets: std::sync::Mutex::new(None),
+        packages: None,
     })))
 }
 
@@ -206,6 +209,20 @@ impl Core {
     pub(crate) fn with_folders(mut self, folders: &Paths) -> Self {
         self.folders = Some(folders.clone());
         self
+    }
+
+    pub(crate) fn with_packages(
+        mut self,
+        packages: std::sync::Arc<dyn kith_kernel::secrets::PackageSource>,
+    ) -> Self {
+        self.packages = Some(packages);
+        self
+    }
+
+    pub(crate) fn packages(
+        &self,
+    ) -> Option<&std::sync::Arc<dyn kith_kernel::secrets::PackageSource>> {
+        self.packages.as_ref()
     }
 
     pub(crate) fn folders(&self) -> Option<&Paths> {

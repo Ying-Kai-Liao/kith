@@ -50,6 +50,8 @@ pub(crate) const PROTOCOL: u32 = 1;
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_LINE: u64 = 1 << 20;
 const MAX_CONNECTIONS: usize = 64;
+/// Connections that are being told `busy` at the limit.
+const MAX_REFUSING: usize = 32;
 const STEP_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -210,6 +212,7 @@ struct Ctx {
     handler: Arc<Handler>,
     stop: Arc<AtomicBool>,
     active: AtomicUsize,
+    refusing: AtomicUsize,
 }
 
 impl Server {
@@ -268,6 +271,7 @@ impl Server {
             handler,
             stop: stop.clone(),
             active: AtomicUsize::new(0),
+            refusing: AtomicUsize::new(0),
         });
         let (end_tx, ended) = mpsc::channel::<()>();
         let accept = std::thread::Builder::new()
@@ -345,6 +349,7 @@ fn accept_loop(listener: &platform::Listener, ctx: &Arc<Ctx>) {
         }
         if ctx.active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
             ctx.active.fetch_sub(1, Ordering::SeqCst);
+            refuse_busy(stream, ctx);
             continue;
         }
         let ctx = ctx.clone();
@@ -361,6 +366,47 @@ fn accept_loop(listener: &platform::Listener, ctx: &Arc<Ctx>) {
             ctx.active.fetch_sub(1, Ordering::SeqCst);
         }
     }
+}
+
+/// At the connection limit: says `busy` to the hello instead of dropping the connection, which the client reads as "no
+/// daemon". On a thread of its own (it waits for the hello), itself limited, past which the connection is dropped.
+fn refuse_busy(stream: Stream, ctx: &Arc<Ctx>) {
+    if ctx.refusing.fetch_add(1, Ordering::SeqCst) >= MAX_REFUSING {
+        ctx.refusing.fetch_sub(1, Ordering::SeqCst);
+        return;
+    }
+    let ctx = ctx.clone();
+    let spawned = std::thread::Builder::new()
+        .name("kith-owner-busy".into())
+        .spawn({
+            let ctx = ctx.clone();
+            move || {
+                answer_busy(stream);
+                ctx.refusing.fetch_sub(1, Ordering::SeqCst);
+            }
+        });
+    if spawned.is_err() {
+        ctx.refusing.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn answer_busy(stream: Stream) {
+    let Ok(mut writer) = stream.try_clone() else {
+        return;
+    };
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    if (&mut reader).take(MAX_LINE).read_line(&mut line).is_err() {
+        return;
+    }
+    let id = serde_json::from_str::<Value>(line.trim())
+        .ok()
+        .and_then(|r| r.get("id").cloned())
+        .unwrap_or(Value::Null);
+    let e = Error::Busy(format!(
+        "kith-core: busy: {MAX_CONNECTIONS} connections are open; nothing ran, try again"
+    ));
+    let _ = write_line(&mut writer, &error_reply(&id, &e));
 }
 
 enum Phase {
@@ -590,6 +636,7 @@ fn error_reply(id: &Value, e: &Error) -> Value {
         Error::NotAllowed(_) => (-32001, "not_allowed"),
         Error::NotServed(_) => (-32004, "not_served"),
         Error::Stopped(_) => (-32005, "stopped"),
+        Error::Busy(_) => (-32006, "busy"),
         _ => (-32000, "failed"),
     };
     failure(id, code, kind, &e.to_string())
@@ -603,6 +650,7 @@ fn from_error(message: &str, kind: &str) -> Error {
         "not_allowed" => Error::NotAllowed(m),
         "not_served" => Error::NotServed(m),
         "stopped" => Error::Stopped(m),
+        "busy" => Error::Busy(m),
         _ => Error::Io(m),
     }
 }
@@ -820,6 +868,13 @@ fn attempt(
         Ok(v) => v,
         Err(why) => return before(&why),
     };
+    // A daemon at its connection limit says so; nothing ran, and it is not "no daemon".
+    if hello["error"]["data"]["kind"] == "busy" {
+        let why = hello["error"]["message"]
+            .as_str()
+            .unwrap_or("the core is busy");
+        return Attempt::Done(Reached::Refused(from_error(why, "busy")));
+    }
     if who == Principal::Host {
         // A daemon from before the host principal answers the hello with a protocol error; a daemon of this build
         // that has no Host (a standalone one) names its principals without it. Either way no host row can run, and

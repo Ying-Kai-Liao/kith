@@ -417,6 +417,8 @@ fn holder_cfg(exe: std::path::PathBuf) -> Config {
         host: false,
         exiting: || false,
         wait_for_embedded: Duration::from_secs(10),
+        package_probe: None,
+        lock_wait: crate::daemon::LOCK_WAIT,
         holder: HolderConfig {
             exe: Some(exe),
             idle: Duration::from_secs(5),
@@ -2704,4 +2706,238 @@ fn a_marked_warm_process_with_two_conversations_is_signalled_once() {
     assert_eq!(got, vec![pid], "{got:?}");
     until("the process to be gone", || !alive(pid));
     d.stop();
+}
+
+// --- the core lock: a time limit on taking it, and no disk read of an agent folder under it ---------------------------
+
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+fn put(path: &std::path::Path, text: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}
+
+/// A daemon over a machine whose `house` agent declares a guest domain, with `sam` a member of it.
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+fn house_daemon(m: &std::path::Path, cfg: Config) -> Daemon {
+    // From here a read of a package folder on a thread that holds the core lock panics that thread.
+    crate::packages::forbid_disk_under_lock();
+    put(&m.join("house/role/agent.md"), "---\nname: house\n---\n");
+    put(
+        &m.join("house/role/capabilities.yaml"),
+        "guest_domains: [pkg.example]\n",
+    );
+    let d = serving(&paths(m), cfg);
+    d.shared()
+        .with_core(|c| {
+            crate::authority::load_for_tests(
+                c.conn(),
+                &json!({
+                    "people": {"kai": {"owner": true}, "sam": {"name": "Sam"}},
+                    "members": {"house": {"sam": {"preset": "member"}}},
+                }),
+            );
+            Ok(())
+        })
+        .unwrap();
+    d
+}
+
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+fn domains_of(r: Reached) -> Vec<String> {
+    match r {
+        Reached::Answered(v) => v["access"]["domains"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|d| d.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used, clippy::many_single_char_names)]
+fn a_package_disk_that_never_answers_slows_the_one_call_that_needs_it_and_stops_no_other() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let hold = Arc::new(AtomicBool::new(false));
+    let h = hold.clone();
+    let d = house_daemon(
+        &m,
+        Config {
+            package_probe: Some(Arc::new(move || {
+                while h.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            })),
+            ..quiet()
+        },
+    );
+    let ask = json!({"agent": "house", "person": "sam"});
+    // The control: a working refresher hands the package's domain to the guest.
+    assert_eq!(
+        domains_of(read(&p, "people.resolve", &ask)),
+        ["pkg.example"]
+    );
+    // The outage: every read of the folder blocks, for good.
+    hold.store(true, Ordering::SeqCst);
+    put(
+        &m.join("house/role/capabilities.yaml"),
+        "guest_domains: [pkg.example, other.example]\n",
+    );
+    let began = Instant::now();
+    let answer = read(&p, "people.resolve", &ask);
+    assert!(
+        began.elapsed() < crate::packages::REFRESH_WAIT + Duration::from_millis(1500),
+        "{:?}",
+        began.elapsed()
+    );
+    // The narrow answer: the package is owner-only while it can't be read, so the guest gets none of its domains.
+    match &answer {
+        Reached::Answered(v) => {
+            assert_eq!(v["allowed"], false, "{v}");
+            assert!(v.to_string().contains("can't read house's package"), "{v}");
+        }
+        other => panic!("{other:?}"),
+    }
+    // While it blocks, the calls that read no package answer at once, and so does the status.
+    for (method, params) in [
+        ("people.revision", json!({})),
+        ("people.who", json!({"platform": "x", "id": "y"})),
+        ("kernel.coreStatus", json!({})),
+    ] {
+        let began = Instant::now();
+        let r = read(&p, method, &params);
+        assert!(
+            !matches!(r, Reached::NoDaemon | Reached::Lost(_)),
+            "{method}: {r:?}"
+        );
+        assert!(
+            began.elapsed() < Duration::from_secs(1),
+            "{method}: {:?}",
+            began.elapsed()
+        );
+    }
+    hold.store(false, Ordering::SeqCst);
+    drop(d);
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used, clippy::many_single_char_names)]
+fn a_call_that_cannot_get_the_lock_in_time_is_busy_and_runs_nothing_and_the_status_names_the_holder()
+ {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = house_daemon(
+        &m,
+        Config {
+            lock_wait: Duration::from_millis(400),
+            ..quiet()
+        },
+    );
+    let shared = d.shared().clone();
+    let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
+    let (free_tx, free_rx) = std::sync::mpsc::channel::<()>();
+    let holder = std::thread::spawn(move || {
+        shared
+            .with_core_until(
+                "the test's slow call",
+                Instant::now() + Duration::from_secs(5),
+                |_| {
+                    held_tx.send(()).unwrap();
+                    let _ = free_rx.recv_timeout(Duration::from_secs(30));
+                    Ok(())
+                },
+            )
+            .unwrap();
+    });
+    held_rx.recv().unwrap();
+    let grant = json!({"person": "sam", "agent": "house", "preset": "guest"});
+    let began = Instant::now();
+    match crate::reach(&p, "people.grant", &grant, false) {
+        Reached::Refused(Error::Busy(why)) => {
+            assert!(why.contains("the test's slow call"), "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        began.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        began.elapsed()
+    );
+    // The status answers with the lock held, and says who has it.
+    let began = Instant::now();
+    match read(&p, "kernel.coreStatus", &json!({})) {
+        Reached::Answered(v) => {
+            assert_eq!(v["lock"]["busy"], true, "{v}");
+            assert!(
+                v["lock"]["held_by"]
+                    .as_str()
+                    .unwrap()
+                    .contains("the test's slow call"),
+                "{v}"
+            );
+            assert_eq!(v["daemon"]["pid"], std::process::id());
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        began.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        began.elapsed()
+    );
+    free_tx.send(()).unwrap();
+    holder.join().unwrap();
+    // Busy meant nothing ran: sam kept the member preset, and the same write goes through now.
+    let preset = |p: &Paths| match read(
+        p,
+        "people.resolve",
+        &json!({"agent": "house", "person": "sam"}),
+    ) {
+        Reached::Answered(v) => v["preset"].clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(preset(&p), json!("member"));
+    assert!(matches!(
+        crate::reach(&p, "people.grant", &grant, false),
+        Reached::Answered(_)
+    ));
+    assert_eq!(preset(&p), json!("guest"));
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used, clippy::many_single_char_names)]
+fn at_the_connection_limit_a_new_client_is_told_busy_not_no_daemon() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let _d = serving(&p, quiet());
+    let open: Vec<Raw> = (0..64).map(|_| Raw::connect(&m)).collect();
+    // A connection is counted once it is accepted: the 65th is the first one refused.
+    until("the 64 connections to be counted", || {
+        matches!(
+            crate::reach(&p, "kernel.version", &json!({}), false),
+            Reached::Refused(Error::Busy(_))
+        )
+    });
+    match crate::reach(&p, "kernel.version", &json!({}), true) {
+        Reached::Refused(Error::Busy(why)) => assert!(why.contains("64 connections"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    drop(open);
+    until("a slot to free", || {
+        matches!(
+            crate::reach(&p, "kernel.version", &json!({}), true),
+            Reached::Answered(_)
+        )
+    });
 }

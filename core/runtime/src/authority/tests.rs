@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use kith_kernel::secrets::{self, Ctx, Rules, Sandbox, ServeDir};
+use kith_kernel::secrets::{self, Ctx, Packages, Rules, Sandbox, ServeDir};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
 use rusqlite::Connection;
@@ -20,6 +20,7 @@ mod card;
 mod cards;
 mod gaps;
 mod guest;
+mod packages;
 mod requests;
 mod revoke;
 mod router;
@@ -39,6 +40,7 @@ fn ctx(root: &Path) -> Ctx {
         now_ms: NOW,
         sandbox: Sandbox::Fixed(false),
         serve: ServeDir::Fixed(root.join("serve")),
+        packages: Packages::Disk,
     }
 }
 
