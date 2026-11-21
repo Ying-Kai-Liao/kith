@@ -391,22 +391,19 @@ fn refuse_busy(stream: Stream, ctx: &Arc<Ctx>) {
 }
 
 fn answer_busy(stream: Stream) {
-    let Ok(mut writer) = stream.try_clone() else {
+    // The hello is waited for at most STEP_TIMEOUT: a client that never speaks must not hold one of the busy threads for
+    // good. `Conn`'s drop shuts the socket, which ends its reader thread too.
+    let Ok(mut conn) = Conn::open(stream) else {
         return;
     };
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    if (&mut reader).take(MAX_LINE).read_line(&mut line).is_err() {
+    let Ok(req) = conn.recv(STEP_TIMEOUT) else {
         return;
-    }
-    let id = serde_json::from_str::<Value>(line.trim())
-        .ok()
-        .and_then(|r| r.get("id").cloned())
-        .unwrap_or(Value::Null);
+    };
+    let id = req.get("id").cloned().unwrap_or(Value::Null);
     let e = Error::Busy(format!(
         "kith-core: busy: {MAX_CONNECTIONS} connections are open; nothing ran, try again"
     ));
-    let _ = write_line(&mut writer, &error_reply(&id, &e));
+    let _ = write_line(&mut conn.writer, &error_reply(&id, &e));
 }
 
 enum Phase {

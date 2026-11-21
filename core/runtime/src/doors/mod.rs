@@ -507,7 +507,13 @@ fn sweep_between(
             Some("its person was cut off")
         } else if gone.contains(&d.id) {
             Some("its supervisor is gone")
-        } else if recheck && door_refusal(ctx, &auth, &d.agent, &person, &d.door, true).is_some() {
+        } else if recheck && {
+            // A sweep names no agent, so nothing was refreshed for it: a fact the cache lacked is not a refusal. The call
+            // rolls back and runs again with the facts read; on its last round the door stays for the next sweep.
+            let before = crate::packages::miss_count();
+            let refused = door_refusal(ctx, &auth, &d.agent, &person, &d.door, true).is_some();
+            refused && crate::packages::miss_count() == before
+        } {
             Some("its person may no longer run it")
         } else {
             None
@@ -515,6 +521,9 @@ fn sweep_between(
         if let Some(why) = why {
             doomed.push((d, why));
         }
+    }
+    if crate::packages::pass_missed() {
+        return Err(crate::packages::need_packages());
     }
     between();
     for (d, why) in doomed {

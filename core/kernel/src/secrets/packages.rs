@@ -296,13 +296,14 @@ impl Ctx {
                 }
                 std::fs::read(&path).map_or(Found::Unreadable, Found::Bytes)
             }
-            Packages::Source(_) => match self
-                .facts(agent)
-                .and_then(|f| f.services.get(file).cloned())
-            {
-                None => Found::Absent,
-                Some(None) => Found::Unreadable,
-                Some(Some(b)) => Found::Bytes(b),
+            // No facts at all (the cache could not give them) is not a file that is not there.
+            Packages::Source(_) => match self.facts(agent) {
+                None => Found::Unreadable,
+                Some(f) => match f.services.get(file).cloned() {
+                    None => Found::Absent,
+                    Some(None) => Found::Unreadable,
+                    Some(Some(b)) => Found::Bytes(b),
+                },
             },
         }
     }

@@ -216,20 +216,23 @@ impl PackageSource for PackageCache {
 }
 
 /// Whether a validation at `at` is good for the call on this thread: made since it began (less [`FRESH`]). A thread with
-/// no call in progress (the daemon's own loops) takes what the cache has.
+/// no call in progress (the daemon's own loops) has no validation to go by: nothing is fresh for it.
 fn fresh(at: Instant) -> bool {
     CALL.with(|c| match &*c.borrow() {
         Some(call) => at + FRESH >= call.start,
-        None => true,
+        // The daemon's own loops have no call to have been checked for: nothing was validated for them, so a fact is a miss
+        // (I4: facts are checked during the call that uses them).
+        None => false,
     })
 }
 
 fn miss(roots: Roots, want: Want) {
     CALL.with(|c| {
-        if let Some(call) = c.borrow_mut().as_mut()
-            && call.raise
-        {
-            call.misses.push(Miss { roots, want });
+        if let Some(call) = c.borrow_mut().as_mut() {
+            call.missed += 1;
+            if call.raise {
+                call.misses.push(Miss { roots, want });
+            }
         }
     });
 }
@@ -340,6 +343,9 @@ struct CallState {
     /// Whether a miss is recorded (and the transaction told): not on the last pass.
     raise: bool,
     misses: Vec<Miss>,
+    /// Every miss of the pass, raised or not: a pass that cannot raise (the last round, or a refresher that did not answer)
+    /// still must not take an "unavailable" fact for a definite no (see [`miss_count`]).
+    missed: usize,
 }
 
 thread_local! {
@@ -354,6 +360,7 @@ fn begin(start: Instant, raise: bool) -> CallGuard {
             start,
             raise,
             misses: Vec::new(),
+            missed: 0,
         });
     });
     CallGuard
@@ -368,6 +375,14 @@ impl Drop for CallGuard {
 /// Whether this pass met a fact the cache could not give: the authority transaction rolls back and says so.
 pub(crate) fn pass_missed() -> bool {
     CALL.with(|c| c.borrow().as_ref().is_some_and(|c| !c.misses.is_empty()))
+}
+
+/// How many facts this pass has found missing so far, raised or not. A rule that decides *no* from a fact and has no
+/// agent in its params to refresh first (`doors.sweep`, `schedule.tick`) compares it before and after: a change means the
+/// answer rested on an unavailable fact. Rolling back is [`pass_missed`]'s (the pass can raise); on the last round the
+/// caller leaves the thing undecided instead.
+pub(crate) fn miss_count() -> usize {
+    CALL.with(|c| c.borrow().as_ref().map_or(0, |c| c.missed))
 }
 
 /// The error a transaction that [`pass_missed`] ends with.

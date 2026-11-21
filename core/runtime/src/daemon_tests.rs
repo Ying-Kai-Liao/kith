@@ -2941,3 +2941,139 @@ fn at_the_connection_limit_a_new_client_is_told_busy_not_no_daemon() {
         )
     });
 }
+
+// --- the rows that name no agent: a sweep and a tick must not decide on a package fact the cache lacks ------------------
+
+const RENDER: &str = "render@03d245db65bb";
+
+/// `house_daemon` for a house that shares a door with `sam` through a job he ticked, and a refresher the test can block.
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+fn door_daemon(m: &std::path::Path) -> (Daemon, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let hold = Arc::new(AtomicBool::new(false));
+    let h = hold.clone();
+    let d = house_daemon(
+        m,
+        Config {
+            package_probe: Some(Arc::new(move || {
+                while h.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            })),
+            ..quiet()
+        },
+    );
+    put(
+        &m.join("house/role/capabilities.yaml"),
+        "helpers: []\ndoors:\n  - name: render\n    npm: [hyperframes@0.8.159]\n    lockfile: doors/render.lock.json\n    tools: [node, ffmpeg]\n    bin: hyperframes/bin/hyperframes.mjs\n    args: [render, --quality, draft]\n    writes: [renders]\n    env: [HYPERFRAMES_NO_UPDATE_CHECK=1, FF=$ffmpeg]\njobs:\n  - name: render-videos\n    doors: [render]\n",
+    );
+    put(&m.join("house/role/doors/render.lock.json"), "{}");
+    d.shared()
+        .with_core(|c| {
+            // No cloud on this machine: a non-owner's door is in sync.
+            crate::sync_lease::unlink(c, &crate::sync_lease::System)?;
+            c.conn().execute(
+                "UPDATE memberships SET jobs = ?1 WHERE agent = 'house' AND person = 'sam'",
+                [json!({"render-videos": {"snapshot": {"doors": [RENDER]}}}).to_string()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    (d, hold)
+}
+
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+fn open_doors(p: &Paths) -> usize {
+    let v = answered(read(p, "doors.list", &json!({})));
+    v["doors"].as_array().unwrap().len()
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_recheck_sweep_keeps_a_guest_door_on_a_healthy_disk_and_when_the_refresher_is_blocked() {
+    use std::sync::atomic::Ordering;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let (d, hold) = door_daemon(&m);
+    let started = answered(read(
+        &p,
+        "doors.start",
+        &json!({"agent": "house", "door": RENDER, "person": "sam", "pid": std::process::id()}),
+    ));
+    assert_eq!(started["state"], "starting", "{started}");
+    assert_eq!(open_doors(&p), 1);
+    // The sweep names no agent: its first pass finds every fact a miss, rolls back, and the refresher gives the facts.
+    let swept = answered(read(&p, "doors.sweep", &json!({"persons": []})));
+    assert_eq!(swept["swept"], json!([]), "{swept}");
+    assert_eq!(open_doors(&p), 1);
+    // The disk stops answering: the sweep takes no "no" from facts it does not have, and the door stays for the next one.
+    hold.store(true, Ordering::SeqCst);
+    put(
+        &m.join("house/role/capabilities.yaml"),
+        "guest_domains: [other.example]\n",
+    );
+    let swept = answered(read(&p, "doors.sweep", &json!({"persons": []})));
+    assert_eq!(swept["swept"], json!([]), "{swept}");
+    assert_eq!(open_doors(&p), 1);
+    hold.store(false, Ordering::SeqCst);
+    drop(d);
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_tick_fires_a_due_guest_job_on_a_healthy_disk_and_writes_no_skip_when_the_refresher_is_blocked()
+{
+    use std::sync::atomic::Ordering;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let (d, hold) = door_daemon(&m);
+    put(
+        &m.join("house/jobs.json"),
+        &json!([{"id": "j", "cron": "* * * * *", "tz": "UTC", "task": "do j", "person": "sam"}])
+            .to_string(),
+    );
+    let skips = |d: &Daemon| -> i64 {
+        let mut n = 0;
+        d.shared()
+            .with_core(|c| {
+                n = c.conn().query_row(
+                    "SELECT COUNT(*) FROM sched_fires WHERE outcome LIKE 'skipped%'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        n
+    };
+    // The disk stops answering first: the tick (no agent named) cannot read house's package, and decides nothing.
+    hold.store(true, Ordering::SeqCst);
+    let v = answered(read(&p, "schedule.tick", &json!({})));
+    assert_eq!(skips(&d), 0, "{v}");
+    assert!(
+        v["fires"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["outcome"] != "fired" && f["final"].is_null()),
+        "{v}"
+    );
+    hold.store(false, Ordering::SeqCst);
+    // The disk answers: the same slot is still due, and it fires.
+    let v = answered(read(&p, "schedule.tick", &json!({})));
+    assert_eq!(skips(&d), 0, "{v}");
+    assert!(
+        v["fires"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["job"] == "j" && f["outcome"] == "fired"),
+        "{v}"
+    );
+    drop(d);
+}

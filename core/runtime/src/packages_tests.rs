@@ -74,6 +74,8 @@ const NAMES: [&str; 8] = [
 fn the_cache_gives_the_answers_the_disk_gives() {
     let (_t, disk) = machine();
     let cache = PackageCache::start(None);
+    // Facts count for the call that had them validated: the call begins first.
+    let _call = begin(Instant::now(), false);
     assert!(cache.refresh(&roots(&disk), Want::All));
     assert!(cache.refresh(
         &roots(&disk),
@@ -115,6 +117,7 @@ fn a_changed_file_is_read_again_and_so_is_one_replaced_by_rename_with_the_same_m
     let (t, disk) = machine();
     let cache = PackageCache::start(None);
     let mem = cached(&disk, &cache);
+    let _call = begin(Instant::now(), false);
     let auth = json!({});
     let caps = t.path().join("agents/house/role/capabilities.yaml");
     let domains = || Rules::new(&mem, &auth).agent_domains("house");
@@ -155,6 +158,7 @@ fn a_new_agent_and_a_deleted_one_show_at_the_next_refresh() {
     let (t, disk) = machine();
     let cache = PackageCache::start(None);
     let mem = cached(&disk, &cache);
+    let _call = begin(Instant::now(), false);
     assert!(cache.refresh(&roots(&disk), Want::All));
     assert!(!mem.agent_exists("late"));
     write(
@@ -234,6 +238,21 @@ fn a_fact_validated_before_the_call_began_is_a_miss() {
     let _call = begin(Instant::now(), false);
     assert!(!mem.agent_exists("house"));
     assert!(!pass_missed());
+}
+
+#[test]
+fn a_thread_with_no_call_takes_nothing_from_the_cache_and_a_miss_is_counted_even_when_not_raised() {
+    let (_t, disk) = machine();
+    let cache = PackageCache::start(None);
+    let mem = cached(&disk, &cache);
+    assert!(cache.refresh(&roots(&disk), Want::Agents(vec!["house".into()])));
+    // The daemon's own loops have no call that had the fact checked: it is unavailable to them, however fresh.
+    assert!(!mem.agent_exists("house"));
+    assert_eq!(super::miss_count(), 0);
+    let _call = begin(Instant::now(), false);
+    assert!(!mem.agent_exists("house"));
+    assert!(!pass_missed());
+    assert_eq!(super::miss_count(), 1);
 }
 
 #[test]
