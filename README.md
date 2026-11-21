@@ -438,7 +438,7 @@ put its skills in `role/skills/`. New sessions pick it up; `kith share <name>` p
 
 ## Licensing
 
-Kith is open source under [Apache-2.0](LICENSE); `NOTICE` carries the attributions that travel with it, including the Codync-derived parts of the relay. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by the license. Third-party and vendored files (for example `apps/packaging/cua-driver`) keep their own licenses. Contributions are accepted under Apache-2.0 (no CLA), see [CONTRIBUTING.md](CONTRIBUTING.md).
+Kith is open source under [Apache-2.0](LICENSE); `NOTICE` carries the attributions that travel with it, including the Codync-derived parts of the relay. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by the license. Third-party and vendored files (for example the ThinkingOrb license beside its port) keep their own licenses. Contributions are accepted under Apache-2.0 (no CLA), see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Code committed before 2026-10-25 was published under MIT/Apache-2.0, and copies taken before then keep those licenses. Versions of the host, cloud, relay and apps released under FSL-1.1-MIT between 2026-10-25 and the move to Apache-2.0 keep the FSL-1.1-MIT license for those copies; from that change on, the whole repo is Apache-2.0.
 

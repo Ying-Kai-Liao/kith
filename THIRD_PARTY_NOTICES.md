@@ -15,7 +15,7 @@ Local voice (kith-tts) uses Phonon, Gradium's on-device text to speech: the ptts
 model and voices (https://huggingface.co/gradium/phonon-31m-en and /gradium/phonon-voices, Apache-2.0,
 Copyright Gradium). The model files are downloaded on first use and are not part of this repository.
 
-Kith includes 714 third-party packages and vendored files under the licenses below.
+Kith includes 713 third-party packages and vendored files under the licenses below.
 
 ## 0BSD
 
@@ -4869,10 +4869,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
   Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)
   Copyright (c) 2014-2016, SourceLair Private Company (https://www.sourcelair.com)
   Copyright (c) 2012-2013, Christopher Jeffrey (https://github.com/chjj/)
-- cua-driver (vendored)
-  https://github.com/trycua/cua
-  Computer-use driver shipped beside the app.
-  Copyright (c) 2025 Cua AI, Inc.
 - thinking-orbs (vendored)
   https://github.com/jakubantalik/thinking-orbs
   Ported to SwiftUI (iOS) and React (desktop) as ThinkingOrb.
