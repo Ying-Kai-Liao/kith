@@ -30,7 +30,9 @@ pub mod pyjson;
 mod tests;
 
 pub use jobs::{Job, PIECES, effective};
-pub use packages::{AgentFacts, Found, PackageSource, Packages, on_disk_read, read_names};
+pub use packages::{
+    AgentFacts, Found, PackageSource, Packages, note_disk_read, on_disk_read, read_names,
+};
 
 /// A refusal `kith-auth` would `die` with: its message and exit code.
 #[derive(Debug, PartialEq, Eq)]

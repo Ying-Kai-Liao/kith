@@ -24,6 +24,7 @@ impl PackageCache {
 pub(crate) fn run_call<R>(
     _cache: &PackageCache,
     _own: &Paths,
+    _method: &str,
     _params: &Value,
     mut pass: impl FnMut() -> Result<R>,
 ) -> Result<R> {
