@@ -525,3 +525,15 @@ definite `revoked` end a door with no answer from the core; the sweeper calls `d
 Bound left: an untick that `kith-auth` cannot judge leaves a door up to `RUN_LIMIT_S` (3600 s). Tests: `kernel/tests/kith-door-core-check`
 (a stub core: answers, refuses, down, hung; scratch edits of each rule were run and fail it). SYNC is not moved (the other covered changes since it
 have not been read).
+
+## Core lock 1c (2026-11-21, flow/resume-retire-python-now-2-corelock1c): folders and service specs off the core lock
+
+`authority/revoke.rs`, `call.rs` and `secret_writes.rs` no longer read a person's folders (`agents/*/memory|files/people/<id>`, `<state>/people/<id>.md`)
+or `<kernel>/services` under the core lock: both come through the package cache's refresher (`Want::Life`, `Want::Service`), and a rename's folder
+move is queued while the lock is held (queue order = commit order) and run by the cache's mover thread after it is let go, with a repair at daemon
+start for every person with a `was` list. Read against the model: no revoke step changed. Suspend, undo, `removePerson` and `removeBot` never wait on
+or refuse for these facts (a removal only says it cannot tell what is kept); every access decision (`may`, `resolve`, `cut_off`, the order that
+follows a removal) is still one locked step on core.db, and no authority answer is cached outside the lock. Folders are not access control: a
+rename that commits and has not moved yet changes where memory sits, not who may do what, and an old id stays refused (`canonical != pid`).
+No model action, check or row changed; `run.sh` was not re-run for this. SYNC is not moved: the other covered changes since it (see `drift.sh`)
+have not been read.

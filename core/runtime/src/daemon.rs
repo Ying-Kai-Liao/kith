@@ -317,8 +317,24 @@ impl Shared {
 
     /// A call that reads package facts: see `packages::run_call`.
     #[cfg(unix)]
-    fn with_packages<R>(&self, params: &Value, pass: impl FnMut() -> Result<R>) -> Result<R> {
-        crate::packages::run_call(&self.packages, &self.own, params, pass)
+    fn with_packages<R>(
+        &self,
+        method: &str,
+        params: &Value,
+        pass: impl FnMut() -> Result<R>,
+    ) -> Result<R> {
+        crate::packages::run_call(&self.packages, &self.own, method, params, pass)
+    }
+
+    /// Queues the repair of the folders an earlier run left under an old id: every person with a `was` list, on the
+    /// package thread. Idempotent (a folder that is already where it belongs is not looked at twice), so it runs at every start.
+    #[cfg(unix)]
+    pub(crate) fn queue_repairs(&self) {
+        let life = crate::authority::revoke::Life::own(&self.own);
+        match self.with_core(|c| crate::authority::call::earlier_moves(c, &life)) {
+            Ok(list) => self.packages.queue_repair(list),
+            Err(e) => log::note(&self.logs, &format!("daemon: folder repair: {e}")),
+        }
     }
 
     /// The secrets master key if the key store holds one, read at most until found and never under the core lock.
@@ -513,13 +529,21 @@ impl Shared {
         {
             if crate::authority::call::serves(method) {
                 // The tokens of a revoked or removed person end in the same locked call that committed it.
-                let answer = self.with_packages(params, || {
+                let (answer, moving) = self.with_packages(method, params, || {
                     self.with_core(|c| {
-                        let answer = crate::authority::call::call(c, method, params)?;
+                        let (answer, mv) =
+                            crate::authority::call::call_deferred(c, method, params)?;
                         self.runs.after_authority_write(method, params, &answer);
-                        Ok(answer)
+                        // A rename's folders move once the lock is let go. Queued here, so the order of the moves is
+                        // the order of the commits.
+                        Ok((answer, mv.map(|mv| self.packages.queue_move(mv))))
                     })
                 })?;
+                // The lock is let go: this caller waits for its folders, but not for ever.
+                let answer = match moving {
+                    Some(wait) => wait.finish(answer, crate::packages::MOVE_WAIT),
+                    None => answer,
+                };
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
             }
@@ -528,7 +552,7 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::doors::serves(method) {
-                let answer = self.with_packages(params, || {
+                let answer = self.with_packages(method, params, || {
                     self.with_core(|c| crate::doors::call(c, method, params, &crate::gate::System))
                 })?;
                 self.served.fetch_add(1, Ordering::SeqCst);
@@ -584,7 +608,7 @@ impl Shared {
                 } else {
                     None
                 };
-                let answer = self.with_packages(params, || {
+                let answer = self.with_packages(method, params, || {
                     self.with_core(|c| {
                         if let Some(key) = &key {
                             crate::secrets::adopt(&c.secrets, key.clone())?;
@@ -880,6 +904,15 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         *slot = Some(core);
     }
     shared.replay_open_removals();
+    // Folders a rename did not finish moving (the daemon died, the disk was stuck) go to their person's current id.
+    #[cfg(unix)]
+    {
+        let logs = shared.logs.clone();
+        shared.packages.set_log(Arc::new(move |n| {
+            log::note(&logs, &format!("daemon: folders: {n}"));
+        }));
+        shared.queue_repairs();
+    }
     let for_calls = shared.clone();
     let handler: Arc<Handler> =
         Arc::new(move |who, method, params| for_calls.dispatch(who, method, params));

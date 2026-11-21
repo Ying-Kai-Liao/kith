@@ -21,9 +21,10 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use kith_kernel::secrets::{self, Ctx};
+use kith_kernel::secrets::{self, Ctx, Found, PackageSource};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -41,7 +42,14 @@ pub(crate) struct Life {
     pub(crate) machine: PathBuf,
     /// The kernel folder, whose `services/` says which logins are personal.
     pub(crate) kernel: PathBuf,
+    /// Where the person's folders and the kernel's service specs come from under the core lock: the daemon's package
+    /// cache, filled by a thread outside the lock. `None` reads the disk (the CLI and embedded runs, which hold no lock).
+    pub(crate) pkg: Option<Arc<dyn PackageSource>>,
 }
+
+/// What a fact the cache could not give turns into, in the words of the refusals that rest on it.
+pub(super) const NO_FOLDERS: &str =
+    "can't read the agents folders: the disk did not answer, try again";
 
 impl Life {
     /// The usual layout, from the agents folder alone (for a caller that has no better view of the folders).
@@ -50,12 +58,55 @@ impl Life {
         let home = c
             .agents
             .parent()
-            .map_or_else(|| c.agents.clone(), std::path::Path::to_path_buf);
+            .map_or_else(|| c.agents.clone(), Path::to_path_buf);
         Life {
             agents: c.agents.clone(),
             state: home.join("state"),
             machine: home.join("machine"),
             kernel: c.kernel.clone(),
+            pkg: match &c.packages {
+                secrets::Packages::Source(s) => Some(s.clone()),
+                secrets::Packages::Disk => None,
+            },
+        }
+    }
+
+    /// The core's own folders, read from the disk (a mover and a repair never go through the cache).
+    pub(crate) fn own(p: &kith_kernel::paths::Paths) -> Life {
+        Life {
+            agents: p.agents.clone(),
+            state: p.state.clone(),
+            machine: p.machine.clone(),
+            kernel: p.home.join("kernel"),
+            pkg: None,
+        }
+    }
+
+    /// The person's folders as (label, path), or `None` when the disk did not answer in time.
+    fn folders_of(&self, pid: &str) -> Option<Vec<(String, PathBuf)>> {
+        match &self.pkg {
+            Some(s) => s
+                .life(&self.agents, &self.kernel, &self.state, pid)
+                .map(|a| (*a).clone()),
+            None => Some(person_folders(&self.agents, &self.state, pid)),
+        }
+    }
+
+    /// [`Self::folders_of`] for a line that only tells what is kept: it never makes the call wait or run again.
+    fn folders_soft(&self, pid: &str) -> Option<Vec<(String, PathBuf)>> {
+        match &self.pkg {
+            Some(s) => s
+                .life_soft(&self.agents, &self.kernel, &self.state, pid)
+                .map(|a| (*a).clone()),
+            None => Some(person_folders(&self.agents, &self.state, pid)),
+        }
+    }
+
+    /// `<kernel>/services/<svc>.json`, or `None` when the disk did not answer in time.
+    pub(super) fn kernel_service(&self, svc: &str) -> Option<Arc<Found>> {
+        match &self.pkg {
+            Some(s) => s.kernel_service(&self.agents, &self.kernel, svc),
+            None => Some(Arc::new(read_service(&self.kernel, svc))),
         }
     }
 }
@@ -80,9 +131,11 @@ pub(super) fn check_not_room(id: &str) -> R<()> {
     Ok(())
 }
 
-/// `person_folders`: (label, path) of what kith keeps for a person outside the tables.
-fn person_folders(life: &Life, pid: &str) -> Vec<(String, PathBuf)> {
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&life.agents)
+/// `person_folders`: (label, path) of what kith keeps for a person outside the tables. Reads the disk: never under the
+/// core lock (the daemon's call goes through the package cache, its mover and repair run on that cache's thread).
+pub(crate) fn person_folders(agents: &Path, state: &Path, pid: &str) -> Vec<(String, PathBuf)> {
+    secrets::note_disk_read();
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(agents)
         .map(|rd| rd.filter_map(Result::ok).map(|e| e.path()).collect())
         .unwrap_or_default();
     dirs.sort();
@@ -99,16 +152,25 @@ fn person_folders(life: &Life, pid: &str) -> Vec<(String, PathBuf)> {
             }
         }
     }
-    let p = life.state.join("people").join(format!("{pid}.md"));
+    let p = state.join("people").join(format!("{pid}.md"));
     if p.exists() {
         out.push(("people".to_owned(), p));
     }
     out
 }
 
-/// The labels of [`person_folders`], sorted and each once.
-fn kept_labels(life: &Life, pid: &str) -> Vec<String> {
-    person_folders(life, pid)
+/// `<kernel>/services/<svc>.json` from the disk.
+pub(crate) fn read_service(kernel: &Path, svc: &str) -> Found {
+    secrets::note_disk_read();
+    let path = kernel.join("services").join(format!("{svc}.json"));
+    if !path.is_file() {
+        return Found::Absent;
+    }
+    std::fs::read(&path).map_or(Found::Unreadable, Found::Bytes)
+}
+
+fn sorted_labels(folders: Vec<(String, PathBuf)>) -> Vec<String> {
+    folders
         .into_iter()
         .map(|(label, _)| label)
         .collect::<BTreeSet<_>>()
@@ -130,7 +192,10 @@ pub(super) fn retired(auth: &Value, life: &Life, pid: &str, left: bool) -> Optio
     if !left {
         return None;
     }
-    let kept = kept_labels(life, pid);
+    // A disk that did not answer is never read as "no folders": the id is not free until it can be looked at.
+    let Some(kept) = life.folders_of(pid).map(sorted_labels) else {
+        return Some(NO_FOLDERS.to_owned());
+    };
     if !kept.is_empty() {
         return Some(format!(
             "memory and files of a removed '{pid}' are still in {} (move them away to use the id)",
@@ -163,6 +228,9 @@ pub(super) fn retired(auth: &Value, life: &Life, pid: &str, left: bool) -> Optio
 /// `need_free`: for a new person or bot, refused when the id is retired.
 fn need_free(auth: &Value, life: &Life, pid: &str, left: bool) -> R<()> {
     if let Some(why) = retired(auth, life, pid, left) {
+        if why == NO_FOLDERS {
+            return die(why);
+        }
         return die(format!(
             "{why}: give the new person another id (e.g. {pid}-2)"
         ));
@@ -330,32 +398,40 @@ fn personal(life: &Life, svc: &str) -> R<bool> {
     if svc.is_empty() || svc.contains(['/', '\\']) || svc == ".." || svc == "." {
         return Ok(false);
     }
-    for dir in [life.kernel.join("services"), life.machine.join("services")] {
-        let path = dir.join(format!("{svc}.json"));
-        if !path.is_file() {
-            continue;
+    let Some(kernel) = life.kernel_service(svc) else {
+        return die(format!(
+            "the service spec of {svc} cannot be read: the disk did not answer, try again"
+        ));
+    };
+    let bytes = match &*kernel {
+        Found::Absent => {
+            let path = life.machine.join("services").join(format!("{svc}.json"));
+            if !path.is_file() {
+                return Ok(false);
+            }
+            std::fs::read(&path).ok()
         }
-        let spec: Option<Value> = std::fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .filter(Value::is_object);
-        let Some(spec) = spec else {
-            return die(format!("the service spec of {svc} cannot be read"));
-        };
-        return Ok(match spec.get("personal") {
-            Some(Value::Bool(b)) => *b,
-            Some(Value::Null) => false,
-            Some(Value::String(t)) => !t.is_empty(),
-            Some(Value::Number(n)) => n.as_f64() != Some(0.0),
-            Some(Value::Array(l)) => !l.is_empty(),
-            Some(Value::Object(m)) => !m.is_empty(),
-            None => matches!(
-                spec.get("kind").and_then(Value::as_str),
-                Some("login" | "browser")
-            ),
-        });
-    }
-    Ok(false)
+        Found::Bytes(b) => Some(b.clone()),
+        Found::Unreadable => None,
+    };
+    let spec: Option<Value> = bytes
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .filter(Value::is_object);
+    let Some(spec) = spec else {
+        return die(format!("the service spec of {svc} cannot be read"));
+    };
+    Ok(match spec.get("personal") {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Null) => false,
+        Some(Value::String(t)) => !t.is_empty(),
+        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
+        Some(Value::Array(l)) => !l.is_empty(),
+        Some(Value::Object(m)) => !m.is_empty(),
+        None => matches!(
+            spec.get("kind").and_then(Value::as_str),
+            Some("login" | "browser")
+        ),
+    })
 }
 
 /// `rename`: a person's new id, carried through every table that names them. The old id stays in `was`, so what
@@ -454,11 +530,46 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
 pub(super) const RENAMED_TAIL: &str =
     " (profile names stay as they are: they name accounts, not people)";
 
+/// A committed rename whose folders still have to follow. The caller runs it after the core lock is let go: on the
+/// package cache's thread (the daemon), or right after its own commit (the CLI, which holds no lock).
+#[derive(Clone, Debug)]
+pub(crate) struct LifeMove {
+    pub(crate) life: Life,
+    pub(crate) old: String,
+    pub(crate) new: String,
+    /// The person's old ids, from the row the rename committed. Folders still under one of the others follow too: an
+    /// earlier rename may not have moved them (the disk was stuck, the daemon died).
+    pub(crate) earlier: Vec<String>,
+}
+
+/// What a rename's move did: the labels that moved, and a note for each folder left as it was.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MoveReport {
+    pub(crate) moved: Vec<String>,
+    pub(crate) notes: Vec<String>,
+}
+
+/// The old ids each person's row keeps in `was`, as (old id, current id): what the repair moves folders for. A bot is
+/// not a person here, and a removed person has no row, so nothing of theirs is listed.
+pub(crate) fn earlier_ids(auth: &Value) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (id, p) in people(auth) {
+        if truthy(p.get("bot_of")) {
+            continue;
+        }
+        for w in words(p.get("was")) {
+            out.push((w, id.clone()));
+        }
+    }
+    out
+}
+
 /// After the commit of a rename: their folders take the new id. Returns the labels of what moved and a note for each
 /// folder left as it was (the destination exists, or the move failed): the write happened, so none of it is an error.
+/// Reads the disk at move time, never a cache.
 pub(super) fn move_life(life: &Life, old: &str, new: &str) -> (Vec<String>, Vec<String>) {
     let (mut moved, mut notes) = (BTreeSet::new(), Vec::new());
-    for (label, p) in person_folders(life, old) {
+    for (label, p) in person_folders(&life.agents, &life.state, old) {
         let dest = if p.extension().is_some_and(|e| e == "md") {
             p.with_file_name(format!("{new}.md"))
         } else {
@@ -484,6 +595,19 @@ pub(super) fn move_life(life: &Life, old: &str, new: &str) -> (Vec<String>, Vec<
         }
     }
     (moved.into_iter().collect(), notes)
+}
+
+/// Runs a rename's move, then the repair of the person's other old ids. The report is the rename's own; the repair's
+/// notes come second (the caller logs them once: nobody is waiting for them).
+pub(crate) fn run_move(mv: &LifeMove) -> (MoveReport, Vec<String>) {
+    let (moved, notes) = move_life(&mv.life, &mv.old, &mv.new);
+    let mut repair_notes = Vec::new();
+    for w in &mv.earlier {
+        if *w != mv.old && *w != mv.new {
+            repair_notes.extend(move_life(&mv.life, w, &mv.new).1);
+        }
+    }
+    (MoveReport { moved, notes }, repair_notes)
 }
 
 /// `person <id> --rm`: they go, with their bots, memberships and open invites; the id is retired (and the ids they
@@ -522,17 +646,24 @@ pub(crate) fn person_remove(
     }
     let ids: Vec<&str> = gone.iter().map(String::as_str).collect();
     forget(auth, &ids);
-    let kept = kept_labels(life, pid);
+    // A removal narrows access and never waits on a folder: when the disk did not answer the line says so.
+    let kept = life.folders_soft(pid).map(sorted_labels);
     let mut msg = format!("{pid} removed, with their memberships and grants");
     if gone.len() > 1 {
         msg = format!("{msg} and bots ({})", gone[1..].join(", "));
     }
     msg.push_str(" (profiles they own are kept); the id is retired, a new person gets another");
-    if !kept.is_empty() {
-        msg = format!(
-            "{msg}; their memory and files in {} are kept (delete them by hand)",
-            kept.join(", ")
-        );
+    match kept {
+        None => msg.push_str(
+            "; can't tell which of their memory and files are kept: the disk did not answer (look in the agents' memory/people and files/people)",
+        ),
+        Some(kept) if !kept.is_empty() => {
+            msg = format!(
+                "{msg}; their memory and files in {} are kept (delete them by hand)",
+                kept.join(", ")
+            );
+        }
+        Some(_) => {}
     }
     Ok((vec![msg], gone))
 }
@@ -603,7 +734,11 @@ pub(crate) fn person_remove_unused(auth: &mut Value, life: &Life, pid: &str) -> 
     if in_profiles {
         has.push("profiles".to_owned());
     }
-    has.extend(kept_labels(life, pid));
+    has.extend(
+        life.folders_of(pid)
+            .map(sorted_labels)
+            .map_or_else(|| die(NO_FOLDERS), Ok)?,
+    );
     if !has.is_empty() {
         return die(format!(
             "{pid} is not unused ({}): kith-auth person {pid} --rm removes them and retires the id",

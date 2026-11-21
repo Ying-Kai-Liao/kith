@@ -32,6 +32,33 @@ pub trait PackageSource: Send + Sync + std::fmt::Debug {
     fn facts(&self, agents: &Path, kernel: &Path, agent: &str) -> Option<Arc<AgentFacts>>;
     /// The names of the agents that have a package.
     fn names(&self, agents: &Path, kernel: &Path) -> Option<Arc<Vec<String>>>;
+    /// What kith keeps for a person outside the tables, as (label, path): the folders `memory/people/<pid>` and
+    /// `files/people/<pid>` of every agent, and `<state>/people/<pid>.md`. A fact the call needs: a source that cannot give
+    /// it says so (and the caller asks again), `None` is "unavailable".
+    fn life(
+        &self,
+        _agents: &Path,
+        _kernel: &Path,
+        _state: &Path,
+        _pid: &str,
+    ) -> Option<Arc<Vec<(String, PathBuf)>>> {
+        None
+    }
+    /// [`Self::life`] for a call that must never wait on it (a removal that only words a line with it): an answer the
+    /// source has, else `None`, and nothing is recorded as missing.
+    fn life_soft(
+        &self,
+        _agents: &Path,
+        _kernel: &Path,
+        _state: &Path,
+        _pid: &str,
+    ) -> Option<Arc<Vec<(String, PathBuf)>>> {
+        None
+    }
+    /// `<kernel>/services/<svc>.json`.
+    fn kernel_service(&self, _agents: &Path, _kernel: &Path, _svc: &str) -> Option<Arc<Found>> {
+        None
+    }
 }
 
 /// A service spec file of a package: not there, its bytes, or there but not readable.
@@ -133,6 +160,12 @@ fn touch() {
     if let Some(f) = DISK_READ.get() {
         f();
     }
+}
+
+/// A read of a folder the rules do not own (a person's folders, the kernel's service specs) outside [`Packages`]: the
+/// same check as the package reads get.
+pub fn note_disk_read() {
+    touch();
 }
 
 fn plain(agent: &str) -> bool {
