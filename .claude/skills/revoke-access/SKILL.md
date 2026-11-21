@@ -20,8 +20,15 @@ design). This skill is its only documentation.
 ```
 verification/revoke/run.sh                          # every row of checks.tsv (228 rows), then the 7 Reconcile.tla rows
 verification/revoke/run.sh --show VARIANT PROPERTY   # TLC's full output (the counterexample) for one row
+verification/revoke/run.sh --shard I/N               # one shard of N (add --smoke for its smoke rows); shard 1 also runs the Reconcile rows
+verification/revoke/run.sh --shard-check N           # no TLC: every row in exactly one of the N shards (CI runs it with N=6)
+KITH_TLC_HEAP=6g verification/revoke/run.sh --show VARIANT PROPERTY   # a bigger Java heap (default 512m; same results)
 verification/revoke/drift.sh                        # covered files changed since the sync commit?
 ```
+
+CI runs the rows as 6 parallel shards (`revoke-access (I/6)`, heap 8g), the slow liveness rows spread across them and
+`switched-always-kill NoLiveProc` alone on shard 6. To reproduce one failing leg: `run.sh --shard I/6`; one row: `--show`.
+If you add rows, `--shard-check 6` must still pass; if you change the shard count, change it in `ci.yml` too.
 
 Same pinned tools as `verification/threads/run.sh` (it is asked for them with `--tools`): `tla2tools.jar` v1.7.4,
 Temurin JRE 21 only when no Java 11+ is present, cached under `${XDG_CACHE_HOME:-$HOME/.cache}/kith-verify/`.
