@@ -152,7 +152,7 @@ S=$(settings KITH_PERMISSION_MODE=auto)
 has "an owner run in auto mode loads the saved rule" "$(js "d['permissions']['allow']" <<< "$S")" "Bash(git status)"
 has "...and the saved sentence, after the defaults" "$(js "d['autoMode']['allow']" <<< "$S")" "'\$defaults', 'The owner approved the agent \"echo\""
 hasnt "...but not a rule of another agent" "$(js "d['permissions']['allow']" <<< "$S")" "Bash(ls)"
-is "it has a PermissionDenied hook" "$(js "'kith-permit' in d['hooks']['PermissionDenied'][0]['hooks'][0]['command'] and d['hooks']['PermissionDenied'][0]['hooks'][0]['command'].split()[-2]" <<< "$S")" "--dir"
+is "it has a PermissionDenied hook" "$(js "'permit' in d['hooks']['PermissionDenied'][0]['hooks'][0]['command'] and d['hooks']['PermissionDenied'][0]['hooks'][0]['command'].split()[-2]" <<< "$S")" "--dir"
 is "...that waits as long as a card may" "$(js "d['hooks']['PermissionDenied'][0]['hooks'][0]['timeout']" <<< "$S")" "660"
 has "...and a PreToolUse one-shot hook next to the memory checks" "$(js "[h['hooks'][0]['command'] for h in d['hooks']['PreToolUse']]" <<< "$S")" "once --dir"
 has "...whose one-shot folder no file tool may write" "$(js "d['permissions']['deny']" <<< "$S")" "/run/once/**)"

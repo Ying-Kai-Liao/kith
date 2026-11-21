@@ -944,6 +944,12 @@ fi
 # so both launch paths write the same bytes.
 cost_hook="\"$KITH/bin/kith-cost\" tag"
 if cbin=$(kith_cost_bin); then cost_hook=$(printf '%q kernel cost --kernel %q tag' "$cbin" "$KITH"); fi
+# The permit hooks, the guest's MCP server and `apply`: `kith kernel permit --kernel K ...` on the program that has the module, else
+# the script. permit_cmd is the command words; KITH_PERMIT_BIN carries the program to the settings builder below.
+permit_cmd=("$KITH/bin/kith-permit")
+KITH_PERMIT_BIN=""
+if pbin=$(kith_permit_bin); then permit_cmd=("$pbin" kernel permit --kernel "$KITH"); KITH_PERMIT_BIN=$pbin; fi
+export KITH_PERMIT_BIN
 # The registry's SessionStart hook: the same side of `kith-sessions` as the rest of this launch (kthreads, decided above).
 sessions_hook="\"$KITH/bin/kith-sessions\" record"
 if [[ -n $kthreads ]]; then sessions_hook=$(printf '%q kernel threads --kernel %q record' "$kthreads" "$KITH"); fi
@@ -1126,7 +1132,9 @@ if os.environ["P_OWNER"] == "1":
     # stays). Needs the ask token, which only a run it started (or kith-permit issue) has; without one both hooks print nothing.
     if run_mode == "auto":
         import shlex, uuid
-        permit = shlex.quote(os.environ["KITH_ROOT"] + "/bin/kith-permit")
+        pbin = os.environ.get("KITH_PERMIT_BIN", "")
+        permit = (shlex.quote(pbin) + " kernel permit --kernel " + shlex.quote(os.environ["KITH_ROOT"])) if pbin \
+            else shlex.quote(os.environ["KITH_ROOT"] + "/bin/kith-permit")
         once_dir = shlex.quote("%s/run/once/%s" % (os.environ["KITH_MACHINE"], uuid.uuid4().hex))
         # The window the owner has to answer is set by the host, up to 10 minutes: the hook waits as long.
         s["hooks"].setdefault("PermissionDenied", []).append(
@@ -1349,7 +1357,13 @@ slash_off() {
 kith_env_sync   # the exports above reach role repos under their old HQ_ names too
 # The agent's MCP servers for a launch-json run: the granted shared services plus its own mcp.json, as one {"mcpServers": {...}}.
 # Anyone but the owner gets kith-permit and nothing else: no shared services (their logins), no server of the agent's own.
-permit_mcp() { printf '{"mcpServers":{"kithpermit":{"command":"%s/bin/kith-permit","args":[]}}}' "$KITH"; }
+permit_mcp() {
+  if [[ -n $KITH_PERMIT_BIN ]]; then
+    python3 -I -c 'import json,sys; print(json.dumps({"mcpServers": {"kithpermit": {"command": sys.argv[1], "args": ["kernel", "permit", "--kernel", sys.argv[2]]}}}, separators=(",", ":")), end="")' "$KITH_PERMIT_BIN" "$KITH"
+  else
+    printf '{"mcpServers":{"kithpermit":{"command":"%s/bin/kith-permit","args":[]}}}' "$KITH"
+  fi
+}
 merged_mcp() {
   [[ $p_owner == 0 ]] && { permit_mcp; return; }
   local f=("$runs/$$.mcp.json"); [[ -f $pkg/mcp.json ]] && f+=("$pkg/mcp.json")
@@ -1463,7 +1477,7 @@ if [[ $launch -eq 1 ]]; then
   # path's apply below. The host asks for a launch at each of an invited person's turns, and hands the settings to
   # that conversation's session alone (session/new or session/load), never by starting its process again.
   if [[ $p_owner == 0 && -n ${KITH_RUN_TOKEN:-} && -n ${KITH_RUN_SOCKET:-} ]]; then
-    python3 "$KITH/bin/kith-permit" apply "$runs/$$.settings.json" || true
+    "${permit_cmd[@]}" apply "$runs/$$.settings.json" || true
   fi
   settings_arg=$(cat "$runs/$$.settings.json")
   mcp_arg=$(merged_mcp)
@@ -1587,17 +1601,17 @@ if [[ $# -gt 0 ]]; then
   if [[ $harness == claude ]]; then
     if [[ -z ${KITH_RUN_TOKEN:-} && -z ${KITH_ASK_TOKEN:-} && $p_owner == 1 ]]; then
       psid=${csid:-continue:$PWD}
-      if ask_env=$("$KITH/bin/kith-permit" issue "$agent" "$psid" "$$"); then eval "$ask_env"; fi
+      if ask_env=$("${permit_cmd[@]}" issue "$agent" "$psid" "$$"); then eval "$ask_env"; fi
     fi
     if [[ -n ${KITH_RUN_TOKEN:-} && -n ${KITH_RUN_SOCKET:-} ]] || [[ -n ${KITH_ASK_TOKEN:-} && -n ${KITH_ASK_SOCKET:-} ]]; then
-      args+=(--mcp-config "{\"mcpServers\":{\"kithpermit\":{\"command\":\"$KITH/bin/kith-permit\",\"args\":[]}}}"
+      args+=(--mcp-config "$(permit_mcp)"
              --permission-prompt-tool mcp__kithpermit__approve)
     fi
     # F11 step 2b: what this session was given beyond the box (a yes on an escape card, an "always") goes into the settings
     # file now, after the claim above and before exec: a once grant is consumed by the one run that is about to start, never
     # by a profile built earlier (a read made before the claim could be spent twice). Nothing from the host, no access.
     if [[ $p_owner == 0 && -n ${KITH_RUN_TOKEN:-} && -n ${KITH_RUN_SOCKET:-} ]]; then
-      python3 "$KITH/bin/kith-permit" apply "$runs/$$.settings.json" || true
+      "${permit_cmd[@]}" apply "$runs/$$.settings.json" || true
     fi
   fi
   exec ${stub[@]+"${stub[@]}"} claude "${args[@]}" -p "$*"
@@ -1623,8 +1637,8 @@ fi
 # pid is this shell's: kith-sessions run keeps it and claude is its child, so the hook still descends from it. No host:
 # the run starts as before and the hook prints nothing.
 if [[ $harness == claude && $p_owner == 1 && $nested -eq 0 && -z ${KITH_RUN_TOKEN:-} && -z ${KITH_ASK_TOKEN:-} ]] \
-   && grep -q 'kith-permit.* denied --dir' "$runs/$$.settings.json" 2>/dev/null; then
-  if ask_env=$(KITH_PERMIT_NO_RESTART=1 "$KITH/bin/kith-permit" issue "$agent" "${csid:-continue:$PWD}" "$$"); then eval "$ask_env"; fi
+   && grep -q 'permit.* denied --dir' "$runs/$$.settings.json" 2>/dev/null; then
+  if ask_env=$(KITH_PERMIT_NO_RESTART=1 "${permit_cmd[@]}" issue "$agent" "${csid:-continue:$PWD}" "$$"); then eval "$ask_env"; fi
 fi
 # The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
 # claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
