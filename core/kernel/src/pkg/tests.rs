@@ -36,7 +36,6 @@ impl Tmp {
             state: self.0.join("state"),
             store: self.0.join("state/store"),
             github: self.0.join("nowhere").to_string_lossy().into_owned(),
-            python: "python3".to_owned(),
         }
     }
 
