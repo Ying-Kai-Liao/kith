@@ -342,6 +342,8 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
             host: false,
             exiting: || false,
             wait_for_embedded: Duration::from_secs(10),
+            package_probe: None,
+            lock_wait: crate::daemon::LOCK_WAIT,
             holder: HolderConfig {
                 exe: Some(holder_bin()),
                 idle: Duration::from_secs(5),

@@ -159,6 +159,8 @@ pub(super) fn with_note(e: &Error, note: &str) -> Error {
         Error::NotAllowed(_) => Error::NotAllowed(m),
         Error::BadParams(_) => Error::BadParams(m),
         Error::NotServed(_) => Error::NotServed(m),
+        Error::Busy(_) => Error::Busy(m),
+        Error::NeedPackages(_) => Error::NeedPackages(m),
     }
 }
 
