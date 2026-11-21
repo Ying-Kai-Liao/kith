@@ -12,6 +12,7 @@ KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-footguns-check.XXXXXX")
 T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
+REAL_KITH=${KITH_BIN:-$(command -v kith || true)}   # the fake program below hands `kernel paths` (bin/kith's folders) to it
 export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json
 unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_MODEL KITH_EFFORT KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR CODEX_HOME HQ_HOME
 mkdir -p "$HOME" "$KITH_HOME/state" "$KITH_HOME/agents/echo/role" "$T/bin"
@@ -49,7 +50,7 @@ run backup --nightly;         check "flagged: backup --nightly" "[[ \$calls == '
 run backup --nightly off;     check "flagged: backup --nightly off" "[[ \$calls == 'kith-state backup --nightly off' ]]"
 # `kith backup list|add|remove` is `kith kernel account backup ...` (R3): a fake kith program that lists the module gets
 # the line; with none the router says so in one line and exits 1, never a run.
-printf '#!/bin/sh\ncase "$1 $2" in "kernel version") echo %s ;; "memory hook") echo phase ;; *) echo "kith $*" >> "%s" ;; esac\n' "'{\"abi\":1,\"modules\":[\"account\"]}'" "$LOG" > "$T/fakekith"; chmod +x "$T/fakekith"
+printf '#!/bin/sh\ncase "$1 $2" in "kernel version") echo %s ;; "memory hook") echo phase ;; "kernel paths") exec "%s" "$@" ;; *) echo "kith $*" >> "%s" ;; esac\n' "'{\"abi\":1,\"modules\":[\"account\"]}'" "$REAL_KITH" "$LOG" > "$T/fakekith"; chmod +x "$T/fakekith"
 KITH_BIN=$T/fakekith run backup list --json
 check "backup list goes to kith kernel account backup list" "[[ \$rc == 0 && \$calls == 'kith kernel account --kernel $K backup list --json' ]]"
 CARGO_TARGET_DIR=$T/no-build PATH=$T/bin:/usr/bin:/bin KITH_BIN=$T/nonexistent run backup list --json

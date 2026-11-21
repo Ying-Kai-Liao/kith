@@ -94,7 +94,7 @@ for line in "tag x" "record" "people month" "month" ""; do
   check "KITH_CORE=python: kith cost ${line:-<bare>} is the same call" "[ \"\$(calls '')\" -ge 1 ]"
 done
 
-# 4. No program, or an old one: `tag` exits 0 without a word, every other verb says so in one line and exits 3. The stub finds
+# 4. (The stub itself: `kith` takes its folders from the program, so with none it refuses before it routes anything.) No program, or an old one: `tag` exits 0 without a word, every other verb says so in one line and exits 3. The stub finds
 # KITH_BIN, the release it sits in, a kith on PATH, the host kith serve installed, a build next to the checkout; this copy has
 # none of the last four, so an unusable KITH_BIN is "no program".
 mkdir -p "$T/old"
@@ -102,14 +102,14 @@ printf '#!/bin/sh\nif [ "$1 $2" = "kernel version" ]; then echo %s; exit 0; fi\n
 chmod +x "$T/old/kith"
 for prog in none old; do
   case $prog in none) export KITH_BIN=$T/nonexistent ;; old) export KITH_BIN=$T/old/kith ;; esac
-  reset; "$KITH" cost tag x >"$T/o" 2>"$T/e" </dev/null; rc=$?
+  reset; "$T/k/bin/kith-cost" tag x >"$T/o" 2>"$T/e" </dev/null; rc=$?
   check "$prog program: tag exits 0, silent" "[ $rc = 0 ] && [ ! -s '$T/o' ] && [ ! -s '$T/e' ]"
   for line in "spent sam echo" "limit echo --sh" "sync" "usage --json"; do
-    "$KITH" cost $line >"$T/o" 2>"$T/e" </dev/null; rc=$?
+    "$T/k/bin/kith-cost" $line >"$T/o" 2>"$T/e" </dev/null; rc=$?
     check "$prog program: kith cost $line exits 3, one line on stderr, nothing on stdout" "[ $rc = 3 ] && [ \"\$(wc -l < '$T/e' | tr -d ' ')\" = 1 ] && grep -q '^kith-cost: ' '$T/e' && [ ! -s '$T/o' ]"
   done
   check "$prog program: the old program never ran a cost verb" "[ ! -e '$T/old/ran' ]"
-  KITH_CORE=python "$KITH" cost spent sam echo >/dev/null 2>"$T/e" </dev/null; rc=$?
+  KITH_CORE=python "$T/k/bin/kith-cost" spent sam echo >/dev/null 2>"$T/e" </dev/null; rc=$?
   check "$prog program: KITH_CORE=python changes nothing (still exit 3)" "[ $rc = 3 ]"
 done
 export KITH_BIN=$REAL
@@ -148,10 +148,10 @@ for prog in none old; do
   case $prog in none) NB=$T/nonexistent ;; old) NB=$T/old/kith ;; esac
   "$KITH" echo set limit 0.5 >/dev/null 2>&1
   reset; launch bash kai X=1 KITH_BIN=$NB
-  check "$prog program, bash path: the owner still runs and sees the stub's line" "[ \"\$(cat '$T/l.rc')\" = 0 ] && grep -q '^kith-cost: ' '$T/l.err'"
+  check "$prog program, bash path: the launch is refused in one line (kith's folders come from the program)" "[ \"\$(cat '$T/l.rc')\" = 1 ] && grep -q '^kith: ' '$T/l.err'"
   "$KITH" echo set limit 0 >/dev/null 2>&1
   reset; launch bash sam X=1 KITH_BIN=$NB
-  check "$prog program, bash path: a member is refused with the stub's line, not run unchecked" "[ \"\$(cat '$T/l.rc')\" = 3 ] && grep -q '^kith-cost: ' '$T/l.err' && grep -q 'not running without the budget check' '$T/l.err'"
+  check "$prog program, bash path: a member is refused too, not run unchecked" "[ \"\$(cat '$T/l.rc')\" = 1 ] && grep -q '^kith: ' '$T/l.err'"
 done
 
 # 5b. A renamed person: zed spent past the budget under the old id, then became zoe. The ledger still says zed, so zoe is
@@ -219,7 +219,7 @@ h=$(hook KITH_CORE=python)
 check "terminal launch, KITH_CORE=python: the same hook" "case '$h' in *kernel\ cost\ --kernel*\ tag) true ;; *) false ;; esac"
 for NB in "$T/nonexistent" "$T/old/kith"; do
   h=$(hook KITH_BIN=$NB)
-  check "terminal launch, no usable program ($(basename "$NB")): the hook is the stub" "case '$h' in *'/bin/kith-cost\" tag'|*'/bin/kith-cost tag') true ;; *) false ;; esac"
+  check "terminal launch, no usable program ($(basename "$NB")): refused in one line, no hook written" "[ -z '$h' ] && grep -q '^kith: ' '$T/hook.out'"
 done
 
 echo
