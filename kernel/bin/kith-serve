@@ -111,7 +111,8 @@ home_guard() {
   fi
   local user real mine theirs
   user=$(id -un 2>/dev/null || true); real=""
-  [ -n "$user" ] && real=$(eval "echo ~\"\$user\"" 2>/dev/null || true)
+  # ~name never expands inside quotes, so the name is checked to be plain and then expanded unquoted.
+  case $user in ""|*[!A-Za-z0-9._-]*) ;; *) eval "real=~$user" 2>/dev/null || real="" ;; esac
   case $real in "~"*|"") real="" ;; esac
   mine=$(cd "${HOME:-/nonexistent}" 2>/dev/null && pwd -P || true); theirs=$(cd "${real:-/nonexistent}" 2>/dev/null && pwd -P || true)
   if [ -z "$mine" ] || [ -z "$theirs" ] || [ "$mine" != "$theirs" ]; then
@@ -244,6 +245,8 @@ case ${1:-help} in
   start)   shift; cmd_start "$@" ;;
   stop)    home_guard; [ -x "$BIN" ] || { echo "kith serve: not installed" >&2; exit 1; }; "$BIN" stop ;;
   restart) shift; home_guard; "$SELF" stop; cmd_start --no-build "$@" ;;
+  # Runs only the guard (a test uses it to see a pass); starts, stops and installs nothing.
+  home-guard) home_guard; echo "kith serve: home guard ok" ;;
   status)  cmd_status ;;
   relay)   shift; cmd_relay "$@" ;;
   cloud)   shift; [ -x "$BIN" ] || { echo "kith serve: not installed" >&2; exit 1; }
