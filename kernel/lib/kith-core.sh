@@ -27,7 +27,9 @@ _kith_usable() {
   done
   real=$(cd "$(dirname "$f")" 2>/dev/null && pwd -P)/$(basename "$f")
   case $real in */kernel/bin/kith) return 1 ;; esac
-  "$c" memory hook --help 2>/dev/null | grep -qi phase
+  "$c" memory hook --help 2>/dev/null | grep -qi phase || return 1
+  # _kith_need_paths (kith_paths_bin): only a program that also answers `kernel paths` counts.
+  [[ -z ${_kith_need_paths:-} ]] || [[ -n $("$c" kernel paths --kernel "$KITH" --sh 2>/dev/null) ]]
 }
 kith_find_bin_set() {
   local target oldifs=$IFS
@@ -57,6 +59,16 @@ kith_find_bin() {
   [[ -n ${_kith_found_done:-} ]] || kith_find_bin_set
   [[ -n $_kith_found_bin ]] || return 1
   printf '%s' "$_kith_found_bin"
+}
+# kith_paths_bin   the program that gives the folders: kith_find_bin's, or (when that one does not answer `kernel paths`: an
+# older program, or a stand-in that is the program for other verbs) the first other candidate that does. Nothing and
+# returns 1 when none does.
+kith_paths_bin() {
+  local c
+  c=$(kith_find_bin) && [[ -n $("$c" kernel paths --kernel "$KITH" --sh 2>/dev/null) ]] && { printf '%s' "$c"; return 0; }
+  c=$(_kith_need_paths=1; kith_find_bin_set; printf '%s' "$_kith_found_bin")
+  [[ -n $c ]] || return 1
+  printf '%s' "$c"
 }
 # kith_need_bin   kith_find_bin, or one line and exit 1: every call's folders come from the program.
 kith_need_bin() {

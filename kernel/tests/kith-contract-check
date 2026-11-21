@@ -28,7 +28,7 @@ CONTRACT_DIR = KERNEL.parent / 'serve' / 'contract' / 'kernel'
 FIXTURES = CONTRACT_DIR / 'fixtures'
 C = json.loads((CONTRACT_DIR / 'contract.json').read_text())
 WRITE = os.environ.get('KITH_WRITE_FIXTURES') == '1'
-REAL_KITH = os.environ.get('KITH_BIN') or os.environ.get('KITH_DIFFTEST_BIN') or ''
+REAL_KITH = os.environ.get('KITH_BIN') or os.environ.get('KITH_DIFFTEST_BIN') or shutil.which('kith') or ''
 if not REAL_KITH or not os.access(REAL_KITH, os.X_OK):
     print('skip: no Rust program (KITH_BIN or KITH_DIFFTEST_BIN): `project add` runs bin/project-id, which needs it')
     sys.exit(0)

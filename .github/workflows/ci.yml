@@ -490,8 +490,10 @@ jobs:
       - name: Checks
         env:
           CHECKS: ${{ matrix.checks }}
-          KITH_BIN: ${{ runner.temp }}/kith-program/kith
         run: |
+          # On PATH last, not KITH_BIN: a check that names its own program (a fake) keeps it, and bin/kith still finds this one
+          # for the folders (`kith kernel paths`) when the fake does not answer.
+          export PATH="$PATH:$RUNNER_TEMP/kith-program"
           failed=0
           while IFS='|' read -r name cmd; do
             [ -n "$name" ] || continue

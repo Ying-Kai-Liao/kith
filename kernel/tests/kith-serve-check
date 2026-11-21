@@ -5,6 +5,9 @@
 #   kernel/tests/kith-serve-check     a few seconds; prints each check, exits 1 when one fails
 set -uo pipefail
 
+# bin/kith finds its folders with `kith kernel paths`: the real program, looked up before PATH is cut down below.
+REAL_KITH=${KITH_BIN:-$(command -v kith || true)}
+
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d "$(dirname "${TMPDIR:-/tmp}/x")/kith-serve-check.XXXXXX")
 trap 'rm -rf "$T"' EXIT
@@ -176,10 +179,10 @@ check "relay creates the file and folder" "[ -f '$CFG' ]"
 check "relay with no argument shows it" "'$SERVE' relay | grep -q relay.example.workers.dev"
 
 # the real kith dispatches `serve` to kith-serve
-out=$("$KERNEL/bin/kith" serve help 2>&1)
+out=$(KITH_BIN=$REAL_KITH "$KERNEL/bin/kith" serve help 2>&1)
 check "kith serve help prints usage" "echo \"\$out\" | grep -q 'kith serve start'"
 ln -s "$KERNEL/bin/kith" "$T/stubs/kith"
-check "kith through a symlink dispatches serve too" "kith serve help | grep -q 'kith serve start'"
+check "kith through a symlink dispatches serve too" "KITH_BIN=$REAL_KITH kith serve help | grep -q 'kith serve start'"
 
 # a packaged install (no serve/ source): installs the kith binary beside share/ under the name kith-serve, no cargo
 P=$T/pkg; mkdir -p "$P/bin" "$P/share/kith/kernel/bin" "$HOME/.kith/serve"
