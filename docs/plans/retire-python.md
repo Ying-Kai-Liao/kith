@@ -1,667 +1,418 @@
 # Retiring the Python kernel
 
-Status: plan, 2026-11-17. Docs and inventory only: this PR changes no code, test or script. The retirement itself runs
-later as the manager `retire-python`, after the `core-transcripts`, `core-schedules` and `rebuild-followups` work has
-merged. This file is that manager's map.
+Status: tracked series P0-P6, rewritten 2026-11-21. Phase 0 and Phase 1 run now; Phase 2 is not started (the architect is
+designing S4 first); Phases 3-6 wait. The first version of this plan (2026-11-17, R1-R10, #1025) is superseded: section 9
+maps it to the new ids, and the finished work of R1-R5 is in the log at the end.
 
-Why now: Kai, 2026-11-17: "I think after those, we can retire the python one." The Rust core already answers the verbs
-listed in `kernel/lib/core-switched.txt` and owns the state of the `accounts` and `authority` modules on Kai's Mac
-(`kith kernel cutover status` on Kai's Mac, 2026-11-17: authority switched since 1794754642, accounts since 1794754648, claims since 1794876918; transcripts and schedules not switched). What is left is
-a long tail of Python that still runs on every launch, on every hook and in the host's subprocess calls.
+Why now: Kai, 2026-11-21: "I already think we can retire python one now. just dont know whats the gap, since some of the
+gap might be rebuild with newer idea." The architect's gap analysis of 2026-11-21 (code at `origin/rust-rebuild`
+9b30143d6, live facts from Kai's Mac) is the evidence for every verdict below. It lives outside the repo, in the architect's
+files: `/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-21-python-gap/gap-analysis.md`. Kai chose "Phase 0 + 1
+now" and "a full plan like the C series". On which features to drop (kith-remote, kith-acp and its shim, guest doors,
+kith-pkg marketplace verbs, the hq rename steps) Kai said "Not sure": **nothing is dropped now; each is ported unless Kai
+drops it, and he is asked when the item comes up** (`kith ask product-lead`).
 
-Read with: `docs/plans/one-bot-model.md` (M0-M5 and its dated log), `docs/plans/core-design.md` (section 3 the router,
-section 11 the switch evidence, Q2 "when is the binary mandatory"), `docs/plans/runtime-design.md`,
-`core/runtime/src/cutover/mod.rs` (the framework) and `docs/codebase-map.md`.
+Read with: `docs/plans/one-bot-model.md` (M5 is this series; its dated log), `docs/plans/core-design.md`,
+`docs/plans/runtime-design.md`, `core/runtime/src/cutover/mod.rs` (the framework) and `docs/codebase-map.md`.
 
-## 0. How the two sides fit together today
+## Rules for every item
 
-Three mechanisms already exist. The plan reuses them and invents as little as possible.
+1. **Every merged PR ticks its item in this doc (status plus PR number) and adds a dated line to the log at the end.**
+2. **The MacBookPro must switch all five modules (accounts, authority, claims, transcripts, schedules;
+   `kith kernel cutover status --require` green) before any release deletes Python there.** This Mac already has; the MacBookPro's stepping is an action (P0-15), not
+   just a status read (P0-10).
+3. A Python module is deleted in the PR that removes its **last user** (import, `SourceFileLoader`, `python3 <path>`,
+   `uv run --script`, the plugin, plists). Find users with `python3 -I scripts/py-file-map.py`; it matches by name across
+   every tracked text file, so a path built with `join` or a Rust string still shows. Paste the new table in the PR.
+4. The deleting PR also: freezes the script's difftest corpus as a golden (`kernel/tests/difftest`), updates the drift lists
+   (`verification/*/drift.sh` `FILES`) and skill trigger text of the TLA+ models that name it, the `ci.yml` path filters
+   and checks (`kernel/tests/kith-ci-names-check` fails if a check is in neither `ci.yml` nor `ci-exempt.txt`), and
+   `.github/kith-protected-paths`; and adds **no core.db migration** (P0-12 checks it).
+5. A step run twice is harmless: deletions are idempotent, Mac-side actions go through the cutover framework or an
+   installer action that is safe to run twice.
+6. **Rollback ends where the Python does.** The PR that deletes a module's Python reader (P1-19 for claims and transcripts,
+   P2-6 for schedules, P3-4 for authority, P5-3 for accounts) makes `kith rollback MODULE` / `cutover rollback` for that
+   module refuse with "re-point `cli/current` first" (as C6 already does for schedules), because it would write files
+   nothing reads and clear the switch. The same PR adds the module to `kernel/lib/requires-switched.txt`.
+7. Mark: an item marked **needs architect design first** gets no worker until the architect's design is in.
 
-| Mechanism | Where | What it does | What it cannot do for retirement |
+## Gates (Kai is the only user)
+
+Decided 2026-11-21 (Kai, via main). Kai updates his two Macs himself, so most of the multi-user safety net of the first
+plan goes.
+
+**Kept**
+- The installer check: `scripts/install.sh` runs the new program's `kith kernel cutover status --require` before it flips
+  `cli/current`. It is the one gate that stops a Python-free release from stranding unswitched state on the MacBookPro or on
+  a stranger who ran the public installer. **It is not built yet:** Step 0 (#1050) added only the `status --require` verb;
+  nothing in `scripts/install.sh`, `install.sh`, `packaging/` or `serve/host/src/update/` calls it, and
+  `kernel/lib/requires-switched.txt` lists no module. P0-14 builds it; the file lists each module no later than the PR that
+  deletes the Python that module's state needs (rule 6).
+- Goldens frozen in the PR that deletes a script (rule 4).
+- TLA+ model drift lists and CI filters updated in the deleting PR (rule 4).
+- The `python-kernel-final` tag (P0-11): free, and the only undo for a source checkout.
+- The `MIN_CLI` raise (P5-6): one constant (`serve/host/src/kernel.rs`).
+- A CI check that a deletion PR adds no core.db migration (P0-12), so "install the previous folder" stays a rollback.
+
+**Dropped**
+- The two-release compatibility window. Stubs live only where a live caller names the path: launchd plists (until they are
+  rewritten), agent tools (`kith-send` is named by resource-manager `watch.py` and devops `uptime.py`), and the hooks of
+  sessions still running at the update (a hook command is fixed for the life of a run).
+- The publish gate across an owner list. It becomes a two-line checklist: this Mac, the MacBookPro.
+- The host start-up refusal with a built-in required-module list. `kith doctor` naming what is not switched is enough.
+- `kith update --back` and its hold marker. Rollback = re-point `cli/current` at the old folder
+  (`KITH_KEEP_VERSIONS` keeps three) and run `kith serve install` from the old binary, by hand; two lines, written in P0-13.
+- The R10 two-release state-format floor: the importers go once both Macs have stepped every module (P6).
+- The loader-to-subprocess prep: moot when `kith-info`, `kith-ask`, `kith-remote` and `kith-skills` are redesigned or
+  ported whole.
+
+Caveat: anyone else who installed from kithbot.app (v0.1.3, Python) is only protected by the installer check.
+
+## How to read an item
+
+`- [ ] **Pn-m. Title.** what. Verdict. Size. Depends. Owner/PR. Status.` Verdicts: **DELETE NOW** (dead or fully replaced,
+a repoint away), **PORT AS-IS** (small, design fine), **REDESIGN** (the core has a better shape; needs architect design
+first), **DROP-candidate** (written as "PORT unless Kai drops it": ask Kai via `kith ask product-lead` when the item comes
+up). Size: S under a day of a coder, M one to three PRs, L a design plus several PRs.
+
+## Phase 0: now (installs, one-line repoints, dead files)
+
+- [x] **P0-1. This plan.** Written as R1-R10. DONE. PORT. S. Depends: none. #1025. Done 2026-11-17 (rewritten as this series 2026-11-21).
+- [x] **P0-2. Step 0.** `kith kernel cutover status MODULE|--json|--require FILE`, `kernel/lib/requires-switched.txt`, `scripts/py-file-map.py`. Verdict: PORT AS-IS. S. Depends: none. #1050. Done 2026-11-19.
+- [x] **P0-3. R1 leaves.** `kith_engines.py`, `hq_settings.py`, the `python3_abs` fallback and the Python read-fence fallback of the Rust launch deleted. DELETE NOW. S. Depends: none. #1059. Done.
+- [x] **P0-4. `kith-account` becomes a stub.** `bin/kith-account` is `exec kith account "$@"`; the `account-state` and `kith backup` Python fallbacks are gone. PORT AS-IS. S. Depends: none. #1081. Done (the stub itself goes in P0-6).
+- [ ] **P0-5. Delete `kernel/lib/hq_paths.py`.** No caller in the repo; devops `monitor.py` now calls `kith paths --json`. DELETE NOW. S. Depends: none. Owner: retire-python-now-p0-2 (#1108). Status: open.
+- [ ] **P0-6. Delete the `kith-account` stub.** A stub window is pointless for one user; drop `kith-account-stub-check`, `kith-accounts-tombstone-check` and the difftest rows that only prove the stub, from `ci.yml` and `ci-exempt.txt` in the same PR. `kith_accounts.py` stays (P1 and P5). DELETE NOW. S. Depends: P0-4. Owner: retire-python-now-p0-2 (#1108). Status: open.
+- [ ] **P0-7. `kith-migrate` forwarder.** Route `kith migrate step|status|rollback` and `kith rollback MODULE` straight to `kith kernel cutover`; delete the forwarding part of `kith_migrate.py` (`:869-887`). The hq-to-kith rename steps stay until P4-22. DELETE NOW. S. Depends: none. Owner: retire-python-now-p0-2 (#1108). Status: open.
+- [ ] **P0-8. Delete `bin/kith-lifecycle`.** Repoint `core/kernel/src/threads/run.rs:267` (`python3 kith-lifecycle sweep`), `kith-wake:442` and `kith-sessions:968` to `kith kernel lifecycle` (repoint, not drop: `kith-wake` runs every minute from `dev.kith.sched`, so dropping its sweep loses the lifecycle sweep), then delete the program's script and replace its entry in the `thread-writers` model's `FILES` (`verification/threads/drift.sh:20`). `kernel/lib/kith_lifecycle.py` stays: `kith-sessions` imports it (`:63-69`) and calls it on every `take_claim` (`:406,:480`) and every `run` (`:941-976`), and it is still the fallback until P1-19, which deletes it. DELETE NOW. S. Depends: #1086 (done). Owner: retire-python-now-p0-2 (#1108). Status: open.
+- [ ] **P0-9. Install the head build on Kai's Mac.** `cli/current` is `0.1.4-rust.02a1921`, two days behind: its program lists no `threads-writer`, `threads-run`, `lifecycle`, `room-ledger`, `cost-ledger`, `project-guest` or `account`, and `core-switched.txt` has no `threads`, `lifecycle`, `room-ledger` or `account` line, so the merged ports are not live here. PORT AS-IS (an action). S. Depends: none. Owner: main. Status: open.
+- [ ] **P0-10. Read the MacBookPro cutover status.** `kith kernel cutover status` there, its branch, and L1381 (its host-native bot count). Rule 2 needs it green before any deletion release reaches it; a Mac on a main checkout gets the head kernel by `git pull`. PORT AS-IS (an action). S. Depends: none. Owner: main. Status: open.
+- [ ] **P0-11. Tag `python-kernel-final`** on the commit just before the first deletion in this series (or the merge commit from rust-rebuild into main, section 8). Not "the last commit that has every Python file": #1059 and #1081 already deleted some. Free, and the only undo for a source checkout; with Kai's OK. PORT AS-IS (an action). S. Depends: none. Owner: main. Status: open.
+- [ ] **P0-12. CI check: a deletion PR adds no core.db migration.** Compare `core/runtime/src/migrations` with the base's when kernel files are deleted. PORT AS-IS. S. Depends: none. Owner: coder (a CI check is coder's work). Status: open.
+- [ ] **P0-13. Write the two-line rollback.** Re-point `cli/current` at the old folder, `kith serve install` from the old binary; in `docs/` where the install notes live. PORT AS-IS. S. Depends: none. Owner: unowned. Status: open.
+- [ ] **P0-14. Build the installer gate.** `scripts/install.sh` (and `install.sh`, and the host updater in `serve/host/src/update/` if it flips `cli/current`) runs the **new** program's `kith kernel cutover status --require kernel/lib/requires-switched.txt` before flipping `cli/current`; an older program answers `--require` with a usage error and exit 1, which must not block the update (treat "no such verb" as pass). `requires-switched.txt` lists the five modules no later than the first release that deletes the Python each module's state needs (rule 6). PORT AS-IS. S. Depends: none. Owner: unowned. Status: open.
+- [ ] **P0-15. Step the MacBookPro through all five modules** (accounts, authority, claims, transcripts, schedules; `kith kernel cutover status --require` green there). An action, run by Kai; P0-10 only reads where it stands. P6-1 and the first release that lists a module in `requires-switched.txt` depend on this, not on the read. PORT AS-IS (an action). S. Depends: P0-10. Owner: Kai. Status: open.
+
+## Phase 1: the run path (the keystone; biggest win per PR)
+
+Today every `kith` call runs `python3 kith_paths.py --sh` first (`kernel/bin/kith:146`); the interactive `kith AGENT` runs the
+whole bash+Python launch (9 Python starts that always happen, 15 with the default ones); only `--launch-json` execs the Rust
+launch (`kernel/bin/kith:353`); even that runs `kith-auth mcp-config` (`core/kernel/src/launch/assemble.rs:1484`) and wraps
+every shared MCP server in `kith-auth exec` (`kith-auth:853-857`). Chat-platform turns and card resumes run `kith AGENT --
+prompt` (`channels/run.rs:397`, `cards/resume.rs:892`), so they pay the same. Phase 1 needs no TLA+ model: it ports an
+assembled settings file, and the claim and lock path is already Rust.
+
+- [x] **P1-1. `project-id` in Rust.** Guest client `core/kernel/src/project/guest.rs`; `bin/project-id` is an sh stub (kept: agents and PROTOCOL.md run it by name). PORT AS-IS. M. Depends: none. #1077. Done 2026-11-19.
+- [x] **P1-2. `kith-room-ledger` hook and `pkg resolve` without Python.** The launch writes the Rust room-ledger hook; `bin/kith-room-ledger` is a stub (goes in P5-7); `pkg resolve` has no Python fallback. PORT AS-IS. M. Depends: none. #1080. Done 2026-11-19.
+- [x] **P1-3. Every `kith-cost` verb in Rust** (`tag`, `record`, the text reports; module `cost-ledger`). PORT AS-IS. L. Depends: none. #1073. Done.
+- [x] **P1-4. `kernel/bin/kith-cost` becomes a forwarding stub** (one file valid as sh and Python, so the hand-written `dev.kith.cost` plist keeps working). PORT AS-IS. S. Depends: P1-3. #1098. Done 2026-11-21.
+- [x] **P1-5. `bin/kith` and `kith-core.sh` call `kith kernel threads`** instead of `kith-sessions` (all verbs except `run`; both claim modes; the record hook). PORT AS-IS. M. Depends: none. #1083. Done.
+- [x] **P1-6. `kith-sessions run` in Rust** (`kith kernel threads run`, module `threads-run`: take-over note, idle stop, status pipe, quit intent, claim release, sleep sweep, `wake_owed`). PORT AS-IS. L. Depends: P1-5. #1090. Done.
+- [ ] **P1-7. `kith_paths.py` out of bash and the host.** The bash finds the program at a fixed relative path (`$KITH/../../../bin/kith`, as the stubs already do) instead of `python3 kith_paths.py --sh|--bin|--machine` (`kernel/bin/kith:146,331,468,924,1544`, four sites in `kernel/lib/kith-core.sh`: `:35,59,76,98`); `kernel paths --sh` exists (`kernel/bin/kith:137`). The host uses its in-process paths and deletes its two `python3` calls (`serve/host/src/runauth.rs:558`, `cards/resource.rs:160`, each has a Rust fallback). The plugin's call (`register.tsx:59`) is P4-23. The file itself goes in P5-3. PORT AS-IS. S. Depends: none. Owner: retire-python-now-paths. Status: in flight.
+- [ ] **P1-8. `kith_guard` must_ask into Rust.** Port `must_ask` into `core/kernel/src/launch/guard.rs` (the rules are mirrored already); `pkg/problems.rs:315-390` stops running `python3 -I`; repoint `serve/host/src/cards/access_tests.rs:15`, which reads the source of `kith_guard.py`. `kith_guard.py` goes with its last user (P5-3). PORT AS-IS. S. Depends: none. Owner: retire-python-now-guard-2 (#1111). Status: in flight.
+- [ ] **P1-9. Route `kith-permit` to `kith kernel permit`.** Hooks `denied`/`once` (`launch/settings.rs:994-1002`), the `kithpermit` MCP (`launch/mcp.rs:14`), `issue` and `apply` (`assemble.rs:1458-1476`) and the calls in `bin/kith:1129,1352,1466,1590-1627`; `kernel permit` covers all of it (`core/kernel/src/permit/`) but nothing points at it. Its door and bug halves still shell to `kith_door` and `kith_bug` (`permit/door.rs:25,61`, `permit/bug.rs:26`); those go with P3-12 and P4-17. PORT AS-IS. M. Depends: none. Owner: retire-python-now-permit-2 (#1109). Status: in flight.
+- [ ] **P1-10. Delete the `kith-cost` stub, repoint its other callers, rewrite `dev.kith.cost`.** Write down the new plist by hand (`kith-uv run --no-project -- <kith> cost sync`, or the host's own timer) and apply it on both Macs. Repoint `kith cost` itself (`kernel/bin/kith:167` -> `kith-core.sh:119`, which execs `bin/kith-cost`) to `kith kernel cost`. Drop both cost-hook fallbacks to the stub (`kernel/bin/kith:945`, `core/kernel/src/launch/settings.rs:782`): the PR writes no cost hook when there is no program. This Mac's 02a1921 program lacks `cost-ledger`, so P0-9 comes first. Then delete `kernel/bin/kith-cost` and `kernel/tests/kith-cost-stub-check`. DELETE NOW after the plist. S. Depends: P1-4, P1-11, P0-9, P1-7. Owner: retire-python-now-cost-3 (#1112). Status: in flight.
+- [ ] **P1-11. Test that `kith-uv` runs a plain program** with no Python. First half done: `uv run --no-project -- /bin/echo ok` printed `ok` with uv 0.13.0 on 2026-11-21. Still open: under launchd with Full Disk Access (the SSD case), on a Mac with no `python3` and `UV_PYTHON_DOWNLOADS=never`. `kith-uv run --no-project -- <kith> ...` is the shape P1-10 and P1-17 depend on. Do the open half before anything that rewrites a plist. PORT AS-IS (a test). S. Depends: none. Owner: unowned. Status: half done.
+- [ ] **P1-12. One run path.** **REDESIGN**, needs architect design first. The terminal calls `kith kernel launch --interactive`, then `kernel threads run`; `bin/kith` keeps nothing but argv. The Rust launch already assembles the same settings (`launch/settings.rs`, `assemble.rs`); missing are the terminal-only parts: the backup-account walk, `--held`, the take-over note and the outbox env. Removes the bash launch body (`:372-1646`) and its inline Python: settings in one `python3 -I -c` (`:964-1170`), facets (`:670`), accounts launch-env (`:714-734`), runenv (`:1421`), uuid (`:1529`), realpath and the stub lookup (`:1544,:1548`). Also makes chat-platform turns and card resumes Rust. Folds in P1-13 and P1-14 so they are not designed twice. L. Depends: P1-7, P1-9. Owner: architect design pending. Status: not started.
+- [ ] **P1-13. `kith_settings.py` reads** (permission_mode, reads-others, call_model: `kernel/bin/kith:838,841,1373`) go to `kith kernel settings`, which answers every read; only the `set` verbs are routed today. The plugin's read (`register.tsx:127`) is P4-23. Folds into P1-12 (the bash launch body that reads them goes). PORT AS-IS. S. Depends: P1-12. Owner: with P1-12. Status: not started.
+- [ ] **P1-14. `kith_accounts.py` chain verbs** (launch-env, main-env, run-chain, `backups-json`, `accounts-json`: `kernel/bin/kith:342-343,596,609,714-734`; the host's `agent/hq.rs:972-1014`; `kith-pkg`, `kith-scratch`) onto `kith kernel account|chain`. Folds into P1-12. The module itself goes in P5-3 (its last users are `kith-pkg` and `kith-scratch`, P4). PORT AS-IS. M. Depends: P1-12. Owner: with P1-12. Status: not started.
+- [ ] **P1-15. `kith-auth mcp-config` and `exec` in process.** **REDESIGN**, needs architect design first. The Rust launch calls `people.mcpConfig` in process (a switched Mac's `kith-auth` already routes it to `people.*` at `:3477-3513`, but as a Python process); shared MCP servers start as `kith kernel secrets exec --for A SVC -- cmd`. This is the seed of "keys never in the agent, one check per call" (decisions 2026-11-21). M. Depends: none. Owner: architect design pending. Status: not started.
+- [ ] **P1-16. `adapters/harness.py` through the core's ACP engines.** **REDESIGN**, needs architect design first. One-shots (`bin/kith:1454`) go through `kernel run-once` as the host's turns do (`serve/host/src/runonce.rs`); engines without ACP get a Rust adapter or are dropped. Kai lists which engines he uses. M. Depends: P1-12. Owner: architect design pending. Status: not started.
+- [ ] **P1-17. `kith-serve-launch` becomes `kith serve --supervise`.** **REDESIGN**, needs architect design first. The host binary takes the launcher role (child, signal forwarding, 20 s SIGKILL, ported from 60 lines) and starts behind `kith-uv` as a plain program; the `launcher` of `~/.kith/serve/config.json` and the `dev.kith.serve` plist change with it. S. Depends: P1-11. Owner: architect design pending. Status: not started.
+- [ ] **P1-18. `kith_readfence.py`.** Delete with the bash launch: only `bin/kith:1306`'s guest fallback names it; the Rust launch always uses `kernel readfence` (`core/kernel/tests/readfence_parity.rs` runs `python3`: a golden replay). DELETE with P1-12. S. Depends: P1-12. Owner: unowned. Status: not started.
+- [ ] **P1-19. Delete `kith-sessions`.** Goes when the `KITH_CORE=python` fallbacks go: `bin/kith:1646`, `kith-core.sh:110`, the launch fallback hook (`launch/settings.rs:794`), `kith-auth:2550`; keep `transcripts_preflight.rs:85`'s check of a live old hook until both Macs run the head. `kith kernel threads` is the complete twin. Also deletes `kernel/lib/kith_lifecycle.py` (moved here from P0-8) and makes `kith rollback` for `claims` and `transcripts` refuse (rule 6). Replace its entries in the `thread-writers` and `writer-lock` models' `FILES`. DELETE. S. Depends: P0-8, P1-12. Owner: unowned. Status: not started.
+
+## Phase 2: core services (wake S4, ask, schedules)
+
+The order matters: the asker, the callee, the daemon tick, a terminal release and a card answer all act in any order, so
+**the TLA+ model of S4 comes before anything is proposed** (L1367 lists the actors: host taker, tick drain, terminal
+release, waiter fire, card Stop). `dev.kith.sched` is today's wake-queue clock: its minute tick skips the jobs on a switched
+Mac but first runs `kith-ask --sweep` and `kith-wake drain` (`kernel/bin/kith-sched:650-655`), and `threads/run.rs:292-307`
+runs the same two after every terminal run. It cannot go before S4. Phase 2: **not started; architect S4 design + TLA+ model
+in progress.**
+
+- [ ] **P2-1. S4 design and TLA+ model.** The host daemon drains the wake queue and fires waiters from core.db each tick; the host begins a wake turn by its id (as `routines/core_runs.rs` does); the terminal's release enqueues and the daemon delivers; one store, import/export, a cutover module `wake`. Model-check before proposal. REDESIGN, needs architect design first. L. Depends: none. Owner: architect (in progress). Status: design and model in progress.
+- [ ] **P2-2. Wake in the core (`kith-wake`, 762 lines).** Drain and waiter firing in the daemon (`core/runtime/src/wake/` has the queue, no `fn drain`); host `wake.rs:63-200` and `cards/resume.rs` (13 sites), `api/people.rs:860`, `bin/kith wake` call the core; retires `run.rs` `wake_owed` and the Python at `run.rs:303`. The host arm of the old R5 ports 3/4 was parked on this. REDESIGN, needs architect design first. L. Depends: P2-1. Owner: architect design pending. Status: not started.
+- [ ] **P2-3. Ask on the job ledger (`kith-ask`, 1142 lines).** An ask is a job-ledger row (L1275) over the asks table (`core/runtime/src/asks`, `end_tree`) plus wake; a `--bg` finish wakes the asker; the dead-ask sweep runs in the daemon instead of after every terminal run; "waiting on Kai" shows up the chain; the CLI is a thin Rust client. Callers: `PROTOCOL.md:50`, host `delegation.rs:41,199`, `cards/mod.rs:344`, `cards/resume.rs:1325`, `permit/helper.rs:76`, `run.rs:302`, `kith-sched:650`. Agent teams (2026-11-19 open line) build on the same row. REDESIGN, needs architect design first. L. Depends: P2-2. Owner: architect design pending. Status: not started.
+- [ ] **P2-4. The host begins the core-fired schedule turn itself** as a normal core turn with the job's prompt: no `kith-sched run-turn` subprocess (`routines/core_cron.rs:195-209`). Then C6 (host routine runner) follows. REDESIGN, needs architect design first. M. Depends: P2-2. Owner: architect design pending. Status: not started.
+- [ ] **P2-5. `kith schedule` verbs as a Rust CLI over `schedule.*`** (ls/add/rm/pause/resume/run/log; the Python already speaks `schedule.*` through `kernel/lib/kith_sched_core.py`); callers `agent/hq.rs:646`, `kith-info:330`. PORT AS-IS. M. Depends: none. Owner: unowned. Status: open.
+- [ ] **P2-6. Retire `kith-sched`, `dev.kith.sched`, `kith_sched_core.py`.** Drop `tick`, `--install` (`kith_migrate.py:566` is gone by then) and the launchd job; delete the script and its checks (the cron-table and json cases are already frozen in `golden/sched.json` and `fixtures/routines-next.json`); drop the `schedule-fire` model's `kith-sched` entry; `kith rollback schedules` refuses from here (rule 6: `schedules_back.rs` hands runs back to `kith-sched`, and `schedules_gate.rs` condition 5 needs it present). `kith-info` loads `kith-sched` as a module (`:330`), so the host must already answer it. `kith_launchd.py` stays until P4-14. DELETE. S. Depends: P2-3, P2-4, P2-5, P3-10. Owner: unowned. Status: not started.
+- [ ] **P2-7. Delete `kith_claims.py`, `kith_registry.py`, `kith_procstart.py`** with their importers (`kith-sessions`, `kith-wake`, `kith-sched`); `kith-procstart-check` and `core/procstart/tests/parity.rs` become golden. DELETE. S. Depends: P1-19, P2-2, P2-6. Owner: unowned. Status: not started.
+
+## Phase 3: host subprocesses (the host calls the script by path)
+
+- [ ] **P3-1. The host calls `people.*` in process** instead of `kith-auth` by path: `channels/hq.rs:159,165` (who/resolve per chat message), `channels/manager.rs:74,88`, `judge.rs:61`, `rich_card/jev.rs:614`, `cards/access.rs:367`, `cards/edge.rs:185-221`, `cards/secret.rs:144`, `launch_cmd.rs`; kernel callers `cost/views.rs:546,581`, `reports.rs:360`. The host already does it for run_auth (`api/authority.rs:957-992`). PORT AS-IS. L. Depends: P1-15. Owner: unowned. Status: not started.
+- [ ] **P3-2. A thin `kith auth` Rust CLI** keeping `get`, `exec`, `keys`, `may`, `resolve` (`kernel secrets may|resolve` exist). Exit-3 shapes with no caller go with their callers (`helper-mcp` with P4-23, `mcp-names` with P3-10). PORT AS-IS. M. Depends: P1-15. Owner: unowned. Status: not started.
+- [ ] **P3-3. Room secrets (`once`) as core rows**, if room secrets stay (`cards/room_secret.rs:101-206`). REDESIGN, needs architect design first. M. Depends: P3-1. Owner: architect design pending. Status: not started.
+- [ ] **P3-4. Delete `kith-auth`.** Drop the unswitched auth.json code path (importer-only), the router, and `hq-auth`; replace its entries in the `revoke-access`, `secret-cards` models' `FILES` and the `invitee-access` skill; the many `kith-auth-*` checks port to Rust integration tests or go (the tombstone-only ones are deleted); `serve/host/src/api/rig.rs` runs a core instead of the script. `kith rollback authority` refuses from here (rule 6). DELETE. M. Depends: P3-1, P3-2, P3-3, P1-12, P1-15, P1-9. Owner: unowned. Status: not started.
+- [ ] **P3-5. "Always allow" as allowances (`kith-allow`, `kith_allowed.py`).** Always turns on a named allowance and never saves an exact command, so `--derive` is not ported (host `cards/autoallow.rs:44-178`, `bin/kith:169`); needs Kai's pick (option A of the 2026-11-19 open line). REDESIGN, needs architect design first. M. Depends: none. Owner: architect design pending. Status: not started.
+- [ ] **P3-6. `kith-cards`** (`--may-read AGENT`, `cards/history.rs:15`) into the host, which owns cards. PORT AS-IS. S. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P3-7. `kith-send-to`** (wakes an outside bot guest in a room, `chat/group.rs:797-814`) into the host. PORT AS-IS. S. Depends: none (it makes no wake or ask call). Owner: unowned. Status: not started.
+- [ ] **P3-8. `kith-recall`, `kith_recall.py`, `kith_runsocket.py`** into the host's `kith memory`/`recall` (`kernel.rs:31` already owns the other memory verbs); callers `hqmem/tidy.rs:984`, `agent/hq.rs:904`, `runtools.rs:121-131` (which runs the Python back), `PROTOCOL.md:19`, the kith-rooms skill; update the `run-tokens` skill text. PORT AS-IS. M. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P3-9. `kith-memory ls|search`** (owner search; guest branch to the run socket) in the same PR as P3-8. PORT AS-IS. S. Depends: P3-8, and P3-10 if it deletes the file (`kith-info` loads `kith-memory` as a module, `:404,:423`). Owner: unowned. Status: not started.
+- [ ] **P3-10. `kith-info` answered by the host in Rust** from `pkg::resolve`, `schedule.jobs`, cost views, facets and the package: no subprocess, no 30 s cache; the JSON shape stays (`serve/docs/bot-info.md`). Callers `agent/hq.rs:701`, `bin/kith:337`. REDESIGN, needs architect design first. M. Depends: P2-5. Owner: architect design pending. Status: not started.
+- [ ] **P3-11. `kith-people`, `kith_people_access.py`, `kith_host.py`.** Route `kith people`/`invite` to `kernel people` (`main.rs:492`, exists unrouted; access goes to core `people.grant|revoke`). PORT AS-IS. S. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P3-12. Guest doors, process side (`kith-door`, `kith_door.py`, `kith_door_core.py`, `door-chrome`, `door-preload.mjs`).** **DROP-candidate**: PORT (as a REDESIGN) unless Kai drops it; ask via `kith ask product-lead` when the item comes up (needed only if invited people or bot guests use a door). Redesign: core door rows with basis+gen, the starter or a sweeper confirms "reaped", the box start moves into Rust (`permit/door.rs`); host `doors.rs:47` sweeps every minute; TLC (revoke vs start). Needs architect design first. L. Depends: P1-9. Owner: architect design pending. Status: not started.
+- [ ] **P3-13. Host `agent/gate/reclaim.rs:67` runs `python3 <agents>/resource-manager/role/tools/res.py`**: product code hard-wiring one agent's Python tool. REDESIGN into a declared package hook, or DROP. S. Depends: none. Owner: unowned. Status: not started (flag).
+
+## Phase 4: operator tools (parallel, S-M each)
+
+Mostly PORT AS-IS busywork; each ends by deleting its script, so rule 3 and rule 4 apply per PR.
+
+- [ ] **P4-1. `kith-pkg` beyond `resolve`:** list, set-field/set-harness, install/update, pin/unpin/rollback, check, history/restore/gc, deps (`bin/kith:156-162,241,262,307`; host `agent/hq.rs:395,562`, `api/kith_tools.rs`, `api/scratch.rs`; `kith-init`, `kith-doctor`, `kith-state`, `kith-scratch`, `kith-skills`; `--json` forms frozen by `kith-pkg-json-check`; `kith-info` loads `kith-pkg` as a module, `:131`, so the host must already answer it). PORT AS-IS. L. Depends: P1-14, P3-10. Owner: unowned. Status: not started.
+- [ ] **P4-2. `kith-pkg` marketplace verbs `share`, `push`, `commit`, `search`, `market`.** **DROP-candidate**: PORT unless Kai drops it (ask via `kith ask product-lead`; the marketplace is Codync-inherited, decisions L900). M. Depends: P4-1. Owner: unowned. Status: not started.
+- [ ] **P4-3. `kith-skills`** (add/remove). PORT AS-IS. S. Depends: P4-1. Owner: unowned. Status: not started.
+- [ ] **P4-4. `kith-scratch`** (`keep`, host `api/scratch.rs:83`) with `kith_trajectory.py`. PORT AS-IS. S. Depends: P4-1, P1-14. Owner: unowned. Status: not started.
+- [ ] **P4-5. `kith-project`** (add/notes/ls; host `agent/hq.rs:455-967`, `PROTOCOL.md:15`). PORT AS-IS. S. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P4-6. `kith-group`** (bot guests in rooms) as Rust verbs on the host API. PORT AS-IS. S. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P4-7. `kith-connector`**, folded into product-lead's open Composio decision (2026-11-21). PORT AS-IS. S. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P4-8. `kith-serve`** (bash; `python3 -I` writes `config.json` `:175,197`) into the host's `serve` verbs. PORT AS-IS. S. Depends: P1-17. Owner: unowned. Status: not started.
+- [ ] **P4-9. `kith-send`** (bash with inline Python). Keeps its path as an sh stub until P4-24 moves the two agent tools off it. PORT AS-IS. S. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P4-10. `kith-call`** (bash, `python3 -I -` body). PORT AS-IS. S. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P4-11. `kith-new`** (scaffold; `kith new` from the host, `agent/hq.rs:611`). PORT AS-IS. S. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P4-12. `kith-doctor`** (610 lines) rewritten for the Rust world: cutover status, launchd plists naming kernel scripts (it warns about them today), program version, and "not switched" naming (replaces the dropped start-up refusal). PORT AS-IS. M. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P4-13. `kith-init`** (526 lines; a hard Python dependency of a full install, `install.sh:115`). PORT AS-IS. M. Depends: P4-1. Owner: unowned. Status: not started.
+- [ ] **P4-14. `kith-state` and `dev.kith.backup`:** `kith backup` in Rust (git add/commit/push of the state repos); the release rewrites the plist in the same step; `kith_launchd.py` goes with it. Live nightly on Kai's Mac. PORT AS-IS. S. Depends: P1-11. Owner: unowned. Status: not started.
+- [ ] **P4-15. `kith-self-update`** folded into the host updater (`serve/host/src/update/`) plus `install.sh`. REDESIGN, needs architect design first. S. Depends: none. Owner: architect design pending. Status: not started.
+- [ ] **P4-16. `kith-keys`, `kith-who`.** PROTOCOL.md and the skills name them. PORT AS-IS. S each. Depends: P3-2 (keys). Owner: unowned. Status: not started.
+- [ ] **P4-17. `kith-bug`, `kith_bug.py`, `kith_redact.py`.** PORT AS-IS. S. Depends: P1-9. Owner: unowned. Status: not started.
+- [ ] **P4-18. `kith-chain`, `kith_chain.py`** (may later sit on the job ledger). PORT AS-IS. S. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P4-19. `kith-helper-allow`** with the plugin. PORT AS-IS. S. Depends: P4-23. Owner: unowned. Status: not started.
+- [ ] **P4-20. `kith-remote`** (`agent@mini` over ssh; successor is the Mac link, not built). **DROP-candidate**: PORT unless Kai drops it (ask: still used?). S. Depends: P2-3 (it loads `kith-ask`). Owner: unowned. Status: not started.
+- [ ] **P4-21. `kith-acp` and `adapters/acp/*` (Python shim).** **DROP-candidate**: PORT unless Kai drops it (ask: does he use an outside ACP client such as Zed to reach kith agents?). S. Depends: none. Owner: unowned. Status: not started.
+- [ ] **P4-22. hq-to-kith rename steps of `kith_migrate.py`.** **DROP-candidate**: PORT unless Kai drops it; the natural moment is once both Macs report migrated (this Mac has `~/.hq` as a link only). The forwarder goes in P0-7. S. Depends: P0-7. Owner: unowned. Status: not started.
+- [ ] **P4-23. Claude Code plugin `register.tsx`** calls `kith kernel ...` instead of Python: `kith_paths --json` (`:59`), `kith-pkg list|resolve --all` (`:70,:81`), `kith_settings` (`:127`), `kith_facets load` (`:325,:348`), `kith-auth helper-mcp|may|resolve` (`:121,:292,:339`), `kith-helper-allow` (`:135`). Adds `kernel facets load` and `kernel permit helper-mcp|helper-allow` (no CLI verb today). `kith-hooks.test.ts` stays. PORT AS-IS. M. Depends: P1-7, P1-13, P4-1. Owner: unowned. Status: not started.
+- [ ] **P4-24. Move the two agent tools that name `kernel/bin/kith-send`** (resource-manager `watch.py:17`, devops `uptime.py:40`) to `kith send`; then the P4-9 stub can go. These are agents' own tools, edited in their role repos. PORT AS-IS. S. Depends: P4-9. Owner: unowned (agents' owners). Status: not started.
+
+## Phase 5: seams (the end of the Python kernel)
+
+- [ ] **P5-1. Rust route table replaces the bash dispatch of `bin/kith`** (`serve/host/src/kernel.rs` `route()` owns argv0; every `kith <verb>` answered in Rust). REDESIGN, needs architect design first. M. Depends: P1-12, P3-4, P4-1..P4-23 (every verb ported or dropped). Owner: architect design pending. Status: not started.
+- [ ] **P5-2. Delete `bin/kith`, `kernel/lib/kith-core.sh`, `kernel/lib/core-switched.txt`** and the remaining `KITH_CORE=python` branches: nothing is left to switch back to. DELETE. S. Depends: P5-1. Owner: unowned. Status: not started.
+- [ ] **P5-3. Delete the last `kernel/lib/*.py`:** `kith_facets`, `kith_jobs`, `kith_runenv`, `kith_trajectory`, `kith_allowed`, `kith_guard`, `kith_settings`, `kith_accounts`, `kith_paths`, `kith_redact`, `kith_launchd` as each loses its last user (rule 3), `kith_tombstone` last. `kith rollback accounts` refuses from here (rule 6). DELETE. S. Depends: P5-1, P4-4, P4-14, P4-17. Owner: unowned. Status: not started.
+- [ ] **P5-4. `scripts/stage-kernel.sh` stops copying `kernel/bin` and `kernel/lib`;** the data they hold (`starters.json`, `user.md`, `agents.gitignore`, `dot-kith.gitignore`, `kernel/skills/`, `kernel/services/*.json`, `PROTOCOL.md`, `kernel/agents/scratch`) moves to `share/kith/`; `apps/desktop/tools/native-host.mjs` follows. PORT AS-IS. M. Depends: P5-2, P5-3. Owner: unowned. Status: not started.
+- [ ] **P5-5. Drop `python@3`** from the Homebrew formula (`packaging/homebrew/kith.rb`) and the installer's `python3` calls (`scripts/install.sh`: `quiesce.py`, `kith_paths.py` for `auth.json` locks; `install.sh`). The installer's gate runs the new program, not Python. PORT AS-IS. S. Depends: P5-3. Owner: unowned. Status: not started.
+- [ ] **P5-6. Raise `MIN_CLI`** (`serve/host/src/kernel.rs:172`) to the first Python-free release. PORT AS-IS. S. Depends: P5-5. Owner: unowned. Status: not started.
+- [ ] **P5-7. Delete the stubs** `kernel/bin/kith-room-ledger` and whatever stubs remain, except `project-id` (agents and PROTOCOL.md run it by name) and `kith-send` until P4-24. DELETE. S. Depends: P5-2. Owner: unowned. Status: not started.
+- [ ] **P5-8. Test and CI tail:** `kith-core-boundary-check` rewritten to forbid new `python3` spawns (not Python importing Rust); `kith-difftest` runs `--golden` only; Rust parity tests that run `python3` (`core/kernel/tests/schedule_parity.rs`, `core/runtime/src/import/tests.rs`, `authority/tests/revoke.rs`, `core/kernel/src/secrets/tests.rs`) become golden replays; `kith doctor` reports no plist naming a kernel script. PORT AS-IS. M. Depends: P5-2. Owner: unowned. Status: not started.
+
+## Phase 6: importers
+
+- [ ] **P6-1. Delete `core/runtime/src/import/*`** (accounts, asks, authority, claims, schedules, transcripts, wake) and the `export_back` halves of the modules, once both Macs have stepped every module (no two-release floor). `kith rollback MODULE` ends with them. DELETE. M. Depends: P0-15, P5-2. Owner: unowned. Status: not started.
+- [ ] **P6-2. Delete the tombstone readers in Rust** and `cutover` code that only the importers used. DELETE. S. Depends: P6-1. Owner: unowned. Status: not started.
+
+## 1. How the two sides fit together (mechanisms)
+
+Three mechanisms exist; the series reuses them and invents little.
+
+| Mechanism | Where | What it does | Limit |
 |---|---|---|---|
-| Verb switch | `kernel/lib/core-switched.txt` read by `kernel_core_exec` in `kernel/lib/kith-core.sh` | A verb line (`verb<TAB>module[<TAB>cutover module]`) sends `kith VERB` to `kith kernel VERB`, when this Mac has a `kith` program whose `kith kernel version` lists the module. Otherwise it returns 1 and the Python answers, silently. Removing the line is the rollback. | The fallback to Python is silent, so a Mac with an old or missing program never notices. Rollback needs the Python still to be there. |
-| Cutover module | `core/runtime/src/cutover/` (`kith migrate step\|status\|check\|rollback MODULE`, `kith rollback MODULE`); registry in `cutover/mod.rs` `registry()`: `accounts`, `transcripts`, `claims`, `schedules`, `authority` | Moves a Python-owned store (state.json, claim files, sched state, auth.json) into core.db, checks the answers match, writes a switch file `<machine>/core/cutover/MODULE.switch`, replaces the source files with tombstones. `rollback` writes the files back (`export_back`, `restore_secrets`). | It is a per-Mac, deliberate act ("never automatic"). `kith migrate` and `kith rollback MODULE` are themselves dispatched through Python today (section 1.4). |
-| Tombstone | `core/runtime/src/cutover/tombstone.rs` writes, `kernel/lib/kith_tombstone.py` reads; `kith_cutover_refuse` in `kith-core.sh` | A Python reader that meets a tombstone refuses (`Tombstoned`, exit 3 or 4). `KITH_CORE=python` is refused for a switched module. | It is per file or per module. There is no per-verb "this script moved" stub for a script that has been deleted. |
+| Verb switch | `kernel/lib/core-switched.txt`, read by `kernel_core_exec` in `kernel/lib/kith-core.sh` | A line `verb<TAB>module[<TAB>cutover module]` sends `kith VERB` to `kith kernel VERB` when this Mac's `kith` program lists the module in `kith kernel version`; otherwise the Python answers, silently. Removing the line is the rollback. | The fallback is silent; rollback needs the Python still there. Goes in P5-2. |
+| Cutover module | `core/runtime/src/cutover/` (`kith migrate step|status|check|rollback MODULE`); registry in `cutover/mod.rs`: `accounts`, `transcripts`, `claims`, `schedules`, `authority` | Moves a Python-owned store into core.db, checks the answers match, writes `<machine>/core/cutover/MODULE.switch`, replaces the source files with tombstones; `rollback` writes them back. | Per Mac and deliberate ("never automatic"). `kith migrate` dispatches through Python until P0-7. |
+| Tombstone | `core/runtime/src/cutover/tombstone.rs` writes, `kernel/lib/kith_tombstone.py` reads | A Python reader that meets one refuses (`Tombstoned`, exit 3 or 4); `KITH_CORE=python` is refused for a switched module. | Per file or module, not per verb. |
+
+Also true:
+
+- The Python files travel in every package: `scripts/stage-kernel.sh` copies `kernel/` (minus `tests/`) into the release
+  tarball, the Homebrew formula and the Mac app (`apps/desktop/tools/native-host.mjs`). A release installs as
+  `<prefix>/cli/<version>/`, `cli/current` points at it, and the last `KITH_KEEP_VERSIONS` (default 3) stay
+  (`scripts/install.sh`). **Deletion happens in a new release folder, never in place**; going back is "install the previous
+  folder", which works only while a deletion release adds no core.db migration (an older binary refuses to write a core.db
+  with a step it does not know, `core/runtime/src/db.rs:421-430`): P0-12.
+- The apps do not run Python. The Rust host and the Rust launch do, in a few places: `permit/door.rs`, `pkg/problems.rs`
+  (`kith_guard`), the host's `kith_paths.py --json` calls, and the Python the launch asks (`kith-auth mcp-config`). The host
+  spawns kernel scripts by path or through `kith` (`serve/host/src/kernel.rs`, `Route::Kernel` hands every verb it does not
+  own to `kernel/bin/kith`). The desktop and iOS apps call the host's API only.
+- A stub is an `sh` file that finds `kith` at a fixed relative path (no `kith_paths.py`) and execs `kith kernel <verb> "$@"`.
+  It serves a caller that executes the file (an old host's `Command::new`, a hook command). It does **not** serve a caller
+  that names an interpreter (`kith-uv run --script <file>`, `python3 <path>`): those are rewritten before the delete.
+
+## 2. Live state (2026-11-21)
+
+- **This Mac (Kai's):** `kith kernel cutover status` reports accounts, transcripts, claims, schedules and authority all
+  switched. Installed CLI `0.1.4-rust.02a1921` (2026-11-19), behind the head (P0-9).
+- **launchd jobs here** (`~/Library/LaunchAgents`, ProgramArguments read):
+  - `dev.kith.serve`: `kith-uv run --quiet --script <cli/current>/kernel/bin/kith-serve-launch <kith> serve --port 19224`;
+    the launcher comes from `~/.kith/serve/config.json` "launcher" (P1-17).
+  - `dev.kith.sched`: `kith-uv ... kith-sched tick`. **Installed, and today's wake-queue clock**: it skips the jobs
+    ("tick skipped, the schedules moved to the Kith core", `~/.kith/logs/sched/tick.log`) but runs `kith-ask --sweep` and
+    `kith-wake drain` first. It cannot go before S4 (P2-6). (The first plan's line "Kai's Mac has no `dev.kith.sched`
+    installed" was out of date.)
+  - `dev.kith.cost`: `kith-uv ... kith-cost sync`; the log is healthy (P1-10).
+  - `dev.kith.backup`: `kith-uv ... kith-state backup --yes` (P4-14).
+  - Agents' own jobs: `dev.kith.house` (house.py), `dev.kith.monitor` and `dev.kith.uptime` (devops). Their Python is the
+    agents', outside this series, but they need `kith-uv`/uv (section 4).
+- **MacBookPro:** cutover state and branch unknown (P0-10); L1381 (its host-native bot count) is open.
+- **What every run still runs in Python today** (a switched Mac, head build; evidence in the gap analysis):
+  - `kith` calls `python3 kith_paths.py --sh` first, and the router needs Python to find the Rust program (P1-7).
+  - The interactive launch is the whole bash+Python body; only `--launch-json` execs `kernel launch` (P1-12).
+  - The Rust launch runs `kith-auth mcp-config`, and every shared MCP server starts as `kith-auth exec` (P1-15).
+  - Hooks written into each run's settings: `kith-permit denied|once` and the `kithpermit` MCP server (P1-9). Hooks are
+    fresh at each launch, but a run already going keeps the command line it started with, which is why a moved hook leaves a
+    stub behind until sessions end.
+  - After each terminal run, `kith kernel threads run` starts `kith-ask --sweep` and `kith-wake drain` (P2).
+  - The host's subprocesses by path: `kith-wake`, `kith-door`, `kith-auth` (the busiest), `kith-allow`, `kith-cards`,
+    `kith-send-to`, `kith-recall`, `kith-sched run-turn`, `kith-info` (Phase 2 and 3).
+  - `dev.kith.serve`, `sched`, `backup` and `cost` start Python (Phase 1, 2, 4).
+
+Counted roughly in the gap analysis: 7 L, about 12 M, about 25 S. Phases 1 to 3 want Opus; Phase 4 is parallel busywork for
+Sonnet coders.
+
+## 3. Order
+
+```
+P0 ──► P1 ──► P5 ──► P6
+ │      │      ▲
+ │      └──► P3┘      P3 also needs P2
+ ├──► P2 ──► P3
+ └──► P4 ────────────► P5
+```
+
+Phase 1 comes first because it removes every per-launch Python start and makes chat and card-resume turns Rust. Phase 2 is
+order-dependent and starts only after the S4 model. Phase 4 is independent and can run beside Phases 1 to 3; P4-23 (the
+plugin) needs P1-7 and P1-13.
+
+## 4. `kith-uv` and agents' own Python (they stay)
+
+Agents' tools live in their own role repos (`agents/<name>/role/tools/`); `kernel/agents/` holds only `scratch`. House's
+`house.py`, devops' `monitor.py` and `uptime.py` and resource-manager's `log_cost.py` need a Python (often uv's script
+dependency resolution), not the kernel. Retiring the kernel's Python does not touch them.
+
+`kith-uv` (`~/.kith/bin/kith-uv`, found by `kith_paths.launcher()`) is a copy of `uv` that holds Full Disk Access, because
+launchd credits file access to the program it starts and a repo on an external disk (Kai's) needs a launcher whose path and
+signature do not change when kith updates (inferred; `docs/moving-from-hq.md` records "Full Disk Access is per path").
+**Decision (2026-11-17, unchanged): keep `kith-uv`** as "the Full Disk Access launcher agents' tools run behind", not as a
+kernel dependency; the kernel's own jobs run behind it as a plain program (`kith-uv run --no-project -- <kith> <verb>`).
+Never rename or replace it (a non-uv binary has a new signature and needs a new grant; removing it breaks every agent's
+plist and the desktop app's "started by kith" test, `host-update.test.ts:120`). **Untested:** that uv runs a plain program
+with no Python on a Mac without `python3` and with `UV_PYTHON_DOWNLOADS=never` (P1-11, before any plist is rewritten).
+
+Python that is not the kernel and stays: `scripts/voice-samples/`, `apps/ios/tools/`, `apps/tests/`,
+`serve/host/tests/fixtures/*.py`, the difftest `*-old.py` frozen references and `kernel/tests/kith-auth-props.py` (a property
+test: port to proptest or keep as a golden replay when `kith-auth` goes).
+
+## 5. Tests and model checks, per deleting PR
+
+Rule 4 in practice. A deleted check comes out of `ci.yml` and `ci-exempt.txt` in the same PR (`kith-ci-names-check`).
+
+- **Switch checks** (`kith-cost-switch-check`, `kith-settings-switch-check`, `kith-account-state-switch-check`,
+  `kith-pkg-pid-switch-check`, `kith-limit-check`, `kith-run-once-cost-check`) compare Python to Rust; with the Python gone
+  there is nothing to compare, so they are deleted and the difftest golden carries the answer.
+- **Corpora to freeze before their script goes** where `kernel/tests/difftest/golden/` lacks one: `json-misc`, `json-pkg`,
+  `json-sched`, `launch*`, `paths*`, `run-once`. The `*-old.py` files stay.
+- **Checks that exercise a script** port to Rust tests (`core/runtime` tests, `serve/host` `api/*_tests.rs`, host e2e for the
+  launchd and sandbox ones) or are deleted when they only prove "Python refuses a tombstone".
+- **Models and skills whose drift list names Python:** `thread-writers` and `writer-lock` (`bin/kith`, `kith-lifecycle`,
+  `kith-sessions`, `kith-wake`, `lib/kith_claims.py`, `lib/kith-core.sh`: P0-8, P1-19, P2-2, P2-7, P5-2); `revoke-access`
+  (`kith-auth`, `bin/kith`, `lib/kith_door.py`, `kith-permit ask_helper`: P1-9, P3-4, P3-12); `secret-cards` (`kith-auth`:
+  P3-4); `schedule-fire` (`kith-sched`: P2-6); `invitee-access` (skill; P3-4); `run-tokens` (skill: `kith-recall`,
+  `kith_runsocket.py`, `kith-memory`, the `project-id` guest branch: P3-8). `holder-lease` and `rooms-with-people` name no
+  Python. A path left in a CI `changes` filter is harmless, but a path left in `drift.sh` `FILES` makes the drift check
+  report "file missing": read each `drift.sh` before the step and re-run the model in the same PR.
+- `host-kernel-tests.txt` and `scripts/ci/host-kernel-tests.sh check`: host tests that run the real `kith-auth` through the
+  api `Rig` move to a core in P3-4.
 
-Two more facts shape the plan.
+## 6. Packaging, installers, launchd
 
-- The Python files travel in every package. `scripts/stage-kernel.sh` copies the whole `kernel/` tree (minus `tests/`)
-  into the release tarball, the Homebrew formula (`depends_on "python@3"`) and the Mac app (`apps/desktop/tools/native-host.mjs`
-  calls the same script). A release installs as `<prefix>/cli/<version>/`, `cli/current` points at it, and the last
-  `KITH_KEEP_VERSIONS` (default 3) older versions stay (`scripts/install.sh`). **This is the rollback and compatibility
-  mechanism the plan leans on: deletion happens in a new release folder, never in place.**
-- The apps do not run Python. The Rust host and the Rust launch do, in a few places (architect MUST 6): the permit door steps
-  run `python3 -I -c` with `import kith_door` (`core/kernel/src/permit/door.rs:7,25,61`, `proc.rs:148`); the Rust package
-  checks run Python with `import kith_guard` (`core/kernel/src/pkg/problems.rs:315-323`); the host runs `python3
-  kith_paths.py --json` (`serve/host/src/cards/resource.rs:160`, `runauth.rs:507`); the launch runs `python3
-  <kernel>/bin/kith-permit apply` (`assemble.rs:1391`). So the "Rust twin" of `kith-permit` and `kith-pkg resolve` still
-  needs Python until those calls are ported: they are part of R4 and R2. The Rust host (`serve/host`) spawns kernel scripts by path
-  (`kernel/bin/kith-auth`, `kith-wake`, `kith-door`, ...) or through the `kith` entry (`serve/host/src/kernel.rs`,
-  `Route::Kernel` hands every verb it does not own to `kernel/bin/kith`). The desktop app (`apps/desktop`) and iOS
-  (`apps/ios`) call the host's API only; grep finds no direct script invocation in either. So "old app builds still calling
-  Python verbs" means old **host binaries** (bundled in an old desktop app, or a standalone install), not the apps' UI code.
-
-## 1. Inventory
-
-Counts of "callers" come from `grep -rl` over `serve/`, `core/`, `apps/`, `scripts/`, `packaging/`, `.github/` and
-`kernel/` (tests excluded) on `origin/rust-rebuild` at `48ed39f13`. The first column is the file; line counts are
-`wc -l`. "Rust" means code exists; "routed" means a caller actually uses it today.
-
-### 1.1 kernel/bin: bash
-
-| Piece | Lines | Role | Wrapper only? | Python inside |
-|---|---|---|---|---|
-| `kith` | 1561 | The launcher and the verb dispatcher: pin the package, assemble the run, walk backup accounts, `--held`, `--launch-json`. `exec python3 kith-sessions run` is its last line (1561); `exec python3 adapters/harness.py` the one-shot path (1375-1377). | No | 56 `python3` mentions: `kith_paths.py --sh`, `--bin`, `--machine`, `kith_accounts.py backups-json`, `kith_settings.py set`, `kith_paths.py`/`kith_engines.py` fallbacks, inline `python3 -I -c` JSON. `kith-core.sh` itself calls `python3 kith_paths.py --bin` and `--machine` (the router needs Python to find the Rust program). |
-| `hq` | symlink to `kith` | Old name. `serve/host/src/kernel.rs` also routes `hq` to the kernel. | Yes (symlink) | none |
-| `kith-new` | 147 | Scaffolds `agents/<name>/`; `hq-new` is a symlink. | No | 4 |
-| `kith-send` | 152 | Delivers a result (Discord, outbox, Telegram); `hq-send` symlink. | No | 6, JSON building |
-| `kith-serve` | 244 | `kith serve start\|stop\|restart\|status\|relay\|cloud`: builds the host, installs `dev.kith.serve`; `hq-serve` symlink. | No | 2 |
-| `kith-call` | 72 | Calls another agent (`kith call`). | No | 1 (`python3 -I -` body) |
-| `lib/kith-core.sh` | 292 | The router (`kith_core_exec`, `kith_cutover_refuse`, `kith_cost`, held-terminal helpers). | No | `python3 -I -c` JSON helpers, `kith_paths.py` |
-| `lib/kith-env.sh`, `lib/guest-env.sh` | 23, 7 | Env sourcing. | Yes | none |
-
-No bash script is only a wrapper except the `hq*` symlinks. Every bash script carries inline Python for JSON or paths,
-so "no Python" needs Rust verbs for those fragments too, not only for the `.py` files.
-
-### 1.2 kernel/bin: Python (shebang `python3` unless noted)
-
-The `hq-auth`, `hq-cost`, `hq-doctor`, `hq-pkg`, `hq-state`, `hq-who` entries are symlinks to the `kith-*` file of the
-same name; they carry no code of their own. Callers below are non-test files.
-
-| Script | Lines | Called by | Rust | What is missing |
-|---|---|---|---|---|
-| `kith-auth` (`hq-auth`) | 3724 | Host: `access.rs`, `api/{people,roles,botguests,authority,devices}.rs`, `cards/*`, `channels/{hq,core,manager}.rs`, `chat/{group,room_*}.rs`, `agent/hq.rs`, found beside the kith binary (`channels/hq.rs` `auth_bin`). Core: `cost/views.rs`, `people/system.rs`, `launch/guard.rs`. `bin/kith`, `kith-permit`, `kith-pkg`, `kith-doctor`, 9 `lib/` modules. Desktop: only as text in comments and tests (16 files), no call. | `core/runtime/src/authority/` (revoke, readers, core.db tables), `core/kernel/src/{secrets,people}/`, `kith kernel auth resolve\|may`. On a switched Mac `kith-auth` already routes most shapes to the core (L1 lift routes, #974) and exits 3 for the rest. | A Rust CLI for every shape (`kernel auth` has only `resolve` and `may`). The shapes that exit 3 on purpose: room secrets (`once`, `exec --secret`, q236), `job AGENT ID JOB` ticks, `mcp-config` with more than one argument. The people-admin writes are app-only on a switched Mac (documented). The unswitched-Mac code path (auth.json plus Keychain) is the importer's job only. |
-| `kith-permit` | 772 | Every run: the `kithpermit` MCP server (`core/kernel/src/launch/mcp.rs:14`, `assemble.rs:1425`), the auto-mode `PermissionDenied` and `PreToolUse` hooks (`launch/settings.rs:977-984`), `apply` (`assemble.rs:1392`). Host: `cards/*` talk about it. | `core/kernel/src/permit/` (`decide`, `helper`, `door`, `hooks`, `host`, `issue`, `access`, `apply`, `mcp`), `kith kernel permit`. Goldens `permit.json`, `permit-mcp.json`. | Routing: nothing points the hooks or the MCP command at `kith kernel permit`. `ask_helper` shells to `bin/kith-ask` (`permit/helper.rs:76`). |
-| `kith-sessions` | 1105 | Every run: SessionStart hook `record` (`settings.rs:776`) and the launcher's last exec `run`. Host: `terminal/`, `remote/account.rs`; `kith-wake`, `kith-lifecycle`. | `core/kernel/src/threads/` (`kith kernel threads`), `core/runtime/src/conversations/` (claims), module `claims`. In Writer mode the Python takers already call the core (#994). | `kith kernel threads` is not routed. `run` (the take-over note and exec of claude) has no Rust twin. Claims step: #1010 lifted the refusal; stepped on Kai's Mac 2026-11-17 (2.2). |
-| `kith-wake` | 762 | Host: `serve/host/src/wake.rs` (one process per call: `enqueue`, `take`, `done`, `back`, `withdraw`), `cards/resume.rs`. `kith-sessions`. | `core/runtime/src/wake/` (queue, model, turns), import `import/wake.rs`. Golden `wake.json`. | The host still spawns the script; a core-side caller in `wake.rs` is the switch. Frozen but not routed. |
-| `kith-lifecycle` | 391 | `kith-sessions`; host `agent/bot/lifecycle.rs`; `host/crates/memory/src/compaction.rs`. | none (the compact claim moved to `kith-stub`, #990, still Python). | Everything. `lifecycle.json` golden exists. |
-| `kith-sched` | 749 | Host: `agent/hq.rs`, `api/kith_info.rs`, `rich_card.rs`, `run_outbox.rs`. `dev.kith.sched` launchd job (not installed on Kai's Mac). Desktop and iOS: via `kithInfo` schedules, no direct call. | `core/runtime/src/schedules/` (tick, fire, run now, webhook), `core/kernel/src/schedule/` (Trigger, cron), module `schedules` (rolled back on Kai's Mac 2026-11-16). | The cutover cannot be stepped until the core runs fired turns (`schedules_gate.rs`: four facts; #1011, #1015 landed the host runner; `core-schedules` is finishing it). CLI verbs `kith schedule ls\|add\|rm\|pause\|resume\|run\|log --json` as Rust: to be confirmed by `core-schedules`. |
-| `kith-cost` (`hq-cost`) | 650 | `SessionStart` hook `tag` (`settings.rs:774`), `launch/assemble.rs:733`, `kith_cost()` in `kith-core.sh`, launchd `dev.kith.cost` (by hand). Host: 4 files. | `core/kernel/src/cost/` (`limit`, `spent`, `usage --json`, `agent --json`, `members`, `bots --json`, `sync`); every verb is Rust now (R2 status below); `bin/kith-cost` is the sh-and-Python stub. | `tag` and `record` (the ledger's only writer, core-design Q7), the text reports, bare `kith cost`. |
-| `kith-account` / `lib/kith_accounts.py` | 731 / 1122 | `bin/kith`, `kith-pkg`, `kith-scratch`, `kith-doctor`. Host: `remote/account.rs`. | `core/kernel/src/accounts/` (list, pick, change, state, mirror), module `accounts` (switched on Kai's Mac). | `backups-json` / `accounts-json` are in the chain verbs (`kith kernel chain`); the login-command verbs of `kith account add\|remove` to be confirmed. |
-| `kith-pkg` (`hq-pkg`) | 1680 | `bin/kith` (`resolve`), `launch/assemble.rs:855`, `serve/host/src/launch_cmd.rs:67`, host `api/scratch.rs`, `install.sh`, `kith-doctor`. | `core/kernel/src/pkg/` (`resolve`, fetch, store, git, problems), `kith kernel pkg resolve`; `pkg` switched in `core-switched.txt`. | Every other verb: `install`, `update`, `share`, `search`, `restore`, `gc`, `pin`/`unpin`/`rollback`, `history`, `push`, `commit`, `deps`, `check --share`, `list`. The `--json` forms are frozen by `kith-pkg-json-check`. |
-| `project-id` | 248 (now a 50-line `sh` stub) | `bin/kith` (`project_id()`), `kith-project`, `kith-ask`, `register.tsx`, agents (bare `project-id` on PATH), old hosts by path. The host answers a guest's `--info` in process (`runauth.rs` `project_info`). | `core/kernel/src/project/` (with `guest.rs`, the run-socket client), `kith kernel project-id`. | Done in R2 (see 2.1): the Python is gone, `bin/project-id` forwards. |
-| `kith-room-ledger` | 65 | Pre/PostToolUse hook of every launch (`settings.rs:541`). | `core/kernel/src/room_ledger/`, `kith kernel room-ledger pre\|post`; golden `room-ledger.json`. | Routing: the launch still writes the script path as the hook. |
-| `kith-people` | 195 | `kith people`, `kith invite`. Host: `api/people.rs`. | `core/kernel/src/people/`, `kith kernel people` (reads through `kith-auth people --json`). | Switch: waits for a core read verb; `people` is not in `core-switched.txt`. |
-| `kith-memory` | 226 | Agents (allowed without a prompt: `settings.rs:714`), host `runauth.rs` (guest `search` over the run socket), `mcp.rs`. | The host answers `check`, `log`, `diff`, `undo`, `rm`, `forget`, `tidy`, `hook`, `summary` (`kernel.rs` `MEMORY_VERBS`). | `ls` and `search` (and the guest branch through `kith_runsocket.py`). |
-| `kith-recall` | 167 | Host `hqmem/tidy.rs:984`, agents (guest branch asks the host: `ask_host`). Uses `lib/kith_recall.py` (448). | Host side only: `serve/host/src/runauth.rs`, `core/runtime/src/runsock.rs`. | The client. |
-| `kith-allow` + `lib/kith_allowed.py`, `lib/kith_guard.py` | 132 + 279 + 728 | Host `cards/autoallow.rs` (`--derive`, `--add-json`), `launch/guard.rs:205`, `bin/kith` settings fill, `kith-pkg check`, `kith-permit`, `kith-auth`, `lib/kith_jobs.py`. | The must-ask judgement is mirrored in `core/kernel/src/launch/guard.rs` and `serve/host/src/cards/resource.rs`. | `--derive` and `--add-json` (the host's "always allow" path) have no Rust twin; `kith_allowed.py` decides what is remembered. |
-| `kith-door` + `lib/kith_door.py` | 19 + 661 | Host `doors.rs` (`sweep` at start, on a cut-off, every minute), `kith-permit`, `lib/kith_jobs.py`. | `core/runtime/src/doors/` (row state, sweep) and host `doors.rs`, not switched. | The process side (start the box, supervise); the Python state is the live one. |
-| `kith-ask` | 1142 | Hooks and the permit helper (`permit/helper.rs:76`), host `api/cards.rs`, `cards/mod.rs`, `remote/account.rs`; 8 serve files. | State only: `core/runtime/src/asks/`, `import/asks.rs`, `delegation` rules in `core/kernel/src/delegation.rs`. | The command itself. Golden `asks.json`, `delegation.json`. |
-| `kith-acp` | 255 | Host `agent/acp.rs`; `adapters/acp/{claude-via-kith,shim/claude}` (a Python shim). | The ACP client crate `core/acp` is a different thing (the host's engine transport). | The ACP server for outside clients. |
-| `kith-info` | 402 | Host `agent/hq.rs` (`hq::info`, cached), `api/kith_info.rs`; the apps read it through `kithInfo`. | none | Everything; the `info --json` shape is the apps' contract (`serve/docs/bot-info.md`). |
-| `kith-doctor` (`hq-doctor`) | 594 | You. Reads launchd (`kith-uv` stuck check, `kith-doctor:460`), `lib/kith_migrate.py`. | none | Everything. |
-| `kith-init` | 526 | `install.sh`, you. | none | Everything (checks git/claude/gh/uv, makes the state repos, offers backups, starters). |
-| `kith-state` (`hq-state`) | 288 | You; launchd `dev.kith.state` (03:00 backup, `ProgramArguments` = `kith-uv run --script kith-state backup --yes`), `lib/kith_launchd.py`. | none | Everything. |
-| `kith-self-update` | 223 | `kith update` (no agent), `kith-doctor --check`, `scripts/install.sh`. | none (the host has its own updater, `serve/host/src/update/`, for the host binary only). | Everything; it drives `install.sh`, `brew upgrade`, `git pull --ff-only`. |
-| `kith-remote` | 411 | You, `kith-ask`. | none | Everything. |
-| `kith-migrate` + `lib/kith_migrate.py` | 26 + 900 | `kith migrate`, `kith rollback MODULE` (`bin/kith:151-153`), `kith-doctor`. | The cutover itself is Rust (`kith kernel cutover`); `kith_migrate.py:869-887` only forwards `step\|status\|check\|rollback\|is-module` to it. The `hq` to `kith` rename steps are separate work, not this package. | The forward moves to the dispatcher; the rename steps stay until the rename is declared done. |
-| `kith-skills`, `kith-scratch`, `kith-project`, `kith-group`, `kith-send-to`, `kith-connector`, `kith-keys`, `kith-cards`, `kith-who`, `kith-bug`, `kith-chain`, `kith-helper-allow` | 311, 181, 242, 407, 186, 156, 94, 89, 154, 197, 240, 37 | Mostly the user or the host by name: `kith-send-to` (`chat/group.rs:769,1462`), `kith-cards` (`cards/history.rs`), `kith-group` (desktop), `kith-connector` (host `mcp.rs`), `kith-scratch` (`api/scratch.rs`). `kith-chain` has no caller outside its own check and CI. | `kith kernel chain` (backup chain verbs) covers part of `kith-chain`'s concerns only. | Each is a port or a drop (section 8). |
-| `kith-serve-launch` | 60 | `dev.kith.serve` when a launcher is set: `["~/.kith/bin/kith-uv","run","--quiet","--script","<repo>/kernel/bin/kith-serve-launch", ...]` (`serve/host/README.md`). `#!/usr/bin/env -S uv run --quiet --script`, the only `uv` shebang. | none | A launcher that passes signals and SIGKILLs after 20 s; see section 5. |
-
-### 1.3 kernel/lib and kernel/adapters
-
-| File | Lines | Imported by | Rust | Notes |
-|---|---|---|---|---|
-| `kith_paths.py` | 341 | Every script and `bin/kith` (`--sh`, `--bin`, `--machine`); `kith-core.sh` | `core/kernel/src/paths/`, `kith kernel paths`, `paths` switched | Last to go: the router uses it to find the Rust program. The installer's `machine_dir` logic is a second copy. |
-| `kith_settings.py` | 629 | `bin/kith`, `kith-cost`, `kith-pkg`, `kith-doctor`, `kith-ask`, `kith_accounts.py` | `core/kernel/src/settings/`, `kith kernel settings`, `settings` switched (the `set` verbs) | Reads still Python in the scripts that import it. |
-| `kith_engines.py` | 32 | `bin/kith` | `core/kernel/src/engines.rs`, `engines` switched | Python only prints "needs the kith program": already a stub. |
-| `kith_accounts.py` | 1122 | see `kith-account` | `accounts` | see above |
-| `kith_claims.py` | 118 | `kith-sessions`, `kith-wake`, `bin/kith` | module `claims` | Reads the claims marker; goes with `claims`. |
-| `kith_procstart.py` | 226 | `kith-sessions`, `kith-wake`, `kith_lifecycle.py` | `core/procstart`, `core/kernel/src/procstart.rs` | Check `kith-procstart-check` asserts both write the same string. |
-| `kith_lifecycle.py` | 350 | `kith-lifecycle`, `kith-sessions` | none | |
-| `kith_guard.py`, `kith_allowed.py`, `kith_jobs.py` | 728, 279, 240 | `kith-auth`, `kith-pkg`, `kith-permit`, `kith-allow`, `bin/kith`, `kith_door.py` | partial, see `kith-allow` | |
-| `kith_door.py` | 661 | `kith-door`, `kith-permit`, `kith_jobs.py` | `core/runtime/src/doors/` (state) | |
-| `kith_runsocket.py`, `kith_recall.py` | 46, 448 | `kith-memory`, `project-id`, `kith-recall` | host `runauth.rs`, `core/runtime/src/runsock.rs` (server side) | |
-| `kith_readfence.py` | 65 | `bin/kith`; the launch's fallback hook (`settings.rs:1404-1410`) | `core/kernel/src/readfence.rs`, `kith kernel readfence`; the launch uses it when it knows a kith binary | Python is only the fallback. Leaf. |
-| `kith_facets.py`, `kith_trajectory.py`, `kith_redact.py`, `kith_bug.py`, `kith_chain.py`, `kith_host.py`, `kith_runenv.py`, `kith_tombstone.py` | 530, 424, 90, 220, 124, 41, 49, 78 | scripts above | `kith_facets` partly in `core/kernel/src/launch/facets.rs` | `kith_tombstone.py` has to outlive the last Python reader of a tombstoned file. |
-| `kith_launchd.py` | 70 | `kith-sched`, `kith-state` (install and reload jobs) | `serve/host/src/service/unix.rs` mirrors it | |
-| `hq_paths.py`, `hq_settings.py` | 16, 9 | nothing in `kernel/` imports them | none | Old-name shims; delete first. |
-| `adapters/harness.py` | n/a | `bin/kith:1375-1377` (one-shot path) | `kith kernel run-once` (ACP engines; `serve/host/src/runonce.rs`) | Non-ACP engines still use Python. |
-| `adapters/claude-code/hooks/register.tsx` | n/a | the Claude Code plugin | n/a | A TSX module that shells to `kith_facets`, `kith_paths`, `kith_settings` (grep of the imports); moves with them. |
-| `adapters/acp/shim/claude` | n/a | `kith-acp` | none | `#!/usr/bin/env python3`. |
-
-### 1.3a Who uses each Python file (architect MUST 3)
-
-**This map must be built mechanically, not by hand,** and re-run in each step PR: `import` lines, `SourceFileLoader` /
-`spec_from_file_location` loads of another script, `python3 <path>` and `uv run --script <path>` calls in bash, Rust, plists and
-the Claude Code plugin (`kernel/adapters/claude-code/hooks/register.tsx`). The manager records, for every file, its last user and
-its step, and a step may delete a file only when the re-run shows no user left. **The script is `scripts/py-file-map.py` (Step 0); its output is the table at the end of this section, run at `02a19215c`.** Re-run it in each step PR and paste the new table. It finds Python files by shebang or `.py` and users by NAME across every tracked text file (so a `python3 -I -c "import kith_door"` inside a Rust string, or a path built with `join`, still shows as a hit); a pattern only labels the hit (`import`, `load`, `run`, `plugin`, else `ref`). `load*` means the user file loads scripts by a computed name (`kith-info`) and mentions the target: confirm by hand. The hand-built first pass missed `kith-scratch`'s import of `kith_trajectory` and ten `python3 <script>` calls; the table has them. The analysis below was written from that first pass; the table agrees with it on the points checked (the users of `kith_facets`, `kith_guard`, `kith_accounts`, and the six loaders). What it found:
-
-- Scripts loaded as Python modules (cannot be replaced by an `sh` stub): `kith-info` loads `kith-pkg`, `kith-sched`, `kith-cost`,
-  `kith-memory` (`kith-info:29,131,295,329,349,368`; it reads their store pointers, `jobs_file`, state, listings and `since_of`);
-  `kith-ask` loads `kith-wake` (`:400`); `kith-bug` loads `kith-permit` (`:39`); `kith-lifecycle` loads `kith-sessions` (`:37`);
-  `kith-remote` loads `kith-ask` (`:45`); `kith-skills` loads `kith-pkg` (`:48`). **Step 0 prep (cheaper than porting `kith-info` early,
-  architect SHOULD 1): change each of these to run the other script as a subprocess instead of loading it.** Then a stub works,
-  and every script keeps the step the table gives it (`kith-info` stays in R8). `kith-bug` and `kith_bug.py` go with `kith-permit` at R4.
-- `bin/kith` is the last user of `kith_guard`, `kith_allowed`, `kith_accounts` (`:936,1049,1200`, `:563-693`) and of
-  `kith_facets.py` (also used by `kith-project`, `kith-room-ledger`, `kith_recall.py` and the plugin, whose `register.tsx` runs
-  `python3 kith_facets.py load` (`:325`), `kith_paths.py --json` (`:59`) and `kith_settings.py` (`:127`)). Those modules go **at R9
-  with `bin/kith`**, unless R8 ports the parts `bin/kith` uses (launch-env, main-env, main-id, run-chain, session-run,
-  session-account; the guard and allow calls at `:936,1049,1200`). The plugin's TSX moves in its own step before R9: it calls the
-  `kith` program instead of Python. R7 therefore does not delete `kith_facets.py`.
-- Nothing in 2.1 yet deletes `kith_settings.py`, `kith_redact.py`, `kith_bug.py`, `kith_chain.py` or `bin/kith-room-ledger`: they
-  go at R9 (`kith_settings`, `kith_redact`), with `kith-bug` at R4 (`kith_bug`), with `kith-chain` at R8 (`kith_chain`), and at R2
-  (`kith-room-ledger`, once the launch writes the Rust hook).
-
-Import lines, as read from the first pass (the table below is the authority):
-
-`kith_accounts.py` is imported by `bin/kith` (it runs it for launch-env, main-env, main-id, run-chain, session-run and
-session-account, `bin/kith:563-693`, as well as `backups-json`/`accounts-json`), `kith-pkg:94`, `kith-scratch:24`,
-`kith_settings.py:391`, `kith-account`. `kith_guard.py`, `kith_allowed.py` and `kith_jobs.py` are imported by `bin/kith`
-(`:936,1049,1200`), `kith-pkg` (`:258,1668`), `kith-auth`, `kith-permit`, `kith-allow`, `kith_door.py`. `kith_paths.py` is imported
-by nearly everything (section 1.3). Consequence for the order: `kith_accounts.py` goes with `kith-pkg` and `kith-scratch`, not at
-R3 (R3 deletes `kith-account` and the `account-state` branch; the module goes at R9 with `bin/kith`, its last user); `kith_guard`,
-`kith_allowed`, `kith_jobs` go at R9 too, not at R4. Also in `kernel/lib`: `door-chrome` (sh) and
-`door-preload.mjs` go with `kith_door` at R4. `starters.json`, `user.md`, `agents.gitignore`, `dot-kith.gitignore` are data that
-`kith-init` reads: when R9 stops staging `kernel/bin` and `kernel/lib` they move to `share/kith/` (with `kernel/skills/`,
-`kernel/services/*.json`, `PROTOCOL.md` and `kernel/agents/scratch`) and `stage-kernel.sh` is updated to copy them.
-
-Old hosts call `python3 kith_paths.py --json` (`serve/host/src/cards/resource.rs:160`, `runauth.rs:507`); both already fall back when
-the file is gone (`resource.rs:148-149`, `runauth.rs:510`). That path cannot be stubbed (it is `python3 <file>`) and must not get a stub.
-
-Mechanical map (`python3 -I scripts/py-file-map.py`, 2026-11-19, `02a19215c`). "Inside kernel/" lists the users that decide the order (a file may go only when this column is empty); "Checks in kernel/tests" are the tests that move or go in the PR that deletes the file; "elsewhere" is grouped by area with a file count (`--json` has every line number). `agent` is a `.md` an agent is told to run (`PROTOCOL.md`, the skills): such a hit decides whether a step needs a stub. Callers of `kith <verb>` (the entry) show only as the row of `bin/kith`. The rows with no user at all were checked by hand: `lib/hq_settings.py` is named only by a test function; `bin/kith-serve-launch` is run by launchd's `dev.kith.serve` on a Mac whose host config sets a launcher (`serve/host/README.md` lines 33-39, `config.json` or `KITH_SERVE_LAUNCHER`), which the map cannot see, as it cannot see plists or config. So the rule is: a file may go only when its column is empty **and** the step in 2.1 that deletes it names it (R9 holds this one).
-
-| File | Users inside kernel/ (kind) | Checks in kernel/tests | Users elsewhere (files, kinds) |
-|---|---|---|---|
-| `adapters/acp/shim/claude` | `adapters/acp/claude-via-kith` ref | `kith-held-check` | none |
-| `adapters/harness.py` | `bin/kith` run; `bin/kith-cost` run; `bin/kith-pkg` run; `lib/kith_engines.py` run | `difftest/`, `kith-run-once-cost-check` | `core/kernel/src` 2 (run); `serve/host/src` 1 (run) |
-| `bin/kith-account` | `bin/kith` ref/run | `difftest/`, `kith-account-check`, `kith-account-state-switch-check`, `kith-accounts-tombstone-check`, `kith-footguns-check` | `.github/workflows` 1 (ref/run); `core/kernel/src` 3 (ref/run); `core/runtime/src` 1 (ref); `serve/host/src` 1 (run) |
-| `bin/kith-acp` | `adapters/acp/claude-via-kith` ref/run; `adapters/acp/shim/claude` ref; `bin/kith` ref/run | `kith-core-deps-check` | `core/acp/Cargo.toml` 1 (ref); `core/kernel/src` 1 (ref); `serve/host/Cargo.toml` 1 (ref); `serve/host/src` 1 (ref) |
-| `bin/kith-allow` | `bin/kith` ref/run; `lib/kith_allowed.py` run; `lib/kith_guard.py` ref | `fixtures/`, `kith-allow-check`, `kith-must-ask-check` | `core/kernel/src` 1 (ref); `serve/host/src` 2 (ref/run) |
-| `bin/kith-ask` | `bin/kith` ref/run; `bin/kith-auth` ref; `bin/kith-chain` run; `bin/kith-permit` ref/run; `bin/kith-remote` load/load*; `bin/kith-sched` ref/run; `bin/kith-sessions` ref/run | `difftest/`, `fixtures/`, `kith-ask-check`, `kith-auth-revoke-check`, `kith-chain-check`, `kith-contract-check`, `kith-guest-helper-check`, `kith-permit-check`, `kith-sched-origin-check`, `kith-sched-person-check`, `kith-sched-run-turn-check`, `kith-sched-tick-lock-check` | `.claude/skills` 1 (agent); `core/api/src` 2 (run); `core/kernel/src` 7 (ref/run); `core/runtime/src` 9 (ref/run); `serve/host/crates` 1 (run); `serve/host/src` 6 (ref/run); `serve/host/tests` 1 (ref); `verification/revoke` 1 (ref) |
-| `bin/kith-auth` | `adapters/claude-code/hooks/register.tsx` plugin/run; `adapters/harness.py` run; `bin/kith` ref/run; `bin/kith-ask` load*; `bin/kith-cards` ref; `bin/kith-cost` ref; `bin/kith-doctor` ref; `bin/kith-group` ref; `bin/kith-info` load*; `bin/kith-init` ref; `bin/kith-memory` ref; `bin/kith-new` ref; `bin/kith-people` ref; `bin/kith-permit` ref; `bin/kith-remote` load*; `bin/kith-sched` ref/run; `bin/kith-send-to` ref/run; `bin/kith-sessions` ref/run; `bin/kith-skills` load*; `lib/kith-core.sh` ref; `lib/kith_accounts.py` ref/run; `lib/kith_door.py` ref; `lib/kith_facets.py` ref; `lib/kith_guard.py` ref; `lib/kith_host.py` ref; `lib/kith_jobs.py` ref; `lib/kith_recall.py` ref; `lib/kith_settings.py` ref; `services/anthropic.json` ref; `services/browser.json` ref; `services/discord.json` ref; `services/grok.json` ref; `services/notion.json` ref; `services/openrouter.json` ref; `services/telegram.json` ref; `skills/kith-keys/SKILL.md` agent | `difftest/`, `fixtures/`, `kith-agent-allow-check`, `kith-allow-check`, `kith-ask-check`, `kith-auth-c2-check`, `kith-auth-check`, `kith-auth-core-mirror-check`, `kith-auth-embedded-check`, `kith-auth-lock-check`, `kith-auth-mixed-race-check`, `kith-auth-props`, `kith-auth-props.py`, `kith-auth-revoke-check`, `kith-auth-router-check`, `kith-auth-secret-check`, `kith-backup-check`, `kith-contract-check`, `kith-cost-bots-check`, `kith-cost-switch-check`, `kith-cutover-check`, `kith-doctor-services-check`, `kith-grants-check`, `kith-group-check`, `kith-guest-door-check`, `kith-guest-helper-check`, `kith-guest-jobs-check`, `kith-guest-sandbox-check`, `kith-helper-mcp-check`, `kith-hooks.test.ts`, `kith-install-drain-check`, `kith-launch-engines-check`, `kith-limit-check`, `kith-load-check`, `kith-must-ask-check`, `kith-people-check`, `kith-permit-check`, `kith-project-check`, `kith-recall-check`, `kith-sched-json-check`, `kith-sched-origin-check`, `kith-sched-person-check`, `kith-sched-run-turn-check`, `kith-sched-tick-lock-check`, `kith-send-to-check`, `kith-sessions-check`, `kith-terminal-flags-check`, `kith-trajectory-check`, `kith-trusted-allow-check` | `.claude/skills` 4 (agent); `.github/workflows` 1 (ref/run); `apps/desktop/src` 9 (ref); `apps/desktop/tools` 1 (ref/run); `apps/ios/Kit` 6 (ref); `core/api/src` 5 (ref); `core/kernel/src` 27 (ref/run); `core/runtime/src` 44 (ref/run); `scripts/ci` 2 (ref/run); `scripts/install.sh` 1 (ref/run); `serve/cloud/migrations` 1 (ref); `serve/cloud/src` 1 (ref); `serve/cloud/test` 1 (ref/run); `serve/host/crates` 2 (ref/run); `serve/host/src` 74 (ref/run); `serve/host/tests` 6 (ref/run); `verification/revoke` 11 (ref/run); `verification/rooms` 1 (ref); `verification/secrets` 3 (ref/run) |
-| `bin/kith-bug` | `bin/kith` ref/run | `kith-bug-check` | none |
-| `bin/kith-cards` | `bin/kith` ref/run | `kith-allow-check` | `core/api/tests` 1 (ref); `serve/host/src` 1 (ref) |
-| `bin/kith-chain` | `PROTOCOL.md` agent; `skills/kith-health-chain/SKILL.md` agent | `fixtures/`, `kith-chain-check`, `kith-json-misc-check` | `serve/host/src` 1 (ref); `serve/host/tests` 1 (ref) |
-| `bin/kith-connector` | `bin/kith` ref/run | `kith-connector-check` | none |
-| `bin/kith-cost` | `adapters/harness.py` ref/run; `bin/kith` ref/run; `bin/kith-auth` ref/run; `bin/kith-info` load*; `lib/kith-core.sh` ref/run; `lib/kith_settings.py` ref | `difftest/`, `fixtures/`, `kith-accounts-check`, `kith-backup-check`, `kith-cost-bots-check`, `kith-cost-switch-check`, `kith-limit-check`, `kith-memory-check`, `kith-migrate-check`, `kith-scratch-check`, `kith-sessions-check` | `.claude/skills` 1 (agent); `.github/workflows` 1 (ref/run); `apps/desktop/src` 1 (run); `apps/ios/Kit` 1 (run); `core/kernel/src` 11 (ref/run); `core/runtime/src` 2 (ref); `serve/host/src` 2 (ref/run) |
-| `bin/kith-doctor` | `bin/kith` run | `kith-agent-allow-check`, `kith-auth-check`, `kith-auth-router-check`, `kith-doctor-services-check` | none |
-| `bin/kith-door` | `bin/kith` ref/run | `kith-guest-door-check` | `serve/host/src` 1 (ref) |
-| `bin/kith-group` | `bin/kith` ref/run; `bin/kith-connector` ref; `bin/kith-keys` ref; `lib/kith_host.py` ref | `difftest/`, `kith-group-check` | `apps/desktop/src` 2 (ref) |
-| `bin/kith-helper-allow` | `adapters/claude-code/hooks/register.tsx` run | `kith-hooks.test.ts` | `.claude/skills` 1 (agent) |
-| `bin/kith-info` | `bin/kith` ref/run; `bin/kith-auth` ref; `bin/kith-memory` ref | `kith-auth-router-check`, `kith-footguns-check` | `apps/desktop/src` 24 (ref); `serve/host/src` 3 (ref); `serve/host/tests` 2 (ref) |
-| `bin/kith-init` | `bin/kith` ref/run | `kith-install-layout-check` | `install.sh` 1 (run) |
-| `bin/kith-keys` | `PROTOCOL.md` agent; `bin/kith` ref/run; `skills/kith-guests/SKILL.md` agent; `skills/kith-keys/SKILL.md` agent | `fixtures/`, `kith-keys-check` | none |
-| `bin/kith-lifecycle` | `bin/kith-sessions` ref; `bin/kith-wake` ref; `lib/kith_lifecycle.py` run | `difftest/`, `fixtures/`, `kith-json-misc-check`, `kith-lifecycle-check`, `kith-sessions-core-check` | `.claude/skills` 1 (agent); `.github/workflows` 1 (ref/run); `core/kernel/src` 1 (ref); `core/procstart/tests` 1 (run); `serve/host/crates` 1 (ref); `serve/host/src` 3 (ref); `verification/threads` 1 (run) |
-| `bin/kith-memory` | `PROTOCOL.md` agent; `bin/kith` ref/run; `bin/kith-info` load*; `skills/kith-project-files/SKILL.md` agent | `fixtures/`, `kith-recall-check` | `.claude/skills` 1 (agent); `.github/workflows` 1 (run); `apps/desktop/src` 1 (ref); `core/api/src` 1 (ref); `core/kernel/src` 1 (ref); `serve/host/crates` 1 (ref); `serve/host/src` 6 (ref/run) |
-| `bin/kith-migrate` | `bin/kith` ref/run; `lib/kith_migrate.py` run | `kith-footguns-check`, `kith-migrate-check` | none |
-| `bin/kith-people` | `bin/kith` ref/run; `lib/kith_host.py` ref | `difftest/`, `kith-people-check` | `core/api/src` 1 (ref); `core/api/tests` 1 (ref); `core/kernel/src` 3 (ref/run); `core/runtime/src` 1 (ref); `serve/host/src` 1 (ref/run) |
-| `bin/kith-permit` | `bin/kith` ref/run; `bin/kith-ask` load*; `bin/kith-auth` ref; `bin/kith-bug` load/load*; `bin/kith-wake` ref; `lib/kith_allowed.py` ref; `lib/kith_bug.py` ref; `lib/kith_door.py` ref; `skills/kith-guests/SKILL.md` agent | `difftest/`, `fixtures/`, `kith-allow-check`, `kith-ask-check`, `kith-auth-secret-check`, `kith-bug-check`, `kith-guest-door-check`, `kith-guest-helper-check`, `kith-guest-jobs-check`, `kith-guest-sandbox-check`, `kith-owner-launch-check`, `kith-permit-check` | `.claude/skills` 2 (agent); `.github/workflows` 1 (run); `core/kernel/src` 13 (ref/run); `core/runtime/src` 1 (ref); `serve/host/src` 8 (ref/run); `serve/host/tests` 1 (ref) |
-| `bin/kith-pkg` | `adapters/claude-code/hooks/register.tsx` plugin/run; `bin/kith` ref/run; `bin/kith-doctor` ref; `bin/kith-info` load*; `bin/kith-init` ref; `bin/kith-scratch` ref; `bin/kith-skills` load/load*; `bin/kith-state` ref; `lib/agents.gitignore` ref; `lib/kith_guard.py` ref; `lib/kith_redact.py` ref | `difftest/`, `fixtures/`, `kith-auth-check`, `kith-footguns-check`, `kith-grants-check`, `kith-guest-sandbox-check`, `kith-harness-check`, `kith-hooks.test.ts`, `kith-market-check`, `kith-must-ask-check`, `kith-pkg-eintr-check`, `kith-pkg-json-check`, `kith-pkg-pid-switch-check` | `.github/workflows` 1 (run); `core/api/src` 1 (ref); `core/kernel/src` 10 (ref/run); `serve/host/src` 4 (ref/run) |
-| `bin/kith-project` | `PROTOCOL.md` agent; `bin/kith` run | `fixtures/` | none |
-| `bin/kith-recall` | `bin/kith` ref/run; `bin/kith-memory` ref; `bin/kith-permit` ref | `fixtures/`, `kith-recall-check`, `kith-trajectory-check` | `.claude/skills` 1 (agent); `serve/host/src` 2 (ref/run) |
-| `bin/kith-remote` | `bin/kith` ref/run; `bin/kith-ask` load*; `bin/kith-init` ref | `difftest/`, `kith-ask-check`, `kith-sched-origin-check`, `kith-sched-person-check` | none |
-| `bin/kith-room-ledger` | `bin/kith` run; `lib/kith_facets.py` ref; `skills/kith-rooms/SKILL.md` agent | `difftest/`, `fixtures/`, `kith-load-check` | `core/kernel/src` 3 (run); `serve/host/src` 1 (run) |
-| `bin/kith-sched` | `bin/kith` ref/run; `bin/kith-call` ref; `bin/kith-chain` ref; `bin/kith-info` load*; `bin/kith-send` ref; `bin/kith-sessions` ref; `lib/kith_allowed.py` ref; `lib/kith_migrate.py` ref; `lib/kith_registry.py` ref; `lib/kith_runenv.py` run; `skills/kith-health-chain/SKILL.md` agent | `difftest/`, `fixtures/`, `kith-info-check`, `kith-migrate-check`, `kith-sched-cron-table`, `kith-sched-jobs-check`, `kith-sched-json-check`, `kith-sched-origin-check`, `kith-sched-person-check`, `kith-sched-prune-check`, `kith-sched-run-turn-check`, `kith-sched-tick-lock-check`, `kith-sched-tombstone-check`, `kith-wake-check` | `.claude/skills` 2 (agent); `.github/workflows` 1 (ref/run); `apps/desktop/src` 4 (ref); `apps/ios/Kit` 5 (ref); `core/api/src` 2 (ref); `core/kernel/src` 4 (ref/run); `core/kernel/tests` 1 (ref/run); `core/procstart/src` 1 (run); `core/runtime/src` 29 (ref/run); `serve/host/src` 13 (ref/run); `serve/host/tests` 3 (ref/run); `verification/registry` 2 (ref/run); `verification/schedule-fire` 5 (ref/run) |
-| `bin/kith-scratch` | `bin/kith` ref/run | none | none |
-| `bin/kith-self-update` | `bin/kith` ref/run; `bin/kith-doctor` ref | `kith-footguns-check`, `kith-json-misc-check`, `kith-pkg-json-check`, `kith-self-update-check` | none |
-| `bin/kith-send-to` | `bin/kith` ref/run | `kith-send-to-check` | `core/runtime/src` 1 (ref); `serve/host/src` 1 (ref) |
-| `bin/kith-serve-launch` | none | `kith-migrate-check`, `kith-serve-launch-check` | `core/runtime/src` 1 (ref) |
-| `bin/kith-sessions` | `bin/kith` ref/run; `bin/kith-ask` load*; `bin/kith-auth` ref; `bin/kith-lifecycle` load; `bin/kith-recall` ref; `bin/kith-sched` ref/run; `bin/kith-serve` ref; `bin/kith-wake` run; `lib/kith-core.sh` run; `lib/kith_claims.py` ref; `lib/kith_lifecycle.py` run; `lib/kith_registry.py` ref | `difftest/`, `fixtures/`, `kith-auth-revoke-check`, `kith-direct-lock-check`, `kith-held-check`, `kith-lifecycle-check`, `kith-resume-pick-check`, `kith-run-kind-check`, `kith-sessions-check`, `kith-sessions-core-check`, `kith-threads-race` | `.claude/skills` 2 (agent); `.github/workflows` 1 (ref/run); `apps/desktop/src` 3 (run); `apps/ios/Kit` 7 (run); `core/api/src` 3 (ref); `core/api/tests` 1 (ref); `core/kernel/src` 8 (ref/run); `core/procstart/tests` 1 (run); `core/runtime/src` 21 (ref/run); `core/stub/src` 1 (ref); `serve/host/src` 9 (ref/run); `serve/host/tests` 1 (ref); `verification/registry` 2 (run); `verification/threads` 2 (ref/run) |
-| `bin/kith-skills` | `bin/kith` ref/run | none | none |
-| `bin/kith-state` | `bin/kith` ref/run; `bin/kith-doctor` ref; `bin/kith-init` ref; `bin/kith-new` ref; `bin/kith-pkg` ref; `lib/agents.gitignore` ref; `lib/kith_migrate.py` ref | `difftest/`, `kith-footguns-check`, `kith-scratch-check` | `serve/host/src` 1 (ref) |
-| `bin/kith-wake` | `bin/kith` run; `bin/kith-ask` load/load*; `bin/kith-lifecycle` load*; `bin/kith-sched` ref/run; `bin/kith-sessions` run; `lib/kith_claims.py` ref | `difftest/`, `fixtures/`, `kith-ask-check`, `kith-auth-revoke-check`, `kith-lifecycle-check`, `kith-sched-run-turn-check`, `kith-sched-tick-lock-check`, `kith-sessions-core-check`, `kith-wake-check` | `.claude/skills` 1 (agent); `.github/workflows` 1 (run); `core/api/src` 2 (ref/run); `core/procstart/tests` 1 (run); `core/runtime/src` 17 (ref/run); `scripts/ci` 1 (ref); `serve/host/src` 5 (load*/ref/run); `serve/host/tests` 1 (ref); `verification/revoke` 1 (ref); `verification/threads` 1 (run) |
-| `bin/kith-who` | `PROTOCOL.md` agent; `bin/kith` ref/run | `fixtures/`, `kith-agent-allow-check`, `kith-trusted-allow-check` | `core/kernel/src` 1 (ref) |
-| `lib/hq_paths.py` | none | none | `serve/host/src` 1 (ref) |
-| `lib/hq_settings.py` | none | none | none |
-| `lib/kith_accounts.py` | `bin/kith` run; `bin/kith-account` import/run; `bin/kith-pkg` import/ref; `bin/kith-scratch` import/ref; `lib/kith_settings.py` import/ref/run | `difftest/`, `kith-account-state-switch-check`, `kith-accounts-tombstone-check`, `kith-backup-check` | `.github/workflows` 1 (run); `core/kernel/src` 8 (ref/run); `core/runtime/src` 3 (run); `serve/host/src` 3 (ref/run); `serve/host/tests` 2 (run) |
-| `lib/kith_allowed.py` | `bin/kith` import/ref/run; `bin/kith-allow` import/run; `bin/kith-permit` run; `lib/kith_guard.py` ref | `fixtures/`, `kith-must-ask-check` | `core/kernel/src` 1 (ref/run); `serve/host/src` 1 (ref/run) |
-| `lib/kith_bug.py` | `bin/kith-bug` import; `bin/kith-permit` import/ref/run | none | `core/kernel/src` 2 (import/ref/run) |
-| `lib/kith_chain.py` | `bin/kith-chain` import/ref/run | none | none |
-| `lib/kith_claims.py` | `bin/kith` run; `bin/kith-sched` import/ref; `bin/kith-sessions` import/ref/run; `bin/kith-wake` import/ref; `lib/kith_registry.py` import/ref; `lib/kith_tombstone.py` run | `kith-sessions-core-check` | `.claude/skills` 1 (agent); `.github/workflows` 1 (run); `core/runtime/src` 1 (ref/run); `verification/threads` 1 (run) |
-| `lib/kith_door.py` | `bin/kith-auth` ref; `bin/kith-door` import/ref/run; `bin/kith-permit` import/ref/run; `bin/kith-wake` ref; `lib/door-chrome` run; `lib/door-preload.mjs` run; `lib/kith_jobs.py` run | `difftest/`, `fixtures/`, `kith-auth-router-check`, `kith-guest-door-check` | `.claude/skills` 2 (agent); `.github/workflows` 1 (run); `core/api/src` 1 (run); `core/kernel/src` 3 (import/ref/run); `core/runtime/src` 5 (run); `serve/host/src` 1 (run); `verification/revoke` 3 (ref/run) |
-| `lib/kith_engines.py` | `bin/kith` run | none | none |
-| `lib/kith_facets.py` | `adapters/claude-code/hooks/register.tsx` run; `bin/kith` ref/run; `bin/kith-project` import/ref; `bin/kith-room-ledger` import/ref/run; `lib/kith_recall.py` import/ref/run | `kith-hooks.test.ts`, `kith-load-check`, `kith-recall-check` | `core/kernel/src` 2 (ref/run); `serve/host/crates` 1 (ref/run); `serve/host/src` 2 (run) |
-| `lib/kith_guard.py` | `bin/kith` import/ref; `bin/kith-auth` import/ref; `bin/kith-permit` import/ref; `bin/kith-pkg` import/ref; `lib/kith_allowed.py` import/ref; `lib/kith_jobs.py` import/ref | `difftest/`, `fixtures/`, `kith-core-boundary-check`, `kith-must-ask-check` | `core/kernel/src` 5 (import/ref/run); `core/runtime/src` 1 (run); `serve/host/src` 3 (import/ref/run) |
-| `lib/kith_host.py` | `bin/kith-group` import; `bin/kith-people` import | none | `core/kernel/src` 1 (ref) |
-| `lib/kith_jobs.py` | `bin/kith-auth` import/ref; `bin/kith-pkg` import/ref; `lib/kith_door.py` import/ref | `difftest/`, `kith-guest-door-check` | `core/kernel/src` 2 (ref/run); `core/runtime/src` 2 (ref/run); `serve/host/src` 1 (ref) |
-| `lib/kith_launchd.py` | `bin/kith-sched` import/ref; `bin/kith-state` import/ref | `kith-launchd-check` | `.github/workflows` 1 (run) |
-| `lib/kith_lifecycle.py` | `bin/kith-lifecycle` import; `bin/kith-sessions` import/ref/run | `difftest/`, `kith-lifecycle-check` | `core/kernel/src` 1 (run); `serve/host/src` 1 (run) |
-| `lib/kith_migrate.py` | `bin/kith-doctor` import/ref; `bin/kith-migrate` import/ref/run | none | none |
-| `lib/kith_paths.py` | `adapters/claude-code/hooks/register.tsx` run; `adapters/harness.py` run; `bin/kith` run; `bin/kith-acp` import; `bin/kith-allow` import; `bin/kith-ask` import; `bin/kith-auth` import; `bin/kith-cards` import; `bin/kith-chain` import; `bin/kith-cost` import; `bin/kith-doctor` import; `bin/kith-info` import; `bin/kith-init` import/run; `bin/kith-lifecycle` import/load*; `bin/kith-memory` import; `bin/kith-new` run; `bin/kith-permit` import; `bin/kith-pkg` import/run; `bin/kith-project` import; `bin/kith-remote` import; `bin/kith-sched` import; `bin/kith-scratch` import; `bin/kith-send` run; `bin/kith-sessions` import; `bin/kith-skills` import; `bin/kith-state` import/run; `bin/kith-wake` import; `bin/kith-who` import; `bin/project-id` import/run; `lib/hq_paths.py` import/run; `lib/kith-core.sh` run; `lib/kith-env.sh` run; `lib/kith_accounts.py` import; `lib/kith_allowed.py` import; `lib/kith_bug.py` import; `lib/kith_claims.py` import; `lib/kith_door.py` import; `lib/kith_facets.py` import; `lib/kith_guard.py` import/ref; `lib/kith_migrate.py` import/ref; `lib/kith_recall.py` import; `lib/kith_redact.py` import; `lib/kith_settings.py` import; `lib/kith_trajectory.py` import | `difftest/`, `fixtures/`, `kith-agent-allow-check`, `kith-ask-check`, `kith-auth-c2-check`, `kith-auth-check`, `kith-auth-lock-check`, `kith-contract-check`, `kith-core-boundary-check`, `kith-cost-bots-check`, `kith-cost-switch-check`, `kith-cutover-check`, `kith-direct-lock-check`, `kith-guest-sandbox-check`, `kith-hooks.test.ts`, `kith-install-layout-check`, `kith-json-misc-check`, `kith-launch-engines-check`, `kith-limit-check`, `kith-migrate-check`, `kith-permit-check`, `kith-recall-check`, `kith-resume-pick-check`, `kith-run-once-cost-check`, `kith-sched-run-turn-check`, `kith-sched-tick-lock-check`, `kith-sched-tombstone-check`, `kith-serve-check`, `kith-sessions-check` | `.claude/skills` 2 (agent); `.github/workflows` 1 (run); `core/kernel/src` 11 (import/ref/run); `install.sh` 1 (run); `scripts/install.sh` 1 (ref/run); `serve/host/src` 8 (ref/run) |
-| `lib/kith_procstart.py` | `bin/kith-sched` import/ref; `bin/kith-sessions` import/ref/run; `bin/kith-wake` import/ref; `lib/kith_lifecycle.py` import/ref | `kith-lifecycle-check`, `kith-procstart-check`, `kith-sessions-check`, `kith-sessions-core-check`, `kith-wake-check` | `.github/workflows` 1 (run); `core/kernel/src` 2 (ref/run); `core/procstart/Cargo.toml` 1 (ref); `core/procstart/tests` 1 (import/ref/run); `core/stub/src` 3 (ref); `core/stub/tests` 2 (ref) |
-| `lib/kith_readfence.py` | `bin/kith` run | `difftest/`, `kith-guest-sandbox-check` | `core/kernel/src` 3 (run); `core/kernel/tests` 1 (run); `serve/host/src` 1 (run) |
-| `lib/kith_recall.py` | `bin/kith-project` import/ref; `bin/kith-recall` import | `fixtures/`, `kith-recall-check` | `.claude/skills` 1 (agent); `serve/host/crates` 1 (run); `serve/host/src` 1 (run) |
-| `lib/kith_redact.py` | `bin/kith-chain` import/ref; `lib/kith_bug.py` import/ref | `kith-bug-check` | `core/kernel/src` 1 (ref/run) |
-| `lib/kith_registry.py` | `bin/kith-sched` import/ref; `bin/kith-sessions` import/ref/run; `lib/kith_claims.py` ref | `fixtures/`, `kith-sched-prune-check`, `kith-sessions-core-check` | `.claude/skills` 1 (agent); `.github/workflows` 1 (run); `core/kernel/src` 1 (ref/run); `core/runtime/src` 4 (ref/run); `verification/registry` 2 (ref/run) |
-| `lib/kith_runenv.py` | `bin/kith` run; `bin/kith-call` run; `bin/kith-sched` import/ref | none | `.github/workflows` 1 (run) |
-| `lib/kith_runsocket.py` | `bin/kith-memory` import/ref | `fixtures/` | `.claude/skills` 1 (agent); `.github/workflows` 1 (run) |
-| `lib/kith_settings.py` | `adapters/claude-code/hooks/register.tsx` run; `bin/kith` import/ref/run; `bin/kith-account` import/ref/run; `bin/kith-ask` import/load*; `bin/kith-cost` import/ref; `bin/kith-doctor` import/ref; `bin/kith-info` import/load*; `bin/kith-pkg` import/ref; `lib/hq_settings.py` import/ref/run; `lib/kith_accounts.py` import/ref/run; `lib/kith_paths.py` run | `difftest/`, `fixtures/`, `kith-accounts-check`, `kith-agent-allow-check`, `kith-auth-c2-check`, `kith-auth-lock-check`, `kith-backup-check`, `kith-info-check`, `kith-install-drain-check`, `kith-settings-switch-check`, `kith-trusted-allow-check` | `.github/workflows` 1 (run); `core/api/src` 1 (run); `core/kernel/src` 10 (ref/run); `scripts/install.sh` 1 (ref/run); `serve/host/crates` 1 (run); `serve/host/src` 1 (run) |
-| `lib/kith_tombstone.py` | `bin/kith-account` import/ref; `bin/kith-auth` import/ref; `bin/kith-doctor` import/ref; `bin/kith-pkg` import/ref; `bin/kith-sched` import/ref; `lib/kith_accounts.py` import/ref; `lib/kith_redact.py` import | `difftest/`, `kith-account-state-switch-check`, `kith-accounts-tombstone-check`, `kith-auth-check`, `kith-auth-props.py`, `kith-auth-router-check`, `kith-bug-check`, `kith-cutover-check`, `kith-direct-lock-check`, `kith-pkg-json-check`, `kith-sched-run-turn-check`, `kith-sched-tick-lock-check`, `kith-sched-tombstone-check`, `kith-sessions-core-check` | `.claude/skills` 1 (agent); `.github/workflows` 1 (run); `core/kernel/src` 5 (ref); `core/runtime/src` 3 (ref/run); `serve/host/src` 3 (ref/run) |
-| `lib/kith_trajectory.py` | `bin/kith-allow` import/ref; `bin/kith-recall` ref; `bin/kith-scratch` import/ref; `lib/kith_guard.py` import; `lib/kith_recall.py` import/ref; `lib/kith_redact.py` import/ref | `kith-trajectory-check` | `core/kernel/src` 1 (run) |
-
-### 1.4 What every run still runs in Python
-
-A launch goes through the Rust `launch` when the caller asked for `--launch-json` (the host does) and `launch` is
-switched. Even that run starts Python at these points, all written by Rust into the run's settings:
-
-- SessionStart hooks: `kith-cost tag` (10 s) and `kith-sessions record` (5 s), `core/kernel/src/launch/settings.rs:774-776`.
-- PreToolUse and PostToolUse: `kith-room-ledger pre|post` (`settings.rs:541`); the read fence for guests is Rust when the
-  launch knows a binary, else `python3 -I kith_readfence.py`.
-- Auto mode: `kith-permit denied` (660 s timeout) and `kith-permit once` (`settings.rs:977-984`).
-- The MCP server `kithpermit`: command `bin/kith-permit` (`launch/mcp.rs:14`).
-- The launch's own calls: `kith-pkg resolve` (`assemble.rs:855`, unless the Rust resolver answers), `kith-cost`
-  (`assemble.rs:733`), `kith-permit apply` (`assemble.rs:1392`).
-- The interactive terminal run (not `--launch-json`): the whole bash launcher, the backup-account walk, `--held` helpers in
-  `kith-core.sh` (`python3 -I` JSON), and the last exec, `kith-sessions run`.
-- The host's subprocesses by path: `kith-auth` (the busiest), `kith-wake`, `kith-door`, `kith-send-to`, `kith-allow`,
-  `kith-cards`, `kith-recall`, `kith-sched` (info), `kith-pkg resolve` (`launch_cmd.rs:67`), `kith-lifecycle`, `kith-memory`
-  (guest search), `project-id` (guest), and `kith <agent> --info-json` through the entry.
-
-Hooks are written fresh into each run's settings, so a changed hook command reaches the next launch. A run that is
-already going keeps the command line it started with until it ends. A long conversation resumed later is a new launch.
-This is the in-flight exposure for any step that moves a hook (section 2.1).
-
-### 1.5 Packaging, installers, launchd
-
-| Piece | Path | Python or uv in it | Retirement effect |
-|---|---|---|---|
-| Release tarball | `scripts/package-release.sh` calls `scripts/stage-kernel.sh` | Copies all of `kernel/` (Python included) into `share/kith/kernel`. | The deletion PRs make the tarball smaller; no packaging change needed until the last step. |
-| Mac app | `apps/desktop/tools/native-host.mjs` calls `stage-kernel.sh`; `apps/desktop/src/main/host-controller.ts` `ensureCli` installs the bundled CLI (`Resources/kith-install.sh`) when the installed one is below `declared.cli` (`apps/desktop/package.json` `kith.cli`, currently `0.1.0`) | Same tree. | The app is how a Mac gets a new CLI (section 3). The check is `MIN_CLI` in `serve/host/src/kernel.rs:172` and `cli_status`. |
-| Homebrew | `packaging/homebrew/kith.rb` | `depends_on "python@3"` | Drop at the last step. A clean Mac's `python3` is the Xcode tools stub (a popup); dropping it is a real gain. |
-| Installer | `scripts/install.sh`, `install.sh` | `python3` for the atomic swap and drain (`quiesce.py`, line 146, 330-354), `kith_paths.py` for `auth.json` locks | The installer is the gate for a Python-free release; it must not depend on Python to install one. |
-| Self-update | `kernel/bin/kith-self-update` | Python; drives `install.sh`, brew, git | Port or fold into `install.sh` plus the host updater. |
-| Voice, screens, guest | `scripts/voice-samples/*.py`, `apps/ios/tools/make-kith-glyph-fonts.py`, `apps/tests/notification_response.py` | Python build tools | Not the kernel; out of scope. They stay. |
-| Host test fixtures | `serve/host/tests/fixtures/*.py`, `serve/host/tests/fake_agent.py` | Python fake agents | Test-only; out of scope. CI keeps a Python for them. |
-| `kith-uv` | `~/.kith/bin/kith-uv`, found by `kith_paths.launcher()`; `docs/moving-from-hq.md` | A copy of `uv` that holds Full Disk Access (a repo on an external disk) | Section 5. |
-| launchd jobs | written by `kith-state` (`dev.kith.state`, 03:00), `kith-sched --install` (`dev.kith.sched`, every 60 s), `kith serve start` and the host's `service/unix.rs` (`dev.kith.serve`); by hand: `dev.kith.cost` (6 h), `dev.kith.monitor` and `dev.kith.house` (agents' own) | `ProgramArguments` is `[kith-uv, run, --quiet, --script, <kernel>/bin/<script>, args]` or the bare script when no launcher exists (`kith-state`, `kith-sched`, `nightly()`); `dev.kith.serve` runs `kith-uv run --script kith-serve-launch` only if a launcher is configured | A plist names the script path under `cli/current/share/kith/kernel/bin/`, so a deleted script means a job that fails every tick. Every job needs a rewrite or a stub (section 2.1). |
-| Desktop host service | `apps/desktop/src/shared/host-service.ts`, `main/host-controller.ts` | `serviceRuns`, `plistSetsKernel` and `/\bHQ_BIN\b/`; `host-update.test.ts:120` builds a plist whose first argument is `kith-uv` | The app treats a plist that starts `kith-uv` as one `kith serve start` wrote and leaves it alone. Tests keep that behaviour. Note: the brief named `host-update.ts`; the file is `host-service.ts` (the test is `host-update.test.ts`). |
-
-### 1.6 Other Python in the repo that is not the kernel
-
-`scripts/voice-samples/`, `apps/ios/tools/`, `apps/tests/`, `serve/host/tests/fixtures/*.py`, `kernel/tests/difftest/{delegation-old,lifecycle-old,threads-old,selftest}.py` and `kernel/tests/kith-auth-props.py`. The last five are
-test harness code (section 4). None of these is retired by this plan, except the difftest `*-old.py` ports of old behaviour,
-which stay as frozen references.
-
-## 2. Retirement order
-
-Rules for every step.
-
-1. **A step is a release, not an edit.** Deleted files are absent from the next `cli/<version>/`; the previous folder stays
-   (`KITH_KEEP_VERSIONS`). A step never edits an installed kernel in place. **Schema rule:** an older binary refuses to write a
-   core.db that has a migration step it does not know (`core/runtime/src/db.rs:421-430`, "it won't write. Update kith."), so
-   going back to the previous release only works if the deletion release added no core.db migration. A deletion release adds
-   none (migrations ship in the release before it); this is a **check, not a promise**: at release time, when kernel files are
-   deleted, CI compares the migration list in `core/runtime/src/migrations` with the previous tag's and fails on a difference; where one cannot be avoided the PR names the earliest release a Mac can go
-   back to, and `kith update --back` refuses to go further.
-2. **Gate = the cutover module is switched on every Mac that will take the release**, checked by the three layers of 3.1,
-   plus the verb switch (`core-switched.txt`) where the step only moves verbs.
-3. **Stub in place of the script, only for callers that run the file directly.** A script cannot be deleted and stubbed at
-   once (same path): the release that deletes it ships the stub *in its place*, a few lines of `sh` that find the `kith`
-   program without `kith_paths.py` (a fixed relative path from the share folder) and exec `kith kernel <verb> "$@"` with the
-   same stdout and exit codes, or print one line and exit with a code chosen on purpose (3 already means "tombstoned" to
-   callers). A stub serves a caller that executes the file (an old host's `Command::new(bin/kith-auth)`, a hook command).
-   It does **not** serve a caller that names an interpreter: `kith-uv run --script <file>` would hand the stub to Python
-   (the `dev.kith.state` and `dev.kith.sched` plists), and `python3 <kernel>/bin/kith-permit apply` (`assemble.rs:1391`)
-   would fail. Those callers are rewritten in the release *before* the delete, by a Rust install action that is safe to run twice
-   (rewrite the plist, reload): `kith-state` and `kith-sched` only write jobs that call themselves (`kith-state:248-249`), so the
-   rewrite cannot be theirs. What the rewritten job runs depends on section 5: under option A it is `kith-uv run --no-project -- <kith> <verb>` (the exact line is fixed by the test in section 5; still behind the launcher, so Full Disk Access holds on the external-disk Mac); a job that ran without
-   `kith-uv` would lose that access. Before R4 a golden freezes what every `kith-auth` call an old host makes prints and exits
-   with. A stub lives one release (the window, 3.1); this is the verb-level twin of `kith_tombstone.py`.
-   **One exception, decided for `dev.kith.cost` (architect, 2026-11-21):** the plist is written by hand (no installer owns it), so
-   no Rust install action can rewrite it before the delete. `kernel/bin/kith-cost` is therefore one file that is valid as `sh` and as
-   Python (`kith-uv run --script` hands it to Python, which re-runs the same file under `/bin/sh`, which execs the program): the chain
-   is launchd -> kith-uv -> python -> sh -> kith, and the installed plist keeps working with nobody editing it. This makes rewriting
-   the plist a gate that must pass *before the stub itself is removed* (R9); `kith doctor` reports any launchd plist that names a
-   kernel script. `kernel/tests/kith-cost-stub-check` holds the file to both languages.
-4. **Tag before the first deletion.** `git tag python-kernel-final` on the last commit that has every Python file. Undo of any
-   step is "install the previous release folder", and "restore from the tag" for a source checkout.
-5. **A Python module is deleted only in the step that removes its last importer** (architect MUST 5). The import graph (1.3a) decides the order; a module that is imported cannot be stubbed, so it moves with its importers.
-6. **A step run twice is harmless.** Each step is a PR that deletes files (a second apply finds nothing) plus, where a
-   Mac-side action is needed, a `kith migrate`/installer action that is idempotent by the cutover framework's own rules
-   (`step` on a switched module re-records and re-tombstones; `rollback` on an unswitched module clears the record).
-7. **Per-step behaviour in the three states.** Every step lists what happens on a Mac where its module is *unswitched*,
-   *switched* and *rolled back* (a rolled-back module is an unswitched one that still has the old state files and a
-   `rolling-back` or absent switch record; `kith kernel cutover status MODULE` tells which).
-
-Unless a step says otherwise: **unswitched or rolled back = the Mac is not offered the release** (the installer refuses and the
-Mac stays on the old `cli/<version>`, `kith doctor` says why; on a brew or git install, or an app-bundled host, the start-up
-refusal stops it instead, 3.1); **switched = proceeds.**
-
-### 2.0 Step 0: groundwork (no removal)
-
-- `kith kernel cutover status` takes no arguments or flags today (`cutover/mod.rs:700-723`; `kith migrate status` forwards to it,
-  `kith_migrate.py:869-879`). Everything below that says `status MODULE`, `status --all`, `--json` or `--require` is **new Step 0
-  work**: `status MODULE` (exit 0 only when switched), `--json`, and `--require FILE` (read a module list, exit 0 when all are
-  switched). `--all` is not a cross-Mac report: one Mac cannot report on others, so the publish gate means running the command on
-  each Mac in the owner list. Also in Step 0, the loader-to-subprocess prep of 1.3a.
-- Tag `python-kernel-final`. Write `kernel/lib/requires-switched.txt` (new, shipped with each release, one module per line)
-  so the installer can ask the new `kith kernel cutover status` which modules are switched on this Mac. `kith doctor` and
-  `kith kernel cutover status --all --json` list per module and per Mac. No file is removed.
-- Gate: none. Undo: delete the new file. Repeat: yes.
-- The routine to know which Macs exist is the **list of owner Macs** (open decision 1).
-
-**Step 0 status (2026-11-19).** Landed in the Step 0 PR: `status MODULE`, `status --json`, `status --require FILE` (a module counts as switched
-only when the record says `switched` AND every tombstone is in place; a damaged record or an unfinished step is "no", with the step to run);
-`kernel/lib/requires-switched.txt` (staged by `cp -R kernel`, no module required yet; `kernel/tests/kith-requires-switched-check`, run in CI);
-`scripts/py-file-map.py` and the table in 1.3a. Not in that PR, left as follow-ups: the **loader-to-subprocess prep** (it edits Python kernel
-scripts and needs their own checks such as `kith-info-check`, so it is its own PR: `kith-ask` -> `kith-wake` `:400`, `kith-bug` ->
-`kith-permit` `:39`, `kith-lifecycle` -> `kith-sessions` `:37`, `kith-remote` -> `kith-ask` `:45`, `kith-skills` -> `kith-pkg` `:48`, and
-`kith-info` -> `kith-pkg`, `kith-sched`, `kith-cost`, `kith-memory` `:29`; `kith-info` reads their functions and state, not just output, so
-that one is the largest); `kith doctor` listing; the wiring of the gate: the installer must run the **new** program's `--require` (an older program answers `status --require` with a usage error and exit 1, even for an empty list, which would block every update); the `python-kernel-final` tag (main creates it, with Kai's OK).
-
-### 2.1 The steps
-
-| # | Gate: module and meaning of "switched" | Removes or tombstones | Undo | Unswitched / switched / rolled back |
-|---|---|---|---|---|
-| **R1** Leaves with Rust twins that Python never needs to fall back to | No cutover module. Verbs `engines`, `paths`, `launch`, `settings` of `core-switched.txt`, plus `readfence` (launch picks Rust when it knows a binary). "Switched" = the Mac's `kith` program lists the module in `kith kernel version` (every Mac on the floor release F, section 3.1). | `hq_settings.py`, `kith_engines.py` and the `python3_abs` fallback in `launch/settings.rs` (`hq_paths.py` and `kith_readfence.py` wait, see Stub); the `KITH_CORE=python` branches for these verbs in `bin/kith`. Stub: `kith engines` prints one line and exits 1 (Python side gone). Kept in R1: `hq_paths.py` (role repos `video` and `devops` import it; builder moves them to `kith paths --json`) and `kith_readfence.py` (the Python launch at `bin/kith:1227` is R9; the Rust launch no longer falls back to it: `fence_bin` is the running program at worst, else the guest launch is refused). `hq_settings.py`, `kith_engines.py`, `python3_abs` and the two `engines` difftest cases are deleted in R1. | Reinstall the previous `cli/<version>`; or restore from the tag. | Unswitched (no or old kith program): not offered the release. Switched: runs. Rolled back: n/a (no module). |
-| **R2** Per-verb switched stores that carry no state (`cost` and `project-id` done, see the R2 status) | `cost`, `pkg`, `project-id`, `settings` lines present and the program on F. For `cost`: add `tag`, `record` to Rust first (the SessionStart hook and the ledger's only writer). For `pkg`: only `resolve` exists; **the script stays until its other verbs are ported or declared dead (R8)**, so R2 deletes only the fallback branch of `resolve`. For `project-id`: port the guest branch first (run-socket client) then delete `bin/project-id`. | `bin/project-id` (after its guest branch), `kith_cost` and `kith_cost_ported` in `kith-core.sh`, `kith-cost` after `tag`/`record`/reports are Rust. Hook `kith-cost tag` becomes `kith kernel cost tag` in `launch/settings.rs:774`. `bin/kith-room-ledger` (once the launch writes the Rust hook, `settings.rs:541`). Stubs: `bin/kith-cost`, `bin/project-id`, `bin/kith-room-ledger` (forward). | Previous release; stubs forward, so a rollback of the Rust half is the same. | Unswitched: stays on old release. Switched: runs. In-flight run keeps the old hook path, which is now a stub that forwards: harmless. **Status 2026-11-19 (room-ledger + pkg part):** the launch (both paths) writes `<kith> kernel room-ledger --kernel K pre|post` when the `room-ledger` line is present and the program lists the module, else the stub path; `bin/kith-room-ledger` is a stub (no program: silent exit 0, but a `pre` for a room note is denied); `pkg resolve` has no Python fallback (no program: the live folder runs, with a line saying why). After R2 the `room-ledger` line only picks the program hook over the stub; deleting it rolls nothing back. |
-| **R3** `accounts` | Module `accounts` switched (`step accounts` done: state.json is a tombstone, the core is the only writer). On F: every Mac that runs agents. Kai's Mac: switched 2026-11-16. | `bin/kith-account` (the module `lib/kith_accounts.py` stays until its last user goes, R9), the `account-state` fallback in `bin/kith:175`, `kith_accounts.py backups-json\|accounts-json` calls (`bin/kith:331-332`) once the chain verbs answer. Ports first: the `kith account add\|remove` verbs (login command returned, not run; section 1.2 had this "to be confirmed"). Stub: `bin/kith-account` (done in R3 PR-B: the file is `exec bin/kith account "$@"`; with no kith program the router prints one line and exits 1, also for `KITH_CORE=python`; the `account-state` and `kith backup` Python fallbacks in `bin/kith` are gone; the account difftest corpora are golden-only; the stub lives one release, then goes). | `kith rollback accounts` (Rust, writes state.json back) **then** the previous release. Rolled back state files are readable only by that older release. | Unswitched: run `kith migrate step accounts` (offered by the updater, section 3.2); refused if it refuses. Switched: proceeds. Rolled back: treated as unswitched, so the release waits. |
-| **R4** `authority` | Module `authority` switched: `auth.json` is a tombstone (`kith migrate step authority`, `KITH_CORE_AUTHORITY` on, M2-24). On every Mac whose people or bots use the owner's agents. Kai's Mac: switched. | `bin/kith-auth` and its `hq-auth` link, `kith-people`, `kith-door`, `lib/kith_door.py`, `door-chrome`, `door-preload.mjs`, `kith-allow`, `kith-helper-allow`, `kith-bug` with `lib/kith_bug.py` (`kith_guard.py`, `kith_allowed.py`, `kith_jobs.py` stay until R9: `bin/kith` and `kith-pkg` still import them); `kith-permit` once the hooks and MCP command point at `kith kernel permit` (`settings.rs:977-984`, `mcp.rs:14`, `assemble.rs:1392,1425`). Ports first: every `python3 "$KITH/bin/kith-permit"` call in `bin/kith` (`:1387`, `:1521`; a stub cannot serve a call that names `python3`); the Python the Rust code itself runs (`permit/door.rs` and `proc.rs` run `kith_door`; `pkg/problems.rs` runs `kith_guard`; the host's `kith_paths.py --json` calls; `assemble.rs:1391`); Rust CLI for every `kith-auth` shape the callers use (the exit-3 shapes become real core calls or are declared dead with the callers named in their M2-23 lift list entries); `kith-allow --derive/--add-json`; the door process side. Stubs: `kith-auth`, `kith-permit`, `kith-door`, `kith-allow`, `kith-cards` (host calls by path), all as forwarders. | `kith rollback authority`, then the previous release. The model checks (section 4) re-run on the rolled-back state. | Unswitched: updater runs `step authority` (it already refuses on one-time secrets, a stale core import, or a changed file: the Mac then stays on the old release and says why). Switched: proceeds. Rolled back: held. |
-| **R5** `claims`, then `transcripts` | Module `claims` switched on every Mac (#1010 lifted the refusal; Kai's Mac switched 2026-11-17, other Macs unknown; needs the host stopped, the stub installed (`kith-stub`), and every live claim importable). Then `transcripts` (`depends_on` claims; today it refuses until `kith-sessions record` stops being its writer). On every Mac that has terminal sessions or the host. | `bin/kith-sessions`, `kith-wake`, `kith-lifecycle`, `lib/kith_claims.py`, `kith_procstart.py`, `kith_lifecycle.py`, and the writes `kith-sessions record` makes. Ports first: every `python3 "$KITH/bin/kith-sessions"` call (`bin/kith:374,551,552,557,1356,1500,1553,1561`, `kith-core.sh:225,288`), not only `run`; `kith kernel threads` routed in `bin/kith`; `kith-sessions run` (the take-over note and exec) in Rust; the host's `wake.rs` calls the core's wake methods; `kith-lifecycle` (compact) in Rust. Hooks: `kith-sessions record` becomes `kith kernel threads record` (`settings.rs:776`). Stubs: `kith-sessions`, `kith-wake`, `kith-lifecycle` (the host calls them by path; old hosts too). | `kith rollback claims` (refuses while a claim is live and while the host runs; neither refusal can be overridden, `cutover/modules/claims.rs:21,178-229`) then the previous release. `claims.tombstone` stays a note old Python takers read by existence. | Unswitched: **this is the long pole**: stepping needs the host stopped and the stub present; the updater cannot do it unattended. Release waits. Switched: proceeds. Rolled back: waits. |
-| **R6** `schedules` | Module `schedules` switched (depends on `claims`): `sched/state.json` is a tombstone, the host's routines are jobs in `jobs.json`, the core's fire is the only scheduler. On every Mac. **Kai's Mac rolled it back 2026-11-16** because the core could not fire (M4-5): that Mac is *rolled back* here until `core-schedules` lands and `kith migrate step schedules` passes the four-fact gate in `schedules_gate.rs` (#1011), after which it is stepped again. | `bin/kith-sched`, the `kith schedule` dispatch, `kith_launchd.py` reload helper (if `kith-state` has moved), the installer that writes `dev.kith.sched`. The plist `dev.kith.sched` is removed by an idempotent installer action; the core fires from the host daemon. Stub: `kith-sched` (forward, or print the moved note and exit 3). | `kith rollback schedules` (host stopped) writes `state.json` and the routines back; then the previous release; `kith-sched --install` re-adds the job. | Unswitched/rolled back: release waits; Kai's `dev.kith.sched` is not installed anyway (docs/codebase-map.md). Switched: proceeds. |
-| **R7** The run path | Verb switches, no module state: `launch` (done), the interactive tail, `adapters/harness.py`, `kith-ask`, `kith-recall`, `kith-memory ls\|search`, `kith-acp`. Gate: each verb in `core-switched.txt` with 5 green main-merged corpus runs (core-design section 11) and its golden frozen first. R5 and R4 are done (the claim, the permit and the hooks are already Rust). | `kith-ask`, `kith_recall.py`, `kith_runsocket.py`, `kith-recall`, `kith-memory`, `kith-acp` and the shim, `harness.py`, the Python in the bash launcher's tail, `kith_host.py` (not `kith_trajectory.py`: `kith-scratch` imports it, so it goes at R8 with `kith-scratch`; not `kith_runenv.py`: `bin/kith:1342` runs `python3 kith_runenv.py --outbox` on every interactive launch, so it goes at R9 with `bin/kith` unless R7 ports that call; not `kith_facets.py`: `bin/kith`, `kith-project` and the plugin still use it, R9). Ports first: each of these has a golden or difftest corpus (`asks.json`, `delegation.json`, `sessions.json`, `lifecycle.json`); freeze first where none exists (`kith-memory`, `kith-recall`). Stubs: `kith-recall`, `kith-memory`, `kith-ask` (hooks, the host's tidy and the permit helper call them by path). | Previous release. | Verb-level: Macs on F are switched by definition; older programs fall back to the previous release's Python. |
-| **R8** Operator tools | Ports or drops, one PR per script: `kith-doctor`, `kith-info`, `kith-init`, `kith-state` (and `dev.kith.state`), `kith-remote`, `kith-self-update`, `kith-skills`, `kith-scratch`, `kith-project`, `kith-group`, `kith-send-to`, `kith-connector`, `kith-keys`, `kith-who`, `kith-chain` with `kith_chain.py`, `kith_trajectory.py` (with `kith-scratch`), and `kith-pkg`'s remaining verbs. A verb with no caller in the repo, no hook and no skill is a drop candidate (open decision 4). Gate: `kith doctor` green on each owner Mac on the new binary. | The scripts. Stubs: the ones the host or a plist calls by name (`kith-send-to`, `kith-cards`, `kith-state`). | Previous release. | A Mac on the floor release has the Rust verb or the stub forwards it. |
-| **R9** The seams | Gate: R1-R8 released and every owner Mac on a release that has no Python caller. Then, in one release: `bin/kith` bash dispatch becomes the Rust `Route::Kernel` table in `serve/host/src/kernel.rs`; `kith migrate`/`kith rollback MODULE` dispatch moves from `kith-migrate` to `kith kernel cutover` directly; `kith-core.sh` and `core-switched.txt` retire (every verb is unconditional Rust, so "remove the line" is no longer a rollback); the Claude Code plugin's calls to `kith_paths.py`, `kith_settings.py` and `kith_facets.py` first (its own step: `register.tsx` calls the `kith` program), then `kith_facets.py`, `kith_runenv.py`, `kith_settings.py`, `kith_redact.py`, `kith_guard.py`, `kith_allowed.py`, `kith_jobs.py` and `kith_accounts.py` (their last users are `bin/kith` and `kith-pkg`, which go with R8/R9), `kith_tombstone.py`, `kith_paths.py`, `kith_launchd.py`, `kith_migrate.py` (the rename steps stay until the rename is closed: see Edge cases), `kith-serve-launch` (section 5). `scripts/install.sh` loses its `python3` calls; the Homebrew formula loses `depends_on "python@3"`; `stage-kernel.sh` stops copying `kernel/bin` and `kernel/lib`. | The last Python; the stubs at the end of their window. | Previous release folder. `kith rollback MODULE` is Rust and needs no Python. | A Mac not on F is refused by `MIN_CLI` (section 3.1). |
-| **R10** Retire the importers and the format readers | Gate: a **state-format floor**: every owner Mac has stepped every module and two releases have passed (open decision 5). | `core/runtime/src/import/*` (accounts, asks, authority, claims, schedules, transcripts, wake) and the `export_back` halves of the modules; tombstone readers in Rust. | Previous release plus tag. | Not applicable: no Mac is unswitched by definition. |
-
-**R5 status (ports 1/4, `retire-python-ports-sessions-calls`):** every `python3 "$KITH/bin/kith-sessions"` call of `bin/kith` and `kith-core.sh` except `run` (`epoch`, `pick`, `latest`, `resolve`, `proc`, `claim`, `terminal`, `release`) and the SessionStart `record` hook now go to `kith kernel threads` when the line `threads<TAB>threads-writer` is in `lib/core-switched.txt` and the program lists the module `threads-writer` (decided once per launch in `bin/kith`, variable `kthreads`; `KITH_CORE=python` is the per-launch rollback, deleting the line the verb-level one). The Rust verbs answer both modes of the claims (Files and Writer, through `claim.*` and `session.record`). Still Python: `run` (`bin/kith:1569`), `kith-wake`, `kith-lifecycle`, the host's `wake.rs`.
-
-**R5 status (ports 4/4, `retire-python-ports-lifecycle`, stacked on ports 1/4):** `kith-lifecycle` (`sweep`, `status`, `intent`) is `kith kernel lifecycle` (`core/kernel/src/lifecycle/`, module `lifecycle`). `bin/kith-lifecycle` forwards to it when the line `lifecycle<TAB>lifecycle` is in `lib/core-switched.txt` and the program lists the module (decided once per process, in the script's `__main__`; `KITH_CORE=python` is the rollback), so `kith-wake drain` and the `kith-sessions` at-sleep wrapper, which call the script by path, need no change. The compaction and the end take the writer claim through the shared `threads::writer::Taker` (Files and Writer mode), never a claim code of their own. The script and `lib/kith_lifecycle.py` stay (old hosts, `kith-sessions` imports the lib); deleting them is a later PR.
-
-**R5 status (ports 2/4, `retire-python-ports-sessions-run`, stacked on ports 1/4):** `kith-sessions run` is `kith kernel threads run AGENT -- [kith-stub ...] claude ARGS...` (`core/kernel/src/threads/run.rs`, the process half in `runproc.rs`; module token `threads-run`). It forks and waits, as the Python `run` does (the shell's pid keeps the terminal's claim, claude is its child), and ports the take-over and resume notes, the idle stop (idle_since, `KITH_SLEEP_MINUTES`, outstanding work, detached children, the keystroke re-check), the stub's status pipe (busy is 75, a lock error is 70), the quit intent, `release_claims` in both modes of the claims, the sleep sweep and `wake_owed`. `bin/kith`'s last exec uses it only when the launch's `kthreads` is set and the program lists `threads-run`; the two `python3 "$KITH/bin/kith-sessions"` lines left are the rollbacks (`bin/kith`, the final exec, and `kith_threads` in `kith-core.sh`). Still Python: `kith-wake`, the host's `wake.rs`; the helpers `run` starts after the child (`kith-lifecycle sweep --at-sleep`, `kith-ask --sweep` / `kith-wake drain`) are still run by path through `python3`.
-
-R5 status, 2026-11-20 (ports 3/4, `wake.rs`): parked, not ported. Architect: the core stores the wake queue but has no drain, no waiter firing and no wake module (S4), and `wake.take` already writes a turn row the host's own `resume.rs` start would duplicate. Every Python caller (`kith-ask`, `kith-sessions`, `kith-sched`, `bin/kith wake`) writes the files, so a host-only Core arm would split the queue across two stores. The host arm is written after the S4 design (drain and waiters in the core, who runs the wake turn, import/export, routed callers) is model-checked.
-
-R1-R3 can overlap. R4 should precede R5: Writer-mode claims take revoke epochs from the core, and those only move when authority is switched. Today `claims` declares no `depends_on` on `authority` (only `schedules` and `transcripts` depend on `claims`), so this is policy: the `retire-python` manager either adds `depends_on authority` to `claims` or writes down why a Mac with claims switched and authority not is safe. R5 precedes R6 (`depends_on`).
-R7 follows R5 because the run path's last exec is `kith-sessions run`. R9 is last by construction.
-
-**R2 status.** `project-id` done (flow/retire-python-ports-project-id): the guest branch is `core/kernel/src/project/guest.rs`
-(a client of the run socket speaking `kernel/lib/kith_runsocket.py`'s protocol, answered before the registry is opened),
-`kernel/bin/project-id` is an `sh` stub that execs `kith kernel project-id` on the first program whose `kernel version` lists the new
-module `project-guest` (exit 3 and one line when none), the `project-id` line of `core-switched.txt` is gone, the host answers a
-guest's `--info` in process, and a guest run gets `KITH_BIN` and read access to that program (`launch/settings.rs` `link_chain`;
-the sandbox would otherwise keep the stub from starting it). `kith_runsocket.py` stays until `kith-memory` is ported (R7). `cost` done (flow/retire-python-ports-cost-delete): every verb of `kith kernel cost` is in Rust
-(`tag`, `record`, the text reports, bare `kith cost`), `kernel/bin/kith-cost` is the sh-and-Python stub above, the `cost` line of
-`core-switched.txt` and `kith_cost_ported` are gone, the bash launch's SessionStart hook is `kith kernel cost tag` on a program with
-the module `cost-ledger` and the stub otherwise (`kith_cost_bin`), `spent` and `limit` in the Rust launch never run the stub, and
-`KITH_CORE=python` changes nothing. Rollback is the previous release only. Without a program the bash launch skips an owner's at-limit
-hold (the owner sees the stub's line); a guest is refused. `pkg` and `kith-room-ledger` are separate PRs.
-
-### 2.2 What "switched" must mean, by module
-
-| Module | Switched means | Checked by | Today |
-|---|---|---|---|
-| `accounts` | `state.json` replaced by a tombstone; `accounts_core_writes` on; `kith account out\|clear\|usage` write core rows | `kith kernel cutover status accounts` (switch file `state=switched`), marker in core.db, tombstone present | Kai's Mac switched 2026-11-16; other Macs: unknown, to list in Step 0 |
-| `authority` | `auth.json` is the core's tombstone; Keychain items sealed into the envelope; `KITH_CORE_AUTHORITY` on and the gate passes | switch file, `authority::switched()` (host reads the tombstone by fingerprint), `cutover.mayServe authority` | Kai's Mac switched; the people-admin writes are app-only there |
-| `claims` | `live/terminal/claims.tombstone` down, the claim files imported; host turns in Writer mode (`terminal/core_writer.rs`) | `cutover.mayServe claims`, `kith_claims.switched` | #1010 lifted the refusal. Kai's Mac: switched, stepped 2026-11-17 (`kith kernel cutover status`, since 1794876918; the 2026-11-16 log line was written before the step). Other Macs: not known; run `kith kernel cutover status claims` on each before R5 |
-| `transcripts` | The registry's rows are the core's; `kith-sessions record` no longer the writer | switch file; `depends_on claims` | Unswitched; no Mac. `core-transcripts` is working on it |
-| `schedules` | `sched/state.json` tombstoned; routines are jobs; the core's fire is the only scheduler; host reads the gate at start | `schedules_gate.rs`: the build runs fired turns, depends on claims, serves `schedule.tick\|runNow\|fire`, and launchd runs the right program | Rolled back on Kai's Mac 2026-11-16; refused on builds that cannot run fired turns (#1011) |
-| verb-level (`paths`, `engines`, `launch`, `settings`, `pkg`, `project-id`, `cost`) | the line is in the installed kernel's `core-switched.txt` and the program lists the module | `kith doctor` prints `core: rust (modules: ...)` | Switched everywhere the kernel and program are current; Macs with an old or missing program silently run Python |
-
-## 3. Macs not yet switched
-
-### 3.1 Who they are, and the window
-
-- **Kai's Macs** (the main Mac, the Mac mini named in the agent notes): switched state differs per module (section 2.2).
-  Step 0 lists them; open decision 1.
-- **Invited people** do not run a kernel. They use the owner's host through the app or the web client (`docs/invited.md`);
-  their runs are the owner's Python and Rust on the owner's Mac. They are never "unswitched Macs". The exception is anyone
-  who installs their own kith and is invited to someone's agents; there is no such Mac in the repo's tests or docs to
-  confirm, so the plan treats it as possible and lets the version gate (below) catch it.
-- **Old desktop builds**: they bundle an old kernel with Python and install it as the CLI when the installed one is below
-  `declared.cli`; the host binary inside them calls `kernel/bin/kith-auth` and the others by path. iOS builds speak only to
-  the host (protocol level, `required_protocol`), so an old iOS build is a host-compatibility question, not a Python one.
-- **Macs where a module was rolled back** (Kai's, schedules, 2026-11-16).
-
-**Compatibility window.** Default (core-design Q2): the Python for a module is deleted **two releases after** the release
-that first lets every owner Mac switch it, and only after `kith doctor` reports the program and the switched module on each
-owner Mac. In release terms: release N ships the last port and rewrites plists; N+1 deletes the script and ships the stub in
-its place (rule 3); N+2 removes the stub. Two things end the window early or late: the owner list (decision 1) all green ends it; any
-Mac on an older release holds it open (it keeps its `cli/<version>` and the Python in it).
-
-**The gate, in three layers** (architect MUST 3: `install.sh` alone is easy to bypass: `brew upgrade` never runs it, a checkout updates by `git pull`, and the desktop app updates its bundled host whatever the CLI gate says):
-
-1. **Publish gate (the one that counts).** No deletion release is tagged until `kith kernel cutover status --all --json` is green on every
-   Mac in the owner list (decision 1) for the modules that release needs.
-2. **Start-up refusal.** The new `kith` program and the host report (and, for the `kith` program, refuse) with one line naming the step to run, when a
-   required module is not switched on this Mac. **The host's list of required modules is built into the host binary**, not read
-   from `kernel/lib/requires-switched.txt`: the host finds its kernel under `cli/current` first (`kernel.rs:153-157`), and on the
-   Mac layer 3 holds back, `cli/current` is still the old release, so a newer host reading the kernel's list would read the old
-   list and not refuse (architect MUST 1). The host keeps its unswitched code path until its built-in list requires the module. The host should start and report the missing module through `compat`/hello, as `cli.ok` does, so the app can show the step, instead of refusing to start (a host that will not start takes the app, iOS and rooms down; layer 1 should keep this from firing on owner Macs, architect SHOULD 4).
-   The `kith` program may read the file as well (it is the installer's input). The refusal lets `kith migrate step|status|rollback`,
-   `kith kernel cutover ...`, `kith update --back` and `kith doctor` through. On a brew or git install the refusal is a stop (the
-   Mac is down until the module is stepped), not a hold on the old release; only layer 3 holds a Mac back. This covers brew, git and
-   the app's bundled host. The refusal must leave the old CLI folder runnable: the host that refuses must not also have raised
-   `MIN_CLI` past what the Mac's CLI can serve, or agents stop on that Mac (`host-controller.ts:206-208` only shows a notice).
-3. **Installer check.** `scripts/install.sh` asks `<new>/bin/kith kernel cutover status --require ...` before it flips
-   `cli/current`; a Mac whose module is not switched stays on the old folder and is told the one step. Third layer only.
-
-`MIN_CLI` (`serve/host/src/kernel.rs:172`, `cli_status`) remains the host's floor on the CLI. The first Python-free release
-raises it, so a new host on an old Python CLI shows "Kith needs the kith CLI X or newer" and the app's `ensureCli` installs the
-bundled one; the reverse (old host, new kernel) is the stub's job (rule 3). Nothing is stepped automatically.
-
-### 3.2 Rollback once the Python files are gone
-
-Today's rollback is "remove the module's line from `core-switched.txt`", or `kith rollback MODULE` (Rust) when state
-moved. Both need the Python still on disk. After a step's release:
-
-- **The release is the unit of rollback, and it is three actions in this order** (architect MUST 2): (1) `kith rollback
-  MODULE` for each module that moved state (Rust, host stopped, claims released), so the files the old release reads are
-  written back; (2) point `cli/current` at the previous `cli/<version>` (the installer keeps three); (3) run `kith serve install`
-  from the old binary, because the launchd job holds the exact versioned binary path (`serve/host/src/service/unix.rs:180`) and
-  the host looks for its kernel under `cli/current` first (`kernel.rs:153-157`): without (3) you get a new host on an old kernel.
-  Decision 9's
-  `kith update --back` does all three **and writes a hold marker** that `install.sh` CLI-only mode (the desktop app's `ensureCli`,
-  `cli-install.ts:81-87`, run on every refresh) respects: the marker names the version rolled back *from*; `install.sh` CLI-only mode refuses that version or older, exits 0 with "held" (so `ensureCli` shows no failure notice on every refresh, `host-controller.ts:206-208`), and a newer bundled version or an explicit `kith update` clears it. Without it the app reinstalls its newer bundled CLI over the rollback,
-  which is exactly what happens after a verb-only step (R1, R2, R7, R8) because no unswitched module trips layer 3. Rolling back
-  past a `MIN_CLI` raise (R9) also needs the older app, since the newer app's host refuses the older CLI. Flipped before (1), the old release meets a tombstone and refuses (fails
-  closed, safe, but the Mac is down until the rollback runs). The schema rule (2.1 rule 1) bounds how far back this goes.
-- **The tag.** `python-kernel-final` and the per-step commits make a source checkout restorable. A package user restores
-  from the retained folder or by `KITH_VERSION=<old> sh install.sh`.
-- **The stub window.** For the window the stubs make most failures visible and recoverable: a forwarder that cannot find the
-  program prints one line (`this script moved to the kith program: kith update`) and exits 3, so a hook or plist that
-  still names an old path fails loudly, not silently.
-- **After the window**, `KITH_CORE=python` and `core-switched.txt` no longer exist; a Mac with a rolled-back module and a
-  Python-free release is not a supported state. This is why the installer gate exists.
-
-### 3.3 Hooks and plists are the sharp edge
-
-A pinned package (`~/.kith/store/<name>@<version>/`) carries no hook command of kith's: kith writes its hooks at launch
-(`settings.rs`). An agent's own `.claude/settings.json` or `role/settings.json` may name `kith-*` scripts. Step 0
-includes `grep -rn "kernel/bin\|kith-" agents/*/role/settings.json` on each owner Mac (the repo has no role repos), and
-the `kith-doctor` check for any launchd plist whose `ProgramArguments` names a kernel script
-(`kith-doctor` `jobs()` inspects the plists and warns for a `sh` stub named behind a launcher). A plist that runs `kith-uv run --script <kernel>/bin/<script>` does **not** keep working
-through an ordinary `sh` stub (uv would hand the stub to Python), except `dev.kith.cost`, whose stub `kernel/bin/kith-cost` is also valid Python and re-runs itself under `sh` (decided 2026-11-21; its plist must still be rewritten before the stub is removed, R9): `dev.kith.state`, `dev.kith.sched` and a configured `dev.kith.serve` launcher are
-rewritten by an install action in the release before the delete (rule 3). `kith-state` and `kith-sched` already rewrite their own
-plists on `nightly`/`--install`, which is the place for it.
-
-## 4. Tests and model checks
-
-### 4.1 kernel/tests (104 entries) and CI
-
-CI runs them in `kernel` (three shards, lines 343-436 of `.github/workflows/ci.yml`), `host-build` (difftest and the
-switch checks, 752-767) and a few macOS-only ones that `kernel/tests/ci-exempt.txt` lists (`kith-sessions-check`,
-`kith-permit-check`, `kith-install-layout-check`, `kith-accounts-check`, `kith-backup-check`, `kith-resume-pick-check`;
-`kith-allow-check` is marked BROKEN). `kernel/tests/kith-ci-names-check` fails if a check is neither in `ci.yml` nor in
-`ci-exempt.txt`, so **a deleted check must come out of `ci.yml` and `ci-exempt.txt` in the same PR** (and its selftest
-rows).
-
-| Group (checks) | Exercises | Action | When |
-|---|---|---|---|
-| `kith-auth-*` (check, c2, json, lock, revoke, router, secret, embedded, core-mirror, mixed-race, props, props.py), `kith-keys`, `kith-grants`, `kith-helper-mcp`, `kith-people`, `kith-accounts-tombstone`, `kith-sched-tombstone` | `kith-auth`, `kith-people`, tombstone behaviour | **Port** the cases to Rust integration tests against the core (`core/runtime` tests, `serve/host` `api/*_tests.rs` already model many). Cases that only prove "Python refuses a tombstone" (`kith-accounts-tombstone-check`, `kith-sched-tombstone-check`, `kith-auth-core-mirror-check`) are **deleted** with the script: the Rust side's own tests (`cutover/tests.rs`, `schedules_gate_tests.rs`) cover the framework. `kith-auth-props.py` is a property test; port to proptest in `serve/host` or keep as a golden replay. | R4 (same PR as the script) |
-| `kith-permit-check`, `kith-must-ask-check`, `kith-trusted-allow-check`, `kith-agent-allow-check`, `kith-agent-deny-secrets-check`, `kith-guest-helper-check`, `kith-guest-door-check`, `kith-guest-jobs-check`, `kith-guest-sandbox-check` | permit, guard, doors | Already have Rust twins (`core/kernel/src/permit/tests.rs`, `mcp_tests.rs`, golden `permit*.json`). **Port** the shell-level ones that run launchd and the macOS sandbox as host e2e (`serve/host/tests/`); delete the rest. | R4 |
-| `kith-sessions-check`, `kith-sessions-core-check`, `kith-wake-check`, `kith-lifecycle-check`, `kith-held-check`, `kith-direct-lock-check`, `kith-threads-race`, `kith-terminal-flags-check`, `kith-resume-pick-check`, `kith-procstart-check`, `kith-load-check` | sessions, claims, wake, lifecycle, held terminals | **Port** to `core/runtime` tests (`terminal_tests.rs`, `direct_park_tests.rs`, `hostclaim_tests.rs`, `parity_tests.rs` in `wake/` exist). `kith-procstart-check` (Python and Rust write the same string) is **deleted** when the Python writer is. `kith-threads-race` is the race harness the thread-writers model drives: port as a Rust stress test. | R5 |
-| `kith-sched-*` (cron-table, jobs, json, origin, person, prune), `kith-send`, `kith-call`, `kith-ask-check`, `kith-chain-check` | schedules, ask, chain | `kith-sched-cron-table`, `-json`, `-jobs` are frozen into `golden/sched.json` (43 cases) and `fixtures/routines-next.json` (132 rows) and replayed on the Rust trigger: **delete** with the script; keep the golden. The rest **port**. | R6, R7 |
-| `kith-cost-*`, `kith-limit-check`, `kith-run-once-cost-check`, `kith-settings-switch-check`, `kith-account-state-switch-check`, `kith-cost-switch-check`, `kith-pkg-pid-switch-check` | the already-switched verbs | These are *switch* checks (Python vs Rust same answer). After the Python goes the comparison has nothing to compare to: **delete**; the difftest golden carries the frozen answer. | R1-R3 |
-| `kith-pkg-*`, `kith-new`, `kith-market`, `kith-scratch`, `kith-footguns`, `kith-json-misc`, `kith-owner-launch`, `kith-launch-*`, `kith-harness`, `kith-agent-*`, `kith-unknown-agent`, `kith-summary` | CLI surface | **Port** as difftest golden cases first (those not yet in `golden/`), then as Rust CLI tests in `serve/host`. | R7, R8 |
-| `kith-install-*`, `kith-self-update`, `kith-migrate`, `kith-launchd`, `kith-serve`, `kith-serve-launch`, `kith-info`, `kith-doctor`-adjacent, `kith-stub-install`, `kith-hooks.test.ts` | installer, launchd, self-update | The installer checks are shell and stay (they test `scripts/install.sh`). The Python-specific ones (`kith-launchd-check`, `kith-migrate-check`'s rename steps, `kith-serve-launch-check`, `kith-self-update-check`) go with their scripts. `kith-hooks.test.ts` tests the plugin's TSX and stays. | R8, R9 |
-| `kith-core-boundary-check`, `kith-core-deps-check`, `kith-contract-check`, `kith-cutover-check`, `kith-difftest-check`, `kith-ci-names-check` | the Rust/Python boundary and the harness | `kith-core-boundary-check` keeps the core "sealed": it must be rewritten to forbid *new* `python3` spawns instead of Python importing Rust. `kith-cutover-check` and `kith-contract-check` stay. `kith-difftest-check`: its OLD side is `KITH_CORE=python`; after R9 the harness runs `--golden` only. | R9 |
-
-`kernel/tests/difftest/` (corpus of 29 cases, `golden/` 24 frozen files with `facets/`): the corpus's OLD side is the Python.
-`kith-difftest --golden golden` was built to "survive the day Python is no longer there" (its README). Before a script is
-deleted, **its corpus must be frozen as a golden in the same PR as the last Python commit**: `account-state`,
-`accounts*`, `cost`, `delegation`, `engines` (not golden: Python prints "needs the kith program"), `json-*`, `launch*`,
-`paths*`, `people`, `permit*`, `pkg-resolve`, `project-id`, `room-ledger`, `run-once`, `secrets-read`, `seed`,
-`settings*`, `threads` still need their record where `golden/` lacks one (`golden/` has: account-state, accounts-core,
-accounts, asks, auth-invite-bot, cost, delegation, json-auth, lifecycle, people, permit-mcp, permit, pkg-resolve,
-project-id, room-ledger, sched, secrets-read, seed-auth, sessions, settings-entry, settings, threads, wake). Missing and
-needed: `json-misc`, `json-pkg`, `json-sched`, `launch*`, `paths*`, `run-once`, `engines`. The `*-old.py` files
-(`delegation-old.py`, `lifecycle-old.py`, `threads-old.py`) are frozen references for the golden recorder and stay.
-
-Tests the table above misses, each ported or deleted with its script: `serve/host/src/cards/access_tests.rs:15` (reads the source of `kith_guard.py`; R8, repoint at `launch/guard.rs`); the Rust parity tests that run `python3`: `core/procstart/tests/parity.rs` (R5), `core/kernel/tests/readfence_parity.rs` (R1), `core/kernel/tests/schedule_parity.rs` (fails in CI without python3; R6), and tests that use the Python as an oracle in `core/runtime/src/import/tests.rs`, `core/runtime/src/authority/tests/revoke.rs`, `core/kernel/src/secrets/tests.rs` (R4, R10). Each becomes a golden replay.
-
-`host-kernel-tests.txt` and `scripts/ci/host-kernel-tests.sh check`: host unit tests that read the kernel or run the real
-`kith-auth` through the api `Rig` (`serve/host/src/api/rig.rs`, `guard_props.rs`, `roles_props.rs`, `botguests_props.rs`).
-At R4 the Rig must run a core instead of the script: **port** (it already has `*_core_tests` neighbours).
-
-### 4.2 The model checks (TLA+ / TLC) and the skills
-
-The models are language-independent; what names Python is the **drift list** (`verification/*/drift.sh` `FILES`), the CI path
-filters in `ci.yml` (lines 144-300) and each skill's trigger text. Python files in them:
-
-| Model / skill | Python it names (drift.sh, skill text) | Rust it already lists | Action at the step |
-|---|---|---|---|
-| `thread-writers` (`verification/threads`) | `bin/kith`, `kith-lifecycle`, `kith-sessions`, `kith-wake`, `lib/kith_claims.py`, `lib/kith-core.sh` | `core/runtime/src/conversations`, `terminal.rs`, `serve/host/src/terminal/` | **R5**: replace each Python entry by its Rust owner in `FILES`, re-run `run.sh`, keep the model. The row for "the child execs claude (same pid)" stays tied to the stub (note in one-bot-model.md, P4/P10). |
-| `writer-lock` (`verification/writer-lock`) | `bin/kith`, `kith-sessions` in the skill text | `core/kernel/src/procstart.rs` and the holder/stub | **R5**, same. |
-| `revoke-access` (`verification/revoke`) | `bin/kith-auth` (`may`, `bot_may`, `cmd_person`), `bin/kith` (helper spawn), `lib/kith_door.py` (`DoorStart`, `DoorSweep`), `kith-permit ask_helper` | `core/runtime/src/authority/`, `core/kernel/src/permit/{helper,door}.rs`, `serve/host/src/remote/*` | **R4**: the model is already phrased over the core and host actors; drop the Python entries, re-sync. |
-| `secret-cards` (`verification/secrets`) | `bin/kith-auth` (`set --stdin-json --grant`, `grant`, `keys`, `revoke --profile`) | `core/runtime/src/cards/`, `secrets/` | **R4**. |
-| `schedule-fire` (`verification/schedule-fire`) | `bin/kith-sched` (tick, catch-up, paused skip) | `core/runtime/src/schedules/` | **R6**: the model's subject is already the core's fire; drop `kith-sched`. |
-| `invitee-access` (skill) | `kernel/bin/kith-auth` (verbs), `kith-permit ask_helper` | `serve/host/src/api/roles.rs`, `core/kernel/src/permit/` | **R4**. |
-| `run-tokens` (skill) | `kernel/bin/kith-recall`, `kernel/lib/kith_runsocket.py`, `kith-memory`, `project-id` guest branch | `serve/host/src/runauth.rs`, `core/runtime/src/runsock.rs` | **R7**: the model's guest-client half becomes the Rust client; re-run its property tests. |
-| `holder-lease`, `rooms-with-people` | none | n/a | no change |
-
-CI jobs: `thread-writers`, `thread-writers-slow`, `writer-lock`, `revoke-access`, `secret-cards`, `rooms-with-people`,
-`holder-lease`, `schedule-fire` (lines 471-640). Each runs when its `changes` filter matches; **a deleted Python path left
-in a filter is harmless, but a path left in `FILES` makes `drift.sh` report "file missing"** (read each `drift.sh` before
-the step; the revoke one lists `kernel/lib/kith_door.py` and the host files it must compare). Delete Python entries and
-re-run the model in the same PR as the script, as the skills ask ("the relevant property checks green").
-
-## 5. Third-party agent tools and `kith-uv`
-
-What the repo shows: `kernel/agents/` holds only `scratch` (no tools). Agents' tools live in their own role repos
-(`agents/<name>/role/tools/`, not in this checkout). `docs/codebase-map.md` names two that matter: devops'
-`role/tools/monitor.py` (`dev.kith.monitor`, KeepAlive) and house's `role/tools/house.py remind --send`
-(`dev.kith.house`, 08:00), both launched through `~/.kith/bin/kith-uv` (`ProgramArguments`: `kith-uv run --quiet --script
-<tool> ...`). I could not read the role repos from here: the next paragraph is inference from the codebase map, the plist
-writers and `kith-doctor`, not from the tools themselves.
-
-These tools are agents' own. They need a Python (and often uv's script dependency resolution), not the kernel. Retiring the
-kernel's Python does not touch them, and the kernel's other uses of `kith-uv` are only: `kith-state`'s plist, `kith-sched`'s
-plist, the host service when a launcher is configured, and `kith-doctor`'s "stuck in kith-uv means lost Full Disk Access"
-check.
-
-Why `kith-uv` exists: launchd credits file access (Full Disk Access, external volumes) to the program it starts. A repo on an
-external disk (Kai's: `/Volumes/Macos 1TB/kith`) needs a launcher that holds the grant, and `uv` is a stable binary whose
-path does not change when kith updates. (Inference: a TCC grant is keyed to the path and signature of the binary; the
-`kith` program is replaced at every update, so a grant given to it would not survive. I did not test that; `docs/moving-from-hq.md`
-records only that "Full Disk Access is per path" and that the grant must be given again after the rename.)
-
-| Option | What it means | Cost |
+| Piece | Python or uv in it | Effect |
 |---|---|---|
-| **A. Keep `kith-uv` as the FDA launcher for agents' tools and the host; stop the kernel depending on its Python** | The file `kith-uv` and `kith_paths.launcher()` stay. `kith-serve-launch` (Python, `uv run --script`) is replaced by a Rust one-file launcher with the same signal behaviour, or the host runs behind `kith-uv` as a plain program: the host would then run behind `kith-uv` as a plain program (`kith-uv run --no-project -- <kith> serve`; **untested: confirm uv runs a plain program without finding or downloading a Python, on a Mac without `python3` and with `UV_PYTHON_DOWNLOADS=never`, before R8 rewrites `dev.kith.state`**). `kith-uv` stays the same binary, so its grant stays valid; replacing it with a non-uv binary changes its signature and needs a new grant. | Small. No grant to redo while `kith-uv` is not replaced. |
-| B. Give the grant to the host binary and drop `kith-uv` for the kernel; keep `kith-uv` only for agents' tools | Needs the grant to survive host updates (signing identity or a stable copy), or a re-grant each update. | A repeated manual step; a recurring "kith can't read my agents" failure. |
-| C. Remove `kith-uv` everywhere | Agents' `dev.kith.monitor`, `dev.kith.house` and any `dev.kith.*` plist naming it stop; the FDA grant moves to something new; `kith-doctor`'s check, `host-service.ts`'s "started by kith" test and `host-update.test.ts`'s plist fixture change. | Highest; breaks third-party agents' installers. Not recommended. |
+| Release tarball, Mac app, Homebrew | `stage-kernel.sh` copies all of `kernel/`; the formula has `depends_on "python@3"` | smaller as scripts go; the last step is P5-4 and P5-5 (a clean Mac's `python3` is the Xcode stub popup, so dropping it is a real gain) |
+| `scripts/install.sh`, `install.sh` | `python3` for the atomic swap and drain (`quiesce.py`), `kith_paths.py` for `auth.json` locks | the installer is the gate for a Python-free release and must not need Python to install one (P5-5) |
+| `kith-self-update` | drives `install.sh`, brew, git | P4-15 |
+| Desktop host service | `apps/desktop/src/shared/host-service.ts`, `main/host-controller.ts`: treats a plist that starts `kith-uv` as one `kith serve start` wrote | stays; `ensureCli` installs the bundled CLI when below `declared.cli` (`apps/desktop/package.json` `kith.cli`) |
+| launchd plists | a plist names a script under `cli/current/share/kith/kernel/bin/`, so a deleted script is a job that fails every tick | each job is rewritten before its script goes: serve (P1-17), cost (P1-10), sched (P2-6), backup (P4-14); `kith doctor` lists any plist that names a kernel script |
 
-**Recommendation: A.** Keep `kith-uv`; document it as "the Full Disk Access launcher agents' tools run behind", not as a
-kernel dependency. Retire `kith-serve-launch`'s Python (R9) by making the launcher a small Rust binary (or by letting the host
-accept `launcher` as a plain program). Do not rename or replace `kith-uv`. `kith-init` keeps checking for `uv` only if an installed
-agent needs it (`kith-init` reads `agents.json`). If `kith-uv` went anyway, every third-party agent's plist and installer would
-need regenerating, and the Full Disk Access grant would be given again by hand on every Mac.
+## 7. Edge cases
 
-## 6. Edge cases (every line filled)
+- **States.** A cutover module is unswitched, switched or rolled back on a Mac; a release that deletes Python is only for a
+  Mac where every module is switched (rule 2, the installer check). Kai's Mac is switched; the MacBookPro is unknown.
+- **Existing features.** Hooks written by the launch change in the launch's Rust one step at a time; a run in flight keeps
+  its old command, which is a stub that forwards. Agents' own `.claude/settings.json` or `role/settings.json` may name
+  `kith-*`: grep `agents/*/role/settings.json` on each Mac before a script goes. `hq-*` links are symlinks to `kith-*` and
+  go with the hq rename work (P4-22). `apps/desktop` and iOS are unaffected by the kernel steps.
+- **Repeats.** Rule 5. The cutover framework's `step`, `rollback` and `status` are idempotent under the core.db lifetime
+  lock.
+- **Old data.** `state.json`, claim files, sched `state.json`, `auth.json`, `live/ask/*.reg`, wake queue files and the
+  session registry are read by `core/runtime/src/import/*`; those importers outlive every Python writer and go in P6.
+- **Invitees and old app builds.** Invitees run no kernel; they use the owner's host through the app or web client. Old
+  desktop builds bundle an old kernel and host that call the scripts by path: Kai controls his app version.
+- **Windows.** Removing the Python from the run path is what lets an owner run on Windows ("one-bot-model" M5). Out of
+  scope here; P1 and P2 are the prerequisite.
 
-- **States.** Each cutover module can be unswitched, switched or rolled back on a Mac; the table in 2.1 says what each step
-  does in each. Summary: a step never runs for a Mac that is not switched for its module; the installer holds that Mac on its old
-  release and names the one command to run.
-- **Existing features.**
-  - Hooks written by the launch (`kith-cost tag`, `kith-sessions record`, `kith-room-ledger`, `kith-permit denied|once`, the
-    `kithpermit` MCP server) change in the launch's Rust, one step at a time. A run in flight keeps its old command; the stub
-    forwards.
-  - Agents' own `.claude/settings.json` or role hooks that name `kith-*`: Step 0 greps them per Mac; the stub covers them
-    for the window.
-  - The host's subprocess calls by path: stubs for `kith-auth`, `kith-wake`, `kith-door`, `kith-send-to`, `kith-allow`,
-    `kith-cards`, `kith-recall`, `kith-sched`, `kith-sessions`, `kith-lifecycle`, `kith-memory`, `project-id`, `kith-pkg`. R4 and R5 also change the host to call the core directly, so the stubs are only for old hosts.
-  - `apps/desktop/src/shared/host-service.ts` and `main/host-controller.ts`: unaffected by the kernel steps; R9 touches the
-    `kith-serve-launch` plist only if the launcher changes (it does not under option A).
-  - `hq-*` links: they are symlinks to `kith-*`. They survive as long as the `hq` name does (`docs/moving-from-hq.md`); with the
-    scripts gone they point at stubs. Their removal belongs to the hq rename work, not this package.
-- **Repeats.** Per step in 2.1 and rule 5. The cutover framework's `step`, `rollback` and `status` are idempotent under the
-  core.db lifetime lock; deleting files twice is a no-op.
-- **Old data.** `state.json`, claim files, sched `state.json`, `auth.json`, `live/ask/*.reg`, wake queue files, and the
-  session registry are read by `core/runtime/src/import/*` (accounts, asks, authority, claims, schedules, transcripts, wake).
-  Those importers must outlive every Python writer, and after R9 they are the only readers of the old formats: keep them
-  until R10's state-format floor (open decision 5). A Mac that updates past a Python writer without stepping would have
-  state nobody reads; the installer gate prevents it.
-- **Invitee Macs and old app builds.** Section 3.1.
-- **The `hq` to `kith` rename.** `kith-migrate` and `lib/kith_migrate.py` (900 lines) hold two things: the rename and the
-  cutover forwarder. This plan removes only the forwarder (R9). The rename code stays until `~/.hq` has no users; separate
-  work.
-- **Windows.** Python removal is what lets an owner run on Windows ("Gets: no Python in the run path; Windows owner use once the
-  hook commands are Rust", one-bot-model M5). Out of scope here; R4/R5 hook rewrites are the prerequisite.
+## 8. Merging rust-rebuild into main
 
-## 7. Work the plan assumes, by owner
+Separate from this series and tracked by main (the gap analysis, section 5): main is an ancestor of rust-rebuild, so the
+merge is a fast-forward; CI ran green on the exact tree; the open items are CI on the PR to main, the member web deploy that
+fires on `apps/desktop/**`, retargeting the open PRs based on rust-rebuild before deleting that branch, Macs on a main
+checkout (read the MacBookPro first, P0-10), pointing flow at main, and the `python-kernel-final` tag (P0-11).
 
-| Needs | Owner today | Plan step it unblocks |
-|---|---|---|
-| Transcripts stepped (module `transcripts`) | manager `core-transcripts` (#747, #794 landed the module; the rest is in flight) | R5 |
-| Schedules re-stepped and the core fires | manager `core-schedules` (#743, #762, #1011, #1015) | R6 |
-| Followups of the rebuild (open SHOULDs, the `kith kernel` routing of `permit`, `threads`, `room-ledger`, `people`) | manager `rebuild-followups` | R2, R4, R5 |
-| Claims stepped on every Mac | #1010 (lifted the refusal); Kai's Mac switched 2026-11-17; other Macs unknown | R5, R6 |
-| Rust twins for `kith-cost tag/record`, `kith-sessions run`, `kith-lifecycle`, `kith-allow --derive`, `kith-memory ls/search`, `kith-recall` client, `kith-pkg` other verbs, `kith-info`, `kith-doctor`, `kith-init` | none yet | R2, R5, R7, R8 |
+## 9. Superseded: the first plan's R1-R10
 
-`gh pr list --state all` on 2026-11-17 shows the landed prerequisites above and no open PR from the three managers yet;
-names here refer to their agent names, not branches.
+| Old step | Now | Old step | Now |
+|---|---|---|---|
+| R1 leaves with Rust twins | P0-3 (done) | R6 `schedules` | P2-4, P2-5, P2-6 |
+| R2 stateless stores (cost, project-id, room-ledger, pkg resolve) | P1-1 to P1-4 (done), P1-10 | R7 the run path | P1-12 to P1-18, P2-3, P3-8, P3-9, P4-21 |
+| R3 `accounts` | P0-4 (done), P0-6, P1-14 | R8 operator tools | Phase 4 |
+| R4 `authority` | P1-9, P1-15, P3-1 to P3-5, P3-12, P4-17 | R9 the seams | Phase 5, plus P0-7 and P1-17 |
+| R5 `claims`, `transcripts` | P0-8, P1-5, P1-6, P1-19, P2-2, P2-7 (ports 1/4, 2/4, 4/4 done; 3/4 parked, see log) | R10 importers | Phase 6 |
 
-## 8. Open decisions for Kai
+Old text that code comments still cite: "rule 3" (the stub rule) is section 1's last bullet; "section 3.1" (the window and the
+three-layer gate) is the dropped Gates above; "R9" means P5.
 
-Each has a recommended default; the `retire-python` manager proceeds on the default and says so in its PR.
+## Log
 
-1. **Which Macs are in the gate?** The installer gate needs the owner list (Kai's Mac, the mini, any other). Options:
-   (a) the Macs Kai names, checked by `kith kernel cutover status --all` on each; (b) any Mac that runs `kith serve`; (c) no list: the
-   release gate is per-Mac at install time only. **Default: (a) plus the per-Mac install gate.** Invitees are not Macs in
-   the gate (they run no kernel).
-2. **Window length.** Options: (a) two releases after the last Mac switched (core-design Q2); (b) one release; (c) until `kith
-   doctor` is green on the owner Macs, no release count. **Default: (a), ended early only by (c) being green on every owner
-   Mac.**
-3. **Stub lifetime.** Options: (a) stubs live through the window then go in R9; (b) stubs forever (a three-line file per verb);
-   (c) no stubs. **Default: (a).** (c) risks old hosts and plists; (b) keeps dead names.
-4. **Port or drop the long tail.** Candidates to drop: `kith-chain` (no caller outside CI), `kith-who`/`hq-who` (a
-   `kith-who:*` allow rule in `settings.rs:715` only), `kith-keys`, `kith-skills`, `kith-bug` (only `kith-permit`), `kith-connector`
-   (host `mcp.rs` names its own server). Options: (a) drop a verb with no caller in repo, hooks or skills; (b) port all; (c)
-   ask per verb. **Default: (c) in a list in the R8 PR, decided before work starts.** There is no usage telemetry, so "no
-   caller" means no caller in this repo.
-5. **Keep the importers?** Options: (a) delete `core/runtime/src/import/*` at R10, two releases after the last Mac steps; (b)
-   keep forever; (c) delete with R9. **Default: (a).** (c) strands a Mac that skipped releases.
-6. **The schedule tick when the host is down.** Python's `dev.kith.sched` ticked every minute through launchd, independent of
-   the host; the core's fire runs in the host daemon (`kith serve`, KeepAlive). Kai's Mac has no `dev.kith.sched` installed, so no
-   change there. Options: (a) accept; (b) keep a launchd job that runs a core `schedule.tick` when the host is not up. **Default:
-   (a) and say so in the release notes.**
-7. **`kith-uv`.** Section 5. **Default: A (keep, decouple from the kernel).**
-8. **Remove `python@3` from the Homebrew formula and the installer's Python at R9?** Options: (a) yes at R9; (b) keep for
-   one more release as a safety. **Default: (a)**, because the installer's gate runs the new program, not Python.
-9. **`kith update --back`**: rollback is three actions (3.2). Add one command that does them, writes the hold marker the app respects, and refuses past a schema step? (Going back past R9 also needs the older app.) Options: (a) yes, in Step 0; (b) document the three. **Default: (a).**
-10. **Where the gate lives.** Options: (a) publish gate plus start-up refusal plus installer check (3.1); (b) installer only. **Default: (a).**
-11. **Schema rule.** Options: (a) a deletion release adds no core.db migration (2.1 rule 1); (b) allow migrations and state the earliest rollback release. **Default: (a).**
-
-## 9. Architect review
-
-Round 1 (2026-11-17, `kith ask architect`): **approved with changes**. The step order and the module-per-step rule were
-settled. MUSTs and what changed:
-
-1. Rollback and the core.db schema: added the schema rule (2.1 rule 1).
-2. Rollback must also reinstall the host: 3.2 is now three actions; decision 9 does all three.
-3. The installer gate is bypassable (brew, git, the app): 3.1 is now publish gate, start-up refusal, installer check; decision 10.
-4. A shell stub breaks callers that name an interpreter: rule 3 rewritten by invocation kind; plists are rewritten before the delete.
-5. Python modules cannot be stubbed and R3/R4 deleted imported modules: new rule 5 and the import graph 1.3a; R3 and R4 narrowed, the shared modules move to R9 (round 3 corrected R8 to R9).
-6. Python run by the Rust code: section 0 corrected, ports listed in R4.
-7. Factual fixes: claims rollback refusals cannot be overridden; the "claim taker calls kith-auth" reason replaced; the "never automatic" quote reattributed; claims state on Kai's Mac settled from `kith kernel cutover status` (switched 2026-11-17, 2.2).
-8. M2 in one-bot-model.md is left unticked, with the remainder named (doors, `kith people` CLI, `host.sock`).
-
-SHOULDs taken: claims `depends_on authority` (R5 note), `door-chrome` and data files in the staging (1.3a), missing tests (4.1), stub/script contradiction in the window (3.1), `kith-uv` option A wording (5), M1 and M0f notes in one-bot-model.md. Not taken: none.
-
-Round 2 (same day): **approved with changes**. MUSTs and what changed:
-
-1. The host's start-up refusal must not read the kernel's list (it finds its kernel under `cli/current`, the old release on a held-back Mac): the list is built into the host (3.1 layer 2).
-2. The desktop app's `ensureCli` would undo a rollback: `kith update --back` writes a hold marker the CLI-only install respects; rolling back past R9 needs the older app (3.2, decision 9).
-3. Rule 5 covered only `import` lines: 1.3a now requires a mechanical map (imports, `SourceFileLoader`, `python3 <path>`, the plugin), lists the first pass (`kith-info`, `kith-ask`, `kith-bug`, `kith-lifecycle`, `kith-remote`, `kith-skills` load other scripts; `bin/kith` and the plugin are the last users of `kith_facets`, `kith_guard`, `kith_allowed`, `kith_accounts`), moves `kith-info` to R2 and the shared modules to R9, and gives the files nothing deleted yet a step.
-
-SHOULDs taken: schema rule as a CI check, what rewritten `kith-uv` jobs run, refusal exemptions and brew/git behaviour, no stub for `kith_paths.py --json`, rule 2 pointer, R3 `kith account add|remove` port.
-
-Round 3 (same day): **approved with changes**. MUSTs and what changed: (1) the step table in 2.1 now matches 1.3a and section 9 (R2 adds `kith-room-ledger`, R4 `kith-bug`, R7 no longer deletes `kith_facets.py`, R8 loses `kith-bug`, R9 lists the shared modules and the plugin step, R3/R4 say R9); (2) `kith kernel cutover status` takes no arguments today, so `status MODULE`, `--json`, `--require` are marked new Step 0 work, `--all` is defined as "run on each Mac". SHOULDs taken: loaders become subprocess calls in Step 0 instead of an early Rust `kith-info`; hold marker specified; the exact `kith-uv` job line is fixed by a test before R8; the host reports the missing module instead of refusing to start. A numbering note: the architect's round 3 said the claims `since 1794876918` is 2026-11-17 00:55 UTC, consistent with the log.
-
-Round 4 (same day): the table and 1.3a agree. Two MUSTs taken: R7 no longer deletes `kith_trajectory.py` (R8, with `kith-scratch`) or `kith_runenv.py` (R9, unless R7 ports `bin/kith:1342`); the `python3 "$KITH/bin/kith-sessions"` (R5) and `kith-permit` (R4) calls in `bin/kith` and `kith-core.sh` are in those rows' "Ports first". SHOULD taken: the file-map script is run once, and its output replaces the hand-built first pass in 1.3a, before R1 starts (stated in 1.3a).
-
-Round 5 (same day): **approved**, no MUSTs left. Two table-symmetry fixes taken (R8 names `kith_trajectory.py`, R9 names `kith_runenv.py`). Open for Kai, all with defaults in section 8: the owner Mac list (decision 1), whether `claims` should formally depend on `authority`, and the uv test before R8.
-
-**Final verdict: approved.**
+- 2026-11-17: first plan (R1-R10) written and architect-reviewed in five rounds (#1025). Verdict: approved; the schema rule,
+  the interpreter-callers rule, the import-graph rule 5 and the mechanical file map came out of it.
+- 2026-11-19: Step 0 (#1050): `status MODULE` (exit 0 only when switched), `status --json`, `status --require FILE` (a module
+  counts as switched only when the record says `switched` and every tombstone is in place; a damaged record or an
+  unfinished step is "no", with the step to run); `kernel/lib/requires-switched.txt` (no module required yet;
+  `kernel/tests/kith-requires-switched-check`, in CI); `scripts/py-file-map.py`. Left over and now dropped: the
+  loader-to-subprocess prep; still open: the installer must run the **new** program's `--require` (an older program answers
+  with a usage error and exit 1, which would block every update).
+- 2026-11-19: R2 `project-id` (#1077): the guest branch is `core/kernel/src/project/guest.rs` (a run-socket client speaking
+  `kernel/lib/kith_runsocket.py`'s protocol, answered before the registry is opened); `kernel/bin/project-id` is an sh stub
+  that execs `kith kernel project-id` on the first program whose `kernel version` lists `project-guest` (exit 3 and one line
+  when none); the `project-id` line of `core-switched.txt` is gone; the host answers a guest's `--info` in process; a guest
+  run gets `KITH_BIN` and read access to that program (`launch/settings.rs` `link_chain`). `kith_runsocket.py` stays until
+  `kith-memory` is ported (P3-8).
+- 2026-11-19: R2 `cost` port (#1073): every `kith kernel cost` verb in Rust (`tag`, `record`, the text reports, bare
+  `kith cost`); the `cost` line of `core-switched.txt` and `kith_cost_ported` are gone; the bash launch's SessionStart hook
+  is `kith kernel cost tag` on a program with `cost-ledger`, the stub otherwise (`kith_cost_bin`); `spent` and `limit` in the
+  Rust launch never run the stub; `KITH_CORE=python` changes nothing. Without a program the bash launch skips an owner's
+  at-limit hold; a guest is refused.
+- 2026-11-19: R2 room-ledger + pkg (#1080): both launch paths write `<kith> kernel room-ledger --kernel K pre|post` when the
+  `room-ledger` line is present and the program lists the module, else the stub path; `bin/kith-room-ledger` is a stub (no
+  program: silent exit 0, but a `pre` for a room note is denied); `pkg resolve` has no Python fallback (no program: the live
+  folder runs, with a line saying why).
+- 2026-11-19: R3 PR-B (#1081): `bin/kith-account` is `exec bin/kith account "$@"` (no program: one line, exit 1, also for
+  `KITH_CORE=python`); the `account-state` and `kith backup` Python fallbacks in `bin/kith` are gone; the account difftest
+  corpora are golden-only. R1 (#1059): `kith_engines.py`, `hq_settings.py` and the Python read-fence fallback deleted.
+- 2026-11-19: R5 ports 1/4 (#1083): every `python3 "$KITH/bin/kith-sessions"` call of `bin/kith` and `kith-core.sh` except
+  `run` (`epoch`, `pick`, `latest`, `resolve`, `proc`, `claim`, `terminal`, `release`) and the SessionStart `record` hook go
+  to `kith kernel threads` when the line `threads<TAB>threads-writer` is in `core-switched.txt` and the program lists the
+  module (decided once per launch, variable `kthreads`; `KITH_CORE=python` is the per-launch rollback). The Rust verbs answer
+  both claim modes (Files and Writer, through `claim.*` and `session.record`).
+- 2026-11-20: R5 ports 2/4 (#1090): `kith-sessions run` is `kith kernel threads run AGENT -- [kith-stub ...] claude ARGS...`
+  (`core/kernel/src/threads/run.rs`, process half `runproc.rs`; module `threads-run`). It forks and waits as the Python did
+  (the shell's pid keeps the terminal's claim, claude is its child) and ports the take-over and resume notes, the idle stop
+  (idle_since, `KITH_SLEEP_MINUTES`, outstanding work, detached children, the keystroke re-check), the stub's status pipe
+  (busy is 75, a lock error is 70), the quit intent, `release_claims` in both modes, the sleep sweep and `wake_owed`.
+  `bin/kith`'s last exec uses it only when `kthreads` is set and the program lists `threads-run`.
+- 2026-11-20: R5 ports 3/4 (#1084): host `wake.rs` port parked, not ported. Architect: the core stores the wake queue but has
+  no drain, no waiter firing and no wake module (S4), and `wake.take` already writes a turn row the host's own `resume.rs`
+  start would duplicate; every Python caller writes the files, so a host-only Core arm would split the queue across two
+  stores. The host arm is written after the S4 design is model-checked (now P2-1, P2-2).
+- 2026-11-21: R5 ports 4/4 (#1086): `kith-lifecycle` (`sweep`, `status`, `intent`) is `kith kernel lifecycle`
+  (`core/kernel/src/lifecycle/`, module `lifecycle`); `bin/kith-lifecycle` forwards to it when the `lifecycle` line is in
+  `core-switched.txt` and the program lists the module; compaction and end take the writer claim through the shared
+  `threads::writer::Taker`. `bin/kith-lifecycle` goes in P0-8; `lib/kith_lifecycle.py` stays until P1-19.
+- 2026-11-21: `kernel/bin/kith-cost` becomes a forwarding stub, valid as sh and as Python, so the hand-written `dev.kith.cost`
+  plist keeps working (launchd -> kith-uv -> python -> sh -> kith) (#1098; with #1084 in batch #1104). `kith doctor` reports
+  any plist that names a kernel script; `kernel/tests/kith-cost-stub-check` holds the file to both languages.
+- 2026-11-21: Kai asked what stands between us and retiring Python now; the architect's gap analysis (outside the repo, see
+  the top) answered. Kai chose Phase 0 + 1 now, a tracked series like the C series, and "Not sure" on every DROP-candidate:
+  nothing is dropped now. Kai-only gates decided (section "Gates"). This file rewritten as P0-P6 (docs only).
+- 2026-11-21: Plan rewritten as the P series (this PR, #1110). The architect approved it after five MUSTs: the installer gate
+  is not built (P0-14), `kith_lifecycle.py` moves from P0-8 to P1-19, rollback refuses once a module's Python is deleted
+  (rule 6), `kith-info`'s module loads add P3-10 dependencies (P2-6, P3-9, P4-1), and P1-10 repoints `kith cost` and drops
+  the cost-hook fallbacks. The six smaller points (P0-15, P0-11, P3-7, P0-12 owner, P1-7 count, drift path) are applied.
+  P1-11 first half: `uv run --no-project -- /bin/echo ok` printed ok with uv 0.13.0.
