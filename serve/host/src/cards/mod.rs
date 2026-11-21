@@ -15,6 +15,7 @@ pub mod access;
 pub mod autoallow;
 pub mod edge;
 pub mod history;
+pub mod intent;
 pub mod resource;
 pub mod resume;
 pub mod room_secret;
@@ -396,7 +397,11 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card, extra: Option<edge::Extr
     let chat = chat_for(hub, &who.person, &who.agent);
     let person_name = hub.store.person(&who.person).map(|p| p.name).filter(|n| !n.is_empty());
     let escape = card.tool == access::TOOL;
-    let (title, kind) = (title_of(&card.tool, &card.shown), tool_kind(&card.tool));
+    // The title is the call, never the agent's description (which `shown` carries when the input has more keys).
+    let input_of_card: Value = serde_json::from_str(&card.input).unwrap_or(Value::Null);
+    let titled =
+        input_of_card["command"].as_str().filter(|_| tool_kind(&card.tool) == "execute").unwrap_or(&card.shown);
+    let (title, kind) = (title_of(&card.tool, titled), tool_kind(&card.tool));
     let (title, mut detail, mut options) = if escape {
         let name = hub.store.person(&card.person).map(|p| p.name).filter(|n| !n.is_empty());
         access::entry_view(card, &name.unwrap_or_else(|| card.person.clone()))
@@ -445,6 +450,10 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card, extra: Option<edge::Extr
         "cardId": card.id,
         "source": "run",
     });
+    if !escape {
+        let reason = kept.as_ref().filter(|k| k["kind"] == "auto").and_then(|k| k["reason"].as_str());
+        intent::annotate(&mut data, &card.tool, &input_of_card, &who.agent, reason);
+    }
     if let Some(kept) = kept {
         let key = if kept["kind"] == "auto" { "autoAllow" } else { "edge" };
         data[key] = kept;
@@ -939,6 +948,8 @@ mod access_tests;
 mod autoallow_tests;
 #[cfg(test)]
 mod edge_tests;
+#[cfg(test)]
+mod intent_tests;
 #[cfg(test)]
 mod props;
 #[cfg(test)]
