@@ -663,9 +663,13 @@ fn session_start_has_no_cost_hook_until_a_program_has_the_ledger() {
         .as_array()
         .unwrap()
         .clone();
-    assert!(hooks
-        .iter()
-        .all(|h| !h["hooks"][0]["command"].as_str().unwrap().contains("cost")));
+    // exactly the registry's hook, and nothing that tags or records cost (a temp path may contain "cost", so match the verb)
+    assert_eq!(hooks.len(), 1, "{hooks:?}");
+    let cmd = hooks[0]["hooks"][0]["command"].as_str().unwrap();
+    assert!(
+        !cmd.contains("kernel cost") && !cmd.contains("kith-cost"),
+        "{cmd}"
+    );
 }
 
 #[test]

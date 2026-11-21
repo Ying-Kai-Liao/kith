@@ -535,12 +535,12 @@ def rewrite_plist(o):
 
 def cost_job(pl):
     """dev.kith.cost ran the polyglot stub `kernel/bin/kith-cost` through kith-uv; the stub is gone (retire-python P1), so the job
-    runs the program, still behind kith-uv: launchd's Full Disk Access is granted to uv, not to the program. Its verb (sync) is kept."""
+    runs `kith kernel cost sync` (no bash or Python between), still behind kith-uv: launchd's Full Disk Access is granted to uv, not to the program. Its verb (sync) is kept."""
     argv = pl.get('ProgramArguments', [])
     for i, a in enumerate(argv):
         if a.endswith('/kernel/bin/kith-cost'):
             pl['ProgramArguments'] = [str(NEW / 'bin/kith-uv'), 'run', '--no-project', '--quiet', '--',
-                                      str(NEW / 'cli/current/bin/kith'), 'cost', *(argv[i + 1:] or ['sync'])]
+                                      str(NEW / 'cli/current/bin/kith'), 'kernel', 'cost', *(argv[i + 1:] or ['sync'])]
             break
     return pl
 

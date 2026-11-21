@@ -471,9 +471,9 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
-    /// What Claude Code usage costs, every verb of `kernel/bin/kith-cost`: the launch's and the apps' (`limit`, `spent`, `usage --json`,
+    /// What Claude Code usage costs, every verb of the former `kernel/bin/kith-cost`: the launch's and the apps' (`limit`, `spent`, `usage --json`,
     /// `agent NAME --json`, `members`, `bots --json`, `sync`), the ledger's writers (`tag`, `record`) and the text reports.
-    /// Prints what `kith-cost` prints, with its exit codes. `kith cost` and the stub `kernel/bin/kith-cost` route here.
+    /// Prints what `kith-cost` prints, with its exit codes. `kith cost` routes here (through `bin/kith`'s `kith_cost`).
     // -h/--help belong to kith-cost's own usage text, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Cost {

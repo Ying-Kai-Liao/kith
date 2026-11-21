@@ -40,7 +40,7 @@ PY
 fail=0
 check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
 out=$(python3 -I "$T/run.py" "$KERNEL" 2>&1)
-check "a job that still runs kernel/bin/kith-cost is told the program line to run" "grep -q 'dev.kith.cost: runs kernel/bin/kith-cost, which is gone.*kith-uv run --no-project --quiet -- .*/.kith/cli/current/bin/kith cost sync' <<<\"\$out\""
+check "a job that still runs kernel/bin/kith-cost is told the program line to run" "grep -q 'dev.kith.cost: runs kernel/bin/kith-cost, which is gone.*kith-uv run --no-project --quiet -- .*/.kith/cli/current/bin/kith kernel cost sync' <<<\"\$out\""
 check "a job that runs another kernel sh stub is warned about, naming the stub" "grep -q 'dev.kith.ledger: runs the kernel stub .*kernel/bin/kith-room-ledger' <<<\"\$out\""
 check "a job that runs a Python kernel script (sched) gets no such line" "! grep -q 'dev.kith.sched: runs' <<<\"\$out\""
 check "a job that runs another program gets no such line" "! grep -q 'dev.kith.monitor: runs' <<<\"\$out\""

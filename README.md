@@ -60,7 +60,7 @@ kith backup run                            # everything to private GitHub repos:
 Desktop app, one click: <https://kithbot.app/download>, or directly <https://kithbot.app/download/mac> (macOS, Apple silicon and Intel)
 and <https://kithbot.app/download/linux> (Linux x64, AppImage).
 
-Kith was called hq until 2026-10-22. The `hq` command still works as an alias (so do `hq-send`, `hq-auth`, `hq-pkg`, `hq-state`, `hq-new`, `hq-cost`, `hq-who`, `hq-serve` and `hq-doctor`, which older agents call), a Mac with an existing `~/.hq`
+Kith was called hq until 2026-10-22. The `hq` command still works as an alias (so do `hq-send`, `hq-auth`, `hq-pkg`, `hq-state`, `hq-new`, `hq-who`, `hq-serve` and `hq-doctor`, which older agents call), a Mac with an existing `~/.hq`
 keeps using it until `kith migrate run` moves it to `~/.kith`, and `~/hq` stays a link to the same folder as `~/kith`.
 Old `HQ_*` variables, `dev.hq.*` jobs and `hq-agent` repos are still read.
 

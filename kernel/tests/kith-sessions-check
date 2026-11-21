@@ -148,6 +148,8 @@ if [[ -n $cbin && -x $cbin ]]; then
 fi
 want=$want_rec; [[ -n $want_cost ]] && want="$want_cost|$want_rec"
 [[ $cmds == *"$want"* ]] && ok "settings: the cost tag hook ($want) then kith-sessions record" || bad "hook list" "$cmds"
+# with no program that has the module, no cost hook at all (neither the program's tag nor the removed stub's)
+[[ -n $want_cost || ( $cmds != *"kernel tag"* && $cmds != *kith-cost* ) ]] && ok "settings: no cost hook unless a program has the cost-ledger module" || bad "cost hook without a program" "$cmds"
 # the rollback writes the Python's registry hook; the cost hook is the same either way (there is no Python cost to go back to)
 rm -rf "$REG"; (cd "$T/work/a" && KITH_CORE=python STUB_SID=run1 tty "$KERNEL/bin/kith" designer)
 cmds=$(python3 -c 'import json; print("|".join(h["hooks"][0]["command"].rsplit("/",1)[-1] for h in json.load(open("'$T/settings.json'"))["hooks"]["SessionStart"]))')

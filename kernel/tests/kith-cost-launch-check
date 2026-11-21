@@ -119,7 +119,7 @@ hooks X=1 > "$T/h.out"
 check "terminal launch, program with cost-ledger: the hook is the program's form" "grep -q 'kernel cost --kernel .* tag\$' '$T/h.out'"
 for NB in "$T/nonexistent" "$T/old/kith"; do
   hooks KITH_BIN=$NB > "$T/h.out"
-  check "terminal launch, no usable program ($(basename "$NB")): the settings are written, with no cost hook" "[ -s '$STUB_SETTINGS' ] && [ -s '$T/h.out' ] && ! grep -q 'kernel cost\\|kith-cost' '$T/h.out'"
+  check "terminal launch, no usable program ($(basename "$NB")): the settings are written, with no cost hook" "[ -s '$STUB_SETTINGS' ] && [ -s '$T/h.out' ] && ! grep -q 'kernel cost\\|/bin/kith-cost' '$T/h.out'"
 done
 
 echo

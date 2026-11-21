@@ -65,7 +65,7 @@ LaunchAgents in `~/Library/LaunchAgents/`, each run through `~/.kith/bin/kith-uv
 | Label | Runs | When | Written by |
 |---|---|---|---|
 | `dev.kith.sched` | `kernel/bin/kith-sched tick` | every minute | `kith-sched --install` (not installed on this Mac) |
-| `dev.kith.cost` | `kith-uv run --no-project --quiet -- <cli>/current/bin/kith cost sync` (kept behind `kith-uv` for launchd's Full Disk Access; hand-written, `kith doctor` warns when a job still runs the old `kernel/bin/kith-cost`) | every 6 h | by hand (no installer) |
+| `dev.kith.cost` | `kith-uv run --no-project --quiet -- <cli>/current/bin/kith kernel cost sync` (kept behind `kith-uv` for launchd's Full Disk Access; hand-written, `kith doctor` warns when a job still runs the old `kernel/bin/kith-cost`) | every 6 h | by hand (no installer) |
 | `dev.kith.monitor` | devops `role/tools/monitor.py run` | always (KeepAlive) | `monitor.py install` (devops' repo) |
 | `dev.kith.house` | house `role/tools/house.py remind --send` | 08:00 daily | by hand (no installer) |
 
@@ -173,7 +173,7 @@ The step only goes through when the gate holds (`cutover/modules/schedules_gate.
 checklist behind `RUNS_FIRED_TURNS` is on the flag, and `serve/host/tests/schedules_cutover_e2e.rs` runs the step, the host, the
 core daemon and the real `kith-sched` as processes (host-build runs it).
 
-**Cost** → Claude Code writes transcripts → `kith-cost sync` (every 6 h, and before each report) → `cost.db`;
+**Cost** → Claude Code writes transcripts → `kith kernel cost sync` (every 6 h, and before each report) → `cost.db`;
 `runs` (from the hook) and `kith:` subagent types attribute requests to agents.
 
 ## Where to change what

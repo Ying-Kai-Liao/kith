@@ -2,7 +2,7 @@
 //! `agent NAME --json`, `members`, `bots --json`, `sync`, the two hooks that write the ledger (`tag`, `record`: `tag.rs`) and
 //! the reports a person reads (`today|week|month|all`, `agents`, `agent NAME`, `people`, `session`, `csv`: `reports.rs`). The
 //! same command line gives the same output and exit code (the difftest golden `cost.json` holds the Python's answers);
-//! `kernel/bin/kith-cost` is a stub that forwards here (there is no Python cost left to go back to).
+//! the `kernel/bin/kith-cost` stub is gone (there is no Python cost to go back to).
 //!
 //! The ledger (`<machine>/cost.db`) is read from here and written by `sync` (new requests out of Claude Code's transcripts, as
 //! the Python does before every verb), `tag` and `record`. `KITH_COST_NOW` (ISO local time, or epoch seconds) is the clock of

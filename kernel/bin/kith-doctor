@@ -457,7 +457,7 @@ def jobs():
             continue
         if any(a.endswith('/kernel/bin/kith-cost') for a in argv):
             bad(f'{label}: runs kernel/bin/kith-cost, which is gone; run the program instead: set ProgramArguments to '
-                f'{HOME}/.kith/bin/kith-uv run --no-project --quiet -- {HOME}/.kith/cli/current/bin/kith cost sync, '
+                f'{HOME}/.kith/bin/kith-uv run --no-project --quiet -- {HOME}/.kith/cli/current/bin/kith kernel cost sync, '
                 f'then launchctl bootout gui/{uid}/{label}; launchctl bootstrap gui/{uid} {f}')
             continue
         missing = [a for a in argv if a.startswith('/') and not os.path.exists(a)]

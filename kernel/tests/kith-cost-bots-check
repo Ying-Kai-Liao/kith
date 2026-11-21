@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# kith-cost-bots-check — a bot's runs sit on its owner's line in `kith-cost people`, with a sub-line per bot, and
-# `kith-cost spent` sums a person with the `was` ids kith-auth resolves for a bot. Throwaway auth.json and ledger.
+# kith-cost-bots-check — a bot's runs sit on its owner's line in `kith kernel cost people`, with a sub-line per bot, and
+# `kith kernel cost spent` sums a person with the `was` ids kith-auth resolves for a bot. Throwaway auth.json and ledger.
 #
 #   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-cost-bots-check     a second or two; prints each check, exits 1 when one fails
-# kernel/bin/kith-cost is a stub for the kith program, so the check needs one (without it the check says so and exits 0).
+# The ledger is the kith program's (`kith kernel cost`), so the check needs one (without it the check says so and exits 0).
 set -uo pipefail
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 BIN=${KITH_DIFFTEST_BIN:-}
-if [ -z "$BIN" ] || [ ! -x "$BIN" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN): kernel/bin/kith-cost forwards to it"; exit 0; fi
+if [ -z "$BIN" ] || [ ! -x "$BIN" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN): the ledger is its"; exit 0; fi
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-cost-bots-check.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 export KITH_AUTH=$T/auth.json HOME=$T/home KITH_HOME=$T/kith
