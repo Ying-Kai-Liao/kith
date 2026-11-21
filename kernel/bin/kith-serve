@@ -95,8 +95,35 @@ install_stub() { install_helper "$1" kith-stub "runs the host starts go unlocked
 # The process holder (kith-holder) too: the host's core starts it from beside the host, and Writer mode needs it.
 install_holder() { install_helper "$1" kith-holder "Writer mode has no holder to connect to"; }
 
+# launchd is per account, not per $HOME: a throwaway HOME does not isolate it, and installing from one replaces the
+# account's real dev.kith.serve job (a test did, 2026-11-21). So start/stop/restart refuse unless $HOME is this
+# account's own home; a test opts in with KITH_SERVE_TEST_LABEL=dev.kith.serve.test-<id> (the host then uses that
+# label, never dev.kith.serve). The host binary enforces the same rule.
+home_guard() {
+  local label=${KITH_SERVE_TEST_LABEL:-}
+  if [ -n "$label" ]; then
+    case $label in
+      dev.kith.serve.test-?*) case $label in *[!A-Za-z0-9._-]*) label="" ;; esac ;;
+      *) label="" ;;
+    esac
+    [ -n "$label" ] && return 0
+    echo "kith serve: KITH_SERVE_TEST_LABEL must look like dev.kith.serve.test-<id>; the real job dev.kith.serve is never a test label" >&2; exit 1
+  fi
+  local user real mine theirs
+  user=$(id -un 2>/dev/null || true); real=""
+  # ~name never expands inside quotes, so the name is checked to be plain and then expanded unquoted.
+  case $user in ""|*[!A-Za-z0-9._-]*) ;; *) eval "real=~$user" 2>/dev/null || real="" ;; esac
+  case $real in "~"*|"") real="" ;; esac
+  mine=$(cd "${HOME:-/nonexistent}" 2>/dev/null && pwd -P || true); theirs=$(cd "${real:-/nonexistent}" 2>/dev/null && pwd -P || true)
+  if [ -z "$mine" ] || [ -z "$theirs" ] || [ "$mine" != "$theirs" ]; then
+    echo "kith serve: refusing to touch the job dev.kith.serve: HOME is ${HOME:-unset} but this account's home is ${real:-unknown}; a test sets KITH_SERVE_TEST_LABEL=dev.kith.serve.test-<id>" >&2
+    exit 1
+  fi
+}
+
 cmd_start() {
   local build=1 dev=0 a
+  home_guard
   [ "${KITH_SERVE_DEV:-}" = 1 ] && dev=1
   for a in "$@"; do case $a in --no-build) build=0 ;; --dev) dev=1 ;; *) echo "kith serve start: unknown option $a" >&2; exit 2 ;; esac; done
   # The live host must never be built from whichever checkout the caller happens to be in (~/kith resolves to the
@@ -216,8 +243,10 @@ cmd_status() {
 
 case ${1:-help} in
   start)   shift; cmd_start "$@" ;;
-  stop)    [ -x "$BIN" ] || { echo "kith serve: not installed" >&2; exit 1; }; "$BIN" stop ;;
-  restart) shift; "$SELF" stop; cmd_start --no-build "$@" ;;
+  stop)    home_guard; [ -x "$BIN" ] || { echo "kith serve: not installed" >&2; exit 1; }; "$BIN" stop ;;
+  restart) shift; home_guard; "$SELF" stop; cmd_start --no-build "$@" ;;
+  # Runs only the guard (a test uses it to see a pass); starts, stops and installs nothing.
+  home-guard) home_guard; echo "kith serve: home guard ok" ;;
   status)  cmd_status ;;
   relay)   shift; cmd_relay "$@" ;;
   cloud)   shift; [ -x "$BIN" ] || { echo "kith serve: not installed" >&2; exit 1; }

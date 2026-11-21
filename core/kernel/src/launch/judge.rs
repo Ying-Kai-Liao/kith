@@ -493,35 +493,310 @@ fn inline_flags(b: &str) -> Option<&'static [&'static str]> {
         .map(|(_, f)| *f)
 }
 
-/// `_inline_code`: an interpreter or shell given code inline, alone (reading stdin) or fed a heredoc.
-fn inline_code(words: &[String]) -> bool {
-    static SHELL_C: LazyLock<Regex> = LazyLock::new(|| rx(r"^-[a-z]*c[a-z]*$"));
-    let mut starts_at = vec![0];
-    if LAUNCHERS.contains(&basename(&words[0])) {
-        starts_at.extend((1..words.len()).filter(|i| inline_flags(base(&words[*i])).is_some()));
+/// `_runs`: the interpreters and shells a command starts, as (name, the words after it): the first word, and after a
+/// launcher (`uv run python ..`, `find -exec sh -c ..`).
+fn runs(words: &[String]) -> Vec<(&'static str, &[String])> {
+    let Some(first) = words.first() else {
+        return vec![];
+    };
+    let mut at = vec![0];
+    if LAUNCHERS.contains(&basename(first)) {
+        at.extend((1..words.len()).filter(|i| inline_flags(base(&words[*i])).is_some()));
     }
-    for i in starts_at {
-        let b = base(&words[i]);
-        let Some(flags) = inline_flags(b) else {
-            continue;
-        };
-        let rest = &words[i + 1..];
-        if rest
-            .first()
-            .is_none_or(|r| ["-", "<", "<<", "<<<"].contains(&r.as_str()))
-        {
-            return true;
-        }
-        for r in rest {
-            if flags.contains(&r.as_str()) || (SHELLS.contains(&b) && SHELL_C.is_match(r)) {
-                return true;
+    at.into_iter()
+        .filter_map(|i| {
+            let b = base(&words[i]);
+            inline_flags(b).map(|_| (inline_name(b), &words[i + 1..]))
+        })
+        .collect()
+}
+
+/// The `'static` name of an interpreter in `INLINE`, so `runs` can hand names around without borrowing the words.
+fn inline_name(b: &str) -> &'static str {
+    INLINE
+        .iter()
+        .chain([&INLINE_FISH])
+        .find(|(n, _)| *n == b)
+        .map_or("", |(n, _)| *n)
+}
+
+/// `_code_flag`: `r` hands interpreter `b` its code inline (a shell's `-s` reads stdin, so it is not one).
+fn code_flag(b: &str, r: &str) -> bool {
+    static SHELL_C: LazyLock<Regex> = LazyLock::new(|| rx(r"^-[a-z]*c[a-z]*$"));
+    inline_flags(b).is_some_and(|f| f.contains(&r) && r != "-s")
+        || (SHELLS.contains(&b) && SHELL_C.is_match(r))
+}
+
+/// `_inline_bodies`: the code given inline (-c, -e, eval ..): (shell bodies, other interpreters' bodies). Flags are read up
+/// to the script a command is given.
+fn inline_bodies(words: &[String]) -> (Vec<String>, Vec<String>) {
+    let (mut shell, mut other) = (vec![], vec![]);
+    for (b, rest) in runs(words) {
+        for (j, r) in rest.iter().enumerate() {
+            if code_flag(b, r) {
+                if j + 1 < rest.len() {
+                    let to = if SHELLS.contains(&b) {
+                        &mut shell
+                    } else {
+                        &mut other
+                    };
+                    to.push(rest[j + 1].clone());
+                }
+                break;
             }
             if !r.starts_with('-') {
                 break;
             }
         }
     }
+    (shell, other)
+}
+
+/// `_reads_code`: an interpreter or shell that takes its code from stdin: alone, or with flags only, `-`, or a shell's -s.
+fn reads_code(words: &[String]) -> bool {
+    for (b, rest) in runs(words) {
+        if rest.iter().any(|r| r.starts_with('<')) {
+            continue;
+        }
+        let mut broke = false;
+        for r in rest {
+            if r == "-" || (r == "-s" && SHELLS.contains(&b)) {
+                return true;
+            }
+            if code_flag(b, r) || !r.starts_with('-') {
+                broke = true;
+                break;
+            }
+        }
+        if !broke {
+            return true;
+        }
+    }
     false
+}
+
+/// Python's `\s` also takes the four separators \x1c-\x1f, which Rust's does not.
+fn py_s(p: &str) -> String {
+    p.replace(r"\S", r"[^\s\x1c-\x1f]")
+        .replace(r"\s", r"[\s\x1c-\x1f]")
+}
+
+/// `FETCHED`: a download handed over as code: `bash <(curl ..)`, `python3 -c "$(curl ..)"`, `source <(wget ..)`.
+static FETCHED: LazyLock<Regex> = LazyLock::new(|| {
+    rx(&py_s(
+        r#"(?:(?:^|[\s;&|(])(?:\S*/)?(?:python[\d.]*|pypy\d*|node|deno|bun|ruby|perl|php|osascript|bash|sh|zsh|dash|fish|source|\.)(?:\s+-\S*)*\s+(?:<{1,3}\s*)?|(?:^|[;&|\n(])\s*)["']?(?:<\(|\$\(|`)\s*(?:\S*/)?(?:curl|wget)\b"#,
+    ))
+});
+static HEREDOC_HEAD: LazyLock<Regex> = LazyLock::new(|| rx(r#"<<-?[ \t]*(['"]?)(\w+)"#));
+static LITERAL: LazyLock<Regex> =
+    LazyLock::new(|| rx(r#"'([^'\\\n]*(?:\\.[^'\\\n]*)*)'|"([^"\\\n]*(?:\\.[^"\\\n]*)*)""#));
+static BRACKETS: LazyLock<Regex> = LazyLock::new(|| rx(r"\[([^\[\]]*)\]"));
+static PATHISH: LazyLock<Regex> =
+    LazyLock::new(|| rx(r"(?:~|\$HOME|\$\{HOME\})?/[\w.@+~-]+(?:/[\w.@+~-]+)*"));
+static HOME_START: LazyLock<Regex> = LazyLock::new(|| rx(r"^(?:~|\$HOME|\$\{HOME\})?/"));
+static OPERATORS: LazyLock<Regex> = LazyLock::new(|| rx(r"\|\||\|&|&&|;;|[;&|()]"));
+
+/// The text of each quoted string in `s` (`[a or b for a, b in LITERAL.findall(s)]`).
+fn literals(s: &str) -> Vec<String> {
+    LITERAL
+        .captures_iter(s)
+        .map(|c| {
+            c.get(1)
+                .or_else(|| c.get(2))
+                .map_or(String::new(), |m| m.as_str().to_owned())
+        })
+        .collect()
+}
+
+fn char_len(s: &str, at: usize) -> usize {
+    s[at..].chars().next().map_or(1, char::len_utf8)
+}
+
+/// `PATHISH.findall`: the Python has a lookbehind `(?<![\w.$}~-])` the regex crate lacks, so a match whose previous
+/// character is one of those is refused and the search goes on from the next character, as the Python's would.
+fn pathish(s: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut pos = 0;
+    while pos <= s.len() {
+        let Some(m) = PATHISH.find_at(s, pos) else {
+            break;
+        };
+        let prev = s[..m.start()].chars().next_back();
+        if prev.is_some_and(|c| c.is_alphanumeric() || "_.$}~-".contains(c)) {
+            pos = m.start() + char_len(s, m.start());
+        } else {
+            out.push(m.as_str().to_owned());
+            pos = m.end();
+        }
+    }
+    out
+}
+
+/// `HEREDOC.finditer` (`<<-?[ \t]*(['"]?)(\w+)\1[^\n]*\n(.*?)(?:\n[ \t]*\2[ \t]*(?:\n|$)|\Z)`, DOTALL; the backreferences
+/// are checked by hand): (start of the `<<`, the heredoc's text) for each.
+fn heredocs(cmd: &str) -> Vec<(usize, String)> {
+    let mut out = vec![];
+    let mut pos = 0;
+    while pos <= cmd.len() {
+        let Some(c) = HEREDOC_HEAD.captures_at(cmd, pos) else {
+            break;
+        };
+        let (Some(whole), Some(q), Some(tag)) = (c.get(0), c.get(1), c.get(2)) else {
+            break;
+        };
+        let next = whole.start() + char_len(cmd, whole.start());
+        let mut e = whole.end();
+        if !q.as_str().is_empty() {
+            if cmd[e..].starts_with(q.as_str()) {
+                e += q.as_str().len();
+            } else {
+                pos = next;
+                continue;
+            }
+        }
+        let Some(nl) = cmd[e..].find('\n') else {
+            pos = next;
+            continue;
+        };
+        let body_from = e + nl + 1;
+        let tag = tag.as_str();
+        // the lazy body ends at the first line that is only the tag, else at the end of the text
+        let mut p = body_from;
+        let (body_end, end) = loop {
+            if p >= cmd.len() {
+                break (cmd.len(), cmd.len());
+            }
+            if cmd.as_bytes()[p] == b'\n' {
+                let rest = cmd[p + 1..].trim_start_matches([' ', '\t']);
+                if let Some(after) = rest.strip_prefix(tag) {
+                    let after_ws = after.trim_start_matches([' ', '\t']);
+                    if after_ws.is_empty() {
+                        break (p, cmd.len());
+                    }
+                    if after_ws.starts_with('\n') {
+                        break (p, cmd.len() - after_ws.len() + 1);
+                    }
+                }
+            }
+            p += char_len(cmd, p);
+        };
+        out.push((whole.start(), cmd[body_from..body_end].to_owned()));
+        pos = end.max(next);
+    }
+    out
+}
+
+/// `_chains`: the pipelines of a shell line as lists of stages; a stage is one member of a pipe and holds the simple
+/// commands it runs, so a download in a group still reaches the shell after it.
+fn chains(command: &str) -> Vec<Vec<Vec<Vec<String>>>> {
+    let line = command.replace('\n', " ; ");
+    let toks = shlex_words(&line).unwrap_or_else(|| py_split(&line));
+    let (mut chains, mut stages, mut stage, mut cur, mut depth) =
+        (vec![], vec![], vec![], vec![], 0usize);
+    for t in toks {
+        if t.is_empty() || !t.chars().all(|c| ";&|()".contains(c)) {
+            if cur.is_empty() && (t == "{" || t == "}") {
+                depth = if t == "{" {
+                    depth + 1
+                } else {
+                    depth.saturating_sub(1)
+                };
+            } else {
+                cur.push(t);
+            }
+            continue;
+        }
+        for op in OPERATORS.find_iter(&t).map(|m| m.as_str()) {
+            if !cur.is_empty() {
+                stage.push(std::mem::take(&mut cur));
+            }
+            match op {
+                "|" | "|&" => stages.push(std::mem::take(&mut stage)),
+                "(" => depth += 1,
+                ")" => depth = depth.saturating_sub(1),
+                _ if depth == 0 => {
+                    stages.push(std::mem::take(&mut stage));
+                    chains.push(std::mem::take(&mut stages));
+                }
+                _ => {}
+            }
+        }
+    }
+    if !cur.is_empty() {
+        stage.push(cur);
+    }
+    stages.push(stage);
+    chains.push(stages);
+    chains
+        .into_iter()
+        .filter(|c| c.iter().any(|s| !s.is_empty()))
+        .map(|c| c.into_iter().filter(|s| !s.is_empty()).collect())
+        .collect()
+}
+
+/// `_heredoc_bodies`: the heredoc text fed to an interpreter that is not a shell (a shell's heredoc lines are already read
+/// as commands): the command the heredoc is given to, or a later one in the pipe it starts.
+fn heredoc_bodies(command: &str) -> Vec<String> {
+    let mut out = vec![];
+    for (at, body) in heredocs(command) {
+        let start = command[..at].rfind('\n').map_or(0, |i| i + 1);
+        let segs = segments(&command[start..at]);
+        if let Some(last) = segs.last() {
+            let w = strip(last);
+            if runs(&w).iter().any(|(b, _)| !SHELLS.contains(b)) {
+                out.push(body);
+                continue;
+            }
+        }
+        let end = at + command[at..].find('\n').unwrap_or(0);
+        for chain in chains(&command[start..end]) {
+            let hit = chain.iter().skip(1).any(|st| {
+                st.iter().map(|w| strip(w)).any(|w| {
+                    !w.is_empty()
+                        && reads_code(&w)
+                        && runs(&w).first().is_some_and(|(b, _)| !SHELLS.contains(b))
+                })
+            });
+            if hit {
+                out.push(body);
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// `_judge_code`: the must-ask classes a script's text shows: a string or list of strings that reads as a shell command, a
+/// trust or secret file it names.
+fn judge_code(body: &str, roots: &[String], pl: &Places, depth: usize) -> BTreeSet<&'static str> {
+    let mut found = BTreeSet::new();
+    let mut lits = literals(body);
+    // a quoted string that is a path as a whole is read whole: a folder with a space in it has no path of PATHISH's shape
+    let spaced: Vec<String> = lits
+        .iter()
+        .map(|s| py_strip(s))
+        .filter(|s| s.contains(' ') && HOME_START.is_match(s))
+        .map(str::to_owned)
+        .collect();
+    for m in BRACKETS.captures_iter(body) {
+        let items = literals(m.get(1).map_or("", |x| x.as_str()));
+        if items.len() > 1 {
+            lits.push(items.join(" "));
+        }
+    }
+    for lit in &lits {
+        if py_strip(lit).contains(' ') {
+            found.extend(bash(lit, roots, pl, depth + 1));
+        }
+    }
+    let paths: Vec<String> = pathish(body).into_iter().chain(spaced).collect();
+    if paths.iter().any(|p| pl.is_secret(p)) {
+        found.insert("secret");
+    }
+    if SENTENCE[1].is_match(body) || paths.iter().any(|p| pl.is_trust(p)) {
+        found.insert("trust");
+    }
+    found
 }
 
 /// `_targets`: the files a command writes, by its spelling.
@@ -579,8 +854,58 @@ fn inside(path: &str, roots: &[String], home: &str) -> bool {
             .any(|r| r.trim_end_matches('/') == real.trim_end_matches('/'))
 }
 
-fn bash(command: &str, roots: &[String], pl: &Places) -> BTreeSet<&'static str> {
+fn bash(command: &str, roots: &[String], pl: &Places, depth: usize) -> BTreeSet<&'static str> {
     let mut found = BTreeSet::new();
+    if FETCHED.is_match(command) {
+        found.insert("code");
+    }
+    let docs = heredoc_bodies(command);
+    if depth < 3 {
+        for body in &docs {
+            found.extend(judge_code(body, roots, pl, depth));
+        }
+    } else if !docs.is_empty() {
+        found.insert("code"); // nested too deep to read: asked
+    }
+    for chain in chains(command) {
+        let (mut fetched, mut texts): (bool, Vec<String>) = (false, vec![]);
+        for stage in &chain {
+            let cmds: Vec<Vec<String>> = stage
+                .iter()
+                .map(|w| strip(w))
+                .filter(|w| !w.is_empty())
+                .collect();
+            for w in &cmds {
+                if !reads_code(w) {
+                    continue;
+                }
+                if fetched {
+                    found.insert("code"); // a download into a shell or interpreter
+                }
+                for text in &texts {
+                    // echo/printf text into one: judged as the code it is
+                    if depth >= 3 {
+                        found.insert("code");
+                    } else if runs(w).first().is_some_and(|(b, _)| SHELLS.contains(b)) {
+                        found.extend(bash(text, roots, pl, depth + 1));
+                    } else {
+                        found.extend(judge_code(text, roots, pl, depth));
+                    }
+                }
+            }
+            if cmds
+                .iter()
+                .any(|w| ["curl", "wget"].contains(&basename(&w[0])))
+            {
+                fetched = true;
+            }
+            for w in &cmds {
+                if ["echo", "printf"].contains(&basename(&w[0])) {
+                    texts.extend(w[1..].iter().filter(|a| !a.starts_with('-')).cloned());
+                }
+            }
+        }
+    }
     let secret_cmds: Vec<&str> = SECRET_CMDS
         .iter()
         .copied()
@@ -590,6 +915,28 @@ fn bash(command: &str, roots: &[String], pl: &Places) -> BTreeSet<&'static str> 
         let words = strip(&seg);
         if words.is_empty() {
             continue;
+        }
+        let (mut shell, mut other) = inline_bodies(&words);
+        // a here-string is the program's stdin: code when it takes its code from there
+        if let Some(i) = words.iter().position(|w| w == "<<<")
+            && i > 0
+            && i + 1 < words.len()
+            && reads_code(&words[..i])
+        {
+            let is_shell = runs(&words[..i])
+                .first()
+                .is_some_and(|(b, _)| SHELLS.contains(b));
+            (if is_shell { &mut shell } else { &mut other }).push(words[i + 1].clone());
+        }
+        if depth < 3 {
+            for body in &shell {
+                found.extend(bash(body, roots, pl, depth + 1));
+            }
+            for body in &other {
+                found.extend(judge_code(body, roots, pl, depth));
+            }
+        } else if !shell.is_empty() || !other.is_empty() {
+            found.insert("code"); // nested too deep to read: asked
         }
         let b = basename(&words[0]);
         if starts(&words, &secret_cmds) {
@@ -635,7 +982,7 @@ fn bash(command: &str, roots: &[String], pl: &Places) -> BTreeSet<&'static str> 
         {
             found.insert("outward");
         }
-        if starts(&words, &CODE_CMDS) || inline_code(&words) {
+        if starts(&words, &CODE_CMDS) {
             found.insert("code");
         }
     }
@@ -660,7 +1007,7 @@ pub fn must_ask(tool: &str, input: &Value, roots: &[String], pl: &Places) -> Opt
     let roots: Vec<String> = roots.iter().flat_map(|r| both(r)).collect();
     if tool == "Bash" {
         if let Some(cmd) = input.get("command").and_then(Value::as_str) {
-            found.extend(bash(cmd, &roots, pl));
+            found.extend(bash(cmd, &roots, pl, 0));
         }
     } else if [
         "Edit",
@@ -808,7 +1155,7 @@ static SENTENCE: LazyLock<[Regex; 5]> = LazyLock::new(|| {
             r"(?i)\b(push\w*|publish\w*|merg\w*|deploy\w*|releas\w*|post\w* to|send\w* (to|an? e-?mail)|e-?mail\w*|tweet\w*|pay\w*|purchas\w*|buy\w*|spend\w*)\b",
         ),
         rx(
-            r"(?i)\b(npx|uvx|bunx|pnpx|dlx|eval|inline code|python3? -c|node -e|ba?sh -c|curl[^.]*\|\s*\w*sh)\b",
+            r"(?i)\b(npx|uvx|bunx|pnpx|dlx|eval|pipx run|uv tool run|npm exec|(?:curl|wget)[^.]*\|\s*\w*sh)\b",
         ),
     ]
 });
