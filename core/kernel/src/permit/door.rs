@@ -25,6 +25,7 @@ req = json.load(sys.stdin)
 import kith_door
 from kith_paths import guest_scrub
 name, path, person, agent = req['door'], req['path'], req['person'], req['agent']
+basis = [b for b in req.get('basis') or [] if isinstance(b, str)]   # a room person's people
 env = guest_scrub(dict(os.environ), person)
 try:
     decl = kith_door.declared(os.path.join(env['KITH_AGENT_DIR'], 'capabilities.yaml'), name)
@@ -32,10 +33,13 @@ try:
     if not (kith_door.in_slice(real, agent, person) and os.path.isdir(real)):
         out = {'end': "The folder must be one of %s's folders under files/people/%s." % (person, person)}
     else:
-        v = kith_door.check(agent, person, kith_door.piece(decl), env)
+        v = kith_door.check(agent, person, kith_door.piece(decl), env, basis)
         state = v.get('state')
         if state == 'held':
             out = {'end': 'Access is being changed right now; try again in a minute.'}
+        elif state in ('not-ticked', 'widened') and person.startswith('room-'):
+            # a card's yes would tick the job for "room-<id>", who has no row: Kai ticks it for the person who lacks it
+            out = {'end': "%s A room's door is turned on for each person in People, not on a card here." % v.get('why')}
         elif state in ('not-ticked', 'widened'):
             out = {'card': True, 'real': real}
         elif not v.get('ok'):
@@ -57,6 +61,7 @@ req = json.load(sys.stdin)
 import kith_door
 from kith_paths import guest_scrub
 name, path, person, agent = req['door'], req['path'], req['person'], req['agent']
+basis = [b for b in req.get('basis') or [] if isinstance(b, str)]   # a room person's people
 env = guest_scrub(dict(os.environ), person)
 try:
     decl = kith_door.declared(os.path.join(env['KITH_AGENT_DIR'], 'capabilities.yaml'), name)
@@ -64,7 +69,7 @@ try:
         kith_door.prepare(agent, decl, env=env)
         out = {'prepared': True}
     else:
-        code, tail = kith_door.run(agent, person, decl, os.path.realpath(path), env)
+        code, tail = kith_door.run(agent, person, decl, os.path.realpath(path), env, basis=basis, gen=req.get('gen'))
         out = {'code': code, 'tail': tail}
 except kith_door.DoorError as e:
     out = {'end': 'The door did not run: %s' % e}
@@ -83,6 +88,26 @@ fn is_door(s: &str) -> bool {
         && b[1..]
             .iter()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+}
+
+/// A room person's door runs for the people the turn started with (`KITH_ROOM_MEMBERS`) and carries the room's gen then
+/// (`KITH_ROOM_GEN`); anyone else's has neither. A room person with no people leaves the basis empty, which kith-auth refuses.
+fn room_basis(env: &Env, person: &str) -> (Vec<String>, Value) {
+    if !crate::launch::room::is_room_person(person) {
+        return (vec![], Value::Null);
+    }
+    let get = |k: &str| env.get(k).unwrap_or_default();
+    let basis = get("KITH_ROOM_MEMBERS")
+        .split(',')
+        .map(|m| m.trim().to_lowercase())
+        .filter(|m| !m.is_empty())
+        .collect();
+    (
+        basis,
+        get("KITH_ROOM_GEN")
+            .parse::<i64>()
+            .map_or(Value::Null, Value::from),
+    )
 }
 
 fn step(env: &Env, kernel: &Path, script: &str, req: &Value, limit: Duration) -> Option<Value> {
@@ -111,10 +136,13 @@ pub fn run_door(a: &serde_json::Map<String, Value>, env: &Env, kernel: &Path) ->
     ) else {
         return "Doors are run from a guest's run only.".to_owned();
     };
+    // read before the scrub: the room's people and gen the turn started with (set by the host, never the guest)
+    let orig = env.clone();
     // nothing of the guest's folders goes to kith-auth, npm, the door's supervisor or a card (`kith-permit` scrubs the same way)
     let (env, _) = guest_scrub(env, kernel, person);
     let env = &env;
-    let mut req = json!({"door": name, "path": path, "person": person, "agent": agent});
+    let (basis, room_gen) = room_basis(&orig, person);
+    let mut req = json!({"door": name, "path": path, "person": person, "agent": agent, "basis": basis, "gen": room_gen});
     let Some(first) = step(env, kernel, CHECK, &req, CHECK_S) else {
         return BROKEN.to_owned();
     };

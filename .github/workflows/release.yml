@@ -63,18 +63,24 @@ jobs:
         run: cd serve/host && cargo build --release --locked -p kith-tts --target ${{ matrix.target }}
       - name: Build kith-stub (the conversation lock)
         run: cd serve/host && cargo build --release --locked -p kith-stub --target ${{ matrix.target }}
+      - name: Build kith-holder (the process holder Writer mode connects to)
+        run: cd serve/host && cargo build --release --locked -p kith-holder --target ${{ matrix.target }}
       - name: Pack
         env:
           KITH_STUB_BIN: serve/host/target/${{ matrix.target }}/release/kith-stub
+          KITH_HOLDER_BIN: serve/host/target/${{ matrix.target }}/release/kith-holder
           KITH_TTS_BIN: ${{ matrix.arch == 'arm64' && format('serve/host/target/{0}/release/kith-tts', matrix.target) || '' }}
         run: scripts/package-release.sh "${{ steps.v.outputs.version }}" ${{ matrix.arch }} "serve/host/target/${{ matrix.target }}/release/kith" dist
+      - name: The packed bin folder has every helper (both CPUs)
+        run: |
+          mkdir smoke && tar -C smoke -xzf dist/*.tar.gz
+          scripts/check-bin-dir.sh smoke/kith-*/bin
       - name: Smoke test (arm64 runs natively)
         if: matrix.arch == 'arm64'
         run: |
-          mkdir smoke && tar -C smoke -xzf dist/*.tar.gz
           smoke/kith-*/bin/kith --version
           smoke/kith-*/bin/kith serve install --help >/dev/null
-          test -x smoke/kith-*/bin/kith-stub
+          smoke/kith-*/bin/kith-holder --version
           # The packed stub must lock and launch a trivial command (KITH_REQUIRE_STUB is read by kernel/bin/kith, not by the stub).
           mkdir smoke/locks
           smoke/kith-*/bin/kith-stub --lock-dir "$PWD/smoke/locks" --key smoke -- true
@@ -255,7 +261,9 @@ jobs:
           ls -la dist
           app=dist/mac-universal/Kith.app
           lipo -archs "$app/Contents/MacOS/Kith"
-          for f in kith-serve kith-speech kith/bin/kith kith/bin/kith-stub; do echo "$f: $(lipo -archs "$app/Contents/Resources/$f")"; done
+          for f in kith-serve kith-speech kith/bin/kith kith/bin/kith-stub kith/bin/kith-holder; do echo "$f: $(lipo -archs "$app/Contents/Resources/$f")"; done
+          # The app installs Resources/kith as the CLI (kith-install.sh): it must carry every helper a release tarball does.
+          ../../scripts/check-bin-dir.sh "$app/Contents/Resources/kith/bin"
           codesign -dv "$app" 2>&1 | grep -E 'Signature|Authority|TeamIdentifier|flags' || true
           cat dist/latest-mac.yml
       - uses: actions/upload-artifact@v4

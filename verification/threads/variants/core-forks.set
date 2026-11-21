@@ -1,0 +1,8 @@
+CoreWriter = TRUE
+ClaudeForks = TRUE
+Terminals = {"t1"}
+MaxSends = 1
+OffTurnWakes = FALSE
+WrapperDies = FALSE
+OwnerNoAnswer = FALSE
+StartTerminalBorn = FALSE

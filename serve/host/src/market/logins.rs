@@ -2,7 +2,7 @@
 //! secure card the user fills in), then `type_login` types it into the focused field;
 //! the password reaches the screen, never the bot. Stored encrypted in the vault.
 use crate::store::Store;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -36,13 +36,6 @@ pub fn all(store: &Store) -> Result<Vec<Login>> {
 
 fn save_all(store: &Store, items: &[Login]) -> Result<()> {
     super::vault::write(store, SLOT, &serde_json::to_string(items)?)
-}
-
-pub fn get(store: &Store, id: &str) -> Result<Login> {
-    all(store)?
-        .into_iter()
-        .find(|l| l.id == id)
-        .ok_or_else(|| anyhow!("No saved login `{id}`; ask for one with request_login"))
 }
 
 pub fn list(store: &Store) -> Result<Value> {
@@ -88,18 +81,6 @@ pub fn remove(store: &Store, id: &str) -> Result<()> {
     save_all(store, &items)
 }
 
-/// Whether the focused window belongs to the login's site: the page's host is the
-/// site or one of its subdomains; without a page, the app's name is the site.
-pub fn matches(site: &str, url: Option<&str>, app: &str) -> bool {
-    match url.map(normalize_site).filter(|h| !h.is_empty()) {
-        Some(host) => {
-            let host = host.split(':').next().unwrap_or(&host).to_owned();
-            host == site || host.ends_with(&format!(".{site}"))
-        }
-        None => !app.is_empty() && app.eq_ignore_ascii_case(site),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,17 +90,5 @@ mod tests {
         assert_eq!(normalize_site("https://www.GitHub.com/login?x=1"), "github.com");
         assert_eq!(normalize_site("Slack"), "slack");
         assert_eq!(normalize_site("https://user@accounts.google.com"), "accounts.google.com");
-    }
-
-    #[test]
-    fn only_the_right_site_matches() {
-        assert!(matches("github.com", Some("https://github.com/login"), "Safari"));
-        assert!(matches("google.com", Some("https://accounts.google.com/signin"), "Chrome"));
-        assert!(!matches("github.com", Some("https://github.com.evil.io/login"), "Safari"));
-        assert!(!matches("github.com", Some("https://notgithub.com/"), "Safari"));
-        assert!(matches("slack", None, "Slack"));
-        assert!(!matches("github.com", None, "Terminal"));
-        // A page URL wins over the app name.
-        assert!(!matches("safari", Some("https://evil.io"), "Safari"));
     }
 }

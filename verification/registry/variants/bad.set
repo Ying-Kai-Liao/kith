@@ -1,0 +1,5 @@
+K1 = "new"
+K2 = "bad"
+K3 = "new"
+MaxCrash = 0
+MaxPrune = 0

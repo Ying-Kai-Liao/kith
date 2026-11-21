@@ -1,0 +1,29 @@
+usage: kith-lifecycle [-h] {sweep,status,intent} ...
+
+kith-lifecycle — what Kith does with a session no process runs (F12, designs/2026-10-24-lifecycle.md).
+
+  kith-lifecycle sweep [--session SID] [--at-sleep]
+                          the tick (kith-wake drain starts it): for each listed session with no live writer, the 54-minute
+                          decision of its idle period, once (rule 5): compact, sleep or end. Compact runs
+                          `claude -p --resume SID "/compact"` only while holding the session's writer claim and after
+                          checking again under it (rule 11), and under kith-stub, which holds the conversation's lock until claude exits (a run
+                          that holds it already: `busy`, no decision, the next sweep tries again; no stub: a warning, or a refusal
+                          with KITH_REQUIRE_STUB=1); the claim names the stub's pid, or claude's when there is none (claim-then-exec;
+                          claude descends from the stub), so it lasts while claude writes even if the sweep dies. End is written only under the claim too (rule 12). Prints one
+                          line per session it acted on. --at-sleep: ask now (a 5-minute cache has no timer; the wrapper
+                          calls it as a session goes to sleep).
+  kith-lifecycle status SID [--json]   what is known: how it ended (idle, quit, ... or crash), the decision, outstanding work
+  kith-lifecycle intent SID WHY PID   write an intent (before a signal; the host's stop paths do the same in Rust)
+
+Rules this keeps: one compactor per session: only a session with no live process and no claim is touched, and a live
+interactive one compacts itself at 54 minutes (Claude's own idle compaction); the compaction's own write is no turn, so it
+never restarts the idle clock; nothing here signals any process. Host bot sessions (ACP) have no registry file, so this
+never sees them; a session the host keeps a conversation for (resolveThread knows it) is skipped too: the host's own
+compactor (memory/compaction.rs while_idle) keeps those. A failed /compact is tried once per idle period. One sweep at a time
+(flock sessions/lifecycle.lock).
+
+positional arguments:
+  {sweep,status,intent}
+
+optional arguments:
+  -h, --help            show this help message and exit

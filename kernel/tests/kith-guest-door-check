@@ -190,12 +190,40 @@ rm -f "$SERVE/cloud-sync.json"
 "$AUTH" person bill --revoke >/dev/null 2>&1
 expect "revoked" "$(field "$(door bill "$DOOR")" state)" "revoked"
 "$AUTH" person bill --unrevoke >/dev/null 2>&1
+# a room person's door (rooms with people, rules 11-12): checked for every person of the basis, ANDed
+"$AUTH" person ann name=Ann >/dev/null 2>&1
+"$AUTH" member video ann mode=default >/dev/null 2>&1
+rdoor() { "$AUTH" door video room-g1 "$DOOR" --basis "$1" --json; }
+expect "ann is not ticked: the room's door is refused" "$(field "$(rdoor bill,ann)" ok)" "false"
+has "naming ann" "$(field "$(rdoor bill,ann)" why)" "ann: "
+expect "as not-ticked" "$(field "$(rdoor bill,ann)" state)" "not-ticked"
+"$AUTH" job video ann make-videos >/dev/null
+expect "ticked for both: it may start" "$(field "$(rdoor bill,ann)" ok)" "true"
+expect "in any order" "$(field "$(rdoor ann,bill)" ok)" "true"
+expect "one person alone is that person's own" "$(field "$(rdoor ann)" ok)" "true"
+"$AUTH" job video bill make-videos --rm >/dev/null
+expect "an untick of one is seen at the next check" "$(field "$(rdoor bill,ann)" ok)" "false"
+"$AUTH" job video bill make-videos >/dev/null
+"$AUTH" person ann --revoke >/dev/null 2>&1
+expect "a revoke of one: refused" "$(field "$(rdoor bill,ann)" state)" "revoked"
+"$AUTH" person ann --unrevoke >/dev/null 2>&1
+expect "no basis: refused" "$(field "$("$AUTH" door video room-g1 "$DOOR" --json)" ok)" "false"
+expect "the owner is no basis" "$(field "$(rdoor kai,bill)" ok)" "false"
+expect "nor another room person" "$(field "$(rdoor room-g2)" ok)" "false"
+expect "a basis for one person's own door is refused" "$(field "$("$AUTH" door video bill "$DOOR" --basis ann --json)" ok)" "false"
+printf '{"linked": true, "until": 1000}\n' > "$SERVE/cloud-sync.json"
+expect "all held: held" "$(field "$(KITH_SERVE_DIR=$SERVE KITH_SERVE_PORT=1 rdoor bill,ann)" state)" "held"
+"$AUTH" person bill --revoke >/dev/null 2>&1
+expect "a definite no (bill revoked) beats held (the sweep's recheck ends the door on it)" \
+  "$(field "$(KITH_SERVE_DIR=$SERVE KITH_SERVE_PORT=1 rdoor bill,ann)" state)" "revoked"
+"$AUTH" person bill --unrevoke >/dev/null 2>&1
+rm -f "$SERVE/cloud-sync.json"
 expect "kith door ls with no doors" "$("$KERNEL/bin/kith-door" ls)" "[]"
 
 # --- the box (macOS)
 NODE=$(command -v node || true)
 if [ ! -x /usr/bin/sandbox-exec ] || [ -z "$NODE" ]; then
-  expect "no sandbox-exec: a sweep ends nothing" "$("$KERNEL/bin/kith-door" sweep)" '{"ended": []}'
+  expect "no sandbox-exec: a sweep ends nothing" "$("$KERNEL/bin/kith-door" sweep)" '{"ended": [], "unknown": false}'
   [ "$fails" -eq 0 ] && echo "all ok (no box on this machine)" || { echo "$fails FAIL"; exit 1; }
   exit 0
 fi
@@ -409,5 +437,52 @@ has "a revoked person's door doesn't start" "$(run_door bill "$DIR")" "bill's ac
 rm -f "$DIR/hold"
 "$AUTH" job video bill make-videos --rm >/dev/null
 lacks "without the job and no host to ask, it doesn't run" "$(run_door bill "$DIR")" "render ended"
+
+
+# --- a room door (rooms with people): the claim keeps its basis; a sweep of any basis person ends it; the recheck ANDs
+"$AUTH" job video bill make-videos >/dev/null
+"$AUTH" job video ann make-videos >/dev/null
+RDIR=$KITH_HOME/agents/video/files/people/room-g1/proj
+mkdir -p "$RDIR" && cp -R "$DIR/." "$RDIR/"
+touch "$RDIR/hold"
+rm -f "$RDIR/renders/door.pid"
+room_door() {   # room_door FOLDER: a room person's door, for the people the host named and the gen the turn started in
+  exec env KITH_ROOM=g1 KITH_ROOM_MEMBERS="${MEMBERS-bill,ann}" KITH_ROOM_GEN=7 KITH_PERSON=room-g1 KITH_AGENT=video \
+    KITH_AGENT_DIR="$PKG" python3 -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("kith_permit", sys.argv[1])
+spec = importlib.util.spec_from_loader("kith_permit", loader); kp = importlib.util.module_from_spec(spec); loader.exec_module(kp)
+print(kp.run_door({"door": "render", "path": sys.argv[2]}))' "$KERNEL/bin/kith-permit" "$1"; }
+room_door "$RDIR" > "$T/room.out" &
+SUP=$!
+for _ in $(seq 1 100); do [ -s "$RDIR/renders/door.pid" ] && break; /bin/sleep 0.1; done
+CLAIM=$("$KERNEL/bin/kith-door" ls)
+has "a room door has a claim" "$CLAIM" '"person": "room-g1"'
+has "that holds its basis" "$CLAIM" '"basis": ["bill", "ann"]'
+has "the gen of the turn's start" "$CLAIM" '"gen": 7'
+has "at room level" "$CLAIM" '"level": "room"'
+DPID=$(cat "$RDIR/renders/door.pid")
+"$KERNEL/bin/kith-door" sweep >/dev/null
+expect "a sweep with nobody named leaves it" "$(alive "$DPID")" "alive"
+has "a sweep of one not in the basis ends nothing" "$("$KERNEL/bin/kith-door" sweep --person cy)" '"ended": []'
+"$AUTH" job video ann make-videos --rm >/dev/null
+has "an untick of one basis person: the recheck ends it" "$("$KERNEL/bin/kith-door" sweep)" '"ended": ["'
+wait "$SUP"
+expect "the door is gone" "$(alive "$DPID")" "gone"
+expect "and its claim" "$(claims)" "0"
+has "it no longer starts, and asks no card" "$(room_door "$RDIR")" "is turned on for each person in People"
+"$AUTH" job video ann make-videos >/dev/null
+rm -f "$RDIR/renders/door.pid"
+room_door "$RDIR" > "$T/room.out" &
+SUP=$!
+for _ in $(seq 1 100); do [ -s "$RDIR/renders/door.pid" ] && break; /bin/sleep 0.1; done
+DPID=$(cat "$RDIR/renders/door.pid")
+has "a sweep of a basis person (the claim names the room person) ends it" "$("$KERNEL/bin/kith-door" sweep --person ann)" '"ended": ["'
+wait "$SUP"
+expect "the door is gone" "$(alive "$DPID")" "gone"
+expect "and its claim" "$(claims)" "0"
+rm -f "$RDIR/hold"
+mkdir -p "$RDIR-2"
+has "a room person with no people named doesn't start" "$(MEMBERS= room_door "$RDIR-2")" "needs the people it runs for"
 
 [ "$fails" -eq 0 ] && echo "all ok" || { echo "$fails FAIL"; exit 1; }

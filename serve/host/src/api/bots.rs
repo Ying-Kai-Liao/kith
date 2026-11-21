@@ -17,6 +17,21 @@ fn lane_conversation(hub: &Hub, lane: &Lane) -> Value {
 }
 
 pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
+    // An invited person in a group room (set by `member_call` alone): the room's rules read and write for them, never
+    // the owner's arms below.
+    if let Some(person) = b["asRoomPerson"].as_str() {
+        use crate::chat::room_post;
+        let answer = match method {
+            "history" => Some(room_post::history(hub, person, &b).await?),
+            "thread" => Some(room_post::thread(hub, person, &b).await?),
+            "send" => Some(room_post::send(hub, person, &b).await?),
+            "react" => Some(room_post::react(hub, person, &b).await?),
+            _ => None,
+        };
+        if let Some(answer) = answer {
+            return Ok(ControlFlow::Break(answer));
+        }
+    }
     Ok(ControlFlow::Break(match method {
         "routineSchedule" => crate::routines::schedule_preview(&b, now_ms())?,
         "routines" => hub.routines.list(str_arg(&b, "botId")?),
@@ -35,11 +50,6 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             str_arg(&b, "id")?,
             b["rotate"].as_bool().unwrap_or(false),
         )?,
-        "routineCall" => crate::routines::call(hub, str_arg(&b, "botId")?, str_arg(&b, "name")?, &b["arguments"])?,
-        "memoryCall" => {
-            let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
-            crate::chat::memory::tool_call(hub, bot, actor_arg(&b, bot), name, &b["arguments"]).await?
-        }
         "chatCall" => {
             let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
             if name == "call_person" {
@@ -47,21 +57,16 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 crate::calls::ring_and_wait(hub, bot, reason, None, false).await?
             } else if name == crate::cards::secret::TOOL {
                 crate::cards::secret::chat_request(hub, bot, actor_arg(&b, bot), &b["arguments"]).await?
-            } else if crate::chat::profile::TOOLS.contains(&name) {
-                crate::chat::profile::call(hub, bot, name, &b["arguments"]).await?
             } else {
                 crate::chat::outbox::call(hub, actor_arg(&b, bot), name, &b["arguments"]).await?
             }
-        }
-        "teamCall" => {
-            let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
-            crate::chat::team::call(hub, actor_arg(&b, bot), name, &b["arguments"]).await?
         }
         "history" => {
             let bot = str_arg(&b, "botId")?;
             let before = b["beforeSeq"].as_i64().unwrap_or(i64::MAX);
             let limit = b["limit"].as_i64().unwrap_or(100).clamp(1, 500);
             let mut entries = hub.store.history(bot, before, limit)?;
+            crate::chat::room_post::mark_hidden(&hub.store, bot, &mut entries);
             crate::hqmem::summary::hide_forgotten(&hub.store, &mut entries);
             let conversation = lane_conversation(hub, &Lane::main(bot));
             json!({"entries": entries, "folder": hub.place_folder(bot, &Lane::main(bot)).await?, "conversation": conversation})
@@ -71,6 +76,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let (bot, root) = (str_arg(&b, "botId")?, str_arg(&b, "rootId")?);
             let lane = Lane::in_thread(bot, root);
             let mut entries = hub.store.thread(bot, root, 500)?;
+            crate::chat::room_post::mark_hidden(&hub.store, bot, &mut entries);
             crate::hqmem::summary::hide_forgotten(&hub.store, &mut entries);
             let conversation = lane_conversation(hub, &lane);
             json!({"entries": entries, "folder": hub.place_folder(bot, &lane).await?, "conversation": conversation})
@@ -82,6 +88,10 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             json!({"entries": entries, "folder": hub.place_folder(bot, &Lane::main(bot)).await?})
         }
         "createBot" => {
+            // C5: new agents come from `newKithAgent`; a host-native bot is no longer made. Only rooms are.
+            if b["kind"] != "group" {
+                bail!("A new agent is a kith agent: use New agent. Only a room is made here.");
+            }
             let mut b = b;
             b["id"] = "".into();
             // Only the hq sync makes a bot of an hq agent.
@@ -122,8 +132,11 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             if let Some(o) = b.as_object_mut() {
                 o.remove("builtin");
             }
+            // An agent joining a room with people is checked live here, off the blocking thread, and the save holds
+            // to what was checked (chat/room_people.rs).
+            let verified = crate::chat::room_people::verify_adds(hub, &b).await?;
             let hub = hub.clone();
-            json!({"bot": tokio::task::spawn_blocking(move || hub.update_bot(&b)).await??})
+            json!({"bot": tokio::task::spawn_blocking(move || hub.update_bot_checked(&b, verified.as_ref())).await??})
         }
         // The roster as the user dragged it, top first.
         "reorderBots" => {
@@ -194,6 +207,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 return Ok(ControlFlow::Break(json!({"entry": e})));
             }
             let row = hub.store.bot(bot)?.filter(|r| !r.deleted).ok_or_else(|| anyhow!("unknown bot"))?;
+            // C5: nothing is saved or queued for a host-native bot.
+            row.config.refuse_native()?;
             // `project` / `folder`: where the place this message runs in works, set before the turn starts, so a
             // new chat, thread or task picks its folder without a reset round trip. Checked before anything is saved.
             let start_in = hub.check_change(crate::agent::folder::Change::from_args(&b)?).await?;
@@ -277,7 +292,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 None
             };
             let e = hub
-                .add_entry(&lane, EntryKind::User, turn, &data)
+                .add_owner_post(&lane, turn, &data, row.config.is_group())
                 .ok_or_else(|| anyhow!("couldn't save the message"))?;
             // Before the turn starts, which launches with it.
             if let Some(engine) = engine
@@ -402,12 +417,9 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             hub.send_cmd(str_arg(&b, "botId")?, Cmd::NewSession)?;
             json!({})
         }
-        "memory" | "saveMemory" | "pinMemory" | "archiveMemory" | "forgetMemory" | "clearMemory" | "undoTidy"
-        | "undoDream" | "answerMemory" | "undoMemory" | "memoryFile" | "saveMemoryFile" | "deleteMemoryFile"
-        | "restoreMemoryFile" => crate::chat::memory::call(hub, method, &b).await?,
-        m if crate::chat::memory::HQ_METHODS.contains(&m) => {
+        m if crate::hqmem::HQ_METHODS.contains(&m) => {
             let (hub, method, b) = (hub.clone(), m.to_owned(), b.clone());
-            tokio::task::spawn_blocking(move || crate::chat::memory::hq_call(&hub, &method, &b)).await??
+            tokio::task::spawn_blocking(move || crate::hqmem::hq_call(&hub, &method, &b)).await??
         }
         "editHandoff" | "keepConversation" => crate::chat::handoff::call(hub, method, &b)?,
         "react" => {

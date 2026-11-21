@@ -93,6 +93,55 @@ check "launchd: broken plist named in errors.schedules, others kept" "is \"'dev.
 check "cost: this agent's rows only, windows by age" "is \"(d['cost']['today'], d['cost']['month'], d['cost']['all'], d['cost']['requests_month'], d['cost']['by_model_month'], d['cost']['since'] is not None)\" \"(0.5, 0.5, 2.5, 1, [{'model': 'claude-sonnet-5-5', 'usd': 0.5}], True)\""
 check "memory: md files relative to dir, with sizes" "is \"(d['memory']['dir'] == '$A/memory', sorted(f['path'] for f in d['memory']['files']), d['memory']['total_bytes'])\" \"(True, ['MEMORY.md', 'projects/alpha/plan.md'], 31)\""
 
+# switched to the Kith core: the same rows, from the core. A stub program plays the core; the real state.json is a tombstone
+# (and says so), so any read of it would show.
+UNSW=$(printf %s "$OUT" | python3 -c 'import json,sys; print(json.dumps([j for j in json.load(sys.stdin)["schedules"] if j["source"] == "kith"]))')
+cat > "$T/prog" <<'PYEOF'
+#!/usr/bin/env python3
+import json, os, sys
+T = os.path.dirname(os.path.realpath(__file__))
+sys.stdin.read()
+open(T + '/calls', 'a').write(sys.argv[3] + '\n')
+if os.path.exists(T + '/down'):
+    sys.stderr.write('no core daemon answers\n'); sys.exit(3)
+if os.path.exists(T + '/hang'):
+    import time; time.sleep(60)
+if sys.argv[3] == 'schedule.jobs':
+    print(json.dumps({'jobs': [
+        {'agent': 'echo', 'id': 'daily', 'cron': '0 8 * * *', 'task': 'say hi', 'paused': False, 'next': '2099-01-01T08:00'},
+        {'agent': 'echo', 'id': 'off', 'cron': '0 9 * * 1', 'task': 'x', 'paused': True, 'person': 'sam', 'next': '2099-01-01T09:00'},
+        {'agent': 'echo', 'id': 'hook', 'trigger': {'webhook': 'x'}, 'task': 'y', 'paused': False, 'next': None}]}))
+else:
+    print(json.dumps({'runs': [{'agent': 'echo', 'id': 'daily', 'at': '2026-10-22T08:00', 'why': 'due', 'pid': 1, 'log': '/x',
+                                'running': False, 'state': os.environ.get('RUN_STATE', 'done')}]}))
+PYEOF
+chmod +x "$T/prog"; export KITH_BIN=$T/prog
+printf '{"state":"tombstone"}' > "$KITH_MACHINE/sched/state.json"
+mkdir -p "$KITH_MACHINE/core/cutover"; printf 'state=switched\n' > "$KITH_MACHINE/core/cutover/schedules.switch"
+OUT=$("$KITH" echo --info-json 2>/dev/null); rc=$?
+SW=$(printf %s "$OUT" | python3 -c 'import json,sys; print(json.dumps([j for j in json.load(sys.stdin)["schedules"] if j["source"] == "kith"]))')
+cat > "$T/same.py" <<'PYEOF'
+import json, sys
+a, b = [json.loads(x) for x in sys.argv[1:]]
+k = lambda j: {x: j[x] for x in j if x != 'next_run'}
+sys.exit(0 if [k(j) for j in a] == [k(j) for j in b] and [j['next_run'] is None for j in a] == [j['next_run'] is None for j in b] else 1)
+PYEOF
+check "switched: same rows as the files gave (ids, cron, task, paused, person, last run and status), never the tombstone" "[ $rc = 0 ] && python3 $T/same.py '$UNSW' '$SW'"
+check "switched: next_run is RFC 3339 with an offset, no error, launchd rows kept, a trigger-only job left out" "is \"(len(d['schedules']), d['errors'].get('schedules') is None or 'bad.plist' in d['errors']['schedules'])\" \"(5, True)\" && is \"bool(__import__('re').fullmatch(r'\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d[+-]\\d\\d:\\d\\d', [j for j in d['schedules'] if j['id'] == 'daily'][0]['next_run']))\" True"
+OUT=$(RUN_STATE=failed "$KITH" echo --info-json 2>/dev/null)
+check "switched: a failed run says failed" "is \"[j['last_status'] for j in d['schedules'] if j['id'] == 'daily']\" \"['failed']\""
+touch "$T/down"; OUT=$("$KITH" echo --info-json 2>/dev/null); rc=$?
+check "switched, core down: exit 0, the reason in errors.schedules, no kith rows, launchd rows kept" "[ $rc = 0 ] && is \"(sorted(j['source'] for j in d['schedules']), 'not answering' in d['errors']['schedules'], 'bad.plist' in d['errors']['schedules'])\" \"(['launchd', 'launchd', 'launchd'], True, True)\""
+rm "$T/down"; touch "$T/hang"; OUT=$("$KITH" echo --info-json 2>/dev/null); rc=$?; rm "$T/hang"
+check "switched, core hung: the page still comes back, in about the cap, saying the core did not answer" "[ $rc = 0 ] && is \"('did not answer' in d['errors']['schedules'], d['skills'] is not None)\" \"(True, True)\""
+OUT=$(RUN_STATE=running "$KITH" echo --info-json 2>/dev/null)
+check "switched: a 'running' run whose process is gone is not shown as running" "is \"[j['last_status'] for j in d['schedules'] if j['id'] == 'daily']\" \"['done']\""
+printf 'state=stepping\n' > "$KITH_MACHINE/core/cutover/schedules.switch"
+printf '{"tick":"2026-10-22T10:00","last":{"echo/daily":{"at":"2026-10-22T08:00","pid":999999,"log":"/x","why":"due"}}}\n' > "$KITH_MACHINE/sched/state.json"
+: > "$T/calls"; OUT=$("$KITH" echo --info-json 2>/dev/null)
+check "stepping: the files again, the core is not asked" "is \"[j['id'] for j in d['schedules'] if j['source'] == 'kith']\" \"['daily', 'off']\" && [ ! -s $T/calls ]"
+rm -f "$KITH_MACHINE/core/cutover/schedules.switch"; unset KITH_BIN
+
 # each part fails soft
 printf 'not json' > "$KITH_MACHINE/sched/state.json"; printf '{broken' > "$A/jobs.json"; printf '{broken' > "$A/role/mcp.json"
 rm "$KITH_MACHINE/cost.db"

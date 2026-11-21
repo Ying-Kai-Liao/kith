@@ -1,0 +1,1 @@
+{"v": 1, "sessionId": "full", "agent": "house", "cwd": "/tmp", "transcriptPath": "/tmp/full.jsonl", "pid": 4242, "project": null, "source": "startup", "resumedFrom": null, "startedAt": "2026-11-17T10:00:00Z", "account": "claude", "kind": "terminal", "label": "terminal", "procStart": null, "recordedAt": 1763373600000000000}

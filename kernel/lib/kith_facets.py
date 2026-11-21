@@ -271,7 +271,7 @@ def _tag(path, text, scope):
 #
 # A room note (memory/rooms/<room>/...) loads or is recalled only where everyone present was there when it was written.
 # The record lives in the state folder (<state>/room-ledger/<agent>/<room>.json: note path under memory/ -> sorted person
-# ids, the owner implied), written by the kith-room-ledger hook of the run itself from the host's environment, never from
+# ids, the owner implied), written by the kith-room-ledger hook of the run itself (`kith kernel room-ledger`, core/kernel/src/room_ledger/; bin/kith-room-ledger forwards) from the host's environment, never from
 # the note's own frontmatter, and a guest's sandbox can neither read nor write the state folder's ledger. A note with no
 # record (written before this, by a shell, or in an unknown room) is owner-only: it loads only where nobody but the owner
 # is present. Only a Kith app group the host read just now can be owner-only (KITH_ROOM_OWNER_ONLY=1, set by the host
@@ -507,7 +507,10 @@ def main(argv):
     members = None if ids is None else [{'kind': 'person', 'id': m, 'rooms': [room]} for m in ids]
     # Room membership lives with the host, not kith-auth: a person its member list names is in this group room, like
     # every other member above (the ledger still decides which notes reach them). A bot guest's KITH_ROOM is not trusted.
-    if a.kind == 'person' and ids and a.person in ids and ID.match(room) and room not in reader['rooms']:
+    # A room person (room-<id>, the host's own id for the turns of a room with people) is the room itself: never named in
+    # the list, which is its basis.
+    if a.kind == 'person' and ids and (a.person in ids or a.person.startswith('room-')) and ID.match(room) \
+            and room not in reader['rooms']:
         reader['rooms'].append(room)
     ledger = read_ledger(a.agent, room) if room not in ('', '?') and ID.match(room) else {}
     out = load_memory(a.agent, a.home, a.person_file, reader, room, [a.project] if a.project else [], cap, members, ledger)

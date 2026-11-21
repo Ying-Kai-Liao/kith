@@ -58,7 +58,12 @@ fn the_rows_are_the_hosts_alone() {
         "hostclaim.show",
         "hostclaim.cancel",
         "hostclaim.park",
+        "hostclaim.strays",
+        "hostclaim.queued",
         "hostclaim.unpark",
+        "hostclaim.proc",
+        "hostclaim.procGone",
+        "hostclaim.adopt",
     ] {
         let m = kith_api::method(name).unwrap_or_else(|| panic!("{name} is not in the table"));
         assert_eq!(m.principals, &[Principal::Host], "{name}");
@@ -227,21 +232,36 @@ fn a_turn_claim_goes_through_claim_next() {
                 "prompt": "hi", "revokeSeen": 0}),
     );
     let turn = q["turn"].as_i64().unwrap();
-    let ask = json!({"conversation": "s1", "turn": turn, "person": "", "revokeSeen": 0, "cwd": "/work",
+    let ask = json!({"conversation": "s1", "turn": turn, "person": "", "revokeSeen": 0, "cwd": "/work", "account": "claude",
         "sessionId": "s1", "home": m.join("home"), "kernel": m.join("kernel"),
         "env": {"KITH_MACHINE": m, "KITH_AGENTS": m.join("agents")}});
-    // A direct turn claim is refused by the claims API itself: this row is the only way in and it is claim_next. No
-    // account is set up on this tmp machine, so it answers claimed or exhausted; it never skips its pick.
+    // A direct turn claim is refused by the claims API itself: this row is the only way in and it is claim_next. Accounts
+    // are not switched on this tmp machine, so the account the host sends (what Shadow and Writer mode both send) is the
+    // one recorded.
     let got = row(&mut core, "hostclaim.turn", &ask);
-    let status = got["status"].as_str().unwrap_or_default();
-    assert!(status == "claimed" || status == "exhausted", "{got}");
-    if status == "claimed" {
-        let again = row(&mut core, "hostclaim.turn", &ask);
-        assert!(
-            again["refused"] == "held" || again["refused"] == "notWaiting",
-            "{again}"
-        );
-    }
+    assert_eq!(got["status"], "claimed", "{got}");
+    assert_eq!(got["account"], "claude", "{got}");
+    let again = row(&mut core, "hostclaim.turn", &ask);
+    assert!(
+        again["refused"] == "held" || again["refused"] == "notWaiting",
+        "{again}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unswitched_turn_claim_without_the_hosts_account_is_an_error_not_a_pick() {
+    let (_t, mut core, m) = world();
+    let q = row(
+        &mut core,
+        "hostclaim.enqueue",
+        &json!({"conversation": "s1", "agent": "echo", "engine": "claude", "source": "app", "person": "",
+                "prompt": "hi", "revokeSeen": 0}),
+    );
+    let ask = json!({"conversation": "s1", "turn": q["turn"], "person": "", "revokeSeen": 0, "cwd": "/work",
+        "sessionId": "s1", "home": m.join("home"), "kernel": m.join("kernel"),
+        "env": {"KITH_MACHINE": m, "KITH_AGENTS": m.join("agents")}});
+    assert!(call_at(&mut core, "hostclaim.turn", &ask, MS).is_err());
 }
 
 /// A queued turn claimed (as `claim_next` does, through the claims API) and redeemed on this process; its claim id and turn.
@@ -381,4 +401,288 @@ fn a_claim_left_ending_by_a_stop_is_ended_by_done_and_the_turn_stays_cancelled()
         terminal(&mut core, "s1", "")["claimId"].is_i64(),
         "claimable again"
     );
+}
+
+fn room(core: &mut Core, extra: &Value) -> Value {
+    let mut p = json!({
+        "conversation": "rc1", "agent": "echo", "engine": "claude", "source": "room",
+        "person": "room-r1", "prompt": "hi", "revokeSeen": 0, "level": "room", "basis": ["ann"],
+        "epochs": {"ann": 0}, "room": "r1", "gen": 4, "joinEpoch": 1, "author": "ann", "budget": 1,
+    });
+    for (k, v) in extra.as_object().unwrap() {
+        p[k] = v.clone();
+    }
+    row(core, "hostclaim.enqueue", &p)
+}
+
+/// The room fields of `hostclaim.enqueue` and the three process rows, as the host calls them: refusals are data, a retry
+/// with the same `key` answers the same turn.
+#[test]
+fn the_room_rows_carry_the_basis_the_budget_and_the_processes() {
+    let (_t, mut core, _m) = world();
+    let root = room(&mut core, &json!({}));
+    let root_id = root["turn"].as_i64().unwrap_or_else(|| panic!("{root}"));
+    let follow = json!({"author": "bot:1", "budget": null, "budgetFrom": root_id, "key": "k"});
+    let one = room(&mut core, &follow.clone());
+    assert!(one["turn"].is_i64(), "{one}");
+    assert_eq!(
+        room(&mut core, &follow)["turn"],
+        one["turn"],
+        "a retry is the same turn"
+    );
+    let spent = room(
+        &mut core,
+        &json!({"author": "bot:1", "budget": null, "budgetFrom": one["turn"]}),
+    );
+    assert_eq!(spent["refused"], "budget", "{spent}");
+    let bot = room(&mut core, &json!({"author": "bot:1"}));
+    assert_eq!(bot["refused"], "other", "{bot}");
+    let bare = room(&mut core, &json!({"basis": []}));
+    assert_eq!(bare["refused"], "other", "{bare}");
+    // ann is revoked: the same enqueue with the epoch she had is refused as revoked.
+    crate::conversations::claims::revoke_person(&mut core, "ann", MS).expect("revoke");
+    let stale = room(&mut core, &json!({"key": "k2"}));
+    assert_eq!(stale["refused"], "revoked", "{stale}");
+    // The key of the conversation: a second (agent, room, epoch) row is refused as data.
+    let dup = row(
+        &mut core,
+        "hostclaim.ensure",
+        &json!({"conversation": "rc2", "agent": "echo", "engine": "claude", "room": "r1", "joinEpoch": 1}),
+    );
+    assert_eq!(dup["refused"], "other", "{dup}");
+    // Processes: register, move, revoke-reach, forget.
+    let w = json!({"pid": 900, "started": "e900", "instance": "kith-serve-host/1-a", "person": "bob", "agent": "echo", "revokeSeen": 0});
+    assert_eq!(row(&mut core, "hostclaim.proc", &w)["registered"], true);
+    assert_eq!(
+        row(
+            &mut core,
+            "hostclaim.procGone",
+            &json!({"pid": 900, "started": "e900"})
+        )["gone"],
+        true
+    );
+    assert_eq!(
+        row(
+            &mut core,
+            "hostclaim.procGone",
+            &json!({"pid": 900, "started": "e900"})
+        )["gone"],
+        false
+    );
+    let adopted = row(
+        &mut core,
+        "hostclaim.adopt",
+        &json!({"instance": "kith-serve-host/2-b"}),
+    );
+    assert_eq!(adopted["ended"], json!([]), "{adopted}");
+}
+
+#[test]
+fn bad_room_params_are_errors_not_quiet_choices() {
+    let (_t, mut core, _m) = world();
+    let both = json!({
+        "conversation": "rc1", "agent": "echo", "engine": "claude", "source": "room", "person": "room-r1",
+        "prompt": "hi", "revokeSeen": 0, "level": "room", "basis": ["ann"], "epochs": {"ann": 0},
+        "room": "r1", "joinEpoch": 1, "author": "ann", "budget": 1, "budgetFrom": 5,
+    });
+    assert!(call_at(&mut core, "hostclaim.enqueue", &both, MS).is_err());
+    // A guest's process without the epoch is an error; a stale one is data.
+    let w = json!({"pid": 9, "started": "e9", "instance": "kith-serve-host/1-a", "person": "ann"});
+    assert!(call_at(&mut core, "hostclaim.proc", &w, MS).is_err());
+    crate::conversations::claims::revoke_person(&mut core, "ann", MS).expect("revoke");
+    let mut stale = w.clone();
+    stale["revokeSeen"] = json!(0);
+    assert_eq!(
+        row(&mut core, "hostclaim.proc", &stale)["refused"],
+        "revoked"
+    );
+}
+
+#[test]
+fn the_row_refuses_a_room_principal_or_room_conversation_without_the_room_turn() {
+    let (_t, mut core, _m) = world();
+    let a = row(
+        &mut core,
+        "hostclaim.enqueue",
+        &json!({"conversation": "x1", "agent": "echo", "engine": "claude", "source": "room",
+                "person": "room-r1", "prompt": "hi", "revokeSeen": 0, "key": "k"}),
+    );
+    assert_eq!(a["refused"], "other", "{a}");
+    let b = row(
+        &mut core,
+        "hostclaim.enqueue",
+        &json!({"conversation": "x2", "agent": "echo", "engine": "claude", "source": "app",
+                "person": "ann", "prompt": "hi", "revokeSeen": 0, "room": "r1", "joinEpoch": 1}),
+    );
+    assert_eq!(b["refused"], "other", "{b}");
+}
+
+/// P6: the host sends a key with every enqueue, so a retry after a lost reply is the same turn, also for a plain owner turn
+/// whose basis is empty; `show` names the turn a claim runs, so the host resumes only its own.
+#[test]
+fn a_keyed_owner_turn_retried_is_one_row_and_show_names_the_claims_turn() {
+    use crate::conversations::claims::{Kind, NewClaim, claim};
+    let (_t, mut core, _m) = world();
+    ensure(&mut core, "s1");
+    let ask = |key: &str| {
+        json!({"conversation": "s1", "agent": "echo", "engine": "claude", "source": "app", "person": "owner",
+               "prompt": "", "revokeSeen": 0, "key": key})
+    };
+    let first = row(&mut core, "hostclaim.enqueue", &ask("accept-1"))["turn"]
+        .as_i64()
+        .unwrap();
+    let again = row(&mut core, "hostclaim.enqueue", &ask("accept-1"))["turn"]
+        .as_i64()
+        .unwrap();
+    assert_eq!(first, again, "the retry lands on the same row");
+    let rows: i64 = core
+        .conn()
+        .query_row(
+            "SELECT count(*) FROM turns WHERE conversation = 's1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(rows, 1);
+    let other = row(&mut core, "hostclaim.enqueue", &ask("accept-2"))["turn"]
+        .as_i64()
+        .unwrap();
+    assert_ne!(other, first, "another key is another turn");
+    let id = claim(
+        &mut core,
+        &NewClaim {
+            conversation: "s1",
+            kind: Kind::Turn,
+            person: "owner",
+            turn: Some(first),
+            holder_instance: Some("kith-serve-host"),
+            account: None,
+            process: None,
+            revoke_seen: 0,
+        },
+        MS,
+    )
+    .expect("claim")
+    .claim_id;
+    let shown = row(&mut core, "hostclaim.show", &json!({"claimId": id}));
+    assert_eq!(shown["claim"]["turn"], first, "{shown}");
+    ensure(&mut core, "s2");
+    let t = terminal(&mut core, "s2", "");
+    let shown = row(
+        &mut core,
+        "hostclaim.show",
+        &json!({"claimId": t["claimId"]}),
+    );
+    assert!(
+        shown["claim"]["turn"].is_null(),
+        "a terminal claim runs no turn: {shown}"
+    );
+}
+
+#[test]
+fn strays_lists_the_turns_with_a_host_key_that_still_wait_and_nothing_else() {
+    let (_t, mut core, _m) = world();
+    let enqueue = |core: &mut Core, conv: &str, key: Option<&str>| {
+        let mut p = json!({"conversation": conv, "agent": "echo", "engine": "claude", "source": "app", "person": "",
+                           "prompt": "", "revokeSeen": 0});
+        if let Some(k) = key {
+            p["key"] = json!(k);
+        }
+        row(core, "hostclaim.enqueue", &p)["turn"].as_i64().unwrap()
+    };
+    let keyed = enqueue(&mut core, "s1", Some("k-1"));
+    let _core_made = enqueue(&mut core, "s2", None);
+    let parked = enqueue(&mut core, "s3", Some("k-3"));
+    row(
+        &mut core,
+        "hostclaim.park",
+        &json!({"turn": parked, "reason": "lock_busy"}),
+    );
+    let gone = enqueue(&mut core, "s4", Some("k-4"));
+    row(
+        &mut core,
+        "hostclaim.cancel",
+        &json!({"turn": gone, "reason": "test"}),
+    );
+    let listed = row(&mut core, "hostclaim.strays", &json!({}));
+    let mut got: Vec<(i64, String)> = listed["turns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| {
+            (
+                t["turn"].as_i64().unwrap(),
+                t["key"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![(keyed, "k-1".to_owned()), (parked, "k-3".to_owned())],
+        "{listed}"
+    );
+}
+
+#[test]
+fn queued_lists_the_schedule_turns_no_host_began_and_says_which_ran_before() {
+    use crate::conversations::claims::{self, Kind, NewClaim};
+    let (_t, mut core, _m) = world();
+    let enqueue = |core: &mut Core, conv: &str, source: &str, key: Option<&str>| {
+        let mut p = json!({"conversation": conv, "agent": "echo", "engine": "claude", "source": source,
+                           "person": "sam", "prompt": "do it", "revokeSeen": 0, "deadline": MS + 60_000});
+        if let Some(k) = key {
+            p["key"] = json!(k);
+        }
+        row(core, "hostclaim.enqueue", &p)["turn"].as_i64().unwrap()
+    };
+    let fired = enqueue(&mut core, "schedule:echo:daily:claude", "schedule", None);
+    core.conn()
+        .execute(
+            "INSERT INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES ('echo', 'daily', 's1', 'fired', ?1, 1)",
+            [fired.to_string()],
+        )
+        .unwrap();
+    let _hosts = enqueue(&mut core, "s1", "schedule", Some("k-1"));
+    let _app = enqueue(&mut core, "s2", "app", None);
+    // A fired turn whose claim was redeemed and then put back (a restart): listed, and said to have run before.
+    let ran = enqueue(&mut core, "schedule:echo:hourly:claude", "schedule", None);
+    let req = NewClaim {
+        conversation: "schedule:echo:hourly:claude",
+        kind: Kind::Turn,
+        person: "sam",
+        turn: Some(ran),
+        holder_instance: Some("kith-serve-host/1-a"),
+        account: None,
+        process: None,
+        revoke_seen: 0,
+    };
+    let id = claims::claim(&mut core, &req, MS).unwrap().claim_id;
+    claims::redeem(&mut core, id, 900, "e900", "kith-serve-host/1-a", MS).unwrap();
+    row(
+        &mut core,
+        "hostclaim.stop",
+        &json!({"claimId": id, "reason": "test", "requeue": true}),
+    );
+    let listed = row(&mut core, "hostclaim.queued", &json!({}));
+    let turns = listed["turns"].as_array().unwrap();
+    assert_eq!(turns.len(), 2, "{listed}");
+    let one = &turns[0];
+    assert_eq!(one["turn"], fired);
+    assert_eq!(one["conversation"], "schedule:echo:daily:claude");
+    assert_eq!(one["agent"], "echo");
+    assert_eq!(one["engine"], "claude");
+    assert_eq!(one["job"], "daily");
+    assert_eq!(one["person"], "sam");
+    assert_eq!(
+        one["owner"],
+        Value::Null,
+        "no owner in these tables: unknown, not false"
+    );
+    assert_eq!(one["prompt"], "do it");
+    assert_eq!(one["deadline"], MS + 60_000);
+    assert_eq!(one["redeemedBefore"], false);
+    assert_eq!(turns[1]["turn"], ran);
+    assert_eq!(turns[1]["redeemedBefore"], true, "{listed}");
+    assert!(turns[1]["job"].is_null(), "no fire row names it");
 }

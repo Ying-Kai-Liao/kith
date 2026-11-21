@@ -485,3 +485,7 @@ button.member-row:hover {
   flex: 1;
   min-width: 0;
 }
+
+/* A flagged native row: one line and two actions where its composer or settings would be. */
+.native-notice { padding: 10px 16px 14px; align-items: flex-start; }
+.native-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; }

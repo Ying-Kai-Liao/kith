@@ -17,6 +17,7 @@ fn who(person: &str) -> RunIdentity {
         claim: None,
         room: None,
         project: Some("alpha".into()),
+        members: Vec::new(),
     }
 }
 
@@ -107,7 +108,7 @@ fn a_token_that_resolved_before_the_revoke_is_refused_at_the_run_door() {
     let me = who("bot-a");
     let ask = |rig: &Rig| {
         rig.core
-            .call_run(&me, "run.projectId", &json!({"args": []}))
+            .call_run(&me, "run.projectId", &json!({"args": []}), true)
     };
     assert_eq!(ask(&rig).unwrap()["stdout"], "alpha\n");
     // The core call that revokes sam; the table is not told here, as if the request had resolved just before.
@@ -129,7 +130,7 @@ fn a_removed_person_is_refused_at_the_run_door_and_a_ghost_never_mints() {
     let amy = who("amy");
     let ask = |rig: &Rig| {
         rig.core
-            .call_run(&amy, "run.projectId", &json!({"args": []}))
+            .call_run(&amy, "run.projectId", &json!({"args": []}), true)
     };
     assert!(ask(&rig).is_ok());
     call_with(
@@ -140,11 +141,71 @@ fn a_removed_person_is_refused_at_the_run_door_and_a_ghost_never_mints() {
     )
     .unwrap();
     assert!(matches!(ask(&rig), Err(crate::error::Error::NotAllowed(_))));
+    let allowed = |rig: &Rig, id: &str, switched| {
+        crate::call::run_identity_allowed(rig.core.conn(), &who(id), switched, "run.mint")
+    };
     assert!(
-        crate::call::run_person_allowed(rig.core.conn(), "ghost", "run.mint").is_err(),
-        "an id that was never a person"
+        allowed(&rig, "ghost", true).is_err(),
+        "an id that was never a person, once the authority is the core's"
     );
-    assert!(crate::call::run_person_allowed(rig.core.conn(), "sam", "run.mint").is_ok());
+    assert!(allowed(&rig, "sam", true).is_ok());
+    // Before the switch core.db knows only the imported people: a person invited since is let through, a removed one
+    // (retired) and a revoked one are not.
+    assert!(
+        allowed(&rig, "ghost", false).is_ok(),
+        "invited after the import"
+    );
+    assert!(allowed(&rig, "amy", false).is_err(), "removed: retired");
+}
+
+#[test]
+fn a_room_persons_basis_decides_and_a_revoked_member_ends_the_token() {
+    let mut rig = Rig::new(&base());
+    let room = |person: &str, room: &str, members: &[&str]| RunIdentity {
+        room: Some(room.into()),
+        members: members.iter().map(|m| (*m).to_owned()).collect(),
+        ..who(person)
+    };
+    let allowed = |rig: &Rig, r: &RunIdentity| {
+        crate::call::run_identity_allowed(rig.core.conn(), r, true, "run.mint")
+    };
+    assert!(allowed(&rig, &room("room-grp1-9", "grp1", &["sam", "bot-a"])).is_ok());
+    assert!(
+        allowed(&rig, &room("room-grp1-9", "grp1", &[])).is_err(),
+        "a room person is for somebody"
+    );
+    assert!(
+        allowed(&rig, &room("room-grp2-9", "grp1", &["sam"])).is_err(),
+        "another room's person"
+    );
+    // The id is the host's slug of the room, compared by its parts: room `a` is not room `a-b`, and punctuation works.
+    assert!(allowed(&rig, &room("room-a-b-1", "a", &["sam"])).is_err());
+    assert!(allowed(&rig, &room("room-a-1", "a-b", &["sam"])).is_err());
+    assert!(allowed(&rig, &room("room-g-1-x-3", "G-1:x", &["sam"])).is_ok());
+    assert!(allowed(&rig, &room("room-grp1-x", "grp1", &["sam"])).is_err());
+    assert!(
+        allowed(&rig, &room("sam", "grp1", &["sam"])).is_err(),
+        "a basis is a room person's only"
+    );
+    assert!(
+        allowed(&rig, &room("room-grp1-9", "grp1", &["sam", "ghost"])).is_err(),
+        "every member counts"
+    );
+    // A suspended member ends the room token (the tokens of a revoke are matched on the basis too).
+    let t = RunTokens::with(yes, |_| Some("s".into()));
+    let (_, minted) = t
+        .mint(room("room-grp1-9", "grp1", &["sam", "bot-a"]))
+        .unwrap();
+    call_with(
+        &mut rig.core,
+        &rig.c,
+        "people.suspend",
+        &json!({"id": "sam"}),
+    )
+    .unwrap();
+    assert!(allowed(&rig, &minted).is_err());
+    assert_eq!(t.end_people(&["sam"]), 1);
+    assert!(!t.is_live(&minted.run_id));
 }
 
 #[test]

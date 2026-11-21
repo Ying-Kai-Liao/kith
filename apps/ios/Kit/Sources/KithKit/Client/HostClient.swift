@@ -255,10 +255,17 @@ public extension HostClient {
         return res.bot
     }
 
-    func createBot(_ draft: BotDraft) async throws -> Bot {
-        struct Res: Decodable { var bot: Bot }
-        let res: Res = try await call("createBot", draft)
-        return res.bot
+    /// Makes a kith agent (`kith new --json`; owner only). A refusal throws the host's own words. The host makes no
+    /// host-native bot any more: `createBot` is for rooms (`createGroup`).
+    func newKithAgent(_ params: [String: String]) async throws -> NewAgent.Answer {
+        try await call("newKithAgent", params, timeout: 240)
+    }
+
+    /// Writes a flagged native row out as a folder (owner only) and returns where. Again overwrites the bundle in place.
+    func exportHostBot(botId: String) async throws -> String {
+        struct Res: Decodable { var path: String }
+        let res: Res = try await call("exportHostBot", ["botId": botId], timeout: 60)
+        return res.path
     }
 
     func updateBot(_ draft: BotDraft) async throws -> Bot {
@@ -308,17 +315,17 @@ public extension HostClient {
     /// `budget`: to a group only, the turns this message gives the room (clamped to 1...100).
     func send(botId: String, text: String, clientNonce: String, threadId: String? = nil, attachments: [String]? = nil,
               pasted: [String]? = nil, newTask: Bool = false, start: FolderChoice? = nil, via: String? = nil,
-              budget: Int? = nil) async throws -> Entry {
+              budget: Int? = nil, stay: Int64? = nil) async throws -> Entry {
         struct Body: Encodable {
             var botId: String; var text: String; var clientNonce: String; var threadId: String?; var attachments: [String]?
             var pasted: [String]?; var newTask: Bool?; var project: String?; var folder: String?; var via: String?
-            var budget: Int?
+            var budget: Int?; var stay: Int64?
         }
         struct Res: Decodable { var entry: Entry }
         let body = Body(botId: botId, text: text, clientNonce: clientNonce, threadId: threadId, attachments: attachments,
                         pasted: pasted?.isEmpty == false ? pasted : nil, newTask: newTask ? true : nil,
                         project: start?.projectId, folder: start?.folderPath, via: via,
-                        budget: budget.map(Turns.clamp))
+                        budget: budget.map(Turns.clamp), stay: stay)
         do {
             let res: Res = try await call(.send, body)
             return res.entry

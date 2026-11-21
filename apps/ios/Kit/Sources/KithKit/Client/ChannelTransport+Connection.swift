@@ -35,10 +35,14 @@ extension ChannelTransport {
                     // The relay said the computer is off: keep saying so rather than "can't reach".
                     if case .hostOffline = state {} else { setState(.failed(reason)) }
                 }
-                let deadline = ContinuousClock.now + backoff.next()
-                while !closed, !restartRequested, ContinuousClock.now < deadline {
+                let deadline = ContinuousClock.now + (retryDelay?() ?? backoff.next())
+                // A kick ends the wait early but keeps `backoff`: a kicked attempt that fails keeps growing the delay.
+                inBackoff = true
+                while !closed, !restartRequested, !kickRequested, ContinuousClock.now < deadline {
                     await stateChange(until: deadline)
                 }
+                inBackoff = false
+                kickRequested = false
                 restartRequested = false
             }
         }

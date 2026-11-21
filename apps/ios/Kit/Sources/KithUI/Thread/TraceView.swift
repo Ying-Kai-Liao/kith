@@ -60,7 +60,7 @@ private struct TraceRow: View {
         case "agent":
             VStack(alignment: .leading, spacing: 4) {
                 Text(d.final == true ? "Reply" : "Said").font(.caption2.bold()).foregroundStyle(Palette.tertiary)
-                MarkdownText(d.text ?? "")
+                MarkdownText(d.text ?? "", cached: d.status != "streaming")
             }
         case "thought":
             Disclosure(isExpanded: $expanded) {

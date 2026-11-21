@@ -9,14 +9,21 @@ export function canLoadHistory(entries: Entry[], complete: boolean): boolean {
  * Lowest `seq` among a bot's main-chat entries the mirror had at `since` (optimistic `local-*` ones
  * are left out), or undefined. Newer entries (a send's RPC response landing before this hello) come
  * again in this catch-up and say nothing about the window.
+ *
+ * The roots of threads whose replies are held don't count while anything else does: a catch-up brings such a root
+ * however far back it is (a task card with fresh replies), and paging from it would skip every message between it
+ * and the window. Paging from here fetches some again, which is harmless (`upsert` goes by id).
  */
-export function mainChatFloor(entries: Entry[], since: number): number | undefined {
+export function mainChatFloor(entries: Entry[], since = Number.MAX_SAFE_INTEGER): number | undefined {
+  const roots = new Set(entries.flatMap((e) => (e.threadId ? [e.threadId] : [])))
   let floor: number | undefined
+  let rootFloor: number | undefined
   for (const e of entries) {
-    if (e.threadId || e.seq <= 0 || e.id.startsWith('local-') || e.rev > since) continue
-    floor = floor === undefined ? e.seq : Math.min(floor, e.seq)
+    if (e.threadId || e.seq <= 0 || e.seq === Number.MAX_SAFE_INTEGER || e.id.startsWith('local-') || e.rev > since) continue
+    if (roots.has(e.id)) rootFloor = rootFloor === undefined ? e.seq : Math.min(rootFloor, e.seq)
+    else floor = floor === undefined ? e.seq : Math.min(floor, e.seq)
   }
-  return floor
+  return floor ?? rootFloor
 }
 
 /** The per-bot floors for a connection that resumes from `since`: none when it starts from scratch. */

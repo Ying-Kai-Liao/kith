@@ -1,0 +1,10 @@
+\* The design of HostRuns.tla (see its header for what each switch means): the runner (rule R: pulls unkeyed turns, cancels a
+\* redeemed one), rule K in step 5, and package C's cron turn with the attach check-and-set. variants/hr-*.set override lines.
+Runner = TRUE
+PullOnlyUnkeyed = TRUE
+SkipRedeemed = TRUE
+KeepLiveHost = TRUE
+Cron = TRUE
+AttachCAS = TRUE
+MaxC = 3
+RunDies = FALSE

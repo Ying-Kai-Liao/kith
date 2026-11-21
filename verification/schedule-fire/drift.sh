@@ -8,15 +8,30 @@
 # set SYNC below to the commit you checked (and in .claude/skills/schedule-fire/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below: origin/rust-rebuild after M4-3 (the fire
-# transaction) and M4-4a, with the code table in the skill checked against fire.rs / sync.rs.
-SYNC=5f4cfbb73eb8d0bf1dfa261c35ec5f1e2b6c4d86
+# The commit at which the models were confirmed to describe the files below: origin/rust-rebuild after M4-5 packages A1
+# (#1033), B (#1042), E (#1043) and C (#1044), with the code tables in the skill and the model headers checked. The commit
+# is #1052's last code commit (the architect-review fixes); its later commits only moved this line and merged rust-rebuild.
+SYNC=9ef9e01c75c8591f5254a34553526753c1702743
 
 FILES=(
+  core/runtime/src/conversations/warm.rs  # adopt: the host's claims after a host restart (HostAdopt; package C changes it)
+  core/runtime/src/hostclaim.rs  # hostclaim.queued, redeemedBefore (the runner's cancel of a redeemed turn)
+  core/runtime/src/import/schedules.rs  # import of the schedule files into the index
+  core/runtime/src/cutover/modules/schedules.rs  # the schedules cutover module
+  core/runtime/src/cutover/modules/schedules_back.rs  # the rollback's hand-back (H4): next runs, state.json last
+  core/runtime/src/cutover/modules/schedules_back_tests.rs  # its cases
+  core/runtime/src/cutover/modules/schedules_switch.rs  # the step: host.lock, tick.lock (H1), the import (H2 anchor, H3 live run)
+  core/runtime/src/cutover/modules/schedules_gate.rs  # gate conditions; condition 6 (package F) is Handover.tla's OldWait
+  serve/host/src/agent/bot/writer_turn.rs  # HostRuns SeeDied: End::Died cancels a bot turn
+  core/procstart  # the start stamps condition 6's lister of old ticks matches on (OldWait)
   kernel/bin/kith-sched               # tick(): the catch-up window, the paused skip, the "still running" skip (the rule M4-3 replaces)
   core/runtime/src/schedules          # M4-2 store and index; M4-3 tick, fire (the one transaction), run now, the webhook entry
   core/runtime/src/migrations/schedules  # sched_tick, sched_fires, sched_runs (unique keys)
   core/runtime/src/conversations/claims.rs  # enqueue_turn, claim, park, unpark_ready, expire_parked, revoke_person
+  core/runtime/src/conversations/reconcile.rs  # Restart: step 5 (rule K keeps the host's live claims)
+  serve/host/src/routines/core_runs.rs  # who runs a fired turn: the host's runner (hostclaim.queued, cancel a redeemed one)
+  serve/host/src/routines/core_cron.rs  # a cron job's turn: claim it, start `kith-sched run-turn` detached, report its end (package C)
+  core/runtime/src/conversations/sched_run.rs  # the cron run's claim: claim_run, attach (the check-and-set), paused_in (package C)
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

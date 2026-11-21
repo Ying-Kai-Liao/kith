@@ -6,23 +6,30 @@ import SwiftUI
 /// Equatable so a reply that didn't change skips its body.
 public struct MarkdownText: View, Equatable {
     let source: String
+    /// False while the reply is still being written (see `MarkdownCache`).
+    let cached: Bool
 
-    public init(_ source: String) {
+    public init(_ source: String, cached: Bool = true) {
         self.source = source
+        self.cached = cached
     }
 
     public var body: some View {
-        let blocks = MarkdownBlocks.parse(source)
+        let blocks = MarkdownCache.blocks(source, cached: cached)
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                MarkdownBlock(block: block)
+                MarkdownBlock(block: block, cached: cached)
             }
         }
         .textSelection(.enabled)
     }
 
     /// Underlines keep links distinct in the monochrome theme; inline code gets a soft tint.
-    static func inline(_ s: String) -> AttributedString {
+    static func inline(_ s: String, cached: Bool = true) -> AttributedString {
+        MarkdownCache.inline(s, cached: cached, parse: parseInline)
+    }
+
+    private static func parseInline(_ s: String) -> AttributedString {
         guard var text = try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
         else { return AttributedString(s) }
         for run in text.runs where run.link != nil {
@@ -38,30 +45,31 @@ public struct MarkdownText: View, Equatable {
 /// One block of a reply.
 private struct MarkdownBlock: View {
     let block: MarkdownBlocks.Block
+    let cached: Bool
 
     @ViewBuilder var body: some View {
         switch block {
         case let .paragraph(t):
-            Text(MarkdownText.inline(t))
+            Text(MarkdownText.inline(t, cached: cached))
                 .font(.body)
                 .foregroundStyle(Palette.text)
         case let .heading(t, level):
-            Text(MarkdownText.inline(t))
+            Text(MarkdownText.inline(t, cached: cached))
                 .font(level == 1 ? .title3.bold() : level == 2 ? .headline : .subheadline.bold())
                 .foregroundStyle(Palette.text)
         case let .bullet(t, marker, depth):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(marker).foregroundStyle(Palette.secondary).monospacedDigit()
-                Text(MarkdownText.inline(t)).foregroundStyle(Palette.text)
+                Text(MarkdownText.inline(t, cached: cached)).foregroundStyle(Palette.text)
             }
             .font(.body)
             .padding(.leading, CGFloat(depth) * 16)
         case .rule:
             Rectangle().fill(Palette.border).frame(height: 1).padding(.vertical, 4)
         case let .table(header, rows):
-            MarkdownTable(header: header, rows: rows)
+            MarkdownTable(header: header, rows: rows, cached: cached)
         case let .quote(t):
-            Text(MarkdownText.inline(t))
+            Text(MarkdownText.inline(t, cached: cached))
                 .font(.body)
                 .foregroundStyle(Palette.secondary)
                 .padding(.leading, 10)
@@ -96,6 +104,7 @@ struct CodeBlock: View {
 private struct MarkdownTable: View {
     let header: [String]
     let rows: [[String]]
+    let cached: Bool
 
     var body: some View {
         let columns = max(header.count, rows.map(\.count).max() ?? 0)
@@ -103,14 +112,14 @@ private struct MarkdownTable: View {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 7) {
                 GridRow {
                     ForEach(0 ..< columns, id: \.self) { i in
-                        Text(MarkdownText.inline(i < header.count ? header[i] : "")).fontWeight(.semibold)
+                        Text(MarkdownText.inline(i < header.count ? header[i] : "", cached: cached)).fontWeight(.semibold)
                     }
                 }
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     Rectangle().fill(Palette.border).frame(height: 1).gridCellUnsizedAxes(.horizontal)
                     GridRow {
                         ForEach(0 ..< columns, id: \.self) { i in
-                            Text(MarkdownText.inline(i < row.count ? row[i] : ""))
+                            Text(MarkdownText.inline(i < row.count ? row[i] : "", cached: cached))
                         }
                     }
                 }

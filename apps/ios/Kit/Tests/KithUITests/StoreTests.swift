@@ -15,6 +15,7 @@ actor FakeRemote: RemoteTransport {
     private var failReadReceipts = false
     private(set) var readAttempts = 0
     private(set) var shutdownCount = 0
+    private(set) var kicks = 0
     private var isShutdown = false
 
     func setReadFailure(_ fail: Bool) { failReadReceipts = fail }
@@ -33,6 +34,10 @@ actor FakeRemote: RemoteTransport {
 
     var subscribed: Bool { !eventSinks.isEmpty }
     var eventSubscriptionCount: Int { eventSinks.count }
+    /// The `since` of each events subscription, in the order they were opened.
+    private(set) var eventSince: [Int64] = []
+    /// Events subscriptions whose consumer has not gone away.
+    private(set) var openEventStreams = 0
 
     func set(_ new: LinkState) {
         state = new
@@ -76,7 +81,15 @@ actor FakeRemote: RemoteTransport {
         try await respond(method, body)
     }
 
-    private func addEvents(_ c: AsyncThrowingStream<Data, Error>.Continuation) { eventSinks.append(c) }
+    private func addEvents(_ c: AsyncThrowingStream<Data, Error>.Continuation, _ request: HostStreamRequest) {
+        eventSinks.append(c)
+        if case let .events(since, _) = request {
+            eventSince.append(since)
+            openEventStreams += 1
+            c.onTermination = { _ in Task { await self.closeEvents() } }
+        }
+    }
+    private func closeEvents() { openEventStreams -= 1 }
     private func addState(_ c: AsyncStream<LinkState>.Continuation) {
         isShutdown = false
         c.yield(state)
@@ -85,7 +98,7 @@ actor FakeRemote: RemoteTransport {
     private func addMailbox(_ c: AsyncStream<MailboxEvent>.Continuation) { mailboxSinks.append(c) }
 
     nonisolated func stream(_ request: HostStreamRequest) -> AsyncThrowingStream<Data, Error> {
-        AsyncThrowingStream { c in Task { await self.addEvents(c) } }
+        AsyncThrowingStream { c in Task { await self.addEvents(c, request) } }
     }
 
     nonisolated func states() -> AsyncStream<LinkState> {
@@ -102,6 +115,8 @@ actor FakeRemote: RemoteTransport {
         AsyncStream { c in Task { await self.addMailbox(c) } }
     }
 
+    func kick() async { kicks += 1 }
+
     func shutdown() async {
         shutdownCount += 1
         isShutdown = true
@@ -112,7 +127,7 @@ actor FakeRemote: RemoteTransport {
     }
 }
 
-private func randomComputer(_ name: String) -> Computer {
+func randomComputer(_ name: String) -> Computer {
     let sk = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
     return Computer(id: RelayCrypto.computerId(signKey: sk), name: name, signKey: sk.base64URLForTests,
                     boxKey: Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation.base64URLForTests,
@@ -125,14 +140,14 @@ private extension Data {
     }
 }
 
-private func context() -> (SharedStore.Context, String) {
+func context() -> (SharedStore.Context, String) {
     let suite = "KithUITests.\(UUID().uuidString)"
     return (SharedStore.Context(accountID: "user_\(UUID().uuidString)", suite: suite), suite)
 }
 
 /// Polls until `condition` holds (2 s at most).
 @MainActor
-private func until(_ condition: @MainActor () async -> Bool) async -> Bool {
+func until(_ condition: @MainActor () async -> Bool) async -> Bool {
     for _ in 0..<200 {
         if await condition() { return true }
         try? await Task.sleep(for: .milliseconds(10))
@@ -181,6 +196,39 @@ private func botEvent(_ id: String, name: String, rev: Int) -> String {
     #expect(await fake.shutdownCount == 0) // Foreground keeps the ordinary connection.
     store.setActive(false)
     #expect(await until { await fake.shutdownCount == 1 })
+}
+
+@MainActor @Test func foregroundKicksALinkAVoiceCallHeldThroughBackground() async throws {
+    let (storage, suite) = context()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let fake = FakeRemote(.ready(.relay))
+    let store = BotStore(computer: randomComputer("Mac"), storage: storage) { fake }
+    defer { store.retire() }
+    store.setActive(true)
+    #expect(await until { await fake.subscribed })
+    await fake.emit(botEvent("b1", name: "Bot", rev: 1))
+    #expect(await until { store.connection == .online })
+    store.beginVoiceCall(UUID(), botId: "b1", speak: { _ in }, end: {})
+    store.setActive(false)
+    store.setActive(true)
+    #expect(await until { await fake.kicks == 1 })
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(await fake.kicks == 1)
+    #expect(await fake.shutdownCount == 0) // The call's link is kept, not restarted.
+}
+
+@MainActor @Test func foregroundRestartsAnOfflineLinkWithoutKicking() async throws {
+    let (storage, suite) = context()
+    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let fake = FakeRemote(.failed("down"))
+    let store = BotStore(computer: randomComputer("Mac"), storage: storage) { fake }
+    defer { store.retire() }
+    store.setActive(true)
+    #expect(await until { store.isOffline })
+    store.setActive(true)
+    #expect(await until { await fake.shutdownCount == 1 })
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(await fake.kicks == 0)
 }
 
 @MainActor @Test func lastVoiceCallEndingDisconnectsBackgroundStore() async throws {
@@ -763,7 +811,7 @@ private func helloJSON(version: String, protocolLevel: Int? = nil, minProtocol: 
     #expect(anotherAccount.composerDrafts.isEmpty)
 }
 
-@MainActor @Test func existingCachesKeepTheirMessagesAndLocalSends() throws {
+@MainActor @Test func existingCachesKeepTheirMessagesAndLocalSends() async throws {
     let (storage, suite) = context()
     defer { storage.erase(); UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
     let computer = randomComputer("Fixture")
@@ -780,6 +828,7 @@ private func helloJSON(version: String, protocolLevel: Int? = nil, minProtocol: 
     try Data(cached.utf8).write(to: url)
     let store = BotStore(computer: computer, storage: storage) { FakeRemote(.ready(.direct)) }
     defer { store.retire() }
+    await store.cacheReady()
     // Adding conversation metadata does not invalidate the existing base cache.
     #expect(store.allEntries("dex").map(\.id) == ["notice", "local-pending"])
     #expect(store.allEntries("dex").last?.data.text == "My unsent message")

@@ -10,11 +10,16 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
-pub(in crate::terminal) type Fake = Arc<dyn Fn(&str, &Value) -> Answer + Send + Sync>;
+pub(crate) type Fake = Arc<dyn Fn(&str, &Value) -> Answer + Send + Sync>;
 
 fn fakes() -> &'static Mutex<HashMap<PathBuf, Fake>> {
     static F: OnceLock<Mutex<HashMap<PathBuf, Fake>>> = OnceLock::new();
     F.get_or_init(Mutex::default)
+}
+
+/// Registers a scripted core of another module's tests (`core_writer_tests`) for a state folder.
+pub(crate) fn register(state: &std::path::Path, fake: Fake) {
+    fakes().lock().unwrap().insert(state.to_path_buf(), fake);
 }
 
 pub(super) fn fake_for(f: &Paths) -> Option<Fake> {
@@ -187,6 +192,10 @@ fn answer(w: &mut World, method: &str, p: &Value) -> Answer {
             json!({"turn": n})
         }
         "hostclaim.turn" => {
+            // The core refuses an unswitched claim that names no account (`claim_next`).
+            if !p["account"].is_string() {
+                return Answer::Refused("hostclaim.turn names no account".into());
+            }
             if w.revoked {
                 return refused("revoked");
             }

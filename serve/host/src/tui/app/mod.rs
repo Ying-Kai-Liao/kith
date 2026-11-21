@@ -15,7 +15,6 @@ mod ui;
 pub use editor::Editor;
 pub use exchange::{ConversationRow, Exchange, Item, Outcome, conversation, group, rows};
 pub use model::{After, AgentModel, Bot, Entry, Kind, Mark, ModelOption, Msg, PERMISSION_MODES, Status};
-pub use slash::SlashAction;
 pub use ui::{
     ACTIONS, Action, AgentPicker, COLORS, Click, Confirm, ConfirmAct, Dir, FIELDS, FILTERS, Field, Focus, FolderPicker,
     Form, Goto, GotoItem, GroupField, GroupForm, Hits, NEW_GROUP, Overlay, SHAPES, Toast, Toggle, TraceMode, Width,
@@ -96,8 +95,6 @@ pub struct App {
     pub plugins: (Vec<Value>, Vec<Value>),
     /// Models each agent offers (`None` while loading).
     pub models: HashMap<String, Option<Vec<AgentModel>>>,
-    /// Agents whose model list came with Fast mode.
-    pub fast_mode: HashSet<String>,
     /// A setup terminal holding the screen.
     pub shell: Option<Shell>,
     /// Chats and threads (`bot` / `bot/root`) marked read since their bot's unread count last changed.
@@ -164,7 +161,6 @@ impl App {
             market: (vec![], vec![]),
             plugins: (vec![], vec![]),
             models: HashMap::new(),
-            fast_mode: HashSet::new(),
             shell: None,
             reading: HashSet::new(),
             history_busy: HashSet::new(),
@@ -270,7 +266,7 @@ impl App {
 
     /// Paging (`history`) covers the main chat only; thread replies don't count.
     fn oldest_main(&self, id: &str) -> Option<i64> {
-        self.entries.get(id)?.values().find(|e| e.thread_id.is_none()).map(|e| e.seq)
+        window_floor(self.entries.get(id)?.values())
     }
 
     pub fn chat_visible(&self) -> bool {
@@ -399,6 +395,17 @@ impl App {
         self.history_busy.insert(id.clone());
         self.call("history", json!({"botId": id, "beforeSeq": oldest, "limit": 200}), After::History(id));
     }
+}
+
+/// Where a chat's loaded main chat is unbroken from: its oldest entry, leaving out the roots of threads whose replies
+/// are loaded. A catch-up brings such a root however far back it is (a task card with fresh replies), and paging from
+/// it would skip everything between it and the window. Only roots loaded: the oldest of them.
+pub(super) fn window_floor<'a>(loaded: impl Iterator<Item = &'a Entry> + Clone) -> Option<i64> {
+    let roots: HashSet<&str> = loaded.clone().filter_map(|e| e.thread_id.as_deref()).collect();
+    let main = loaded.filter(|e| e.thread_id.is_none() && e.seq > 0);
+    let (rooted, plain): (Vec<&Entry>, Vec<&Entry>) = main.partition(|e| roots.contains(e.id.as_str()));
+    let oldest = |rows: &[&Entry]| rows.iter().map(|e| e.seq).min();
+    oldest(&plain).or_else(|| oldest(&rooted))
 }
 
 /// What to update, in the words every client uses (docs/reference/compatibility.md).

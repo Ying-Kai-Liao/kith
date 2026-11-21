@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""A stand-in for kith-auth beside the stub kernel: `resolve <agent> --person <id>` says yes for the people named in
+STUB_AUTH_ALLOW (comma separated) and fails for everyone else, as an unreachable kith-auth does."""
+import json
+import os
+import sys
+
+args = sys.argv[1:]
+allow = [p for p in os.environ.get("STUB_AUTH_ALLOW", "").split(",") if p]
+if len(args) >= 4 and args[0] == "resolve" and args[2] == "--person" and args[3] in allow:
+    print(json.dumps({"allowed": True, "owner": False, "agent": args[1], "person": args[3]}))
+    sys.exit(0)
+sys.exit(1)

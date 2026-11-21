@@ -65,8 +65,8 @@ export class PeopleModel extends Observable {
   }
 
   /** `who` is a person's id or a new name; null when it failed (the reason is in `error`). */
-  async create(who: { personId: string } | { name: string }, agents: Record<string, Role>): Promise<CreatedInvite | null> {
-    const made = await this.run((c) => c.createInvite(who, agents))
+  async create(who: { personId: string } | { name: string }, agents: Record<string, Role>, rooms: string[] = []): Promise<CreatedInvite | null> {
+    const made = await this.run((c) => c.createInvite(who, agents, rooms))
     if (made) await this.load()
     return made
   }

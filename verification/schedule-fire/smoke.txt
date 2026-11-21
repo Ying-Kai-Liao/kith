@@ -6,3 +6,7 @@ no-unique AtMostOncePerSlot
 stale-may NoFireForRevokedPerson
 no-missed-live DueGetsRow
 fixed NeverFired
+# Added at the M4-5 re-sync (seconds each): who runs a fired turn, run-turn's attach check-and-set, gate condition 6.
+hr-design PromptOnce
+hr-no-cas PromptOnce
+h-old-nowait AtMostOnce

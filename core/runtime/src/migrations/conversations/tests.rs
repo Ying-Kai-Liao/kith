@@ -252,3 +252,123 @@ fn a_version_80_database_with_a_report_row_migrates_and_keeps_the_pid_the_report
         .expect("claim pid");
     assert_eq!(pid, 100);
 }
+
+#[test]
+fn a_version_81_database_with_live_claims_migrates_and_its_rows_stay_owner_level() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    let v81: Vec<_> = MIGRATIONS
+        .iter()
+        .copied()
+        .filter(|s| s.version <= 81)
+        .collect();
+    {
+        let c = start_with(&l, &v81).expect("v81 db");
+        assert_eq!(c.schema_version(), 81);
+        let db = c.conn();
+        conversation(db, "c1");
+        conversation(db, "c2");
+        db.execute(
+            "INSERT INTO claims (claim_id, conversation, generation, kind, state, pid, pid_started, person, turn, created_at)
+             VALUES (1, 'c1', 1, 'turn', 'running', 100, 'e100', 'sam', 1, 1)",
+            [],
+        )
+        .expect("claim");
+        db.execute(
+            "INSERT INTO turns (id, conversation, claim_id, person, source, state, queued_at) VALUES (1, 'c1', 1, 'sam', 'app', 'running', 1)",
+            [],
+        )
+        .expect("running turn");
+        db.execute(
+            "INSERT INTO turns (id, conversation, person, source, state, queued_at) VALUES (2, 'c2', 'sam', 'app', 'queued', 1)",
+            [],
+        )
+        .expect("queued turn");
+    }
+    let mut c = start_with(&l, MIGRATIONS).expect("migrates");
+    assert_eq!(c.migrated_from(), Some(81));
+    {
+        let db = c.conn();
+        let one = |sql: &str| -> i64 { db.query_row(sql, [], |r| r.get(0)).expect(sql) };
+        assert_eq!(
+            one(
+                "SELECT count(*) FROM turns WHERE level = 'owner' AND budget_left IS NULL AND room IS NULL AND author IS NULL"
+            ),
+            2
+        );
+        assert_eq!(one("SELECT count(*) FROM turn_people"), 0);
+        assert_eq!(
+            one("SELECT count(*) FROM conversations WHERE room IS NULL AND join_epoch IS NULL"),
+            2
+        );
+        assert_eq!(one("SELECT count(*) FROM warm_procs"), 0);
+        assert_eq!(
+            one("SELECT count(*) FROM claims WHERE state = 'running' AND pid = 100"),
+            1
+        );
+    }
+    // The live claim is still the writer, and a revoke reaches it by its person as before.
+    let r = crate::conversations::claims::revoke_person(&mut c, "sam", 5).expect("revoke");
+    assert_eq!(r.kill.len(), 1);
+    assert_eq!(r.kill[0].pid, Some(100));
+    assert_eq!(r.cancelled_turns, 1, "the queued turn");
+    let db = c.conn();
+    let state: String = db
+        .query_row("SELECT state FROM claims WHERE claim_id = 1", [], |r| {
+            r.get(0)
+        })
+        .expect("state");
+    assert_eq!(state, "ending");
+}
+
+#[test]
+fn a_version_82_database_with_warm_processes_migrates_each_row_as_its_one_conversation() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    let v82: Vec<_> = MIGRATIONS
+        .iter()
+        .copied()
+        .filter(|s| s.version <= 82)
+        .collect();
+    {
+        let c = start_with(&l, &v82).expect("v82 db");
+        assert_eq!(c.schema_version(), 82);
+        // A process with a conversation, one with none, one marked for a kill.
+        for (pid, conv, kill) in [
+            (10, Some("c1"), None),
+            (11, None, None),
+            (12, Some("c2"), Some(7)),
+        ] {
+            c.conn()
+                .execute(
+                    "INSERT INTO warm_procs (pid, started, instance, person, agent, conversation, kill_at)
+                     VALUES (?1, 'e', 'kith-serve-host/1-a', 'ann', 'echo', ?2, ?3)",
+                    params![pid, conv, kill],
+                )
+                .expect("warm row");
+        }
+    }
+    let c = start_with(&l, MIGRATIONS).expect("migrates");
+    assert_eq!(c.migrated_from(), Some(82));
+    let db = c.conn();
+    let row = |pid: i64| -> (String, Option<i64>, String) {
+        db.query_row(
+            "SELECT conversation, kill_at, person FROM warm_procs WHERE pid = ?1",
+            [pid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("row")
+    };
+    assert_eq!(row(10), ("c1".into(), None, "ann".into()));
+    assert_eq!(row(11), (String::new(), None, "ann".into()));
+    assert_eq!(row(12), ("c2".into(), Some(7), "ann".into()));
+    // Now one process may hold several conversations; the same one twice is refused.
+    let ins = |conv: &str| {
+        db.execute(
+            "INSERT INTO warm_procs (pid, started, instance, conversation) VALUES (10, 'e', 'i', ?1)",
+            [conv],
+        )
+    };
+    ins("c9").expect("a second conversation");
+    assert!(ins("c9").is_err(), "one row per process and conversation");
+}

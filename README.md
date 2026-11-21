@@ -210,7 +210,7 @@ kernel/                    the code
   bin/kith-remote            agents on your other machines over ssh: kith remote add, kith ask agent@machine
   bin/kith-memory            search the agents' memory and shared notes
   bin/kith-sched             scheduled agent jobs (cron, launchd)
-  bin/kith-account           extra Claude / Codex logins and the backup chain: kith account add, kith backup list|add|remove
+  bin/kith-account           (a stub for `kith account`) extra Claude / Codex logins and the backup chain: kith account add, kith backup list|add|remove
   PROTOCOL.md              the core memory rules, appended to every agent's prompt
   skills/<name>/SKILL.md   kernel skills an agent reads when the case comes up (keys, rooms, guests, calls…)
   services/<name>.json     shared services (MCP servers, APIs, logins): how to start them, which secrets by name
@@ -338,7 +338,7 @@ entry's readiness and `kith <agent> --launch-json --backup <id>` launches one (e
 programs. The ledger records the harness and login of each run (`provider`, `account`).
 
 ## Cost
-`bin/kith-cost` keeps every Claude Code request's cost (list API prices) in `~/.kith/cost.db`, so it outlives
+`kith cost` (the Rust `kith kernel cost`, reached through `bin/kith-cost`) keeps every Claude Code request's cost (list API prices) in `~/.kith/cost.db`, so it outlives
 transcript cleanup. Each session `kith` starts is tagged with the agent, package version, model, effort and caller
 (terminal or discord); `kith:<name>` subagents are recognised by their type. `kith cost agents [today|week|month|all]`
 compares agents; `kith cost agent video` shows one agent by day, by version/model/effort and its costliest runs;
@@ -438,7 +438,7 @@ put its skills in `role/skills/`. New sessions pick it up; `kith share <name>` p
 
 ## Licensing
 
-Kith is open source under [Apache-2.0](LICENSE); `NOTICE` carries the attributions that travel with it, including the Codync-derived parts of the relay. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by the license. Third-party and vendored files (for example `apps/packaging/cua-driver`) keep their own licenses. Contributions are accepted under Apache-2.0 (no CLA), see [CONTRIBUTING.md](CONTRIBUTING.md).
+Kith is open source under [Apache-2.0](LICENSE); `NOTICE` carries the attributions that travel with it, including the Codync-derived parts of the relay. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by the license. Third-party and vendored files (for example the ThinkingOrb license beside its port) keep their own licenses. Contributions are accepted under Apache-2.0 (no CLA), see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Code committed before 2026-10-25 was published under MIT/Apache-2.0, and copies taken before then keep those licenses. Versions of the host, cloud, relay and apps released under FSL-1.1-MIT between 2026-10-25 and the move to Apache-2.0 keep the FSL-1.1-MIT license for those copies; from that change on, the whole repo is Apache-2.0.
 

@@ -39,6 +39,8 @@ public protocol RemoteTransport: HostTransport {
     func mailboxEvents() -> AsyncStream<MailboxEvent>
     /// Stops for good: closes sockets and ends every stream.
     func shutdown() async
+    /// Retries a link that is waiting out a backoff right now; does nothing otherwise.
+    func kick() async
 }
 
 public enum HostError: LocalizedError, Sendable, Equatable {

@@ -9,7 +9,7 @@ use super::access_core_tests::Core;
 use super::devices::Caller;
 use super::dispatch;
 use super::rig::Rig;
-use crate::remote::core_revokes::{Due, reconcile};
+use crate::remote::core_revokes::{Due, owed, reconcile};
 use crate::remote::members::{self, Listed};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -181,4 +181,128 @@ async fn a_core_that_cannot_be_read_changes_nothing() {
     core.stop();
     reconcile(&r.hub, &mut BTreeSet::new()).await;
     assert!(held(&r, "sam") && !set_aside(&r, "sam"), "no read, no act");
+}
+
+/// sam renamed samuel in the core (the host keeps sam's rows and device under `sam`), a room turn whose basis names
+/// `sam`, then the core down. Answers the rig, the core (stopped) and the turn's key.
+async fn renamed_with_the_core_down() -> (Rig, Core, &'static str) {
+    let (r, mut core) = switched_with_sam().await;
+    core.ask("people.renamePerson", json!({"id": "sam", "to": "samuel"})).expect("rename");
+    r.device("sam-mac", Some("sam"));
+    let turn = "room-turn-of-sam";
+    r.hub.room_turn_begins(turn, &["sam".into()]);
+    core.stop();
+    (r, core, turn)
+}
+
+/// Kai revokes samuel and the core write fails (`local_revoke`'s failure branch, the core down after the person was
+/// read): cut fail-closed by the id given, and owed under every other.
+async fn revoke_samuel_without_the_core(r: &Rig, turn: &str) {
+    assert!(crate::api::people::local_revoke(&r.hub, &r.bin, "samuel", true).await.is_err(), "not taken by the core");
+    assert_eq!(owed(&r.hub), ["samuel"], "the ids couldn't be read: the cut is owed");
+    // The window the design leaves: nothing names `sam` while the core is down.
+    assert!(held(r, "sam") && r.hub.room_turn_registered(turn));
+}
+
+/// Finding 1 of PR #1020 (`ReconcileOwed.tla` fix.cfg, FailCutReached): the owed cut is paid under every id once the core
+/// answers.
+#[tokio::test]
+async fn a_renamed_persons_revoke_without_the_core_cuts_the_old_id_once_the_core_is_back() {
+    let (r, mut core, turn) = renamed_with_the_core_down().await;
+    revoke_samuel_without_the_core(&r, turn).await;
+    // a tick while the core is still down: the row stays
+    Due::default().tick(&r.hub, true).await;
+    assert_eq!(owed(&r.hub), ["samuel"]);
+    core.restart();
+    Due::default().tick(&r.hub, false).await;
+    assert!(set_aside(&r, "sam") && !held(&r, "sam"), "sam's device and membership are set aside");
+    assert!(!r.hub.room_turn_registered(turn), "and the room turn whose basis names sam is stopped");
+    assert!(owed(&r.hub).is_empty(), "paid: the row is dropped");
+}
+
+/// `revoke_person`'s own core-down branch (the person read from this host's record) owes the cut the same way.
+#[tokio::test]
+async fn the_app_revoke_with_the_core_down_owes_the_cut_too() {
+    let (r, mut core, turn) = renamed_with_the_core_down().await;
+    let said = call(&r, "revokePerson", json!({"personId": "sam"})).await;
+    assert!(said.is_err(), "the owner is told the revoke is not complete: {said:?}");
+    assert_eq!(owed(&r.hub), ["sam"]);
+    assert!(set_aside(&r, "sam") && !r.hub.room_turn_registered(turn), "cut by the id given at once");
+    core.restart();
+    Due::default().tick(&r.hub, false).await;
+    assert!(owed(&r.hub).is_empty(), "paid under samuel and sam");
+}
+
+/// `undo-keeps.cfg` (NoLostUndo): an undo before the poll pays the row gives sam back and clears it, so no later tick
+/// cuts a person the owner restored.
+#[tokio::test]
+async fn an_undo_before_the_owed_cut_is_paid_restores_and_clears_it() {
+    let (r, mut core, turn) = renamed_with_the_core_down().await;
+    revoke_samuel_without_the_core(&r, turn).await;
+    core.restart();
+    call(&r, "unrevokePerson", json!({"personId": "samuel"})).await.unwrap();
+    assert!(owed(&r.hub).is_empty(), "the undo cleared the owed cut");
+    Due::default().tick(&r.hub, true).await;
+    assert!(held(&r, "sam") && !set_aside(&r, "sam"), "undone, and kept so");
+}
+
+/// The cloud's undo (`apply_revoked`'s `--unrevoke`, from `pull`) clears an owed cut in its own locked section too, under
+/// every id: a row kept under the old id is dropped by an undo of the new one.
+#[tokio::test]
+async fn the_clouds_undo_clears_an_owed_cut_too() {
+    let (r, core) = switched_with_sam().await;
+    core.ask("people.renamePerson", json!({"id": "sam", "to": "samuel"})).expect("rename");
+    members::locked_run(&r.bin, &["handle", "samuel", "kith", "user_sam"]).await.unwrap();
+    let cut = members::apply_revoked(&r.hub, Some(&r.bin), Some(&["user_sam".to_owned()])).await.unwrap();
+    assert_eq!(cut.cut, ["samuel"], "the cloud's revoke applied");
+    crate::remote::core_revokes::owe_cut(&r.hub, "sam");
+    let undone = members::apply_revoked(&r.hub, Some(&r.bin), Some(&[])).await.unwrap();
+    assert_eq!(undone.restored, ["samuel"]);
+    assert!(owed(&r.hub).is_empty(), "the cloud's undo cleared the row kept under the old id");
+}
+
+/// Revoke refusal wording: the renamed person's NEW id is not in the host's record, so the core being down refuses the
+/// revoke before any cut. The owner reads that nobody was revoked, why, and what to do.
+#[tokio::test]
+async fn a_revoke_of_the_new_id_with_the_core_down_says_it_did_not_happen_and_what_to_do() {
+    let (r, _core, _turn) = renamed_with_the_core_down().await;
+    let said = call(&r, "revokePerson", json!({"personId": "samuel"})).await.unwrap_err().to_string();
+    assert!(said.contains("samuel was not revoked"), "{said}");
+    assert!(said.contains("core isn't running") && said.contains("Start it, then revoke again"), "{said}");
+    assert!(!said.contains("Changes made before this point may stand"), "{said}");
+    assert!(owed(&r.hub).is_empty() && !set_aside(&r, "sam"), "nothing was cut: the words are true");
+    let undo = call(&r, "unrevokePerson", json!({"personId": "samuel"})).await.unwrap_err().to_string();
+    assert!(undo.contains("samuel was not restored") && undo.contains("undo the revoke again"), "{undo}");
+}
+
+/// The undo-read-fail row: an undo that can't read the ids is given back by the one id and says so, until a later undo
+/// reads them.
+#[tokio::test]
+async fn an_undo_that_cannot_read_the_ids_leaves_a_note_until_a_later_undo_reads_them() {
+    let (r, mut core, _turn) = renamed_with_the_core_down().await;
+    let ids = ["samuel".to_owned(), "sam".to_owned()];
+    crate::remote::core_revokes::restore_held(&r.hub, "sam").await;
+    let note = crate::remote::core_revokes::undo_note(&r.hub, &ids).expect("the owner is told it isn't finished");
+    assert!(note.contains("core isn't running") && note.contains("undo again"), "{note}");
+    let audit = r.hub.store.audit_list(0, Some("sam")).unwrap();
+    assert!(audit.iter().any(|a| a.method == "undo.unread"), "{audit:?}");
+    core.restart();
+    crate::remote::core_revokes::restore_held(&r.hub, "samuel").await;
+    assert!(crate::remote::core_revokes::undo_note(&r.hub, &ids).is_none(), "a later undo read the ids");
+}
+
+/// A cut owed under a former id when the person was undone while the ids were unreadable (the undo's clear could not
+/// find the row) is dropped, never paid; a revoke after that undo is paid as before.
+#[tokio::test]
+async fn an_owed_cut_older_than_an_undo_that_could_not_read_the_ids_is_dropped_not_paid() {
+    let (r, mut core, turn) = renamed_with_the_core_down().await;
+    revoke_samuel_without_the_core(&r, turn).await;
+    // the undo (by the new id) with the core down: its read of the ids fails, so the row under `sam` is not found
+    crate::remote::core_revokes::owe_cut(&r.hub, "sam");
+    crate::remote::core_revokes::clear_owed(&r.hub, "samuel").await;
+    assert_eq!(owed(&r.hub), ["sam"], "an undo that could not read the ids left the former id's row");
+    core.restart();
+    Due::default().tick(&r.hub, false).await;
+    assert!(owed(&r.hub).is_empty(), "the row is gone");
+    assert!(held(&r, "sam") && !set_aside(&r, "sam"), "the undone person was not cut");
 }

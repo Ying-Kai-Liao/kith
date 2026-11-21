@@ -40,11 +40,14 @@
 //!   host keeps routines in memory and saves them over serve.db's `routines.v1`, so a rollback refuses while the host
 //!   runs (`rollback_refusal`; `--force` does not override it): stop the host first, roll back, start it.
 //!   Jobs made on another Mac stay (their `mac` is not this one's); `check` names them.
-//! - `live`: scheduled turns that have not finished.
+//! - Per job, never a global rewind (`schedules_back`, rule H4): the turns that wait are cancelled (their fire rows become
+//!   `skipped:rollback`), each routine trigger's `next_run` is set from them, its unused anchor or what the core decided,
+//!   and `state.json`'s `last` keeps a run the core started that still goes.
+//! - `live`: scheduled turns that are running (a detached cron run with a process is handed to kith-sched instead).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use kith_kernel::paths::Paths;
 use kith_kernel::schedule::{Trigger, Zone};
@@ -52,10 +55,14 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 
+use super::schedules_back as back;
+use super::schedules_gate as gate;
+use super::schedules_switch::{self as switch, Next};
 use crate::cutover::state::{self, Phase};
-use crate::cutover::{Env, Module, Opts};
+use crate::cutover::{Env, Module, Opts, SourceLock};
 use crate::db::Core;
 use crate::error::{Error, Result};
+use crate::schedules::jobs_io::{self, JobsLock, write_list};
 use crate::secrets::Envelope;
 use crate::secrets::keystore::KeyStore;
 
@@ -64,21 +71,102 @@ const ROUTINES_KEY: &str = "routines.v1";
 /// How long the import waits for another writer of an agent's jobs.json.
 const LOCK_WAIT: Duration = Duration::from_secs(30);
 
+/// Whether the core runs the turns a schedule fire makes (a fired cron job or routine becomes a turn that runs and ends).
+/// `step_refusal` refuses while this is false (with the other conditions in `schedules_gate`). Each line names its PR and
+/// the test that proves it; if one stops being true, this goes back to false.
+///
+/// - [x] Guest jobs and agents with no bot run: they go through `kith-sched run-turn` under an external claim (#1044).
+///   Proved by `kernel/tests/kith-sched-run-turn-check` and
+///   `a_revoke_kills_a_guests_scheduled_run_because_its_claim_is_swept_by_person` (the e2e has no guest job).
+/// - [x] A job's model, effort, harness and person are fixed when the slot fires (`sched_fires.settings`, m0126, #1044).
+///   Proved by `the_settings_of_the_run_are_fixed_on_the_turn_when_it_fires_and_listed_for_the_host`.
+/// - [x] A host restart neither kills nor repeats a scheduled run: an attached run keeps going, and `end_gone` marks a
+///   dead one failed and never requeues it (#1044). Proved by
+///   `a_run_that_died_after_it_attached_is_ended_and_its_turn_failed_never_requeued` and e2e case (a) (a restart adds
+///   no row and no run).
+/// - [x] Step and rollback hold `host.lock` and then `tick.lock`, and the anchor and the hand-back work per job (#1033,
+///   #1042). Proved by e2e cases (b) and (c).
+/// - [x] Gate conditions 2-5 hold, and condition 6 (the step waits out the ticks that started before it took
+///   `tick.lock`, #1043 SHOULD 1). Proved by `schedules_gate_tests` and e2e case (d).
+/// - [x] The real-process e2e passes in CI: `serve/host/tests/schedules_cutover_e2e.rs`, cases (a) to (d), run by the
+///   host-build job's `schedules cutover e2e` step; the schedule-fire model is re-synced with its `HostRuns` rows.
+pub(crate) const RUNS_FIRED_TURNS: bool = true;
+
 type KeyFactory = std::sync::Arc<dyn Fn() -> Box<dyn KeyStore>>;
 
 pub(crate) struct Schedules {
     /// Tests: the key store the envelope opens, in place of this computer's. `None`: the operating system's.
     keys: Option<KeyFactory>,
+    /// Tests: skip the build gate, so the step tests can step. Never set outside tests.
+    #[cfg(test)]
+    gate_open: bool,
+    /// What the import read of state.json (its sha; empty for no file), checked again just before the tombstone.
+    /// `None`: no import has run under this step's lock.
+    imported: std::cell::RefCell<Option<String>>,
+    /// Tests: how long the step waits for `tick.lock`.
+    tick_wait: Duration,
+    /// Tests: the lister of running `kith-sched tick` processes (condition 6).
+    ticks: gate::Lister,
 }
 
 impl Schedules {
     pub(crate) const fn new() -> Self {
-        Self { keys: None }
+        Self {
+            keys: None,
+            #[cfg(test)]
+            gate_open: false,
+            imported: std::cell::RefCell::new(None),
+            tick_wait: switch::TICK_WAIT,
+            ticks: gate::list_ticks,
+        }
+    }
+
+    /// Tests: a short wait for `tick.lock`.
+    #[cfg(test)]
+    pub(crate) fn tick_wait(mut self, wait: Duration) -> Self {
+        self.tick_wait = wait;
+        self
+    }
+
+    /// Tests: a fixed list of running ticks, in place of the process table.
+    #[cfg(test)]
+    pub(super) fn ticks(mut self, list: gate::Lister) -> Self {
+        self.ticks = list;
+        self
     }
 
     #[cfg(test)]
     pub(crate) fn with_keys(keys: KeyFactory) -> Self {
-        Self { keys: Some(keys) }
+        Self {
+            keys: Some(keys),
+            gate_open: true,
+            imported: std::cell::RefCell::new(None),
+            tick_wait: switch::TICK_WAIT,
+            ticks: gate::list_ticks,
+        }
+    }
+
+    /// Tests: the same module with the build gate shut, as it is in the field.
+    #[cfg(test)]
+    pub(crate) fn gated(mut self) -> Self {
+        self.gate_open = false;
+        self
+    }
+
+    /// The gate's refusal for this build, if any (the step, its dry run and `check` all say it).
+    fn build_refusal(&self, env: &Env) -> Option<String> {
+        #[cfg(test)]
+        if self.gate_open {
+            return None;
+        }
+        gate::refusal(&gate::Facts {
+            runs_fired_turns: RUNS_FIRED_TURNS,
+            depends_on_claims: self.depends_on().contains(&"claims"),
+            serves_rows: gate::serves_rows(),
+            launchd: gate::launchd_runs_this_build(&gate::user_home(env)),
+            sched_locks: gate::launchd_sched_locks(&gate::user_home(env)),
+            holder: gate::launchd_has_holder(&gate::user_home(env)),
+        })
     }
 
     /// Runs `f` with the core's envelope, opening it first when this core has not yet.
@@ -114,6 +202,8 @@ struct Row {
     bot: String,
     def: Value,
     key: Option<String>,
+    /// A `once` the host already fired: the slot (UTC text) that gets a decided row (H2).
+    decided: Option<String>,
 }
 
 #[derive(Default)]
@@ -127,7 +217,31 @@ struct Plan {
     notes: Vec<String>,
 }
 
-fn serve_db_of(env: &Env) -> PathBuf {
+/// The folder the host keeps `host.lock` in: `KITH_SERVE_HOME`, else `~/.kith/serve` (`service::data_dir`), NOT the
+/// folder of serve.db (which `KITH_SERVE_DB` can move). `env.serve_db` (tests) names a folder of its own.
+pub(super) fn host_dir_of(env: &Env) -> PathBuf {
+    host_dir_with(env, &|k| std::env::var_os(k).filter(|v| !v.is_empty()))
+}
+
+pub(super) fn host_dir_with(
+    env: &Env,
+    var: &dyn Fn(&str) -> Option<std::ffi::OsString>,
+) -> PathBuf {
+    if let Some(d) = env.serve_db.as_ref().and_then(|p| p.parent()) {
+        return d.to_path_buf();
+    }
+    var("KITH_SERVE_HOME").map_or_else(
+        || {
+            var("HOME")
+                .map_or_else(|| env.home.clone(), PathBuf::from)
+                .join(".kith")
+                .join("serve")
+        },
+        PathBuf::from,
+    )
+}
+
+pub(super) fn serve_db_of(env: &Env) -> PathBuf {
     if let Some(p) = &env.serve_db {
         return p.clone();
     }
@@ -148,12 +262,12 @@ fn serve_db_of(env: &Env) -> PathBuf {
         .join("serve.db")
 }
 
-/// Why the host cannot be called stopped, if it cannot: `host.lock` in its data folder (the folder of serve.db) is an
+/// Why the host cannot be called stopped, if it cannot: `host.lock` in its data folder ([`host_dir_of`]) is an
 /// advisory lock the OS drops with the process, so a stale file or a reused pid never reads as running. Read-only: the
 /// file is never created. No file, or a free lock, is stopped. A held lock says "running"; any other open or lock error
 /// says the lock cannot be checked (still a refusal, but never worded as "stop the host").
-fn host_blocker(env: &Env) -> Option<HostBlock> {
-    let dir = serve_db_of(env).parent().map(Path::to_path_buf)?;
+pub(super) fn host_blocker(env: &Env) -> Option<HostBlock> {
+    let dir = host_dir_of(env);
     let file = match std::fs::File::open(dir.join("host.lock")) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
@@ -173,10 +287,13 @@ fn host_blocker(env: &Env) -> Option<HostBlock> {
     }
 }
 
-enum HostBlock {
+pub(super) enum HostBlock {
     Running,
     Unknown(String),
 }
+
+const STEP_RUNNING: &str = "not stepped: the host is running and reads the schedules switch only when it starts; stop the host, step schedules, start the host. `step schedules --dry-run` and `check schedules` work while it runs";
+const ROLLBACK_RUNNING: &str = "the host is running and would save its routines over the ones put back; stop the host first (then roll back, then start it); --force does not override this";
 
 /// The refusal line for a host in the way, in the words of the verb (`running` is that verb's "the host is running").
 fn host_refusal(env: &Env, running: &str) -> Option<String> {
@@ -246,7 +363,7 @@ fn text<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
 }
 
 /// The host's trigger (`serve/host/src/routines/schedule.rs`, camelCase, tagged by `type`) as the kernel's.
-fn convert(t: &Value) -> std::result::Result<Trigger, String> {
+pub(super) fn convert(t: &Value) -> std::result::Result<Trigger, String> {
     let kind = text(t, "type").ok_or("a trigger has no type")?;
     let word = |k: &str| text(t, k).ok_or_else(|| format!("a {kind} trigger has no {k}"));
     let number = |k: &str| {
@@ -281,6 +398,12 @@ fn convert(t: &Value) -> std::result::Result<Trigger, String> {
     };
     k.validate().map_err(|e| e.0)?;
     Ok(k)
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0))
 }
 
 fn routines_of(db: &Connection) -> Result<Vec<Value>> {
@@ -425,16 +548,27 @@ fn routine_rows(
             def.insert("paused".into(), json!(true));
         }
         def.insert("mac".into(), json!(mac));
-        def.insert(
-            "routine".into(),
-            json!({
-                "id": id,
-                "bot": bot,
-                "trigger": i + 1,
-                "timeoutSeconds": r.get("timeoutSeconds").and_then(Value::as_u64).unwrap_or(3600),
-            }),
-        );
+        let mut block = json!({
+            "id": id,
+            "bot": bot,
+            "trigger": i + 1,
+            "timeoutSeconds": r.get("timeoutSeconds").and_then(Value::as_u64).unwrap_or(3600),
+        });
+        // What the host would do next: the job's first core plan counts from it (H2).
+        let mut decided = None;
+        match switch::next_of(r, i, &trigger, now_ms()) {
+            Next::At(at) => {
+                block["anchor"] = json!(at);
+                // The anchor counts only while the job keeps this trigger (`schedules::anchor::of`).
+                block["anchorTrigger"] =
+                    serde_json::to_value(&trigger).map_err(|e| e.to_string())?;
+            }
+            Next::OnceFired(ms) => decided = crate::schedules::slot_of_ms(ms),
+            Next::Nothing => {}
+        }
+        def.insert("routine".into(), block);
         rows.push(Row {
+            decided,
             agent: agent.clone(),
             job,
             routine: id.to_owned(),
@@ -468,60 +602,9 @@ fn read_list(file: &Path) -> std::result::Result<Vec<Value>, String> {
     }
 }
 
-/// `jobs.json` replaced whole (a temp file in the same folder, synced, then renamed), as `kith-sched` writes it.
-fn write_list(file: &Path, jobs: &[Value]) -> Result<()> {
-    let io = |e: std::io::Error| Error::Io(format!("cutover: schedules: {}: {e}", file.display()));
-    let dir = file.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(dir).map_err(io)?;
-    let tmp = dir.join(format!(".jobs.json.{}.tmp", std::process::id()));
-    let mut body = serde_json::to_string_pretty(&Value::Array(jobs.to_vec()))
-        .map_err(|e| Error::Io(format!("cutover: schedules: {e}")))?;
-    body.push('\n');
-    {
-        use std::io::Write as _;
-        let mut f = std::fs::File::create(&tmp).map_err(io)?;
-        f.write_all(body.as_bytes()).map_err(io)?;
-        f.sync_all().map_err(io)?;
-    }
-    std::fs::rename(&tmp, file).map_err(io)
-}
-
-/// The exclusive side of `<machine>/sched/<agent>.jobs.lock`, the lock `kith-sched` edits under; let go on drop.
-struct JobsLock(#[allow(dead_code, reason = "held for its drop")] std::fs::File);
-
+/// The import waits [`LOCK_WAIT`] for another writer of the file; the writer and the lock are the one `kith schedule` uses.
 fn lock_jobs(machine: &Path, agent: &str) -> Result<JobsLock> {
-    use fs2::FileExt as _;
-    let dir = machine.join("sched");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| Error::Io(format!("cutover: schedules: {}: {e}", dir.display())))?;
-    let path = dir.join(format!("{agent}.jobs.lock"));
-    let f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| Error::Io(format!("cutover: schedules: {}: {e}", path.display())))?;
-    let until = Instant::now() + LOCK_WAIT;
-    loop {
-        match f.try_lock_exclusive() {
-            Ok(()) => return Ok(JobsLock(f)),
-            Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
-                if Instant::now() >= until {
-                    return Err(Error::Refused(format!(
-                        "cutover: schedules: {} is held by another writer (kith-sched?) for more than {}s; try again",
-                        path.display(),
-                        LOCK_WAIT.as_secs()
-                    )));
-                }
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Err(e) => {
-                return Err(Error::Io(format!(
-                    "cutover: schedules: {}: {e}",
-                    path.display()
-                )));
-            }
-        }
-    }
+    jobs_io::lock_jobs(machine, agent, LOCK_WAIT)
 }
 
 enum Verdict {
@@ -537,7 +620,19 @@ fn made_for(job: &Value, routine: &str, bot: &str) -> bool {
         .is_some_and(|r| text(r, "id") == Some(routine) && text(r, "bot") == Some(bot))
 }
 
-fn verdict(jobs: &[Value], row: &Row, mac: &str) -> Verdict {
+/// A job without the host's next run (`routine.anchor` and the trigger it was read for): the anchor is a snapshot of the
+/// host's clock, so `same_answer` must not call a job different because the host's next run moved since.
+pub(super) fn without_anchor(job: &Value) -> Value {
+    let mut job = job.clone();
+    if let Some(r) = job.get_mut("routine").and_then(Value::as_object_mut) {
+        r.remove("anchor");
+        r.remove("anchorTrigger");
+    }
+    job
+}
+
+/// `same`: the check's reading, which leaves the anchor out of the compare (an import still brings it up to date).
+fn verdict(jobs: &[Value], row: &Row, mac: &str, same: bool) -> Verdict {
     let Some(at) = jobs
         .iter()
         .position(|j| text(j, "id") == Some(row.job.as_str()))
@@ -557,7 +652,12 @@ fn verdict(jobs: &[Value], row: &Row, mac: &str) -> Verdict {
             row.agent, row.job
         ));
     }
-    if have == &row.def {
+    let equal = if same {
+        without_anchor(have) == without_anchor(&row.def)
+    } else {
+        have == &row.def
+    };
+    if equal {
         Verdict::Same
     } else {
         Verdict::Update(at)
@@ -642,7 +742,7 @@ fn apply_agent(cx: &mut Apply<'_>, agent: &str, rows: &[&Row]) -> Result<()> {
     })?;
     let mut changed = false;
     for row in rows {
-        match verdict(&jobs, row, cx.mac) {
+        match verdict(&jobs, row, cx.mac, false) {
             Verdict::New => {
                 jobs.push(row.def.clone());
                 cx.counts.added += 1;
@@ -684,30 +784,78 @@ impl Module for Schedules {
         "schedules"
     }
 
+    /// The runner will be the host's Writer path, which is the claims lane's.
+    fn depends_on(&self) -> &'static [&'static str] {
+        &["claims"]
+    }
+
     fn tombstones(&self, env: &Env) -> Vec<PathBuf> {
         vec![env.machine.join("sched").join("state.json")]
     }
 
+    /// `host.lock` (held, so the host cannot start between the refusal and the tombstone) and then `tick.lock` (a
+    /// kith-sched tick finishes first and none starts), from before the import to the tombstone (MUST 2, H1).
+    fn source_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        let held = switch::hold_both(
+            env,
+            STEP_RUNNING,
+            self.tick_wait,
+            self.ticks,
+            switch::OldTicks::Refuse,
+        )?;
+        *self.imported.borrow_mut() = None;
+        Ok(Some(Box::new(held)))
+    }
+
+    /// The same two locks for a rollback, taken before the rolling-back record, so a refusal writes nothing and a host
+    /// cannot start (and save its routines over the write-back) until the rollback is done.
+    fn rollback_lock(&self, env: &Env) -> Result<Option<SourceLock>> {
+        let held = switch::hold_both(
+            env,
+            ROLLBACK_RUNNING,
+            self.tick_wait,
+            self.ticks,
+            switch::OldTicks::Note,
+        )?;
+        Ok(Some(Box::new(held)))
+    }
+
+    /// state.json must still be what the import read: a writer that did not take `tick.lock` would otherwise lose its
+    /// tick to the tombstone.
+    fn before_tombstone(&self, env: &Env) -> Result<()> {
+        let Some(want) = self.imported.borrow().clone() else {
+            return Err(Error::Refused(
+                "schedules: the import did not record state.json's sha, so the file cannot be checked before the tombstone; nothing was tombstoned, run it again".into(),
+            ));
+        };
+        if crate::import::schedules::state_sha(&env.machine)?.unwrap_or_default() == want {
+            Ok(())
+        } else {
+            Err(Error::Refused(
+                "schedules: sched/state.json changed after the import read it (a tick that did not take tick.lock?); nothing was tombstoned, run the step again".into(),
+            ))
+        }
+    }
+
     fn step_refusal(&self, env: &Env) -> Option<String> {
+        if let Some(why) = self.build_refusal(env) {
+            return Some(why);
+        }
         // The host reads the switch when it starts. A running host started before the step would keep running every
         // routine from serve.db next to the core's fire, so each would run twice.
-        host_refusal(
-            env,
-            "not stepped: the host is running and reads the schedules switch only when it starts; stop the host, step schedules, start the host. `step schedules --dry-run` and `check schedules` work while it runs",
-        )
+        host_refusal(env, STEP_RUNNING)
     }
 
     fn rollback_refusal(&self, env: &Env) -> Option<String> {
         // Not a `live` reason: `--force` must not get past it. The running host saves its in-memory routines over
         // serve.db's `routines.v1`, silently undoing the keys and flags the rollback puts back there.
-        host_refusal(
-            env,
-            "the host is running and would save its routines over the ones put back; stop the host first (then roll back, then start it); --force does not override this",
-        )
+        host_refusal(env, ROLLBACK_RUNNING)
     }
 
     fn check_notes(&self, env: &Env) -> Vec<String> {
-        other_mac_notes(env)
+        let mut notes = other_mac_notes(env);
+        notes.extend(self.build_refusal(env));
+        notes
     }
 
     fn dry_run_despite_refusal(&self) -> bool {
@@ -719,16 +867,22 @@ impl Module for Schedules {
         false
     }
 
+    /// Only a run of a routine that the core is running (claimed or started) holds a rollback: its host stop already
+    /// ended the bot's runs, so normally there are none. A turn that waits is cancelled by the rollback, and a detached
+    /// cron run with a process goes into state.json's `last` (the H4 hand-back, `schedules_back`).
     fn live(&self, _env: &Env, core: &Core) -> Result<Vec<String>> {
         let mut out = Vec::new();
         let n: i64 = core.conn().query_row(
-            "SELECT COUNT(DISTINCT t.id) FROM sched_fires f JOIN turns t ON t.id = CAST(f.turn_id AS INTEGER)
-             WHERE f.turn_id IS NOT NULL AND t.state IN ('queued', 'parked', 'claimed', 'running')",
+            &format!("SELECT COUNT(DISTINCT t.id) FROM sched_fires f JOIN turns t ON t.id = CAST(f.turn_id AS INTEGER)
+             LEFT JOIN claims c ON c.claim_id = t.claim_id
+             LEFT JOIN sched_jobs j ON j.agent = f.agent AND j.job = f.job
+             WHERE f.turn_id IS NOT NULL AND t.state IN ('claimed', 'running')
+               AND NOT ({} AND j.def IS NOT NULL AND json_extract(j.def, '$.routine') IS NULL)", back::CLAIM_GOING),
             [],
             |r| r.get(0),
         )?;
         if n > 0 {
-            out.push(format!("{n} scheduled turn(s) have not finished"));
+            out.push(format!("{n} scheduled turn(s) are running"));
         }
         Ok(out)
     }
@@ -815,10 +969,18 @@ impl Module for Schedules {
             for row in plan.rows.iter().filter(|r| r.key.is_some()) {
                 lines.extend(self.put_key(core, row)?);
             }
-            lines.extend(
-                crate::import::schedules::run_in(&env.layout, &env.machine, false, Some(core))?
-                    .lines,
-            );
+            lines.extend(Self::decide_fired_onces(core, &plan)?);
+            let anchored: Vec<_> = plan
+                .rows
+                .iter()
+                .map(|r| (r.agent.as_str(), r.job.as_str(), &r.def))
+                .collect();
+            back::rearm(core, &anchored)?;
+            let (rep, sha) =
+                crate::import::schedules::run_sha(&env.layout, &env.machine, false, Some(core))?;
+            // The sha of the bytes the import read (under tick.lock): what the tombstone is checked against.
+            *self.imported.borrow_mut() = Some(sha.unwrap_or_default());
+            lines.extend(rep.lines);
         } else {
             lines.extend(
                 crate::import::schedules::run_in(&env.layout, &env.machine, true, None)?.lines,
@@ -861,7 +1023,7 @@ impl Module for Schedules {
                 }
             };
             for row in plan.rows.iter().filter(|r| r.agent == agent) {
-                match verdict(&jobs, row, &mac) {
+                match verdict(&jobs, row, &mac, true) {
                     Verdict::Same => {}
                     Verdict::New => {
                         diffs.push(format!("{agent}/{}: a routine, not a job yet", row.job));
@@ -908,7 +1070,10 @@ impl Module for Schedules {
     }
 
     fn restore_secrets(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
-        self.write_routines_back(env, core)
+        // The turns that wait first: the next runs read what they cancelled.
+        let mut lines = back::cancel_waiting(core, now_ms())?;
+        lines.extend(self.write_routines_back(env, core)?);
+        Ok(lines)
     }
 
     fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>> {
@@ -965,7 +1130,7 @@ impl Module for Schedules {
             "schedules: removed {} imported job(s) from the agents' jobs.json",
             removed.len()
         ));
-        lines.push(write_state_back(env, core.conn(), &mac)?);
+        lines.push(back::write_state_back(env, core.conn(), &mac)?);
         lines
             .push("start the host so it reads its routines again (it keeps them in memory)".into());
         Ok(lines)
@@ -1010,6 +1175,32 @@ impl Schedules {
             .map(|b| sha_hex(&b)))
     }
 
+    /// A `once` the host already fired gets a decided row at its slot, so the core's plan finds it decided and never
+    /// refires it (H2). Idempotent; a row the core already decided is left as it is.
+    fn decide_fired_onces(core: &mut Core, plan: &Plan) -> Result<Vec<String>> {
+        let rows: Vec<&Row> = plan.rows.iter().filter(|r| r.decided.is_some()).collect();
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        let tx = core.claim_tx()?;
+        let mut lines = Vec::new();
+        for r in rows {
+            let Some(slot) = &r.decided else { continue };
+            let n = tx.execute(
+                "INSERT OR IGNORE INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES (?1, ?2, ?3, 'skipped:already fired by the host', NULL, ?4)",
+                rusqlite::params![r.agent, r.job, slot, now_ms()],
+            )?;
+            if n > 0 {
+                lines.push(format!(
+                    "{}/{}: its once already fired in the host: slot {slot} is decided, the core will not fire it again",
+                    r.agent, r.job
+                ));
+            }
+        }
+        tx.commit()?;
+        Ok(lines)
+    }
+
     /// The job's key as the secret record hooks.rs reads. Written only when missing or different, so a re-import changes
     /// nothing. Says that it wrote, never what.
     fn put_key(&self, core: &Core, row: &Row) -> Result<Vec<String>> {
@@ -1038,7 +1229,8 @@ impl Schedules {
         let paths = paths_of(env)?;
         let mac = mac_peek(&env.machine);
         // routine id -> (enabled, key) as the core has it. A routine with several jobs is enabled when any job is.
-        let mut back: BTreeMap<String, (bool, Option<String>)> = BTreeMap::new();
+        let mut keep: BTreeMap<String, (bool, Option<String>)> = BTreeMap::new();
+        let mut mine: Vec<(String, Value)> = Vec::new();
         for agent in agent_names(paths) {
             let file = crate::schedules::jobs_file(paths, &agent);
             let Ok((_, jobs)) = crate::schedules::read_jobs(&env.machine, &agent, &file) else {
@@ -1056,7 +1248,8 @@ impl Schedules {
                         .and_then(|b| String::from_utf8(b.to_vec()).ok())
                         .filter(|k| !k.is_empty()))
                 })?;
-                let e = back.entry(routine.to_owned()).or_insert((false, None));
+                mine.push((agent.clone(), j.clone()));
+                let e = keep.entry(routine.to_owned()).or_insert((false, None));
                 e.0 |= enabled;
                 if e.1.is_none() {
                     e.1 = key;
@@ -1064,7 +1257,7 @@ impl Schedules {
             }
         }
         let file = serve_db_of(env);
-        if back.is_empty() || !file.is_file() {
+        if keep.is_empty() || !file.is_file() {
             return Ok(vec![
                 "schedules: no routine to write back to serve.db".to_owned(),
             ]);
@@ -1093,15 +1286,16 @@ impl Schedules {
         })?;
         let mut changed = 0;
         let mut seen = BTreeSet::new();
+        let mut flagged = BTreeSet::new();
         if let Some(list) = state.get_mut("routines").and_then(Value::as_array_mut) {
             for r in list.iter_mut() {
                 let Some(id) = text(r, "id").map(str::to_owned) else {
                     continue;
                 };
-                let Some((enabled, key)) = back.get(&id) else {
+                let Some((enabled, key)) = keep.get(&id) else {
                     continue;
                 };
-                seen.insert(id);
+                seen.insert(id.clone());
                 let Some(o) = r.as_object_mut() else { continue };
                 let mut set = |k: &str, v: Value| {
                     if o.get(k) == Some(&v) {
@@ -1115,10 +1309,22 @@ impl Schedules {
                 let b = key.as_ref().is_some_and(|k| set("webhookKey", json!(k)));
                 if a || b {
                     changed += 1;
+                    flagged.insert(id);
                 }
             }
         }
-        for id in back.keys().filter(|id| !seen.contains(*id)) {
+        // Each trigger's next run from what the core decided (H4), under the locks the rollback holds.
+        let since = state::read(&env.layout, self.name())?.map_or(0, |s| s.at.saturating_mul(1000));
+        let (next, dropped) = back::next_runs(
+            core.conn(),
+            &mac,
+            since,
+            &mine,
+            &back::host_triggers(&state),
+        )?;
+        lines.extend(dropped);
+        changed += back::apply_next(&mut state, &next, &flagged);
+        for id in keep.keys().filter(|id| !seen.contains(*id)) {
             lines.push(format!(
                 "routine {id} is no longer in serve.db; its job is removed and it is not brought back"
             ));
@@ -1131,7 +1337,7 @@ impl Schedules {
         }
         tx.commit()?;
         lines.push(format!(
-            "schedules: wrote {changed} routine(s) back to serve.db (enabled flags and webhook keys)"
+            "schedules: wrote {changed} routine(s) back to serve.db (enabled flags, webhook keys and next runs)"
         ));
         Ok(lines)
     }
@@ -1151,98 +1357,4 @@ fn key_record_exists(db: &Connection, agent: &str, job: &str) -> Result<bool> {
 
 fn tombstoned(env: &Env) -> bool {
     crate::cutover::tombstone::is_tombstone(&env.machine.join("sched").join("state.json"))
-}
-
-/// `state.json` again, over the tombstone: the last tick and each job's last run on this Mac from the core, and any other
-/// top-level key the original had (read from the copy the tombstone kept, `state.json.pre-cutover-<time>`).
-fn write_state_back(env: &Env, db: &Connection, mac: &str) -> Result<String> {
-    let dir = env.machine.join("sched");
-    let file = dir.join("state.json");
-    let mut out = Map::new();
-    // Keys the original had besides the two this file is rebuilt from (`pruned`).
-    let kept = std::fs::read_dir(&dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("state.json.pre-cutover-")
-        })
-        .max_by_key(std::fs::DirEntry::file_name)
-        .and_then(|e| std::fs::read(e.path()).ok())
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
-    if let Some(Value::Object(o)) = kept {
-        for (k, v) in o {
-            if k != "tick" && k != "last" {
-                out.insert(k, v);
-            }
-        }
-    }
-    let wm: Option<i64> = db
-        .query_row(
-            "SELECT at FROM sched_watermark WHERE mac = ?1",
-            [mac],
-            |r| r.get(0),
-        )
-        .optional()?;
-    let tick = match wm.and_then(crate::schedules::local_minute) {
-        Some(t) => Some(t),
-        None => db
-            .query_row("SELECT tick FROM sched_tick WHERE mac = ?1", [mac], |r| {
-                r.get::<_, String>(0)
-            })
-            .optional()?,
-    };
-    if let Some(t) = tick {
-        out.insert("tick".into(), json!(t));
-    }
-    let mut last = Map::new();
-    let mut st = db.prepare(
-        "SELECT agent, job, at, why, pid, log FROM sched_runs
-         WHERE mac = ?1 AND id IN (SELECT max(id) FROM sched_runs WHERE mac = ?1 GROUP BY agent, job)
-         ORDER BY agent, job",
-    )?;
-    let rows = st.query_map([mac], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, Option<String>>(3)?,
-            r.get::<_, Option<i64>>(4)?,
-            r.get::<_, Option<String>>(5)?,
-        ))
-    })?;
-    for row in rows {
-        let (agent, job, at, why, pid, log) = row?;
-        if at.is_empty() {
-            continue;
-        }
-        let mut e = Map::new();
-        e.insert("at".into(), json!(at));
-        if let Some(p) = pid {
-            e.insert("pid".into(), json!(p));
-        }
-        if let Some(l) = log {
-            e.insert("log".into(), json!(l));
-        }
-        if let Some(w) = why {
-            e.insert("why".into(), json!(w));
-        }
-        last.insert(format!("{agent}/{job}"), Value::Object(e));
-    }
-    let n = last.len();
-    out.insert("last".into(), Value::Object(last));
-    let io = |e: std::io::Error| Error::Io(format!("cutover: schedules: {}: {e}", file.display()));
-    std::fs::create_dir_all(&dir).map_err(io)?;
-    let tmp = dir.join("state.json.tmp");
-    std::fs::write(
-        &tmp,
-        serde_json::to_string_pretty(&Value::Object(out)).unwrap_or_default(),
-    )
-    .map_err(io)?;
-    std::fs::rename(&tmp, &file).map_err(io)?;
-    Ok(format!(
-        "schedules: wrote sched/state.json again (the last tick and {n} job(s)' last run)"
-    ))
 }

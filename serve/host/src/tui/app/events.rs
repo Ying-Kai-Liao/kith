@@ -86,10 +86,7 @@ impl App {
         self.floors = if self.stream_since > 0 {
             self.entries
                 .iter()
-                .filter_map(|(bot, loaded)| {
-                    let oldest = loaded.values().filter(|e| e.thread_id.is_none() && e.seq > 0).map(|e| e.seq).min();
-                    Some((bot.clone(), oldest?))
-                })
+                .filter_map(|(bot, loaded)| Some((bot.clone(), super::window_floor(loaded.values())?)))
                 .collect()
         } else {
             HashMap::new()
@@ -367,6 +364,24 @@ mod tests {
         assert!(app.history_complete("a"));
     }
 
+    #[test]
+    fn history_pages_from_the_window_not_from_an_old_task_root_held_for_its_replies() {
+        let ev = |seq: i64, thread: Value| {
+            json!({"type": "entry", "entry": {"botId": "a", "id": format!("e{seq}"), "seq": seq, "turn": seq,
+                "kind": "user", "threadId": thread}})
+        };
+        let mut app = test_app();
+        app.on_event(&ev(10, Value::Null));
+        app.on_event(&ev(200, Value::Null));
+        app.on_event(&ev(210, Value::Null));
+        app.on_event(&ev(300, json!("e10")));
+        assert_eq!(app.oldest_main("a"), Some(200));
+        let mut roots_only = test_app();
+        roots_only.on_event(&ev(10, Value::Null));
+        roots_only.on_event(&ev(300, json!("e10")));
+        assert_eq!(roots_only.oldest_main("a"), Some(10));
+    }
+
     fn connect(app: &mut App, since: i64) {
         app.on_msg(Msg::Connected { since });
         app.on_event(&json!({"type": "hello"}));
@@ -457,25 +472,5 @@ mod tests {
         app.upsert_bot(&json!({"id":"b", "computer":true}));
         assert!(app.bots["b"].computer);
         assert!(FIELDS.contains(&Field::Computer));
-    }
-
-    #[test]
-    fn fast_mode_survives_loading_the_editor() {
-        let mut app = test_app();
-        app.upsert_bot(&json!({"id":"b", "fastMode":true}));
-        assert!(app.bots["b"].fast_mode);
-        assert!(FIELDS.contains(&Field::Fast));
-    }
-
-    #[test]
-    fn a_refused_fast_mode_reads_its_reason() {
-        let mut app = test_app();
-        app.upsert_bot(
-            &json!({"id":"b", "fastMode":true, "fastModeSupport":"refused", "fastModeIssue":"requires extra usage"}),
-        );
-        assert!(app.bots["b"].fast_shown());
-        assert!(app.bots["b"].fast_refusal().is_some_and(|why| why.contains("requires extra usage")));
-        app.upsert_bot(&json!({"id":"g", "kind":"group", "fastModeSupport":"offered"}));
-        assert!(!app.bots["g"].fast_shown());
     }
 }

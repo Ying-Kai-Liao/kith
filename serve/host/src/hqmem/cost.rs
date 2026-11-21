@@ -1,6 +1,6 @@
 //! The cost rows of background runs (summaries, tidy-ups): written to the agent's ledger through `kith cost record`.
 
-use crate::chat::oneshot::Reply;
+use crate::hqmem::oneshot::Reply;
 use anyhow::anyhow;
 use std::time::Duration;
 

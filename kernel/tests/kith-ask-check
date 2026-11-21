@@ -447,4 +447,28 @@ expect "and its kith-ask is gone" "$(kill -0 "$ipid" 2>/dev/null && echo alive |
 [ -n "$okids" ] && kill $okids 2>/dev/null
 export STUB_SLEEP=0
 
+# kith-permit's park writes the .parked marker under the ask box's lock, and not at all for an ended ask.
+python3 - "$KERNEL/bin/kith-permit" "$BOX" <<'PY'
+import fcntl, importlib.machinery, importlib.util, json, os, sys, threading, time, pathlib
+loader = importlib.machinery.SourceFileLoader('kith_permit', sys.argv[1])
+spec = importlib.util.spec_from_loader('kith_permit', loader)
+mod = importlib.util.module_from_spec(spec); loader.exec_module(mod)
+box = pathlib.Path(sys.argv[2]); box.mkdir(parents=True, exist_ok=True)
+env = {'KITH_ASK_ID': 'ask-parklock'}
+marker = box / 'ask-parklock.parked'
+marker.unlink(missing_ok=True)
+held = open(box / '.lock', 'w'); fcntl.flock(held, fcntl.LOCK_EX)
+t = threading.Thread(target=mod.park, args=(env,)); t.start()
+time.sleep(0.5)
+during = marker.exists()
+held.close(); t.join(5)
+print('ok   park waits for the ask box lock' if not during and marker.exists() else 'FAIL park waits for the ask box lock (during=%s after=%s)' % (during, marker.exists()))
+marker.unlink()
+(box / 'ask-parklock.reg').write_text(json.dumps({'state': 'stopped', 'ended_at': 5}))
+mod.park(env)
+print('ok   park leaves an ended ask alone' if not marker.exists() else 'FAIL park leaves an ended ask alone')
+sys.exit(0 if not during and not marker.exists() else 1)
+PY
+[ $? = 0 ] || fails=$((fails + 1))
+
 [ "$fails" = 0 ] && echo "all kith-ask checks passed" || { echo "$fails check(s) failed"; exit 1; }

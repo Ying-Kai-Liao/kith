@@ -1478,3 +1478,60 @@ async fn a_mirrored_ask_card_reaches_the_owner_and_no_invited_person_or_bot_gues
 
 #[path = "core_claims_flow_tests.rs"]
 mod core_claims;
+
+#[tokio::test]
+async fn the_step_7_sync_says_whether_the_session_moved_and_must_be_reloaded() {
+    let r = Rig::new();
+    let root = r.app_thread("s9");
+    let lane = Lane::in_thread(&r.bot, &root);
+    r.append("s9", &user("2020-01-01T00:00:00Z", "from the app"));
+    r.register("s9", "builder", DEAD, Some("s9"));
+    // The first look at a session the host has not imported yet catches it up (and says so); then nothing is new.
+    sync::sync_for_turn(&r.hub, &lane, "s9").await.unwrap();
+    let before = r.forgets();
+    assert_eq!(sync::sync_for_turn(&r.hub, &lane, "s9").await.unwrap(), sync::Synced::Unchanged);
+    assert_eq!(r.forgets(), before);
+    // A terminal wrote while the turn waited: the lines are imported and the session must be reloaded.
+    r.append("s9", &user("2099-01-01T00:00:00Z", "typed in the terminal, then closed"));
+    assert_eq!(sync::sync_for_turn(&r.hub, &lane, "s9").await.unwrap(), sync::Synced::Moved);
+    assert!(r.texts(&root).iter().any(|t| t.contains("typed in the terminal")), "imported");
+    assert!(r.forgets() > before, "other actors that cached the session forget it");
+    // Told once: the mark is cleared, so the next turn does not reload for nothing.
+    assert_eq!(sync::sync_for_turn(&r.hub, &lane, "s9").await.unwrap(), sync::Synced::Unchanged);
+    // A lane that is no thread has nothing to sync.
+    assert_eq!(sync::sync_for_turn(&r.hub, &Lane::main(&r.bot), "s9").await.unwrap(), sync::Synced::Unchanged);
+}
+
+#[tokio::test]
+async fn the_step_7_sync_reports_a_fork_instead_of_moving_the_turn_to_it() {
+    // A terminal forked the thread's session while the turn waited: the lane follows the fork, but the turn holds its claim
+    // on the old session, so the answer is `Forked`, not `Moved`.
+    let r = Rig::new();
+    let root = r.app_thread("s9");
+    let lane = Lane::in_thread(&r.bot, &root);
+    r.append("s9", &user("2020-01-01T00:00:00Z", "from the app"));
+    r.append("f1", &user("2099-01-01T00:00:00Z", "typed in the fork"));
+    r.register("f1", "builder", DEAD, Some("s9"));
+    assert_eq!(sync::sync_for_turn(&r.hub, &lane, "s9").await.unwrap(), sync::Synced::Forked { session: "f1".into() });
+}
+
+#[tokio::test]
+async fn a_fork_the_scan_adopted_between_the_claim_and_step_7_is_still_a_fork() {
+    // The scan takes no thread lock: it can adopt the fork after `begin` and before the sync, so the sync itself sees the lane
+    // already on the fork, with only a stale mark to show for it. The turn's claim names the old session all the same.
+    let r = Rig::new();
+    let root = r.app_thread("s9");
+    let lane = Lane::in_thread(&r.bot, &root);
+    r.append("s9", &user("2020-01-01T00:00:00Z", "from the app"));
+    r.append("f1", &user("2099-01-01T00:00:00Z", "typed in the fork"));
+    r.register("f1", "builder", DEAD, Some("s9"));
+    r.scan();
+    assert_eq!(
+        r.hub.store.kv_get(&lane_key("session", &r.bot, &lane)).as_deref(),
+        Some("f1"),
+        "the scan moved the lane to the fork"
+    );
+    assert_eq!(sync::sync_for_turn(&r.hub, &lane, "s9").await.unwrap(), sync::Synced::Forked { session: "f1".into() });
+    // A turn that claimed the fork itself is not told it forked.
+    assert_ne!(sync::sync_for_turn(&r.hub, &lane, "f1").await.unwrap(), sync::Synced::Forked { session: "f1".into() });
+}

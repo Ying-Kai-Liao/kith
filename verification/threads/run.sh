@@ -2,6 +2,9 @@
 # Model-checks "one writer per thread" (Threads.tla) with TLC, one command, no global install.
 #
 #   verification/threads/run.sh                  every row of checks.tsv: variant x property, expected pass/fail
+#   verification/threads/run.sh --slow           the rows of checks-slow.tsv, one at a time, each on every core (TLC -workers
+#                                                auto, heap KITH_TLC_HEAP, default 6g): the large passing rows (tens of millions
+#                                                of states), CI job thread-writers-slow
 #   verification/threads/run.sh --show VARIANT PROPERTY   TLC's full output (the counterexample) for one row
 #   verification/threads/run.sh --list           the rows
 #
@@ -88,7 +91,8 @@ run_tlc() {   # run_tlc VARIANT KIND NAME -> TLC's output on stdout
   compose "$1" "$2" "$3" > "$work/Threads.cfg"
   # TLC unpacks its standard modules into java.io.tmpdir; parallel runs must not share one.
   mkdir -p "$work/tmp"
-  ( cd "$HERE" && "$JAVA" -Djava.io.tmpdir="$work/tmp" -XX:+UseParallelGC -Xmx512m -cp "$JAR" tlc2.TLC -workers 1 -deadlock \
+  ( cd "$HERE" && "$JAVA" -Djava.io.tmpdir="$work/tmp" -XX:+UseParallelGC -Xmx"${TLC_HEAP:-512m}" -cp "$JAR" tlc2.TLC \
+      -workers "${TLC_WORKERS:-1}" -deadlock \
       -metadir "$work/states" -config "$work/Threads.cfg" Threads.tla 2>&1 ) || true
   rm -rf "$work"
 }
@@ -111,20 +115,26 @@ case "${1:-}" in
     [[ $res == "$4" ]]
     exit $? ;;
   --show)
-    setup; kind=$(awk -F'\t' -v v="$2" -v n="$3" '$1==v && $3==n {print $2}' "$HERE/checks.tsv" | head -1)
+    setup; kind=$(awk -F'\t' -v v="$2" -v n="$3" '$1==v && $3==n {print $2}' "$HERE/checks.tsv" "$HERE/checks-slow.tsv" | head -1)
     [[ -n $kind ]] || { echo "run.sh: no row $2 $3 in checks.tsv" >&2; exit 2; }
     run_tlc "$2" "$kind" "$3"; exit 0 ;;
   --tools)  # internal: where the pinned Java and TLA+ tools are, for the other models (verification/secrets/run.sh)
     setup; echo "$JAVA"; echo "$JAR"; exit 0 ;;
-  --list)  grep -v '^#' "$HERE/checks.tsv"; exit 0 ;;
+  --list)  grep -v '^#' "$HERE/checks.tsv" "$HERE/checks-slow.tsv"; exit 0 ;;
 esac
 
+TABLE=$HERE/checks.tsv
+jobs=$(( $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) > 4 ? 4 : $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) ))
+if [[ ${1:-} == --slow ]]; then
+  # One row at a time, all cores and a big heap each: a 1-worker, 512 MB run of these did not finish in 2 h.
+  TABLE=$HERE/checks-slow.tsv jobs=1
+  export TLC_WORKERS=auto TLC_HEAP=${KITH_TLC_HEAP:-6g}
+fi
 setup
 echo "tla2tools $TLA_VERSION, java $(java_major "$JAVA") ($JAVA)"
-jobs=$(( $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) > 4 ? 4 : $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4) ))
 res=$(mktemp "${TMPDIR:-/tmp}/kith-verify-res.XXXXXX")
 start=$(date +%s)
-grep -v '^#' "$HERE/checks.tsv" | grep -v '^$' \
+grep -v '^#' "$TABLE" | grep -v '^$' \
   | tr '\t\n' '\0\0' \
   | xargs -0 -n 4 -P "$jobs" "${BASH_SOURCE[0]}" --one >"$res" 2>&1 || true
 
@@ -134,9 +144,9 @@ while IFS='|' read -r v p want got st; do
   mark=ok; [[ $want == "$got" ]] || { mark=MISMATCH; bad=1; }
   printf '%-26s %-34s %-6s %-6s %-9s %s\n' "$v" "$p" "$want" "$got" "$st" "$([[ $mark == ok ]] || echo "<-- $mark")"
 done < <(sort "$res")
-rows=$(grep -vc '^#\|^$' "$HERE/checks.tsv" || true)
+rows=$(grep -vc '^#\|^$' "$TABLE" || true)
 [[ $(wc -l <"$res") -eq $rows ]] || { echo "run.sh: only $(wc -l <"$res") of $rows rows reported (TLC or setup failed); see: run.sh --show VARIANT PROPERTY"; cat "$res" | grep -v '|' || true; bad=1; }
 rm -f "$res"
 echo "$rows rows in $(( $(date +%s) - start ))s"
-if (( bad )); then echo "RESULT: differs from checks.tsv"; exit 1; fi
+if (( bad )); then echo "RESULT: differs from $(basename "$TABLE")"; exit 1; fi
 echo "RESULT: every row as expected"

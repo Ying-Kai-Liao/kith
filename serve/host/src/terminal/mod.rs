@@ -16,16 +16,28 @@
 
 pub mod claim;
 pub mod core_claims;
+pub mod core_holders;
+pub mod core_writer;
 pub mod intent;
 mod jsonl;
 mod registry;
+pub(crate) use registry::{pid_runs, proc_start};
 mod sync;
 #[cfg(test)]
 mod tests;
+#[cfg(unix)]
+pub mod warm_stub;
+#[cfg(all(test, unix))]
+mod warm_stub_tests;
 
 #[cfg(test)]
 pub use sync::scan;
-pub use sync::{SendGate, bot_gate, carry_over, host_turn_ended, resolve, send_gate, start, start_gate, take_over};
+pub use sync::{
+    SendGate, bot_gate, carry_over, host_turn_ended, resolve, send_gate, start, start_gate, start_gate_in, take_over,
+};
+// Step 7 of a Writer-mode turn; the wiring package (P7b) is its caller.
+#[allow(unused_imports, reason = "no caller until the wiring package (P7b)")]
+pub use sync::{Synced, sync_for_turn};
 
 use std::collections::HashSet;
 use std::path::PathBuf;

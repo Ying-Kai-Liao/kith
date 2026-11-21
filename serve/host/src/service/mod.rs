@@ -32,9 +32,24 @@ static BINARY_IDENTITY: OnceLock<(String, String)> = OnceLock::new();
 /// Snapshot before serving: reading the path again after an update would identify
 /// the replacement on disk rather than this running process.
 pub fn capture_binary_identity() -> Result<()> {
+    use std::io::Read as _;
     let exe = current_exe()?;
+    // In chunks: a debug build is over 500 MB, and the e2e tests start several hosts at once.
+    let mut file = std::fs::File::open(&exe)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = match file.read(&mut buf) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            read => read?,
+        };
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
     let mut hash = String::with_capacity(64);
-    for byte in Sha256::digest(std::fs::read(&exe)?) {
+    for byte in hasher.finalize() {
         write!(hash, "{byte:02x}")?;
     }
     let _ = BINARY_IDENTITY.set((exe.to_string_lossy().into_owned(), hash));
@@ -44,11 +59,15 @@ pub fn capture_binary_identity() -> Result<()> {
 /// This binary's resolved path, in the form other programs print it: Windows'
 /// `canonicalize` adds a `\\?\` prefix that the apps' paths and shells don't have.
 pub fn current_exe() -> std::io::Result<PathBuf> {
-    let exe = std::env::current_exe()?.canonicalize()?;
-    Ok(match exe.to_str().and_then(|p| p.strip_prefix(r"\\?\")) {
+    Ok(plain(std::env::current_exe()?.canonicalize()?))
+}
+
+/// A canonical path without Windows' `\\?\` prefix (see [`current_exe`]).
+fn plain(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|p| p.strip_prefix(r"\\?\")) {
         Some(plain) if cfg!(windows) => PathBuf::from(plain),
-        _ => exe,
-    })
+        _ => path,
+    }
 }
 
 pub fn binary_identity() -> Option<&'static (String, String)> {
@@ -112,22 +131,29 @@ fn holder_wanted() -> bool {
 }
 
 /// The words in front of the host in a job that runs it under the holder: `kith-holder supervise ... --`. The holder
-/// program is `$KITH_HOLDER_BIN` or `kith-holder` beside this program (where the daemon looks too); the folder and the
-/// secret file are the core's own, so the holder this starts is the one the daemon says hello to. `None`: not opted in.
+/// program is the one the job's core will look for (`kernel::find_holder`: beside this program, or in the Mac app's CLI
+/// folder), and the folder and the secret file are the core's own, so the holder this starts is the one the daemon says
+/// hello to. `None`: not opted in.
 fn holder_words() -> Result<Option<Vec<String>>> {
     if !holder_wanted() {
         return Ok(None);
     }
     let name = if cfg!(windows) { "kith-holder.exe" } else { "kith-holder" };
-    let exe = match std::env::var_os("KITH_HOLDER_BIN").filter(|v| !v.is_empty()) {
-        Some(e) => PathBuf::from(e),
-        None => current_exe().context("locating the kith-serve binary")?.with_file_name(name),
+    let host = current_exe().context("locating the kith-serve binary")?;
+    let Some(exe) = crate::kernel::find_holder(&host).map(plain) else {
+        bail!("the holder is switched on but there is no {name} beside {} (install it beside kith)", host.display());
     };
-    if !exe.is_file() {
-        bail!(
-            "the holder is switched on but {} is missing (set KITH_HOLDER_BIN, or install it beside kith)",
-            exe.display()
-        );
+    // The job's environment does not carry KITH_HOLDER_BIN, so its core would look beside the host and never connect
+    // to a holder named only here. Both sides resolved: the holder beside the host may itself be a link.
+    if let Some(given) = std::env::var_os("KITH_HOLDER_BIN").filter(|v| !v.is_empty()) {
+        let given = PathBuf::from(given);
+        if given.canonicalize().ok().map(plain) != exe.canonicalize().ok().map(plain) {
+            bail!(
+                "KITH_HOLDER_BIN names {} but the service's core will use {}: unset it, or put that holder beside the host",
+                given.display(),
+                exe.display()
+            );
+        }
     }
     let folders = crate::kernel::folders(&kith_kernel::paths::process_home());
     let (dir, secret) = crate::core_front::holder_files(&folders).context("preparing the holder's folder")?;

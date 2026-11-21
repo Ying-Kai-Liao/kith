@@ -1,0 +1,11 @@
+# Cutover modules that must be switched on a Mac before it takes this release (retire-python plan, section 3.1).
+#
+# One module name per line; `#` starts a comment. Names are CUTOVER MODULES only (`kith kernel cutover modules`:
+# accounts, transcripts, claims, schedules, authority). The verb switches in core-switched.txt (paths, engines, launch,
+# settings, ...) are not modules and would be reported as unknown.
+#
+# Read by: kith kernel cutover status --require kernel/lib/requires-switched.txt
+# Exit 0 when every listed module is switched here; otherwise it names the missing ones and the step to run for each.
+# (The host's own start-up check uses a list built into the host binary, not this file.)
+#
+# No module is required yet: the first deletion release adds its lines.

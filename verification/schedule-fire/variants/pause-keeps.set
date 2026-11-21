@@ -1,1 +1,3 @@
 PauseCancels = FALSE
+ClaimPausedCheck = FALSE
+KeepRebegin = FALSE

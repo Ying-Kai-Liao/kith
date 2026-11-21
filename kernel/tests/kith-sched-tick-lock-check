@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# kith-sched-tick-lock-check: kith-sched holds <machine>/sched/tick.lock (exclusive flock) across read, decide, record and
+# save, so `kith kernel cutover step schedules` (which takes the same lock from import to tombstone) cannot race it.
+#   - lock held by someone else: tick starts and saves nothing; `run` and `run --json` fail (non-zero), nothing starts
+#   - a tombstone placed while a tick waits: nothing starts, state.json stays the note
+#   - `last` records pid and procStart; an old record without procStart still counts as running
+#   - a slot recorded without a pid (crash between record and Popen) is skipped, never started twice
+# Runs from a copy of the kernel with a stub bin/kith. Throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-sched-tick-lock-check
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sched-tick-lock.XXXXXX"); T=$(cd "$T" && pwd -P)
+PIDS=()
+trap 'for p in "${PIDS[@]:-}"; do [[ -n $p ]] && kill "$p" 2>/dev/null; done; rm -rf "$T"' EXIT
+export PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_AUTH=$T/auth.json KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1
+unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_MACHINE HQ_MACHINE KITH_SCHED_PERMISSION_MODE KITH_RUN_OUTBOX HQ_RUN_OUTBOX
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_SERVE_DIR" "$T/k/bin" "$KITH_HOME/agents/house/role"
+printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
+ln -s "$KERNEL/lib" "$T/k/lib"
+for b in kith-sched kith-auth; do cp "$KERNEL/bin/$b" "$T/k/bin/$b"; done
+for b in kith-ask kith-wake; do printf 'pass\n' > "$T/k/bin/$b"; done   # the tick's sweep and drain, not under test
+# The stub run: leaves a mark and stays alive a while, so its pid is a live one to record.
+printf '#!/bin/sh\necho ran >> "$KITH_STATE/ran"\nexec sleep 30\n' > "$T/k/bin/kith"; chmod +x "$T/k/bin/kith"
+MACHINE=$(python3 -I -c "import sys; sys.path.insert(0, '$KERNEL/lib'); from kith_paths import paths; print(paths()['KITH_MACHINE'])")
+mkdir -p "$MACHINE/sched"
+S=$MACHINE/sched/state.json
+LOCK=$MACHINE/sched/tick.lock
+[[ -n "$MACHINE" ]] || { echo "no machine dir"; exit 1; }
+J=$KITH_HOME/agents/house/jobs.json
+printf '[{"id": "a", "cron": "0 8 * * *", "task": "do a"}]\n' > "$J"
+export KITH_SCHED_NOW=2026-11-04T08:00 KITH_SCHED_LOCK_WAIT=1
+K() { python3 "$T/k/bin/kith-sched" "$@"; }
+fresh() { rm -f "$S" "$S.tmp" "$T/state/ran"; printf '{"tick": "2026-11-04T07:59", "last": {}}\n' > "$S"; }
+ran() { [[ -e "$T/state/ran" ]]; }
+last_has() { python3 -c "import json; l=json.load(open('$S'))['last'].get('house/a',{}); import sys; sys.exit(0 if $1 else 1)"; }
+# Hold the lock for $1 seconds in the background; waits until it really holds it.
+hold() { python3 -c "
+import fcntl, sys, time
+f = open('$LOCK', 'a'); fcntl.flock(f, fcntl.LOCK_EX); print('held', flush=True); time.sleep($1)" >"$T/held" 2>&1 &
+  HOLD=$!; PIDS+=("$HOLD"); for _ in $(seq 50); do grep -q held "$T/held" 2>/dev/null && return; sleep 0.1; done; }
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; sed 's/^/     | /' "$T/out" "$T/err" 2>/dev/null | tail -8; fails=$((fails + 1)); fi; }
+
+# 1. The marker line the cutover gate greps.
+check "marker line present" "grep -q '^KITH_SCHED_TICK_LOCK = 1' '$KERNEL/bin/kith-sched'"
+
+# 2. A free lock: the tick starts the job and records pid and procStart.
+fresh
+K tick >"$T/out" 2>"$T/err" </dev/null
+sleep 0.5
+check "tick starts the due job" "ran"
+check "last has pid and procStart" "last_has \"'pid' in l and str(l.get('procStart',''))[:1] in ('e', 'b')\""
+check "the tick stamp is saved" "[[ \"\$(python3 -c \"import json; print(json.load(open('$S'))['tick'])\")\" == 2026-11-04T08:00 ]]"
+check "tick.lock is a file under the machine dir" "[[ -e '$LOCK' ]]"
+PID=$(python3 -c "import json; print(json.load(open('$S'))['last']['house/a']['pid'])"); kill "$PID" 2>/dev/null
+
+# 3. Lock held: the tick starts nothing, saves nothing, exits 0 with a line on stderr.
+fresh; BEFORE=$(cat "$S")
+hold 60
+K tick >"$T/out" 2>"$T/err" </dev/null; rc=$?
+check "held lock: tick exits 0, says so, starts nothing, leaves state.json" "[[ $rc -eq 0 ]] && grep -q 'tick.lock is held' '$T/err' && ! ran && [[ \"\$(cat '$S')\" == '$BEFORE' ]]"
+# `run` by hand, text and --json: non-zero, nothing started, state untouched.
+K run house a >"$T/out" 2>"$T/err" </dev/null; rc=$?
+check "held lock: run exits non-zero, starts nothing" "[[ $rc -ne 0 ]] && grep -q 'tick.lock is held' '$T/err' && ! ran && [[ \"\$(cat '$S')\" == '$BEFORE' ]]"
+K run house a --json >"$T/out" 2>"$T/err" </dev/null; rc=$?
+check "held lock: run --json exits non-zero with the error object, starts nothing" "[[ $rc -ne 0 ]] && grep -q '\"ok\": false' '$T/out' && grep -q 'tick.lock is held' '$T/out' && ! ran && [[ \"\$(cat '$S')\" == '$BEFORE' ]]"
+kill "$HOLD" 2>/dev/null; wait "$HOLD" 2>/dev/null
+
+# 4. Lock released: run and run --json take it and start.
+fresh
+K run house a --json >"$T/out" 2>"$T/err" </dev/null; rc=$?
+check "free lock: run --json starts the job" "[[ $rc -eq 0 ]] && grep -q '\"ok\": true' '$T/out' && ran && last_has \"'pid' in l and 'procStart' in l\""
+PID=$(python3 -c "import json; print(json.load(open('$S'))['last']['house/a']['pid'])"); kill "$PID" 2>/dev/null
+fresh
+K run house a >"$T/out" 2>"$T/err" </dev/null; rc=$?
+check "free lock: run starts the job" "[[ $rc -eq 0 ]] && ran && last_has \"'pid' in l\""
+PID=$(python3 -c "import json; print(json.load(open('$S'))['last']['house/a']['pid'])"); kill "$PID" 2>/dev/null
+
+# 5. A tombstone placed while a tick waits for the lock: nothing starts, the note stays.
+fresh
+NOTE='{"kith_tombstone": 1, "module": "schedules", "message": "moved", "rollback": "kith rollback schedules"}'
+export KITH_SCHED_LOCK_WAIT=20
+python3 -c "
+import fcntl, time
+f = open('$LOCK', 'a'); fcntl.flock(f, fcntl.LOCK_EX); open('$T/held2', 'w').write('held')
+time.sleep(2)
+open('$S', 'w').write('''$NOTE'''); f.close()" &
+H2=$!; PIDS+=("$H2"); for _ in $(seq 50); do [[ -e "$T/held2" ]] && break; sleep 0.1; done
+K tick >"$T/out" 2>"$T/err" </dev/null; rc=$?
+wait "$H2" 2>/dev/null
+check "tombstone while waiting: tick exits 0 with the note's line, starts nothing, state.json is the note" "[[ $rc -eq 0 ]] && grep -q 'moved to the Kith core' '$T/out' && ! ran && [[ \"\$(cat '$S')\" == '$NOTE' ]] && [[ ! -e '$S.tmp' ]]"
+export KITH_SCHED_LOCK_WAIT=1
+
+# 6. An old record without procStart whose pid is alive still counts as running: skipped, not started again.
+fresh
+sleep 30 & OLD=$!; PIDS+=("$OLD")
+printf '{"tick": "2026-11-04T07:59", "last": {"house/a": {"at": "2026-11-04T07:00", "why": "due 07:00", "log": "x", "pid": %s}}}\n' "$OLD" > "$S"
+K tick >"$T/out" 2>"$T/err" </dev/null
+check "old record (pid, no procStart) still counts as running" "grep -q 'still running' '$T/err' && ! ran"
+
+# 7. A slot recorded without a pid (a crash before Popen) is skipped, never run twice.
+printf '{"tick": "2026-11-04T07:59", "last": {"house/a": {"at": "2026-11-04T08:00", "why": "due 08:00", "log": "x"}}}\n' > "$S"
+K tick >"$T/out" 2>"$T/err" </dev/null
+check "a recorded slot with no pid is not started again" "! ran"
+
+# 8. A slot started with a pid, then kith-sched killed before the tick was saved: the run has ended, nothing starts again.
+printf '{"tick": "2026-11-04T07:59", "last": {"house/a": {"at": "2026-11-04T08:00", "why": "due 08:00", "log": "x", "pid": 999999}}}\n' > "$S"
+K tick >"$T/out" 2>"$T/err" </dev/null
+check "a started slot whose pid has ended is not started again (tick not saved)" "! ran && ! grep -q 'still running' '$T/err'"
+
+[[ $fails -eq 0 ]] && echo "all ok" || echo "$fails failed"
+exit $((fails > 0))

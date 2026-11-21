@@ -57,6 +57,10 @@ pub fn ask_helper_within(
     let (Some(person), Some(caller)) = (env.get("KITH_PERSON"), env.get("KITH_AGENT")) else {
         return "Helpers are asked from a guest's run only.".to_owned();
     };
+    if crate::launch::room::is_room_person(person) {
+        // a room person is for everyone in a room at once; kith-auth knows no such person (a door it may run)
+        return "A room's turns can't ask helpers yet.".to_owned();
+    }
     if agent == caller {
         return format!("You are {agent}; ask another agent.");
     }

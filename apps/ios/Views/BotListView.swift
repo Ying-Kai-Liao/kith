@@ -285,7 +285,7 @@ struct BotListView: View {
                     machineChips
                     labelChips(all)
                     // A computer waiting for an update has its card instead; its bots aren't known yet.
-                    if all.isEmpty && shownStores.allSatisfy({ $0.mismatch == nil }) {
+                    if all.isEmpty && shownStores.allSatisfy({ $0.mismatch == nil && $0.cacheLoaded }) {
                         EmptyRoster(canCreate: allStores.contains { $0.mismatch == nil }, hasComputer: !accounts.computers.isEmpty,
                                     create: newBot, showComputers: { app.showComputers = true })
                     }
@@ -848,23 +848,18 @@ private struct HomeSheets: ViewModifier {
     func body(content: Content) -> some View {
         content
             .kithSheet(item: $editing) { target in
-                // A new bot can move to another computer until it's created.
-                let computerId = editing?.computerId ?? target.computerId
-                if let store = accounts.store(for: computerId) {
-                    BotEditorView(draft: target.draft,
-                                  computers: allStores.map {
-                                      ($0.computer.id, $0.connection == .online ? $0.hostName : "\($0.hostName) (offline)")
-                                  },
-                                  computer: target.draft.id == nil
-                                      ? Binding(get: { computerId }, set: { editing?.computerId = $0 })
-                                      : nil)
-                        .environment(store)
-                        .onChange(of: store.selection) { _, botId in
-                            // A new bot opens its chat, on the computer it was created on.
-                            guard let botId else { return }
-                            store.selection = nil
-                            accounts.selection = BotReference(accountId: accounts.accountId, computerId: computerId, botId: botId)
-                        }
+                if let store = accounts.store(for: target.computerId) {
+                    // A new agent is kith's New agent; an existing bot's profile is the editor.
+                    Group {
+                        if target.draft.id == nil { NewAgentSheet() } else { BotEditorView(draft: target.draft) }
+                    }
+                    .environment(store)
+                    .onChange(of: store.selection) { _, botId in
+                        // A new agent opens its chat, on the computer it was created on.
+                        guard let botId else { return }
+                        store.selection = nil
+                        accounts.selection = BotReference(accountId: accounts.accountId, computerId: target.computerId, botId: botId)
+                    }
                 }
             }
             .kithSheet(item: $newChat) { target in
@@ -970,7 +965,7 @@ private struct GroupTarget: Identifiable {
 
 private struct EditTarget: Identifiable {
     let id = UUID()
-    var computerId: ComputerID
+    let computerId: ComputerID
     let draft: BotDraft
 }
 

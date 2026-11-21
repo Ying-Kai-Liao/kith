@@ -1,0 +1,2 @@
+\* the design for a host routine's job (the owner's bot runs it; adopt requeues a running turn; the keep path)
+Cron = FALSE

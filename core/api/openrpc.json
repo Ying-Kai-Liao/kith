@@ -2897,6 +2897,17 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "members",
+          "summary": "A room person's run: the people the turn is for. The token's audience is the room cut to what every one of them may see; a revoked member ends the token.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       ],
       "result": {
@@ -2934,6 +2945,9 @@
             "kind": "caller"
           },
           "project": {
+            "kind": "caller"
+          },
+          "members": {
             "kind": "caller"
           }
         }
@@ -3050,7 +3064,7 @@
         "run-token"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "kernel",
@@ -3091,7 +3105,7 @@
         "run-token"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "kernel",
@@ -10609,6 +10623,55 @@
       }
     },
     {
+      "name": "run.resolve",
+      "summary": "Who a run token stands for, for the host's own socket: the token must be live, bound, the peer pid must be the run's process or below it and the run's person (and every member of a room turn's basis) must still be allowed. Answers the identity, or is refused.",
+      "params": [
+        {
+          "name": "token",
+          "summary": "The run's token.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The connecting process on the host's socket.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-run",
+          "resolve"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "token": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "doors.list",
       "summary": "The guest doors that are starting or live, and swept ones whose box is not confirmed gone, as `{doors}`. With `--all` the closed ones kept for a day too.",
       "params": [
@@ -11046,14 +11109,32 @@
     },
     {
       "name": "claim.list",
-      "summary": "The writer claims: the live ones (queued, claimed, running) and the recent ended ones, as `{live, recent}`.",
-      "params": [],
+      "summary": "The writer claims: the live ones (queued, claimed, running, ending) and the recent ended ones, as `{live, recent}`; each row carries the conversation's `agent` and the `holderInstance` the claim went to. The owner reads it (`kith-wake`) and so does the host (a revoke's narrowed sweep; a warm process's step 7, which asks whether anyone claimed its conversation since). With `conversation` (and `after`, a claim id) only that conversation's claims above `after`, in both lists.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "Only this conversation's claims.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "after",
+          "summary": "Only claims with an id above this (default 0).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
       "result": {
         "name": "result",
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "owner",
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
@@ -11067,7 +11148,307 @@
           "--json"
         ],
         "requires": [],
-        "args": {}
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "after": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "claim.external",
+      "summary": "A kernel taker's writer claim on a conversation (`kith-sessions claim|terminal|resolve`, a `--direct` run) once the claims are the core's: kind `external`, naming the run's process (pid and start stamp) and the person kith-auth resolved (empty: the owner). Idempotent for the same process. Ends dead externals and settles stopped idle processes first; an idle warm process holding the conversation is marked for a kill and answers `waiting` until it is gone. A person's claim needs `revokeSeen` (`claim.epoch`, read before the may check). Answers `{claimId, generation}`, or `{refused: held | takeover | waiting | revoked | agent, why}`; a session id outside a-z0-9._- is refused. Serves only once the claims are switched.",
+      "params": [
+        {
+          "name": "conversation",
+          "summary": "The session id.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The run's process (the launcher's shell, which then execs the engine).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "That process's start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The principal revoke sweeps by (empty: the owner).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent (required for a conversation the core does not know yet; a different one than the conversation's is refused).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "engine",
+          "summary": "The engine of such a conversation (default claude).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "The person's `claim.epoch` read before the caller's may check (required for a person; the owner's default is read now).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "conversation": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "agent": {
+            "kind": "caller"
+          },
+          "engine": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "claim.epoch",
+      "summary": "How many times a principal was revoked. A person's claim carries the value read BEFORE the may check that let the run in (`revokeSeen`), so a revoke committed after it refuses the claim. Answers `{epoch}`.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The principal (empty: the owner).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "claim.attach",
+      "summary": "A scheduled cron run records its own process on the claim the host made for its turn (`hostclaim.claim` kind `scheduleRun`), with a check-and-set: the claim must be `claimed` with no process yet. The claim becomes kind `external`, `running`, with this pid and start stamp, and its turn `running`; the caller then starts the engine, and exits without running when this refuses. Answers `{attached: true}` (`again` for the same process), or `{refused: \"gone\", state}` when the claim was cancelled, ended, requeued or already has a process. Serves only once the claims are switched.",
+      "params": [
+        {
+          "name": "claimId",
+          "summary": "The claim the host made for the turn.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The run's own process.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "That process's start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "claimId": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "claim.release",
+      "summary": "Gives back the owner's external claims of one process (pid and start stamp): a claim already ended, or none, answers `{ended: []}`, so a retry is harmless. Never touches a turn's, a terminal's or a person's claim (a person's ends when its process is gone, or by a revoke). Answers `{ended}`.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "Only this conversation's claim.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "conversation": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "claim.sweepPerson",
+      "summary": "Revoke or removal with no host running: ends the live claims of these principals (queued ones end at once, live ones go to `ending`). The owner is refused. Answers `{kill: [{claimId, pid, started, conversation}]}` for the caller to signal; the rows end once the processes are gone.",
+      "params": [
+        {
+          "name": "persons",
+          "summary": "The principals (a person and their bots).",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "persons": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
       }
     },
     {
@@ -11384,6 +11765,275 @@
       }
     },
     {
+      "name": "schedule.runs",
+      "summary": "The newest run of every job that has one (of one agent, or one job): what `kith schedule log` lists. Answers `{runs}`.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "Only this agent's.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "Only this job's.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "schedule.put",
+      "summary": "Add a job to an agent's jobs.json, or replace the one with that id (`kith schedule add`). The cron is checked as the fire reads it; `effort` is one of low, medium, high, xhigh, max; with no `id` it is a slug of the task. `person` is who the job runs as (the caller's person; none is the owner). Answers `{ok, agent, replaced, job}`, the job as `schedule.jobs` shows it.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cron",
+          "summary": "Five cron fields, or @hourly, @daily, @weekly, @monthly.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "task",
+          "summary": "What the run is asked to do.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The job's id.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "model",
+          "summary": "The model.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "effort",
+          "summary": "The effort.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "harness",
+          "summary": "The engine.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Who the job runs as.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "cron": {
+            "kind": "positional"
+          },
+          "task": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          },
+          "model": {
+            "kind": "positional"
+          },
+          "effort": {
+            "kind": "positional"
+          },
+          "harness": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "schedule.drop",
+      "summary": "Remove a job from an agent's jobs.json (`kith schedule rm`); what it has waiting is cancelled. Answers `{ok, agent, id, changed}`.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The job.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "schedule.setPaused",
+      "summary": "Pause or resume a job (`kith schedule pause` and `resume`); pausing cancels what it has waiting. Answers `{ok, agent, id, changed}`.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The job.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "paused",
+          "summary": "True to pause, false to resume.",
+          "required": true,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          },
+          "paused": {
+            "kind": "positional"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
       "name": "schedule.fire",
       "summary": "A webhook or event delivery for one job: checks the job's key (`Authorization: Bearer` or a GitHub-style `X-Hub-Signature-256` HMAC of the exact body, the key read from the secrets lane), the event against the job's trigger and filters, then fires through the same transaction as `schedule.runNow` with the slot `event:<hash of the delivery id>`, so a redelivery fires at most once. Answers `fired`, `busy` (retry), `ignored`, `ping`, `refused` (`unauthorized`, `paused`, `gone`, `invalid`) or what an earlier delivery of the same id decided. The body is UTF-8 text: the listener refuses a body that is not as `invalid` and never converts it lossily (a replaced byte would make a correct signature fail). The host calls it as itself with the real sender in `caller`; `caller` is only echoed in the answer, never used to decide anything, and M4-5 stores it with the fire row.",
       "params": [
@@ -11462,6 +12112,39 @@
           },
           "caller": {
             "kind": "positional"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "session.record",
+      "summary": "Records a session in the core's session registry (the `SessionStart` hook once the transcripts are the core's): in one transaction the newest record wins (order: `recordedAt` ns, then `procStart`, then the last to arrive) and `session_records`, `engine_sessions` and `conversations` are written; then `$KITH_STATE/live/terminal/<sid>.json` is written from the row (also when the record was older), and only then does the call answer. A compact keeps the row's `startedAt`. Answers `{outcome: recorded | older}`, or `{refused: invalid, why}` (the record is dropped) or `{refused: not-serving, why}` (the transcripts module is not switched: the hook keeps its spool entry).",
+      "params": [
+        {
+          "name": "record",
+          "summary": "The record `kith-sessions record` writes (`v: 1`, `sessionId`, `agent`, `cwd`, `transcriptPath`, `pid`, ...), with `recordedAt` in nanoseconds since the epoch.",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "record": {
+            "kind": "caller"
           }
         },
         "hidden": true
@@ -13304,6 +13987,22 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "room",
+          "summary": "A room conversation: the conversation of (agent, room, joinEpoch), made when missing. A second one for the same key is refused.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "joinEpoch",
+          "summary": "The room's join epoch (with `room`).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
         }
       ],
       "result": {
@@ -13328,6 +14027,12 @@
             "kind": "caller"
           },
           "engine": {
+            "kind": "caller"
+          },
+          "room": {
+            "kind": "caller"
+          },
+          "joinEpoch": {
             "kind": "caller"
           }
         },
@@ -13371,7 +14076,7 @@
     },
     {
       "name": "hostclaim.claim",
-      "summary": "A terminal or `external` writer claim (step 1). Refused when a writer holds the conversation. An `external` claim names its process. Answers `{claimId, generation}`.",
+      "summary": "A terminal or `external` writer claim (step 1), or a `scheduleRun`: the claim of a pulled schedule turn for a run that has no process yet (`turn` required; the run attaches itself with `claim.attach`). Refused when a writer holds the conversation; `paused` when the turn's job is paused (the turn is cancelled). An `external` claim names its process. Answers `{claimId, generation}`.",
       "params": [
         {
           "name": "conversation",
@@ -13383,10 +14088,18 @@
         },
         {
           "name": "kind",
-          "summary": "terminal or external.",
+          "summary": "terminal, external or scheduleRun.",
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "turn",
+          "summary": "The schedule turn a `scheduleRun` claim runs.",
+          "required": false,
+          "schema": {
+            "type": "integer"
           }
         },
         {
@@ -13451,6 +14164,9 @@
           "kind": {
             "kind": "caller"
           },
+          "turn": {
+            "kind": "caller"
+          },
           "person": {
             "kind": "caller"
           },
@@ -13472,7 +14188,7 @@
     },
     {
       "name": "hostclaim.enqueue",
-      "summary": "Queues a turn for a conversation (created when missing). Refused when the person was revoked after `revokeSeen`. Answers `{turn}`.",
+      "summary": "Queues a turn for a conversation (created when missing). Refused when the person was revoked after `revokeSeen`, or, for a room turn, when a `basis` person was revoked after their `epochs` entry (`revoked`), the turn has no basis, a bot's post opens a chain, or the conversation belongs to another join epoch (`other`), or the chain's turn budget is spent (`budget`). A room turn's basis, room, gen, level, author and budget are fixed here and never change. `key` makes a retry after a lost reply answer the same turn without spending the budget again. Answers `{turn}`.",
       "params": [
         {
           "name": "conversation",
@@ -13537,6 +14253,92 @@
           "schema": {
             "type": "integer"
           }
+        },
+        {
+          "name": "level",
+          "summary": "`owner` (default) or `room`: a room turn speaks for the people of its basis.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "basis",
+          "summary": "The people the turn speaks for.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "epochs",
+          "summary": "`hostclaim.epoch` of each basis person, read before the may check.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          }
+        },
+        {
+          "name": "room",
+          "summary": "The room.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "gen",
+          "summary": "The room's membership generation at the start.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "joinEpoch",
+          "summary": "The room's join epoch: which conversation it goes to.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "author",
+          "summary": "Whose post made the turn: a person, `bot:<id>` or an agent name.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "budget",
+          "summary": "A person's post: the follow-up rounds the chain may have.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "budgetFrom",
+          "summary": "A bot's or agent's turn: the turn that caused it. It spends one of that turn's rounds.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "key",
+          "summary": "The caller's id for this enqueue, so a retry is not counted twice.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
         }
       ],
       "result": {
@@ -13577,6 +14379,229 @@
           },
           "deadline": {
             "kind": "caller"
+          },
+          "level": {
+            "kind": "caller"
+          },
+          "basis": {
+            "kind": "caller"
+          },
+          "epochs": {
+            "kind": "caller"
+          },
+          "room": {
+            "kind": "caller"
+          },
+          "gen": {
+            "kind": "caller"
+          },
+          "joinEpoch": {
+            "kind": "caller"
+          },
+          "author": {
+            "kind": "caller"
+          },
+          "budget": {
+            "kind": "caller"
+          },
+          "budgetFrom": {
+            "kind": "caller"
+          },
+          "key": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.proc",
+      "summary": "A host engine process, idle or not, with a session it has loaded: registers it or adds one more session to it (one core row per process and session; a process loads its agent's main session and its chat's threads), so a revoke reaches an idle one. `revokeSeen` is required for any person but the owner; refused (`revoked`) when stale. Answers `{registered}`.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "instance",
+          "summary": "The host instance that runs it.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Whose process it is (a guest's principal).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "A session it has loaded. Leave out for a process with none yet.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "revokeSeen",
+          "summary": "`hostclaim.epoch` of `person`, read before the process was started.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "instance": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "agent": {
+            "kind": "caller"
+          },
+          "conversation": {
+            "kind": "caller"
+          },
+          "revokeSeen": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.procGone",
+      "summary": "The process exited: forget it, unless a kill is owed for it (a revoke or host change marked it): then it stays until `hostclaim.settle` finds it gone. With `conversation`, only that session is forgotten (the process stays known, with its other sessions). Answers `{gone}`.",
+      "params": [
+        {
+          "name": "pid",
+          "summary": "The process.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "started",
+          "summary": "Its start stamp.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "Forget only this session of the process (it unloaded or forked it away).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "pid": {
+            "kind": "caller"
+          },
+          "started": {
+            "kind": "caller"
+          },
+          "conversation": {
+            "kind": "caller"
+          }
+        },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.adopt",
+      "summary": "This host start's instance takes over: every claim and process of another host instance is ended (a claim never redeemed at once and its turn given back; one with a process goes to `ending`, its process to be killed until gone). Answers `{ended, kill}`.",
+      "params": [
+        {
+          "name": "instance",
+          "summary": "`kith-serve-host/<pid>-<start stamp>`.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "instance": {
+            "kind": "caller"
           }
         },
         "hidden": true
@@ -13584,7 +14609,7 @@
     },
     {
       "name": "hostclaim.turn",
-      "summary": "The claim for a queued or parked turn, through `claim_next` (it picks the account and starts the session row). A stopped ask's turn is cancelled by the core and the refusal says so (`stopped`); any other refusal leaves the turn as it is, and the caller cancels it with `hostclaim.cancel` when it will not retry. Answers `{status: claimed, claimId, generation, account, fresh}` or `{status: exhausted, text}`.",
+      "summary": "The claim for a queued or parked turn, through `claim_next` (it starts the session row on the account: the core picks it once accounts are switched; until then it is the `account` the host sends). A stopped ask's turn is cancelled by the core and the refusal says so (`stopped`); any other refusal leaves the turn as it is, and the caller cancels it with `hostclaim.cancel` when it will not retry. Answers `{status: claimed, claimId, generation, account, fresh}` or `{status: exhausted, text}`.",
       "params": [
         {
           "name": "conversation",
@@ -13637,6 +14662,14 @@
         {
           "name": "holderInstance",
           "summary": "The holder instance the spawn goes to.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "account",
+          "summary": "The account the host's warm process runs as. Used and recorded while accounts are not switched (the core does not pick then); ignored once the core owns account state.",
           "required": false,
           "schema": {
             "type": "string"
@@ -13704,6 +14737,9 @@
             "kind": "caller"
           },
           "holderInstance": {
+            "kind": "caller"
+          },
+          "account": {
             "kind": "caller"
           },
           "kernel": {
@@ -14012,6 +15048,50 @@
             "kind": "caller"
           }
         },
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.strays",
+      "summary": "The turns a host enqueued (they carry its `key`) that are still queued or parked: `{turns: [{turn, conversation, key}]}`. The host cancels those it has no item for (a turn requeued after a restart, whose item is gone). A turn the core made itself carries no key and is never listed.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {},
+        "hidden": true
+      }
+    },
+    {
+      "name": "hostclaim.queued",
+      "summary": "The turns the core queued that no host began (a schedule's fire: `enq_key` NULL, source `schedule`) and that wait (queued or parked): `{turns: [{turn, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {},
         "hidden": true
       }
     },

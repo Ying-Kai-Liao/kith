@@ -92,6 +92,8 @@ install_helper() {
 }
 install_tts() { install_helper "$1" kith-tts "local voice stays unavailable"; }
 install_stub() { install_helper "$1" kith-stub "runs the host starts go unlocked"; }
+# The process holder (kith-holder) too: the host's core starts it from beside the host, and Writer mode needs it.
+install_holder() { install_helper "$1" kith-holder "Writer mode has no holder to connect to"; }
 
 cmd_start() {
   local build=1 dev=0 a
@@ -137,6 +139,10 @@ cmd_start() {
       tail -n 30 "$log" >&2
       echo "kith serve: kith-stub didn't build; runs the host starts go unlocked" >&2
     fi
+    if ! (cd "$HOST" && PATH="$(dirname "$cargo"):$PATH" exec ${lowprio[@]+"${lowprio[@]}"} "$cargo" build --profile dev-app --manifest-path "$HOST/Cargo.toml" -p kith-holder) >"$log" 2>&1; then
+      tail -n 30 "$log" >&2
+      echo "kith serve: kith-holder didn't build; Writer mode has no holder to connect to" >&2
+    fi
     rm -f "$log"
   fi
   if [ -x "$built" ]; then
@@ -156,6 +162,7 @@ cmd_start() {
   fi
   install_tts "$(dirname "$built")/kith-tts"
   install_stub "$(dirname "$built")/kith-stub"
+  install_holder "$(dirname "$built")/kith-holder"
   [ -x "$BIN" ] || { echo "kith serve: no host binary at $built or $BIN: run kith serve start without --no-build" >&2; exit 1; }
   # The job runs this checkout's kith, not whichever one the login shell finds first. A launcher (config.json
   # `launcher` or KITH_SERVE_LAUNCHER) is opt-in per machine, e.g. when the agents live on an external volume.

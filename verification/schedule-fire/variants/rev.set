@@ -1,3 +1,5 @@
 MaxEdits = 0
 MaxRevs = 1
 MaxTurns = 2
+HostBotOnly = FALSE
+KeepRebegin = FALSE

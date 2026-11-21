@@ -300,9 +300,9 @@ export class HostClient {
   }
 
   /** `pasted`: what the user pasted rather than typed, which memory never takes as their own words. */
-  async send(botId: string, text: string, clientNonce: string, threadId: string | null, attachments: string[] | null, pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null, engine: QuickEngine | null = null) {
+  async send(botId: string, text: string, clientNonce: string, threadId: string | null, attachments: string[] | null, pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null, engine: QuickEngine | null = null, stay: number | null = null) {
     try {
-      return asEntry((await this.callHost('send', { botId, text, clientNonce, threadId, attachments, ...(pasted.length ? { pasted } : {}), ...(newTask ? { newTask } : {}), ...(place ?? {}), ...(via ? { via } : {}), ...(budget !== null ? { budget: clampTurns(budget) } : {}), ...(engine ?? {}) })).entry)
+      return asEntry((await this.callHost('send', { botId, text, clientNonce, threadId, attachments, ...(stay !== null ? { stay } : {}), ...(pasted.length ? { pasted } : {}), ...(newTask ? { newTask } : {}), ...(place ?? {}), ...(via ? { via } : {}), ...(budget !== null ? { budget: clampTurns(budget) } : {}), ...(engine ?? {}) })).entry)
     } catch (e) {
       throw typedWriterError(e)
     }
@@ -548,8 +548,32 @@ export class HostClient {
   }
 
   /** `who` is an existing person's id or a new person's name. */
-  async createInvite(who: { personId: string } | { name: string }, agents: Record<string, Role>): Promise<CreatedInvite> {
-    return parseCreatedInvite(await this.call('createInvite', { ...who, agents }, 60_000))
+  async createInvite(who: { personId: string } | { name: string }, agents: Record<string, Role>, rooms: string[] = []): Promise<CreatedInvite> {
+    return parseCreatedInvite(await this.call('createInvite', { ...who, agents, ...(rooms.length ? { rooms } : {}) }, 60_000))
+  }
+
+  // People in group rooms (serve/host/src/api/room_people.rs). Owner: roomPeople, addRoomPerson, removeRoomPerson.
+  // A host before rooms with people answers "unknown method".
+  roomPeople(room: string) {
+    return this.callHost('roomPeople', { room })
+  }
+
+  /** The host's refusal text is user-ready (an outside bot in the room, a missing grant); it is thrown as is. */
+  addRoomPerson(room: string, person: string) {
+    return this.callHost('addRoomPerson', { room, person }, 60_000)
+  }
+
+  removeRoomPerson(room: string, person: string) {
+    return this.callHost('removeRoomPerson', { room, person }, 60_000)
+  }
+
+  // An invited person's side: the rooms they are in right now, and leaving one.
+  async myRooms() {
+    return (await this.callHost('myRooms', {})).rooms
+  }
+
+  leaveRoom(room: string) {
+    return this.callHost('leaveRoom', { room })
   }
 
   revokeInvite(inviteId: string) {

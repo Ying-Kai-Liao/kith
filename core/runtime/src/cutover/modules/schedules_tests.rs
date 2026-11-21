@@ -15,14 +15,14 @@ use crate::secrets::keystore::{KeyStore, MemoryKeyStore};
 use crate::tests::machine;
 
 /// A key that is not a real one; no test output may ever contain it.
-const SECRET: &str = "whk-0123456789-not-a-real-key";
+pub(super) const SECRET: &str = "whk-0123456789-not-a-real-key";
 
-fn opts() -> Opts {
+pub(super) fn opts() -> Opts {
     Opts::default()
 }
 
 /// The module with a key store of the test's own (the real one is the OS keychain); every hook is the module's.
-struct Lifted(Schedules);
+pub(super) struct Lifted(pub(super) Schedules);
 
 impl Module for Lifted {
     fn name(&self) -> &'static str {
@@ -57,6 +57,9 @@ impl Module for Lifted {
     fn guards_claims(&self) -> bool {
         self.0.guards_claims()
     }
+    fn depends_on(&self) -> &'static [&'static str] {
+        self.0.depends_on()
+    }
     fn step_refusal(&self, env: &Env) -> Option<String> {
         self.0.step_refusal(env)
     }
@@ -69,40 +72,49 @@ impl Module for Lifted {
     fn check_notes(&self, env: &Env) -> Vec<String> {
         self.0.check_notes(env)
     }
+    fn source_lock(&self, env: &Env) -> crate::error::Result<Option<crate::cutover::SourceLock>> {
+        self.0.source_lock(env)
+    }
+    fn rollback_lock(&self, env: &Env) -> crate::error::Result<Option<crate::cutover::SourceLock>> {
+        self.0.rollback_lock(env)
+    }
+    fn before_tombstone(&self, env: &Env) -> crate::error::Result<()> {
+        self.0.before_tombstone(env)
+    }
 }
 
-struct World {
+pub(super) struct World {
     _t: tempfile::TempDir,
-    env: Env,
-    store: MemoryKeyStore,
-    serve: PathBuf,
+    pub(super) env: Env,
+    pub(super) store: MemoryKeyStore,
+    pub(super) serve: PathBuf,
 }
 
 impl World {
-    fn reg(&self) -> Vec<Box<dyn Module>> {
+    pub(super) fn reg(&self) -> Vec<Box<dyn Module>> {
         let store = self.store.clone();
         vec![Box::new(Lifted(Schedules::with_keys(std::sync::Arc::new(
             move || -> Box<dyn KeyStore> { Box::new(store.clone()) },
         ))))]
     }
 
-    fn core(&self) -> Core {
+    pub(super) fn core(&self) -> Core {
         crate::start_with(&self.env.layout, MIGRATIONS).unwrap()
     }
 
-    fn mel_jobs(&self) -> PathBuf {
+    pub(super) fn mel_jobs(&self) -> PathBuf {
         self.env.machine.join("agents/mel/jobs.json")
     }
 
-    fn jobs(&self) -> Vec<Value> {
+    pub(super) fn jobs(&self) -> Vec<Value> {
         serde_json::from_slice(&std::fs::read(self.mel_jobs()).unwrap()).unwrap()
     }
 
-    fn state_file(&self) -> PathBuf {
+    pub(super) fn state_file(&self) -> PathBuf {
         self.env.machine.join("sched/state.json")
     }
 
-    fn mac(&self) -> String {
+    pub(super) fn mac(&self) -> String {
         std::fs::read_to_string(self.env.machine.join("mac-id"))
             .unwrap()
             .trim()
@@ -118,7 +130,7 @@ impl World {
             .map(|b| String::from_utf8(b.to_vec()).unwrap())
     }
 
-    fn serve_routines(&self) -> Value {
+    pub(super) fn serve_routines(&self) -> Value {
         let c = Connection::open(&self.serve).unwrap();
         let raw: String = c
             .query_row("SELECT v FROM kv WHERE k = 'routines.v1'", [], |r| r.get(0))
@@ -126,7 +138,7 @@ impl World {
         serde_json::from_str(&raw).unwrap()
     }
 
-    fn set_serve_routines(&self, v: &Value) {
+    pub(super) fn set_serve_routines(&self, v: &Value) {
         Connection::open(&self.serve)
             .unwrap()
             .execute(
@@ -137,7 +149,7 @@ impl World {
     }
 }
 
-fn routine(id: &str, bot: &str, enabled: bool, triggers: &Value, key: &str) -> Value {
+pub(super) fn routine(id: &str, bot: &str, enabled: bool, triggers: &Value, key: &str) -> Value {
     json!({
         "id": id, "botId": bot, "name": format!("name of {id}"), "instruction": format!("do {id}"),
         "triggers": triggers, "enabled": enabled, "createdAt": 1, "updatedAt": 2, "nextRuns": [],
@@ -145,13 +157,13 @@ fn routine(id: &str, bot: &str, enabled: bool, triggers: &Value, key: &str) -> V
     })
 }
 
-fn cron() -> Value {
+pub(super) fn cron() -> Value {
     json!({"type": "cron", "expression": "0 8 * * *", "timeZone": "Europe/Paris"})
 }
 
 /// A Mac with the agent `mel`, a serve.db whose bot `b1` is mel's, and the routines `r1` (one cron trigger, enabled) and
 /// `r2` (a webhook and an interval, disabled). With `extra`: `b2` (a host-native bot) with the routine `r3`.
-fn world(extra: bool) -> World {
+pub(super) fn world(extra: bool) -> World {
     let (t, m) = machine();
     let mut p = crate::tests::paths(&m);
     p.state = m.join("state");
@@ -206,6 +218,18 @@ fn world(extra: bool) -> World {
     drop(c);
     let mut env = Env::with_paths(&p);
     env.serve_db = Some(serve.clone());
+    // `schedules` depends on `claims` (the wrapper forwards it), so these tests start with claims switched.
+    crate::perms::ensure_dir(&env.layout.dir).unwrap();
+    state::write(
+        &env.layout,
+        "claims",
+        &state::Switch {
+            phase: state::Phase::Switched,
+            snapshot: None,
+            at: 0,
+        },
+    )
+    .unwrap();
     World {
         _t: t,
         env,
@@ -214,7 +238,7 @@ fn world(extra: bool) -> World {
     }
 }
 
-fn find<'a>(jobs: &'a [Value], id: &str) -> &'a Value {
+pub(super) fn find<'a>(jobs: &'a [Value], id: &str) -> &'a Value {
     jobs.iter()
         .find(|j| j["id"] == id)
         .unwrap_or_else(|| panic!("no job {id}: {jobs:?}"))
@@ -224,7 +248,7 @@ fn kernel_json(t: &kith_kernel::schedule::Trigger) -> Value {
     serde_json::to_value(t).unwrap()
 }
 
-fn write_state(w: &World, v: &Value) {
+pub(super) fn write_state(w: &World, v: &Value) {
     std::fs::create_dir_all(w.state_file().parent().unwrap()).unwrap();
     std::fs::write(w.state_file(), v.to_string()).unwrap();
 }
@@ -232,7 +256,7 @@ fn write_state(w: &World, v: &Value) {
 // --- the refusal, the dry run and the check ------------------------------------------------------------------------------
 
 /// A running host: `host.lock` in serve.db's folder, held with the same advisory lock the host takes.
-fn host_runs(w: &World) -> std::fs::File {
+pub(super) fn host_runs(w: &World) -> std::fs::File {
     use fs2::FileExt as _;
     let f = std::fs::OpenOptions::new()
         .create(true)
@@ -251,7 +275,7 @@ fn the_step_refuses_while_the_host_runs_but_the_dry_run_and_check_work() {
     let before = std::fs::read(w.mel_jobs()).unwrap();
     let host = host_runs(&w);
     // A real step: refused, one line, and nothing was made.
-    let e = step(&registry(), &w.env, "schedules", opts())
+    let e = step(&w.reg(), &w.env, "schedules", opts())
         .unwrap_err()
         .to_string();
     assert!(
@@ -263,7 +287,7 @@ fn the_step_refuses_while_the_host_runs_but_the_dry_run_and_check_work() {
     assert!(!w.env.layout.db.exists(), "no core.db was opened or made");
     // The dry run goes through, says what it would do, and writes nothing at all.
     let out = step(
-        &registry(),
+        &w.reg(),
         &w.env,
         "schedules",
         Opts {
@@ -284,7 +308,7 @@ fn the_step_refuses_while_the_host_runs_but_the_dry_run_and_check_work() {
     assert!(!w.env.layout.db.exists());
     // `check` says the core does not answer the same yet, and (with a core) still writes nothing.
     crate::tests::open_all(&w.env.layout);
-    let out = check(&registry(), &w.env, "schedules").unwrap();
+    let out = check(&w.reg(), &w.env, "schedules").unwrap();
     assert!(out[0].contains("difference"), "{out:?}");
     assert!(
         out.iter().any(|l| l.contains("a routine, not a job yet")),
@@ -357,7 +381,7 @@ fn a_lock_file_that_cannot_be_opened_refuses_without_saying_stop_the_host() {
     if std::fs::File::open(&lock).is_ok() {
         return;
     }
-    let e = step(&registry(), &w.env, "schedules", opts())
+    let e = step(&w.reg(), &w.env, "schedules", opts())
         .unwrap_err()
         .to_string();
     assert!(
@@ -771,7 +795,7 @@ fn a_rollback_waits_for_unfinished_scheduled_turns_unless_forced() {
         core.conn()
             .execute_batch(
                 "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('c1', 'mel', 'claude', 0, 0);
-                 INSERT INTO turns (conversation, source, state, queued_at) VALUES ('c1', 'schedule', 'queued', 0);
+                 INSERT INTO turns (conversation, source, state, queued_at) VALUES ('c1', 'schedule', 'running', 0);
                  INSERT INTO sched_fires (agent, job, slot, outcome, turn_id, at)
                    VALUES ('mel', 'r1', '2026-11-04T08:00:00Z', 'fired', (SELECT max(id) FROM turns), 0);",
             )
@@ -780,7 +804,7 @@ fn a_rollback_waits_for_unfinished_scheduled_turns_unless_forced() {
     let err = rollback(&reg, &w.env, "schedules", opts())
         .unwrap_err()
         .to_string();
-    assert!(err.contains("scheduled turn(s) have not finished"), "{err}");
+    assert!(err.contains("scheduled turn(s) are running"), "{err}");
     assert!(state::read(&w.env.layout, "schedules").unwrap().is_some());
     rollback(
         &reg,
@@ -953,7 +977,7 @@ fn the_dry_run_leaves_serve_db_and_the_sched_state_exactly_as_they_were() {
         std::fs::read(w.state_file()).unwrap(),
     );
     step(
-        &registry(),
+        &w.reg(),
         &w.env,
         "schedules",
         Opts {
@@ -964,4 +988,47 @@ fn the_dry_run_leaves_serve_db_and_the_sched_state_exactly_as_they_were() {
     .unwrap();
     assert_eq!(std::fs::read(&w.serve).unwrap(), db);
     assert_eq!(std::fs::read(w.state_file()).unwrap(), st);
+}
+
+// --- the build gate ---------------------------------------------------------------------------------------------------
+
+#[test]
+fn a_build_that_cannot_run_fired_turns_refuses_the_step_and_says_so_in_the_dry_run_and_check() {
+    const WORDS: &str = "not stepped: this build can't run the turns its schedules fire; kith-sched keeps running your jobs.";
+    let w = world(false);
+    let store = w.store.clone();
+    let reg: Vec<Box<dyn Module>> = vec![Box::new(Lifted(
+        Schedules::with_keys(std::sync::Arc::new(move || -> Box<dyn KeyStore> {
+            Box::new(store.clone())
+        }))
+        .gated(),
+    ))];
+    let e = step(&reg, &w.env, "schedules", opts())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains(WORDS), "{e}");
+    assert!(!tombstone::is_tombstone(&w.state_file()));
+    crate::tests::open_all(&w.env.layout);
+    let dry = step(
+        &reg,
+        &w.env,
+        "schedules",
+        Opts {
+            dry_run: true,
+            force: false,
+        },
+    )
+    .unwrap();
+    assert!(
+        dry.iter()
+            // A build launchd does not run refuses (condition 4); the core runs fired turns now, so there is no "1:".
+            .any(|l| l.starts_with(WORDS) && !l.contains("1:") && l.contains("4:")),
+        "{dry:?}"
+    );
+    let c = check(&reg, &w.env, "schedules").unwrap();
+    assert!(
+        c.iter()
+            .any(|l| l.starts_with(WORDS) && !l.contains("1:") && l.contains("4:")),
+        "{c:?}"
+    );
 }

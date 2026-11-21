@@ -277,6 +277,52 @@ fn a_due_job_fires_into_a_turn_with_its_deadline_and_moves_the_watermark() {
 }
 
 #[test]
+fn the_settings_of_the_run_are_fixed_on_the_turn_when_it_fires_and_listed_for_the_host() {
+    let mut r = Rig::new();
+    let mut job = daily("daily", "30 8 * * *");
+    job["model"] = json!("opus");
+    job["effort"] = json!("high");
+    job["harness"] = json!("claude");
+    job["person"] = json!("sam");
+    r.jobs("mel", &json!([job.clone()]));
+    r.set_wm(at(2026, 11, 3, 8, 29));
+    r.tick(at(2026, 11, 3, 8, 30));
+    let want = json!({"model": "opus", "effort": "high", "harness": "claude", "person": "sam"});
+    let stored: String = r
+        .core
+        .conn()
+        .query_row("SELECT settings FROM sched_fires", [], |x| x.get(0))
+        .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), want);
+    // An edit between the fire and the run changes nothing the run reads: the host is handed what was fixed.
+    job["model"] = json!("haiku");
+    job.as_object_mut().unwrap().remove("effort");
+    r.jobs("mel", &json!([job]));
+    r.tick(at(2026, 11, 3, 8, 31));
+    let queued = crate::hostclaim::call_at(
+        &mut r.core,
+        "hostclaim.queued",
+        &json!({}),
+        at(2026, 11, 3, 8, 32),
+    )
+    .unwrap();
+    assert_eq!(queued["turns"][0]["settings"], want);
+    // A turn fired before the column existed has none: the run falls back to the job's current values.
+    r.core
+        .conn()
+        .execute("UPDATE sched_fires SET settings = NULL", [])
+        .unwrap();
+    let old = crate::hostclaim::call_at(
+        &mut r.core,
+        "hostclaim.queued",
+        &json!({}),
+        at(2026, 11, 3, 8, 32),
+    )
+    .unwrap();
+    assert_eq!(old["turns"][0]["settings"], Value::Null);
+}
+
+#[test]
 fn a_failure_between_any_two_steps_leaves_nothing_and_the_slot_fires_on_the_next_tick() {
     for step in [
         Step::Row,
@@ -1679,4 +1725,252 @@ fn run_now_refuses_a_job_of_another_mac_and_writes_nothing_while_mine_and_unname
     assert_eq!(r.wm(), None);
     assert_eq!(r.run_now("mel", "ours", "k1", now)["outcome"], "fired");
     assert_eq!(r.run_now("mel", "anyone", "k1", now)["outcome"], "fired");
+}
+
+// ---- the switch handover (M4-5): the per-job anchor (H2) and a run kith-sched left going (H3)
+
+/// An imported routine's job: a trigger, and the host's next run as the job's anchor.
+fn routine_job(id: &str, trigger: &Value, anchor: Option<i64>) -> Value {
+    let mut routine = json!({"id": id, "bot": "b1", "trigger": 1, "timeoutSeconds": 600});
+    if let Some(a) = anchor {
+        routine["anchor"] = json!(a);
+        routine["anchorTrigger"] = trigger.clone();
+    }
+    json!({"id": id, "task": format!("do {id}"), "trigger": trigger, "routine": routine})
+}
+
+fn utc_cron(expr: &str) -> Value {
+    json!({"type": "cron", "expr": expr, "tz": "UTC"})
+}
+
+#[test]
+fn a_daily_routine_anchored_for_tomorrow_survives_todays_ticks_while_the_watermark_lags() {
+    let mut r = Rig::new();
+    let anchor = at(2026, 11, 4, 9, 0);
+    // The host fired 09:00 today; kith-sched's last tick (the imported watermark) is still 07:00.
+    r.jobs(
+        "mel",
+        &json!([routine_job("daily", &utc_cron("0 9 * * *"), Some(anchor))]),
+    );
+    r.set_wm(at(2026, 11, 3, 7, 0));
+    for now in [
+        at(2026, 11, 3, 10, 0),
+        at(2026, 11, 3, 10, 1),
+        at(2026, 11, 3, 23, 59),
+    ] {
+        assert!(fired(&r.tick(now)).is_empty(), "a refire of today's slot");
+    }
+    assert!(
+        r.rows("daily").is_empty(),
+        "ticks before the anchor do not use it"
+    );
+    assert!(super::anchor::unused(r.core.conn(), "mel", "daily", anchor).unwrap());
+    // Tomorrow's tick reaches it and fires once.
+    assert_eq!(fired(&r.tick(anchor)), ["daily"]);
+    assert_eq!(r.rows("daily").len(), 1);
+    assert!(!super::anchor::unused(r.core.conn(), "mel", "daily", anchor).unwrap());
+    assert!(fired(&r.tick(anchor + 60_000)).is_empty());
+    assert_eq!(r.n("SELECT count(*) FROM turns"), 1);
+}
+
+#[test]
+fn a_routine_whose_next_run_passed_while_the_host_was_down_fires_once_on_the_first_tick() {
+    let mut r = Rig::new();
+    r.jobs(
+        "mel",
+        &json!([routine_job(
+            "hourly",
+            &utc_cron("0 * * * *"),
+            Some(at(2026, 11, 3, 8, 0))
+        )]),
+    );
+    // The watermark is AHEAD of the anchor (a tick of kith-sched a minute ago): the anchor still counts.
+    r.set_wm(at(2026, 11, 3, 10, 29));
+    assert_eq!(fired(&r.tick(at(2026, 11, 3, 10, 30))), ["hourly"]);
+    assert_eq!(r.n("SELECT count(*) FROM turns"), 1);
+    let rows = r.rows("hourly");
+    assert!(
+        rows.last().unwrap().0.starts_with("2026-11-03T10:00"),
+        "{rows:?}"
+    );
+    assert!(fired(&r.tick(at(2026, 11, 3, 10, 31))).is_empty());
+    assert_eq!(
+        r.n("SELECT count(*) FROM turns"),
+        1,
+        "used once, then the normal rule"
+    );
+}
+
+#[test]
+fn a_once_the_host_already_fired_has_a_decided_row_and_is_not_fired_again() {
+    let mut r = Rig::new();
+    let at_ms = at(2026, 11, 3, 8, 0);
+    r.jobs(
+        "mel",
+        &json!([routine_job(
+            "once",
+            &json!({"type": "once", "at": at_ms}),
+            None
+        )]),
+    );
+    r.core
+        .conn()
+        .execute(
+            "INSERT INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES ('mel', 'once', ?1, 'skipped:already fired by the host', NULL, 0)",
+            [super::slot_of_ms(at_ms).unwrap()],
+        )
+        .unwrap();
+    r.set_wm(at(2026, 11, 3, 7, 0));
+    assert!(fired(&r.tick(at(2026, 11, 3, 9, 0))).is_empty());
+    assert_eq!(r.n("SELECT count(*) FROM turns"), 0);
+}
+
+#[test]
+fn an_interval_routine_counts_from_its_next_run_minus_its_period() {
+    let mut r = Rig::new();
+    let next = at(2026, 11, 3, 9, 30);
+    r.jobs(
+        "mel",
+        &json!([routine_job(
+            "every",
+            &json!({"type": "interval", "every": 3600}),
+            Some(next)
+        )]),
+    );
+    r.set_wm(at(2026, 11, 3, 8, 0));
+    assert!(fired(&r.tick(at(2026, 11, 3, 9, 29))).is_empty());
+    assert_eq!(fired(&r.tick(next)), ["every"]);
+    let rows = r.rows("every");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].0.starts_with("2026-11-03T09:30"), "{rows:?}");
+    // Then the interval counts from that slot, as ever.
+    assert!(fired(&r.tick(next + HOUR - 60_000)).is_empty());
+    r.finish_all();
+    assert_eq!(fired(&r.tick(next + HOUR)), ["every"]);
+    assert_eq!(
+        super::anchor::count_from(&Trigger::Interval { every: 3600 }, next),
+        next - HOUR
+    );
+}
+
+/// A job with no anchor counts as it did (cron from the watermark).
+#[test]
+fn a_job_without_an_anchor_counts_from_the_watermark_as_before() {
+    let mut r = Rig::new();
+    r.jobs(
+        "mel",
+        &json!([routine_job("plain", &utc_cron("0 9 * * *"), None)]),
+    );
+    r.set_wm(at(2026, 11, 3, 7, 0));
+    assert_eq!(fired(&r.tick(at(2026, 11, 3, 10, 0))), ["plain"]);
+}
+
+/// kith-sched's last run of `job`, as the import writes it.
+fn imported_run(r: &Rig, job: &str, at_ms: i64, pid: i64, proc_start: Option<&str>) {
+    r.core
+        .conn()
+        .execute(
+            "INSERT INTO sched_runs (agent, job, mac, slot, at, state, pid, proc_start)
+             VALUES ('mel', ?1, ?2, ?3, 'x', 'started', ?4, ?5)",
+            rusqlite::params![
+                job,
+                r.mac,
+                super::slot_of_ms(at_ms).unwrap(),
+                pid,
+                proc_start
+            ],
+        )
+        .unwrap();
+}
+
+fn sleeper() -> std::process::Child {
+    std::process::Command::new("sleep")
+        .arg("60")
+        .spawn()
+        .unwrap()
+}
+
+#[test]
+fn a_live_kith_sched_run_at_the_switch_skips_its_job_until_the_pid_exits() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([daily("every", "* * * * *")]));
+    let now = at(2026, 11, 3, 10, 0);
+    let mut child = sleeper();
+    let pid = i64::from(child.id());
+    let stamp = kith_kernel::procstart::start_stamp(child.id()).expect("a stamp");
+    imported_run(&r, "every", now - 5 * 60_000, pid, Some(&stamp));
+    r.set_wm(now - 60_000);
+    let rep = r.tick(now);
+    assert!(fired(&rep).is_empty(), "{rep}");
+    assert!(
+        r.outcomes("every")[0].starts_with("skipped:busy"),
+        "{:?}",
+        r.outcomes("every")
+    );
+    assert_eq!(r.n("SELECT count(*) FROM turns"), 0);
+    // The run ends: the next slot fires.
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert_eq!(fired(&r.tick(now + 60_000)), ["every"]);
+}
+
+/// A stamp of the same form as `stamp` that is not it (macOS `e<ms>`, Linux `b<boot>:<ticks>`).
+fn other_stamp(stamp: &str) -> String {
+    if let Some(ms) = stamp.strip_prefix('e') {
+        return format!("e{}", ms.parse::<i64>().unwrap() - 5_000);
+    }
+    let (boot, ticks) = stamp.rsplit_once(':').unwrap();
+    format!("{boot}:{}", ticks.parse::<u64>().unwrap() + 1)
+}
+
+#[test]
+fn a_reused_pid_is_not_a_live_run_and_a_pid_alone_falls_back_to_alive() {
+    let mut r = Rig::new();
+    r.jobs(
+        "mel",
+        &json!([daily("a", "* * * * *"), daily("b", "* * * * *")]),
+    );
+    let now = at(2026, 11, 3, 10, 0);
+    let mut child = sleeper();
+    let pid = i64::from(child.id());
+    let stamp = kith_kernel::procstart::start_stamp(child.id()).expect("a stamp");
+    // `a`: the pid is alive but is another process than the one recorded (the stamp differs, same form).
+    let other = other_stamp(&stamp);
+    imported_run(&r, "a", now - 60_000, pid, Some(&other));
+    // `b`: an old entry with a pid and no stamp: alive and young is enough.
+    imported_run(&r, "b", now - 60_000, pid, None);
+    r.set_wm(now - 60_000);
+    assert_eq!(fired(&r.tick(now)), ["a"]);
+    assert!(r.outcomes("b")[0].starts_with("skipped:busy"));
+    child.kill().unwrap();
+    child.wait().unwrap();
+}
+
+#[test]
+fn an_imported_run_older_than_the_window_does_not_skip() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([daily("old", "* * * * *")]));
+    let now = at(2026, 11, 3, 10, 0);
+    let mut child = sleeper();
+    imported_run(&r, "old", now - 7 * HOUR, i64::from(child.id()), None);
+    r.set_wm(now - 60_000);
+    assert_eq!(fired(&r.tick(now)), ["old"]);
+    child.kill().unwrap();
+    child.wait().unwrap();
+}
+
+#[test]
+fn an_anchor_is_ignored_once_the_trigger_it_was_read_for_is_edited() {
+    let mut r = Rig::new();
+    let anchor = at(2026, 11, 10, 9, 0);
+    let weekly = utc_cron("0 9 * * 2");
+    let mut job = routine_job("w", &weekly, Some(anchor));
+    r.jobs("mel", &json!([job.clone()]));
+    r.set_wm(at(2026, 11, 3, 8, 0));
+    assert!(fired(&r.tick(at(2026, 11, 3, 9, 0) + 60_000)).is_empty());
+    // Edited to daily (the routine block is kept): it counts from the watermark again.
+    job["trigger"] = utc_cron("0 9 * * *");
+    r.jobs("mel", &json!([job]));
+    r.set_wm(at(2026, 11, 3, 8, 0));
+    assert_eq!(fired(&r.tick(at(2026, 11, 3, 9, 1))), ["w"]);
 }

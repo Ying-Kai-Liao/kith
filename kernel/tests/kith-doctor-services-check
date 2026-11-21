@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# kith-doctor-services-check — the services check reads `kith-auth ls --json`: an ok grant that is not in the agent's
+# needs is fine, a grant that is not ok is ✗ with the agent and service, and a tombstone answer is a note.
+#
+#   kernel/tests/kith-doctor-services-check     a second or two; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-doctor-services-check.XXXXXX")
+trap 'rm -rf "$T"' EXIT
+export KITH_HOME=$T/kith HOME=$T/home
+mkdir -p "$HOME"
+
+# Load kith-doctor as a module and answer its `kith-auth ls --json` with a canned result.
+cat > "$T/run.py" <<'PY'
+import importlib.machinery, importlib.util, json, os, subprocess, sys
+kernel, canned = sys.argv[1], sys.argv[2]
+loader = importlib.machinery.SourceFileLoader('kith_doctor', os.path.join(kernel, 'bin', 'kith-doctor'))
+spec = importlib.util.spec_from_loader('kith_doctor', loader)
+doc = importlib.util.module_from_spec(spec)
+sys.argv = ['kith-doctor']
+loader.exec_module(doc)
+reply = json.loads(open(canned).read())
+def fake_run(*args, cwd=None, timeout=None):
+    assert args[-2:] == ('ls', '--json'), args
+    return subprocess.CompletedProcess(args, reply['rc'], reply.get('stdout', ''), reply.get('stderr', ''))
+doc.run = fake_run
+doc.services()
+print(json.dumps({'bad': doc.BAD}))
+PY
+
+cat > "$T/mixed.json" <<'JSON'
+{"rc": 0, "stdout": "{\"agents\": [{\"agent\": \"house\", \"services\": [{\"service\": \"jev-browser\", \"profile\": \"jev-browser/kai\", \"status\": \"ok\", \"declared\": false, \"env\": []}, {\"service\": \"github\", \"profile\": \"gh/kai\", \"status\": \"ok\", \"declared\": true, \"env\": []}, {\"service\": \"notion\", \"profile\": \"notion/kai\", \"status\": \"missing NOTION_TOKEN\", \"declared\": true, \"env\": []}, {\"service\": \"slack\", \"profile\": null, \"status\": \"not granted\", \"declared\": true, \"env\": []}]}]}"}
+JSON
+cat > "$T/tomb.json" <<'JSON'
+{"rc": 3, "stdout": "{\"ok\": false, \"error\": \"authority moved to the core, and it gave no answer: down\"}"}
+JSON
+
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+out() { python3 -I "$T/run.py" "$KERNEL" "$1" | tail -1; }   # the last line is the JSON; the rest is the printed check
+check "an ok grant outside needs is not a failure" "out $T/mixed.json | python3 -c 'import json,sys; b=json.load(sys.stdin)[\"bad\"]; assert not any(\"jev-browser\" in x for x in b)'"
+check "a missing secret is ✗ with agent and service" "out $T/mixed.json | grep -q 'house: notion notion/kai missing NOTION_TOKEN'"
+check "a service with no grant is ✗" "out $T/mixed.json | grep -q 'house: slack not granted'"
+check "an ok declared grant is not a failure" "! out $T/mixed.json | grep -q 'github'"
+check "the core tombstone is a note, not ✗" "out $T/tomb.json | python3 -c 'import json,sys; assert json.load(sys.stdin)[\"bad\"]==[]'"
+exit $fail

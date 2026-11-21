@@ -361,21 +361,6 @@ fn secrets_has_at(folders: &Paths, name: &str, wait: std::time::Duration) -> any
 
 // --- run tokens (M2-13) -----------------------------------------------------------------------------------------------
 
-/// Set to `1` (or `true`) to have the host get a guest run's token from the core daemon (`run.mint` / `run.bind` /
-/// `run.end` on the owner socket) instead of its own table. Off by default: a token the core minted works on the core's
-/// run.sock, which a guest's sandbox does not allow yet, so a guest run holding one reads nothing. It is for the step
-/// that switches host.sock, and for trying the path on a machine where that does not matter.
-pub const RUN_TOKENS_VIA_CORE: &str = "KITH_RUN_TOKENS_VIA_CORE";
-
-/// Whether [`RUN_TOKENS_VIA_CORE`] is on.
-pub fn run_tokens_via_core() -> bool {
-    switch_is_on(std::env::var(RUN_TOKENS_VIA_CORE).ok().as_deref())
-}
-
-fn switch_is_on(value: Option<&str>) -> bool {
-    matches!(value, Some("1" | "true"))
-}
-
 /// What a run needs to be minted. An empty room or project is left out.
 pub struct RunWho<'a> {
     pub person: &'a str,
@@ -383,6 +368,8 @@ pub struct RunWho<'a> {
     pub conversation: &'a str,
     pub room: Option<&'a str>,
     pub project: Option<&'a str>,
+    /// A room person's run: the people the turn is for (empty for everyone else).
+    pub members: &'a [String],
 }
 
 /// A run token the core minted. The token is shown once, here, and goes into the run's environment; Debug leaves it out.
@@ -428,6 +415,9 @@ pub fn mint_run_in(paths: &Paths, who: &RunWho<'_>) -> Minted {
             params[k] = json!(v);
         }
     }
+    if !who.members.is_empty() {
+        params["members"] = json!(who.members);
+    }
     // A mint is a write: never sent twice.
     match kith_core::reach(paths, "run.mint", &params, false) {
         kith_core::Reached::Answered(a) => {
@@ -447,17 +437,65 @@ pub fn mint_run_in(paths: &Paths, who: &RunWho<'_>) -> Minted {
     }
 }
 
+/// Who the core says a guest's token is, for a connection to host.sock from process `pid` (`run.resolve`): the token must be
+/// live, bound, the process must be the run's or below it and the run's people must still be allowed. `None` for every
+/// refusal and for a core that does not answer: the host never decides for a guest on its own. Blocking.
+pub fn resolve_run(token: &str, pid: u32) -> Option<crate::runauth::RunIdentity> {
+    resolve_run_in(&process_folders(), token, pid)
+}
+
+pub fn resolve_run_in(paths: &Paths, token: &str, pid: u32) -> Option<crate::runauth::RunIdentity> {
+    let kith_core::Reached::Answered(a) =
+        kith_core::reach(paths, "run.resolve", &json!({"token": token, "pid": pid}), true)
+    else {
+        return None;
+    };
+    let text = |k: &str| a.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_owned);
+    Some(crate::runauth::RunIdentity {
+        person: text("person")?,
+        agent: text("agent")?,
+        room: text("room"),
+        run_id: text("runId")?,
+        scope: crate::runauth::TokenScope::Guest,
+        // The core's conversation is the host's session: `grant_for` minted it as that.
+        session: text("conversation")?,
+        project: text("project"),
+        reply: None,
+        members: a
+            .get("members")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+    })
+}
+
 impl CoreRun {
-    /// Binds the run to the process it was started as. False when the core did not bind it (the token then resolves
-    /// for nobody).
-    pub fn bind(&self, pid: u32) -> bool {
-        let answer = kith_core::reach(&self.paths, "run.bind", &json!({"runId": self.run_id, "pid": pid}), false);
-        matches!(answer, kith_core::Reached::Answered(a) if a["bound"] == true)
+    /// Binds the run to the process it was started as: the call to make (it asks the core, so on a blocking thread). False
+    /// when the core did not bind it (the token then resolves for nobody).
+    pub fn bind_job(&self) -> impl FnOnce(u32) -> bool + Send + 'static {
+        let (paths, run_id) = (self.paths.clone(), self.run_id.clone());
+        move |pid| {
+            let answer = kith_core::reach(&paths, "run.bind", &json!({"runId": run_id, "pid": pid}), false);
+            matches!(answer, kith_core::Reached::Answered(a) if a["bound"] == true)
+        }
     }
 
-    /// Ends the run's token. Nothing to do when the core is gone: a restart ended it already.
-    pub fn end(&self) {
-        let _ = kith_core::reach(&self.paths, "run.end", &json!({"runId": self.run_id}), false);
+    /// Ends the run's token on a thread of its own and does not wait for it: a grant ends where a run's task ends, and a
+    /// busy core must not hold that task (or an async worker) for the length of its answer. Nothing to do when the core is
+    /// gone: a restart ended it already.
+    pub fn end_detached(&self) {
+        let (paths, run_id) = (self.paths.clone(), self.run_id.clone());
+        let end = move || {
+            let _ = kith_core::reach(&paths, "run.end", &json!({"runId": run_id}), false);
+        };
+        // No thread to spawn is a process in trouble: end it here rather than leave a token behind.
+        if let Err(e) = std::thread::Builder::new().name("kith-run-end".into()).spawn(end.clone()) {
+            drop(e);
+            end();
+        }
     }
 }
 
@@ -469,6 +507,15 @@ const CORE_CALL_METHODS: &[&str] = &[
     "terminal.open",
     "terminal.attach",
     "terminal.list",
+    // the kernel takers' claim rows (P5), see kernel/bin/kith-sessions and kith-wake
+    "claim.external",
+    "claim.attach",
+    "claim.release",
+    "claim.sweepPerson",
+    "claim.list",
+    "claim.epoch",
+    // the SessionStart hook's record once the transcripts are the core's (transcripts P1), see kernel/bin/kith-sessions
+    "session.record",
     "people.suspend",
     "people.undo",
     "people.removePerson",
@@ -498,8 +545,25 @@ const CORE_CALL_METHODS: &[&str] = &[
     "people.secretShare",
     "people.secretBrowser",
     "people.agentAccess",
+    // `kith people grant`, see `ROUTED_WRITES`; `people.revoke` above is the mirror's and takes the same call
+    "people.grant",
+    // `kith schedule` once the schedules are the core's (bin/kith, kernel/lib/kith_sched_core.py): the reads, the edits of a
+    // jobs.json and the run-now. Owner only like the rest; nothing here runs without a daemon.
+    "schedule.jobs",
+    "schedule.runs",
+    "schedule.put",
+    "schedule.drop",
+    "schedule.setPaused",
+    "schedule.runNow",
     // the probe before a Keychain write: only a daemon that is switched answers it, see `DAEMON_ONLY_READS`
     "people.revision",
+    // a guest door's row on a switched Mac (kernel/lib/kith_door_core.py): start, mark live, end and the sweep. Daemon only (not
+    // embedded: no daemon is exit 3, which the caller reads as "no answer"). Exit 4 also covers a bad call, so only `doors.start`
+    // reads it as a refusal.
+    "doors.start",
+    "doors.markLive",
+    "doors.end",
+    "doors.sweep",
 ];
 
 /// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
@@ -534,6 +598,8 @@ const ROUTED_WRITES: &[&str] = &[
     "people.secretShare",
     "people.secretBrowser",
     "people.agentAccess",
+    // `kith people grant` (kernel/lib/kith_people_access.py): a write that widens access, so it needs `viaSwitch`
+    "people.grant",
 ];
 
 /// A read that only a switched daemon answers: `kith-auth set` asks it before it writes a Keychain item, so that no daemon,
@@ -550,53 +616,111 @@ const DAEMON_APPEARS: std::time::Duration = std::time::Duration::from_millis(150
 /// No core file yet answers `{"noCore":true}` and exit 0: a fresh install has nothing to keep in step. 0 ran, 3 nothing ran,
 /// 4 the core refused the call, 5 it failed after it may have written.
 #[cfg(unix)]
-fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> i32 {
+fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> CallEnd {
     let started = std::time::Instant::now();
     loop {
         match kith_core::call_authority_embedded(folders, method, params) {
-            Ok(kith_core::EmbeddedCall::Answered(answer)) => {
-                println!("{answer}");
-                return 0;
-            }
+            Ok(kith_core::EmbeddedCall::Answered(answer)) => return CallEnd::Answered(answer),
             Ok(kith_core::EmbeddedCall::NoCore(dir)) => {
                 eprintln!("no core db at {}: nothing to update", dir.display());
-                println!("{}", json!({"noCore": true}));
-                return 0;
+                return CallEnd::Answered(json!({"noCore": true}));
             }
             Ok(kith_core::EmbeddedCall::Busy) => {
                 // A daemon that came up meanwhile is used, never raced.
                 match kith_core::reach(folders, method, params, false) {
-                    kith_core::Reached::Answered(answer) => {
-                        println!("{answer}");
-                        return 0;
-                    }
-                    kith_core::Reached::Refused(e) => {
-                        eprintln!("{e}");
-                        return 4;
-                    }
+                    kith_core::Reached::Answered(answer) => return CallEnd::Answered(answer),
+                    kith_core::Reached::Refused(e) => return CallEnd::Refused(e.to_string()),
                     _ => {}
                 }
                 if started.elapsed() >= DAEMON_APPEARS {
-                    eprintln!("no core daemon answers, and another core holds the lock");
-                    return 3;
+                    return CallEnd::NoAnswer("no core daemon answers, and another core holds the lock".to_owned(), 3);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            Err(e) => {
-                eprintln!("{e}");
-                return match e {
-                    kith_core::Error::NoSuchMethod(_)
-                    | kith_core::Error::BadParams(_)
-                    | kith_core::Error::NotAllowed(_)
-                    | kith_core::Error::NotServed(_)
-                    | kith_core::Error::Refused(_)
-                    | kith_core::Error::Stopped(_) => 4,
-                    kith_core::Error::Io(_) => 5,
-                    _ => 3,
-                };
-            }
+            Err(e) => return CallEnd::of_error(&e),
         }
     }
+}
+
+/// `session.record` with no daemon (transcripts P1): an embedded core that takes the lock WITHOUT waiting. A held lock is
+/// exit 3 at once (nothing ran, the hook's spool entry stays for the daemon's drain): a hook has five seconds. No core file
+/// yet is exit 3 too: there is no core to be the registry's writer, so the hook keeps its entry. 0 answered (the answer may
+/// be a `refused` as data), 4 refused, 5 failed after it may have written.
+#[cfg(unix)]
+fn record_embedded(folders: &Paths, method: &str, params: &Value) -> CallEnd {
+    match kith_core::call_transcripts_embedded(folders, method, params) {
+        Ok(kith_core::EmbeddedCall::Answered(answer)) => CallEnd::Answered(answer),
+        Ok(kith_core::EmbeddedCall::NoCore(dir)) => {
+            CallEnd::NoAnswer(format!("no core db at {}: nothing recorded", dir.display()), 3)
+        }
+        Ok(kith_core::EmbeddedCall::Busy) => {
+            CallEnd::NoAnswer("no core daemon answers, and another core holds the lock".to_owned(), 3)
+        }
+        Err(e) => CallEnd::of_error(&e),
+    }
+}
+
+/// What a core call came to, in the three ends the callers tell apart (`kernel/lib/kith_claims.py`): an answer (a refusal can be
+/// data in it), a rejection (nothing ran: exit 4) and no answer (exit 3: nothing ran, the caller falls back; exit 5: lost
+/// after sending, a claim may or may not have been made).
+pub enum CallEnd {
+    Answered(Value),
+    Refused(String),
+    NoAnswer(String, i32),
+}
+
+impl CallEnd {
+    #[cfg(unix)]
+    fn of_error(e: &kith_core::Error) -> Self {
+        let why = e.to_string();
+        match e {
+            kith_core::Error::NoSuchMethod(_)
+            | kith_core::Error::BadParams(_)
+            | kith_core::Error::NotAllowed(_)
+            | kith_core::Error::NotServed(_)
+            | kith_core::Error::Refused(_)
+            | kith_core::Error::Stopped(_) => Self::Refused(why),
+            kith_core::Error::Io(_) => Self::NoAnswer(why, 5),
+            _ => Self::NoAnswer(why, 3),
+        }
+    }
+}
+
+/// One owner-socket call of `method`, as `kith kernel core-call` makes it, without the checks of its command line: the
+/// daemon, else (no daemon) the embedded core for the rows that run without one (`claim.sweepPerson`, a revoke must reach a
+/// person's runs while serve is stopped; `session.record`). Only a read is sent again when the connection breaks.
+fn core_call_dispatch(method: &str, params: &Value) -> CallEnd {
+    let folders = kernel::folders(&kith_kernel::paths::process_home());
+    // Only a list (or a read) is repeated when the connection breaks: an open or a ticket may have run.
+    let repeatable =
+        matches!(method, "terminal.list" | "claim.list" | "claim.epoch" | "schedule.jobs" | "schedule.runs");
+    match kith_core::reach(&folders, method, params, repeatable) {
+        kith_core::Reached::Answered(answer) => CallEnd::Answered(answer),
+        kith_core::Reached::Refused(e) => CallEnd::Refused(e.to_string()),
+        #[cfg(unix)]
+        // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
+        // The terminal methods need the daemon's sockets.
+        kith_core::Reached::NoDaemon if kith_core::embedded(method) => core_call_embedded(&folders, method, params),
+        #[cfg(unix)]
+        kith_core::Reached::NoDaemon if method == "session.record" => record_embedded(&folders, method, params),
+        kith_core::Reached::NoDaemon => CallEnd::NoAnswer("no core daemon answers".to_owned(), 3),
+        kith_core::Reached::Mismatch(note) => CallEnd::NoAnswer(note, 3),
+        kith_core::Reached::Lost(note) => CallEnd::NoAnswer(note, 5),
+    }
+}
+
+/// [`core_call_dispatch`] for the kernel takers of `kith kernel threads` (the writer claims, the registry's record): the
+/// methods are theirs alone and the call ends within `limit`, because nothing underneath has a deadline of its own that
+/// fits a `SessionStart` hook (five seconds in all) or a launch. Running out of time is no answer, exit 5: the call may have
+/// run.
+pub fn core_call_within(method: &str, params: &Value, limit: std::time::Duration) -> CallEnd {
+    debug_assert!(CORE_CALL_METHODS.contains(&method));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (m, p) = (method.to_owned(), params.clone());
+    std::thread::spawn(move || {
+        let _ = tx.send(core_call_dispatch(&m, &p));
+    });
+    rx.recv_timeout(limit).unwrap_or_else(|_| CallEnd::NoAnswer("the core did not answer in time".to_owned(), 5))
 }
 
 /// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered (for the
@@ -637,32 +761,18 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
         eprintln!("core-call: {method} is for kith-auth's router: it needs viaSwitch: true and no amount");
         return 2;
     }
-    let folders = kernel::folders(&kith_kernel::paths::process_home());
-    // Only a list is repeated when the connection breaks: an open or a ticket may have run.
-    match kith_core::reach(&folders, method, &params, method == "terminal.list") {
-        kith_core::Reached::Answered(answer) => {
+    match core_call_dispatch(method, &params) {
+        CallEnd::Answered(answer) => {
             println!("{answer}");
             0
         }
-        kith_core::Reached::Refused(e) => {
-            eprintln!("{e}");
+        CallEnd::Refused(why) => {
+            eprintln!("{why}");
             4
         }
-        #[cfg(unix)]
-        // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
-        // The terminal methods need the daemon's sockets.
-        kith_core::Reached::NoDaemon if kith_core::embedded(method) => core_call_embedded(&folders, method, &params),
-        kith_core::Reached::NoDaemon => {
-            eprintln!("no core daemon answers");
-            3
-        }
-        kith_core::Reached::Mismatch(note) => {
-            eprintln!("{note}");
-            3
-        }
-        kith_core::Reached::Lost(note) => {
-            eprintln!("{note}");
-            5
+        CallEnd::NoAnswer(why, code) => {
+            eprintln!("{why}");
+            code
         }
     }
 }
@@ -706,9 +816,16 @@ pub fn account_call(folders: &Paths, method: &str, params: &Value, read: bool) -
     }
 }
 
+/// Where the core finds the kernel's `kith` for the tools a guest run reaches on run.sock (recall, memory search,
+/// project-id): the way the host finds it for its own launches, asked again on every call.
+fn tell_the_core_the_kernel() {
+    kith_core::set_kernel_finder(crate::agent::hq::bin);
+}
+
 /// `kith serve` has the daemon front start beside the host. It never waits for it and never fails on it: a core that
 /// will not start is a line in the core log and a status for `kith doctor`, and the host goes on.
 pub fn start_beside_host() -> kith_core::Daemon {
+    tell_the_core_the_kernel();
     // The one daemon that has a Host: it makes the host secret in this process's memory.
     kith_core::Daemon::spawn_as_host(&kernel::folders(&kith_kernel::paths::process_home()), crate::service::is_exiting)
 }
@@ -716,6 +833,7 @@ pub fn start_beside_host() -> kith_core::Daemon {
 /// `kith kernel core-daemon`: the daemon front alone, in the foreground. Prints `ready` once it serves and
 /// `served=N` when stdin closes, which is how it is stopped. The difftest and the end-to-end tests run it.
 pub fn run_foreground() -> i32 {
+    tell_the_core_the_kernel();
     let daemon = kith_core::Daemon::spawn(&kernel::folders(&kith_kernel::paths::process_home()));
     if let Err(e) = daemon.ready(std::time::Duration::from_secs(120)) {
         eprintln!("{e}\nrecovery: {}", e.recovery());
@@ -811,6 +929,17 @@ mod tests {
         }
     }
 
+    /// A guest door's row (`kernel/lib/kith_door_core.py`) is the daemon's: with no daemon the call is exit 3, which the caller
+    /// reads as "no answer", never as a start or a sweep that ran in an embedded core.
+    #[test]
+    fn the_door_calls_are_on_core_call_and_never_embedded() {
+        for m in ["doors.start", "doors.markLive", "doors.end", "doors.sweep"] {
+            assert!(CORE_CALL_METHODS.contains(&m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(!kith_core::embedded(m), "{m} must not run without the daemon");
+        }
+    }
+
     fn args(line: &str) -> Vec<OsString> {
         std::iter::once("kith serve").chain(line.split(' ')).map(OsString::from).collect()
     }
@@ -850,14 +979,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_run_token_switch_is_off_unless_asked() {
-        for off in [None, Some(""), Some("0"), Some("yes"), Some("false")] {
-            assert!(!switch_is_on(off), "{off:?}");
-        }
-        assert!(switch_is_on(Some("1")) && switch_is_on(Some("true")));
-    }
-
     /// A short folder: a Unix socket path holds about a hundred bytes.
     #[cfg(unix)]
     fn machine_paths(tag: &str) -> Paths {
@@ -872,14 +993,14 @@ mod tests {
 
     #[cfg(unix)]
     fn who(person: &str) -> RunWho<'_> {
-        RunWho { person, agent: "echo", conversation: "run:g:3:sam:t1", room: Some("g1"), project: None }
+        RunWho { person, agent: "echo", conversation: "run:g:3:sam:t1", room: Some("g1"), project: None, members: &[] }
     }
 
     /// The host mints through a real core daemon, binds and ends there, is refused for a revoked person, and where no
     /// daemon answers it says so (the caller then gives the run no token).
     #[cfg(unix)]
     #[test]
-    fn the_host_mints_through_a_real_daemon_and_falls_back_when_there_is_none() {
+    fn the_host_mints_through_a_real_daemon_and_gets_no_token_when_there_is_none() {
         let paths = machine_paths("mint");
         // Nothing listens yet.
         assert!(matches!(mint_run_in(&paths, &who("sam")), Minted::Unavailable));
@@ -901,10 +1022,29 @@ mod tests {
         // A grant over it: the run's environment names the core's socket, bind goes to the core, drop ends the token.
         let socket = run.socket.clone();
         let grant = crate::runauth::RunGrant::from_core(run);
-        let env = grant.env(Path::new("/not/used"));
-        assert_eq!(env[1], (crate::runauth::SOCKET_ENV.to_owned(), socket.to_string_lossy().into_owned()));
-        grant.bind_pid(std::process::id());
+        let env = grant.env(Path::new("/the/host.sock"));
+        assert_eq!(env[0].0, crate::runauth::TOKEN_ENV);
+        assert_eq!(env[1], (crate::runauth::CORE_SOCKET_ENV.to_owned(), socket.to_string_lossy().into_owned()));
+        assert_eq!(
+            env[2],
+            (crate::runauth::SOCKET_ENV.to_owned(), "/the/host.sock".to_owned()),
+            "cards stay on host.sock"
+        );
+        // The host asks the core who the token is: from the run's own process only, with the identity it was minted with.
+        let token = env[0].1.clone();
+        assert_eq!(owner("run.bind", json!({"runId": run_id, "pid": std::process::id()}))["bound"], true);
+        let me = resolve_run_in(&paths, &token, std::process::id()).expect("the core knows the token");
+        assert_eq!((me.person.as_str(), me.agent.as_str(), me.room.as_deref()), ("sam", "echo", Some("g1")));
+        assert_eq!(me.session, "run:g:3:sam:t1");
+        assert!(resolve_run_in(&paths, "not-a-token", std::process::id()).is_none());
+        assert!(resolve_run_in(&paths, &token, 1).is_none(), "init is not below the run");
         drop(grant);
+        // The end is detached: it lands a moment after the drop.
+        let begun = std::time::Instant::now();
+        while resolve_run_in(&paths, &token, std::process::id()).is_some() && begun.elapsed().as_secs() < 10 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(resolve_run_in(&paths, &token, std::process::id()).is_none(), "an ended run is nobody");
         assert_eq!(owner("run.end", json!({"runId": run_id}))["ended"], false, "the grant ended it on drop");
 
         // A revoked person gets no token, and that is not "no daemon".

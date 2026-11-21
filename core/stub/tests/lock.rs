@@ -231,6 +231,12 @@ fn source_never_removes_anything() {
                 if name == "main.rs" && code.trim() == "std::fs::rename(&tmp, &path)" {
                     continue;
                 }
+                // And `unmark`: a `<key>.loaded/<pid>-<start>` marker (never a lock file, never its folder).
+                if name == "loaded.rs"
+                    && code.trim() == "match std::fs::remove_file(dir.join(me)) {"
+                {
+                    continue;
+                }
                 assert!(!code.contains(banned), "{banned} in {name}: {code}");
             }
         }

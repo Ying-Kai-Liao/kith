@@ -660,13 +660,85 @@ fn a_connected_core_keeps_renewing_the_holders_lease() {
     let p = paths(&m);
     *SECRET_FILE.lock().expect("lock") = Some(Layout::new(&m).holder_secret);
     let exe = fake_holder(&m, proving);
-    let _d = serving(&p, holder_cfg(exe));
+    let d = serving(&p, holder_cfg(exe));
     // The lease is 600 ms: a renewal on connect and then one about every 200 ms, each for the full period.
     until("three renewals", || {
         RENEWALS.lock().expect("lock").len() >= 3
     });
     assert!(RENEWALS.lock().expect("lock").iter().all(|ms| *ms == 600));
     assert_eq!(holder_state(&p), "connected");
+    // The first hello of the generation opened the claims: nothing in this test marked it by hand.
+    assert!(
+        d.shared
+            .with_core(|c| crate::conversations::claims::is_reconciled(c))
+            .expect("mark"),
+        "a connected holder's hello reconciles the generation's claims"
+    );
+}
+
+/// A killed `--direct` run's external claim stays `claimed` unless something settles it; the daemon's own tick does,
+/// with no holder connected and no `claim.*` call from anyone.
+#[cfg(unix)]
+#[test]
+fn the_kill_resend_tick_ends_the_external_claim_of_a_gone_process() {
+    use crate::conversations::claims::{Kind, NewClaim, claim};
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let mut child = std::process::Command::new("sleep")
+        .arg("120")
+        .spawn()
+        .expect("sleep");
+    let pid = child.id();
+    let mut started = None;
+    until("the process to have a start time", || {
+        started = kith_lock_stamp(pid);
+        started.is_some()
+    });
+    let started = started.expect("stamp");
+    let id = d
+        .shared
+        .with_core(|c| {
+            crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, 1)?;
+            c.conn().execute(
+                "INSERT INTO conversations (id, agent, engine, created_at, updated_at) VALUES ('x', 'a', 'claude', 1, 1)",
+                [],
+            )?;
+            let req = NewClaim {
+                conversation: "x",
+                kind: Kind::External,
+                person: "",
+                turn: None,
+                holder_instance: None,
+                account: None,
+                process: Some((pid, &started)),
+                revoke_seen: 0,
+            };
+            Ok(claim(c, &req, 10)?.claim_id)
+        })
+        .expect("claim");
+    let state = || -> String {
+        d.shared
+            .with_core(|c| {
+                Ok(c.conn().query_row(
+                    "SELECT state FROM claims WHERE claim_id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )?)
+            })
+            .expect("state")
+    };
+    crate::kill_resend::settle(&d.shared);
+    assert_eq!(state(), "claimed", "the process is alive");
+    let _ = child.kill();
+    let _ = child.wait();
+    crate::kill_resend::settle(&d.shared);
+    assert_eq!(state(), "ended");
+}
+
+#[cfg(unix)]
+fn kith_lock_stamp(pid: u32) -> Option<String> {
+    kith_kernel::procstart::start_stamp(pid)
 }
 
 // --- step 7: a holder that is not the one the core last knew --------------------------------------------------------
@@ -2577,5 +2649,59 @@ fn a_second_pass_after_the_process_is_gone_does_nothing() {
     until("the process to be gone", || !alive(pid));
     assert_eq!(resend(&d), Vec::<u32>::new(), "a gone pid is left alone");
     assert_eq!(resend(&d), Vec::<u32>::new());
+    d.stop();
+}
+
+/// M3 P8: the host reads the claims the revoke sweep needs (`claim.list`, `claim.sweepPerson`) on a real daemon. Not switched, the
+/// core refuses them as "not switched" (the module's own gate): the host is NOT refused as a principal, which is what an owner-only
+/// `claim.list` would have answered it. (The table test pins the principals: owner and host only.)
+#[test]
+fn the_host_may_ask_the_claim_rows_of_a_revoke_sweep_and_is_refused_by_the_switch_not_the_principal()
+ {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, hosted());
+    for (name, params) in [
+        ("claim.list", json!({})),
+        ("claim.sweepPerson", json!({"persons": ["sam"]})),
+    ] {
+        for (who, reached) in [
+            ("host", host(&p, name, &params)),
+            ("owner", read(&p, name, &params)),
+        ] {
+            match reached {
+                Reached::Refused(Error::NotAllowed(note)) => {
+                    panic!("{name}: the {who} was refused as a principal: {note}")
+                }
+                Reached::Refused(_) => {}
+                other => panic!("{name}: the {who} got {other:?}"),
+            }
+        }
+    }
+    drop(d);
+}
+
+/// One host process that has loaded two conversations (two `warm_procs` rows) is one kill, signalled once.
+#[cfg(unix)]
+#[test]
+fn a_marked_warm_process_with_two_conversations_is_signalled_once() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (pid, start) = leader();
+    d.shared
+        .with_core(|c| {
+            for conv in ["main", "thread"] {
+                c.conn().execute(
+                    "INSERT INTO warm_procs (pid, started, instance, conversation, kill_at)
+                     VALUES (?1, ?2, ?3, ?4, 1)",
+                    rusqlite::params![pid, start, crate::holder_link::HOST_INSTANCE, conv],
+                )?;
+            }
+            Ok(())
+        })
+        .expect("rows");
+    let got = crate::kill_resend::pass(&d.shared, None, Duration::from_secs(60));
+    assert_eq!(got, vec![pid], "{got:?}");
+    until("the process to be gone", || !alive(pid));
     d.stop();
 }

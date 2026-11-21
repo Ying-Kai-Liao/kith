@@ -1,0 +1,7 @@
+# cfg (in reconcile-owed/)	expected	why
+# A renamed person's revoke whose read of the ids failed (ReconcileOwed.tla; remote/core_revokes.rs owe_cut, pay_owed, clear_owed). Whole-config rows.
+fix	pass	the failed read leaves an owed row, the poll pays it under every id, an undo clears it: TypeOK, NoLostUndo, FailCutHoldsOwed, Narrows, FailCutReached
+today	fail	FailCutReached: no owed row, the old id is never cut (revoke fails, rename, cut with the read falling back, stutter)
+undo-keeps	fail	NoLostUndo: the undo leaves the row, and the retry cuts a person the owner gave back
+fix-blind	pass	an undo whose read of the ids failed leaves a marker; the retry drops a row older than it unpaid and pays a newer one: all of fix's checks
+undo-blind	fail	NoLostUndo: the same undo with no marker (or a guard on the person's revoked flag, which a failed revoke also shows): the retry cuts the person the owner gave back

@@ -172,8 +172,61 @@ impl Store {
 
     /// Removes an invite that never left this computer (the cloud refused it).
     pub fn delete_invite(&self, id: &str) -> Result<()> {
-        self.db.locked().execute("DELETE FROM invites WHERE invite_id = ?1", [id])?;
+        let c = self.db.locked();
+        c.execute("DELETE FROM invites WHERE invite_id = ?1", [id])?;
+        c.execute("DELETE FROM invite_rooms WHERE invite_id = ?1", [id])?;
         Ok(())
+    }
+
+    /// The rooms an invite names, each not done yet. Kept beside the invite, not in it, so the cloud's invite and a
+    /// revoked person's suspended copy stay as they were.
+    pub fn put_invite_rooms(&self, id: &str, rooms: &[String]) -> Result<()> {
+        let c = self.db.locked();
+        for room in rooms {
+            c.execute("INSERT OR IGNORE INTO invite_rooms(invite_id, room) VALUES(?1, ?2)", params![id, room])?;
+        }
+        Ok(())
+    }
+
+    /// The room parts of invites that have any not done, as `(invite, room)`, oldest invite first. Old invites have none.
+    pub fn invite_rooms_todo(&self) -> Vec<(String, String)> {
+        let c = self.db.locked();
+        let Ok(mut st) = c.prepare(
+            "SELECT r.invite_id, r.room FROM invite_rooms r JOIN invites i ON i.invite_id = r.invite_id
+             WHERE r.done_at IS NULL ORDER BY i.created_at, r.room",
+        ) else {
+            return vec![];
+        };
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.flatten().collect()).unwrap_or_default()
+    }
+
+    /// Whether `room` of invite `id` is done (joined, or the room was gone). A part that was never made is not done.
+    pub fn invite_room_done(&self, id: &str, room: &str) -> bool {
+        let c = self.db.locked();
+        let row = c.query_row(
+            "SELECT done_at IS NOT NULL FROM invite_rooms WHERE invite_id = ?1 AND room = ?2",
+            params![id, room],
+            |r| r.get::<_, bool>(0),
+        );
+        logged("invite room", row.optional()).flatten().unwrap_or(false)
+    }
+
+    /// Marks one room part done. Never undone: that mark is what keeps a removed person out.
+    pub fn mark_invite_room_done(&self, id: &str, room: &str) -> Result<()> {
+        self.db.locked().execute(
+            "UPDATE invite_rooms SET done_at = ?3 WHERE invite_id = ?1 AND room = ?2 AND done_at IS NULL",
+            params![id, room, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    /// Every room part of an invite, done or not.
+    pub fn invite_rooms(&self, id: &str) -> Vec<String> {
+        let c = self.db.locked();
+        let Ok(mut st) = c.prepare("SELECT room FROM invite_rooms WHERE invite_id = ?1 ORDER BY room") else {
+            return vec![];
+        };
+        st.query_map([id], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 
     pub fn person(&self, id: &str) -> Option<PersonRow> {

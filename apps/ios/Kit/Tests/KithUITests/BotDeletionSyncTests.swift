@@ -45,6 +45,7 @@ import Testing
     store.saveCache()
     let restored = BotStore(computer: computer, storage: storage) { fake }
     defer { restored.retire() }
+    await restored.cacheReady()
     #expect(restored.bots[bot.id] == nil)
     #expect(restored.chat(bot.id).isEmpty)
 }

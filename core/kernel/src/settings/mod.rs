@@ -267,7 +267,10 @@ fn diagnose(name: &str, mut s: Map) -> String {
 
 /// `locked()` + read + change + `write()`: one writer at a time, the rest of the file kept. A refused read or change
 /// leaves the file as it is.
-fn edit(ctx: &Ctx<'_>, change: impl FnOnce(&mut Map) -> Result<(), String>) -> Result<(), String> {
+pub(crate) fn edit(
+    ctx: &Ctx<'_>,
+    change: impl FnOnce(&mut Map) -> Result<(), String>,
+) -> Result<(), String> {
     let io = |e: std::io::Error| format!("{}: {e}", file(ctx).display());
     std::fs::create_dir_all(&ctx.machine).map_err(io)?;
     let lock = std::fs::OpenOptions::new()

@@ -299,8 +299,9 @@ pub async fn auth_person(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
 /// Runs before the memberships, so a membership the revoke cut finds its person already revoked (and keeps their handle
 /// and bots for the undo). Returns the people newly revoked here, whose running turns the caller stops. None (a cloud
 /// that predates revoking) changes nothing. An error fails the pull: this host stays out of sync rather than serve on
-/// access it could not apply (I2).
-pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Result<Revoked> {
+/// access it could not apply (I2). An undo clears a cut still owed of the person in the same locked section
+/// (`core_revokes::clear_owed`).
+pub async fn apply_revoked(hub: &Hub, bin: Option<&Path>, listed: Option<&[String]>) -> Result<Revoked> {
     let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(Revoked::default()) };
     let mut out = Revoked::default();
     for p in auth_people(bin).await?.into_iter().filter(|p| !p.kith.is_empty() && !p.owner && p.bot_of.is_empty()) {
@@ -313,7 +314,11 @@ pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Res
         // per person, because kith-auth exits 0 for it.
         let said = {
             let _w = crate::api::people::AUTH_WRITES.lock().await;
-            crate::api::authority::run_auth_noted(bin, &["person", &p.id, flag, "--local"]).await
+            let said = crate::api::authority::run_auth_noted(bin, &["person", &p.id, flag, "--local"]).await;
+            if !revoked && said.is_ok() {
+                crate::remote::core_revokes::clear_owed(hub, &p.id).await;
+            }
+            said
         }
         .with_context(|| format!("kith-auth person {} {flag}", p.id))?
         .1;

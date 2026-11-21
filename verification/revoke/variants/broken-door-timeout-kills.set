@@ -1,0 +1,9 @@
+\* BROKEN: a sweep whose core call timed out ends a running door of an allowed person
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE
+CoreDoorStart = TRUE
+CoreSlow = TRUE
+TimeoutKills = TRUE

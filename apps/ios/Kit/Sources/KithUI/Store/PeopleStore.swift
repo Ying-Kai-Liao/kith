@@ -92,13 +92,19 @@ public final class PeopleStore {
 
     /// Makes an invite for a new person (`name`) or one already invited (`personId`). Nil when it failed (see `error`)
     /// or while another write is still running.
-    public func createInvite(name: String?, personId: String?, agents: [String: InviteRole]) async -> CreatedInvite? {
+    public func createInvite(name: String?, personId: String?, agents: [String: InviteRole], rooms: [String] = []) async -> CreatedInvite? {
         guard !busy, let host = host() else { return nil }
         busy = true
         error = nil
         defer { busy = false }
         do {
-            let made = try await host.createInvite(name: name, personId: personId, agents: agents)
+            // Rooms ride only on the real client; a test host without rooms makes the plain invite.
+            let made: CreatedInvite
+            if !rooms.isEmpty, let client = host as? HostClient {
+                made = try await client.createInvite(name: name, personId: personId, agents: agents, rooms: rooms)
+            } else {
+                made = try await host.createInvite(name: name, personId: personId, agents: agents)
+            }
             await load()
             return made
         } catch {

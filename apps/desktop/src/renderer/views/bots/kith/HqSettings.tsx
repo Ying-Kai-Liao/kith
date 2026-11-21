@@ -5,8 +5,8 @@ import type { KithInfoStore } from '../../../store/kith-info-store'
 import { useAgentModels } from '../agent-models'
 
 /**
- * An hq bot's permission, call model, harness, model, effort and Fast mode, once. Kith holds them: each is written through
- * (`kith <agent> set …`) and shown as kith reports it; Fast mode has no setting, so it is read-only and says "Set in Kith".
+ * An hq bot's permission, call model, harness, model and effort, once. Kith holds them: each is written through
+ * (`kith <agent> set …`) and shown as kith reports it.
  */
 /** The call-model choices, plus the current one when this app doesn't know it. */
 function callOptions(kith: KithInfoStore, current: string) {

@@ -1,0 +1,7 @@
+CoreWriter = TRUE
+ClaudeForks = FALSE
+Terminals = {"t1"}
+MaxSends = 1
+ClaimNextChecksHeld = FALSE
+\* the warm-process check in claim.external would keep the terminal out of the window; claim_next's `held` is the second line
+ExternalChecksWarm = FALSE

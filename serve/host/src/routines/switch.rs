@@ -4,8 +4,9 @@
 //! imports every routine into its agent's jobs.json (job id = routine id, or `<id>-<n>` for the n-th of several
 //! triggers) and the core fires them: [`Gate::Core`]. Then, and only then:
 //!
-//! - the host's own scheduler fires nothing; once a minute it calls `schedule.tick` and the core does the firing (one tick
-//!   at a time, a slow one is skipped not queued, a failed one is logged and waits for the next minute);
+//! - the host's own scheduler fires nothing; when the wall-clock minute changes it calls `schedule.tick` and the core does the firing (one tick
+//!   at a time, a slow one is skipped not queued, a failed one is warned about once and retried at the next second). The cadence
+//!   only sets how late a fire is: the core reads its own clock, and one fire per slot and the catch-up window keep a slot from being lost or doubled;
 //! - `POST /hooks/routines/:id` (and the relay's delivery, which reaches the same `receive`) goes to `schedule.fire` for the
 //!   job the import made from that routine, as the Host principal. The core checks the key and the signature with its
 //!   own copy of the key; the host logs and returns no secret;
@@ -33,8 +34,7 @@ use std::sync::atomic::Ordering;
 
 /// The module's name in the cutover framework.
 const MODULE: &str = "schedules";
-/// One core tick a minute, as `kith-sched`'s launchd job ticked.
-const TICK_EVERY_MS: i64 = 60_000;
+const MINUTE_MS: i64 = 60_000;
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum Gate {
@@ -120,31 +120,63 @@ impl Routines {
         *self.link.locked() = link;
     }
 
-    /// Whether a core tick is due now; true claims it (one at a time, a minute apart). The caller must call
+    /// The minute to tick the core for, when a tick is due now; `Some` claims it (one at a time). Due when the wall-clock
+    /// minute differs from the last minute a tick succeeded in (so also once at start), however late the previous tick
+    /// ran: a fixed spacing drifted and skipped a minute about hourly. The caller must hand the minute to
     /// [`Self::forward_tick`], which releases the claim.
-    pub(super) fn core_tick_due(&self, now: i64) -> bool {
+    pub(super) fn core_tick_due(&self, now: i64) -> Option<i64> {
         if self.core_ticking.swap(true, Ordering::AcqRel) {
-            return false;
+            return None;
         }
-        let mut last = self.last_core_tick.locked();
-        if now - *last < TICK_EVERY_MS {
+        let minute = now.div_euclid(MINUTE_MS);
+        // `!=` and not `<`: a clock that went back (sleep, NTP) ticks again instead of waiting for the old minute.
+        if *self.last_core_tick.locked() == Some(minute) {
             self.core_ticking.store(false, Ordering::Release);
-            return false;
+            return None;
         }
-        // Stamped when claimed, not when done: a failing tick waits for the next minute instead of looping.
-        *last = now;
-        true
+        Some(minute)
     }
 
-    /// One `schedule.tick`. Blocking; the runner calls it off the async threads.
-    pub(super) fn forward_tick(&self) {
+    /// One `schedule.tick` for the claimed `minute`. Blocking; the runner calls it off the async threads. Only an
+    /// answered tick marks its minute done; a busy or failed one is claimed again at the next second. A `Refused` is
+    /// always retried: the refusals `schedule.tick` gives clear on their own (a job that changed hands mid-fire, which
+    /// the next tick settles) or are for the owner to fix (a machine id file that is not one), and the retry is one
+    /// cheap socket call a second, so treating one as done for the minute would only hide it. The core's own rules, not
+    /// this cadence, keep a slot from being lost or fired twice: one fire per slot (its `sched_fires` row), and the
+    /// catch-up window after a late tick. The cadence only changes how late a fire is.
+    pub(super) fn forward_tick(&self, minute: i64) {
+        // Released on a panic too (inside the link, or the blocking task dying), or no tick would ever run again.
+        let _claim = Claim(&self.core_ticking);
         let link = self.link.locked().clone();
         match link.owner("schedule.tick", &json!({})) {
-            Answer::Done(v) => tracing::debug!(fired = %v, "routines: the core ticked"),
-            Answer::Refused(why) => tracing::warn!(why, "routines: the core refused a schedule tick"),
-            Answer::Down { why, .. } => tracing::warn!(why, "routines: could not reach the core for a schedule tick"),
+            Answer::Done(v) => {
+                tracing::debug!(fired = %v, "routines: the core ticked");
+                *self.last_core_tick.locked() = Some(minute);
+                if let Some((failed, since)) = self.tick_streak.locked().take() {
+                    tracing::info!(
+                        failed,
+                        lasted_s = since.elapsed().as_secs(),
+                        "routines: the core answers schedule ticks again"
+                    );
+                }
+            }
+            Answer::Refused(why) => self.tick_failed(&why, "the core refused a schedule tick; retrying"),
+            Answer::Down { why, .. } => {
+                self.tick_failed(&why, "could not reach the core for a schedule tick; retrying");
+            }
         }
-        self.core_ticking.store(false, Ordering::Release);
+    }
+
+    /// Warn on the first failure of a streak, then only debug: the retry is every second.
+    fn tick_failed(&self, why: &str, what: &str) {
+        let mut streak = self.tick_streak.locked();
+        let (count, _) = streak.get_or_insert((0, std::time::Instant::now()));
+        *count += 1;
+        if *count == 1 {
+            tracing::warn!(why, "routines: {what}");
+        } else {
+            tracing::debug!(why, failed = *count, "routines: {what}");
+        }
     }
 
     /// Edits are the core's now.
@@ -165,15 +197,7 @@ impl Routines {
     #[allow(clippy::type_complexity, reason = "(bot, agent, jobs) read once by two callers")]
     fn jobs_of(&self, hub: &Hub, id: &str) -> Option<(String, String, Vec<(String, bool)>)> {
         let r = self.state.locked().routines.iter().find(|r| r.id == id && !r.deleted).cloned()?;
-        let agent = hub
-            .store
-            .bot(&r.bot_id)
-            .ok()
-            .flatten()
-            .filter(|b| !b.deleted)?
-            .config
-            .hq_agent
-            .filter(|a| !a.is_empty())?;
+        let agent: String = hub.store.bot(&r.bot_id).ok().flatten().filter(|b| !b.deleted)?.config.hq_agent?.into();
         let n = r.triggers.len();
         let jobs = r
             .triggers
@@ -269,5 +293,14 @@ impl Routines {
             Gate::Core => self.run_now_via_core(hub, bot, id),
             Gate::Held(_) => self.refuse_edit().map(|()| Value::Null),
         }
+    }
+}
+
+/// Clears the core tick claim when dropped.
+struct Claim<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
 }

@@ -1,0 +1,23 @@
+{
+ "a": {
+  "v": 1,
+  "sessionId": "s-1",
+  "agent": "file",
+  "cwd": "/tmp",
+  "pid": null,
+  "recordedAt": 7
+ },
+ "b": {
+  "v": 1,
+  "sessionId": "s-1",
+  "agent": "entry",
+  "cwd": "/tmp",
+  "pid": null,
+  "recordedAt": 7
+ },
+ "arrival": {
+  "a": 0,
+  "b": 1
+ },
+ "winner": "b"
+}

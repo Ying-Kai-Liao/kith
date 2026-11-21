@@ -1,0 +1,20 @@
+\* The design with the fixes this model asks for (see RegistryStep.tla for each switch). A variant's .set overrides lines here.
+\* Sizes: three hooks of one session (new, old-kernel, new), one core crash, one prune.
+K1 = "new"
+K2 = "old"
+K3 = "new"
+MaxCrash = 1
+MaxPrune = 1
+WriteAhead = TRUE
+OneName = FALSE
+NsDrops = FALSE
+FileFrom = "row"
+ProjectRule = "reconcile"
+RowWrite = "conditional"
+Reconcile = TRUE
+MissingKey = "mtime"
+ExportRule = "newer"
+ImportClears = TRUE
+SameGuard = TRUE
+TombGuard = TRUE
+FileWrite = "atomic"

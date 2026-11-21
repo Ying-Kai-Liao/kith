@@ -2,7 +2,7 @@ import KithKit
 import SwiftUI
 
 /// An hq bot's permission, call model, harness, model and effort, once. hq holds them: each is written through
-/// (`kith <agent> set …`) and shown as hq reports them, and a refusal shows the CLI's own words. Fast mode has no kith setting, so it isn't offered.
+/// (`kith <agent> set …`) and shown as hq reports them, and a refusal shows the CLI's own words.
 struct HqSettingsRows: View {
     let store: KithInfoStore
     /// False once the Access tab shows the permission mode.
@@ -47,7 +47,6 @@ struct HqSettingsRows: View {
         case .permission: store.savingPermission
         case .callModel: store.savingCallModel
         case .harness, .model, .effort: store.savingSetting != nil
-        case .fastMode: false
         }
     }
 
@@ -62,7 +61,7 @@ struct HqSettingsRows: View {
                     case .harness: await store.setSetting("harness", pick)
                     case .model: await store.setSetting("model", pick)
                     case .effort: await store.setSetting("effort", pick)
-                    case .permission, .fastMode: await store.setPermission(pick)
+                    case .permission: await store.setPermission(pick)
                     }
                 }
             })

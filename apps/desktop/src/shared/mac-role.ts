@@ -75,7 +75,7 @@ export function guestPrompts(entries: ReadonlyMap<string, Entry[]>, ownBots: { h
       out.push({
         entryId: e.id,
         botId,
-        personName: d.personName || d.person || '',
+        personName: d.personName || (typeof d.person === 'string' ? d.person : '') || '',
         agent: d.agent ?? '',
         title: d.title ?? 'Use a tool',
         options: d.options ?? [],

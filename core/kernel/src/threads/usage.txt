@@ -12,6 +12,8 @@ kith-sessions — terminal `kith <agent>` sessions the host can list and continu
   kith-sessions terminal SID PID [PERSON [AGENT]]  for an interactive run that resolve did not claim (a fresh one, on the
                                            --session-id bin/kith chose; KITH_RESUME): the claim, kind terminal, for PID (the
                                            launcher's shell, which then execs `run`, which gives it back); refused at once when held
+                                           (claim and terminal print `lock-alone` on stdout, resolve adds r_alone=1, when the owner's run
+                                           goes on under the conversation lock alone: bin/kith then starts the stub with --lock-alone)
   kith-sessions release SID                gives back SID's claim when its holder is the caller's parent (the launcher's shell, same start time),
                                            else exits 1 and touches nothing (`kith AGENT --held` after a resume: terminal.open takes the claim itself)
   kith-sessions proc PID PERSON AGENT     every non-owner run: a session-less `proc-PID.claim` naming the person, so the revoke sweep
@@ -25,9 +27,20 @@ kith-sessions — terminal `kith <agent>` sessions the host can list and continu
   kith-sessions run AGENT -- CMD...        run CMD (claude) as a child: signals and exit code pass through; afterwards gives back the
                                            claims of this process and says how to get the session back: `kith AGENT --resume ID` (also when the host took it over)
 
+  kith-sessions caps                       what this copy knows, one per line (`registry-core`: the registry's Writer mode)
+  kith-sessions epoch PERSON               Writer mode only: prints PERSON:N, the core's revoke epoch for them (bin/kith reads it before kith-auth decides)
+
+Writer mode (the claims are the core's: the marker $KITH_STATE/live/terminal/claims.tombstone, kernel/lib/kith_claims.py). The claim files
+below are then neither read nor written: claim, terminal, resolve, release, proc and sweep are rows of the core (claim.external,
+claim.release, claim.sweepPerson). A core that gives no answer never turns into the files: a person's run refuses, the owner's goes
+on under the conversation's stub lock alone, `sweep` exits 3. No marker (today): everything below, unchanged.
+
 Registry file (contract with the host, serve/): dir 0700, file 0600, written by tmp + rename:
   {"v":1,"sessionId","agent","cwd","transcriptPath","pid" (the claude process),"project","source","resumedFrom","startedAt",
-   "account" (the login it was made under: KITH_ACCOUNT_ID, e.g. claude or claude:work; bin/kith resumes it only there)}
+   "account" (the login it was made under: KITH_ACCOUNT_ID, e.g. claude or claude:work; bin/kith resumes it only there),
+   "recordedAt" (nanoseconds since the epoch: the order key, kernel/lib/kith_registry.py)}
+  Once the registry is the core's (the marker live/terminal/registry.tombstone or the transcripts switch, kith_registry.switched)
+  record writes no file: it spools inbox/<sid>.<recordedAt>.<pid>.json, calls session.record, and deletes its entry on an answer.
 Writer claim (contract with the host, serve/host/src/terminal/claim.rs): $KITH_STATE/live/terminal/<sid>.claim, made whole in a
 temp file and linked into place (exclusive), 0600: {"pid","procStart","at","kind"}. Whoever holds it is the one writer of the
 session, before the registry file exists and with the host down. Stale (pid gone, or started at another time) = free, taken over by rename.
@@ -41,4 +54,3 @@ Listable = the owner's own run of one of these kinds (the file's "kind", with "l
   ask | schedule | helper   a one-shot: bin/kith sets KITH_RUN_KIND for exactly that run from what its launcher passed
             (kith-ask, kith-sched: KITH_LAUNCH_KIND) or, started by another run of the owner's, `helper`.
 Never listed: KITH_PERSON runs, the host's own runs (KITH_VIA=serve, channels, tidying), KITH_HIDE_SESSION, agent worktrees.
-

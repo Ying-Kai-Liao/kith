@@ -3,8 +3,8 @@
 #
 #   scripts/package-release.sh <version> <arch> <path-to-kith-binary> [out-dir]
 #
-# kith-<version>-darwin-<arch>.tar.gz holding bin/kith (and bin/kith-tts, the local voice helper, when KITH_TTS_BIN names
-# a built one: arm64 only) and share/kith/{kernel,.claude-plugin,install.sh,LICENSE,
+# kith-<version>-darwin-<arch>.tar.gz holding bin/kith (bin/kith-stub, bin/kith-holder and bin/kith-tts when KITH_STUB_BIN,
+# KITH_HOLDER_BIN and KITH_TTS_BIN name built ones; kith-tts is arm64 only) and share/kith/{kernel,.claude-plugin,install.sh,LICENSE,
 # NOTICE,THIRD_PARTY_NOTICES.md,README.md} (kernel/VERSION holds <version>): the layout the binary's kernel lookup expects (kernel at ../share/kith/kernel). Also writes the
 # tarball's .sha256 next to it.
 set -eu
@@ -20,6 +20,8 @@ install -m 755 "$BIN" "$STAGE/$NAME/bin/kith"
 [ -z "${KITH_TTS_BIN:-}" ] || install -m 755 "$KITH_TTS_BIN" "$STAGE/$NAME/bin/kith-tts"
 # The conversation lock's launcher, beside kith where `kith <agent>` looks for it (KITH_STUB_BIN names a built one).
 [ -z "${KITH_STUB_BIN:-}" ] || install -m 755 "$KITH_STUB_BIN" "$STAGE/$NAME/bin/kith-stub"
+# The process holder Writer mode connects to, beside kith where the core and the host look for it.
+[ -z "${KITH_HOLDER_BIN:-}" ] || install -m 755 "$KITH_HOLDER_BIN" "$STAGE/$NAME/bin/kith-holder"
 sh "$ROOT/scripts/stage-kernel.sh" "$STAGE/$NAME/share/kith" "$VERSION"
 tar -C "$STAGE" -czf "$OUT/$NAME.tar.gz" "$NAME"
 (cd "$OUT" && shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256")

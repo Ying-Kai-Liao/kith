@@ -61,8 +61,9 @@ public struct SkyBackground: View {
             }
             if !isNight {
                 // Day: a soft sky-blue wash over the artwork (multiply keeps the clouds), so the sky reads against the white page.
-                LinearGradient(colors: [Color(red: 0.72, green: 0.86, blue: 1), .clear], startPoint: .top, endPoint: .bottom)
-                    .frame(height: variant == .home ? 330 : KithSize.skyHeaderFade)
+                // The home wash scales with the screen (a fixed 330 pt ended a third of the way down a Pro Max and looked like a cut).
+                LinearGradient(colors: [Color(red: 0.72, green: 0.86, blue: 1), .clear], startPoint: .top, endPoint: variant == .home ? UnitPoint(x: 0.5, y: 0.55) : .bottom)
+                    .frame(height: variant == .home ? nil : KithSize.skyHeaderFade)
                     .blendMode(.multiply)
             }
         }

@@ -1,0 +1,3 @@
+\* the runner pulls keyed turns too and re-runs redeemed ones
+PullOnlyUnkeyed = FALSE
+SkipRedeemed = FALSE

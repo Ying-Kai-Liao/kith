@@ -730,9 +730,10 @@ mod tests {
             "grants": [{"grantId": "grt_x", "deviceKey": injected, "deviceName": "x", "platform": "ios", "scopes": ["control"]}]});
 
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
-        let cfg: BotConfig =
-            serde_json::from_value(json!({"id": "", "name": "B", "cwd": cwd, "backend": "custom", "command": "true"}))
-                .unwrap();
+        let cfg: BotConfig = serde_json::from_value(
+            json!({"id": "", "name": "B", "cwd": cwd, "backend": "custom", "command": "true", "hqAgent": "relay-test"}),
+        )
+        .unwrap();
         let bot = hub.create_bot(cfg).unwrap();
         let bot_id = bot["id"].as_str().unwrap().to_owned();
         let nonce = "3F2504E0-4F89-11D3-9A0C-0305E82C3301";
@@ -806,9 +807,10 @@ mod tests {
         let hub = temp_hub();
         let fake = Arc::new(Fake::default());
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
-        let cfg: BotConfig =
-            serde_json::from_value(json!({"id": "", "name": "B", "cwd": cwd, "backend": "custom", "command": "true"}))
-                .unwrap();
+        let cfg: BotConfig = serde_json::from_value(
+            json!({"id": "", "name": "B", "cwd": cwd, "backend": "custom", "command": "true", "hqAgent": "relay-test"}),
+        )
+        .unwrap();
         let bot_id = hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned();
         let saved = hub
             .routines
@@ -890,9 +892,10 @@ mod tests {
         // The pull on connect fails: without the fix the item below would be refused for good.
         *fake.state_failures.lock().unwrap() = 1;
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
-        let cfg: BotConfig =
-            serde_json::from_value(json!({"id": "", "name": "B", "cwd": cwd, "backend": "custom", "command": "true"}))
-                .unwrap();
+        let cfg: BotConfig = serde_json::from_value(
+            json!({"id": "", "name": "B", "cwd": cwd, "backend": "custom", "command": "true", "hqAgent": "relay-test"}),
+        )
+        .unwrap();
         let bot_id = hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned();
         let nonce = "9A1B2C3D-4F89-11D3-9A0C-0305E82C3301";
         let inner = json!({"m": "send", "b": {"botId": bot_id, "text": "hi", "clientNonce": nonce}, "ts": now_ms()});

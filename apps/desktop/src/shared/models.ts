@@ -38,14 +38,8 @@ export interface Bot {
   /** `ask` or `auto`. */
   permission: string
   model?: string | null
-  /** The model's own settings (effort, fast…): agent option id → value. */
+  /** The model's own settings (effort…): agent option id → value. */
   modelOptions: Record<string, string>
-  /** The agent's Fast mode (Claude Code, Codex): faster replies for more usage. */
-  fastMode: boolean
-  /** What the agent says about Fast mode: `unknown` (no session yet), `offered`, `unsupported`,
-   *  or `refused` (it turned it off; `fastModeIssue` says why). */
-  fastModeSupport: string
-  fastModeIssue: string | null
   pinned: boolean
   /** Where the user dragged it, lowest first (after pinned bots); ties sort by recent activity. */
   position: number
@@ -65,6 +59,8 @@ export interface Bot {
   hqAgent?: string | null
   /** The bot of an agent that ships with Kith (scratch): reached through Quick chat, sorted last in the roster. */
   builtin?: boolean
+  /** A host-native row the host no longer runs (one-bot-model C5): it is flagged, exported, or remade as a kith agent. Absent from an older host. */
+  needsKithAgent?: boolean
   autoName: boolean
   /** Each burst of the user's chat is a task with its own thread and session; false keeps one conversation. */
   tasks: boolean
@@ -134,9 +130,6 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
     permission: raw.permission ?? 'auto',
     model: raw.model ?? null,
     modelOptions: raw.modelOptions ?? {},
-    fastMode: raw.fastMode ?? false,
-    fastModeSupport: raw.fastModeSupport ?? 'unknown',
-    fastModeIssue: raw.fastModeIssue ?? null,
     pinned: raw.pinned ?? false,
     position: raw.position ?? 0,
     hidden: raw.hidden ?? false,
@@ -149,6 +142,7 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
     memoryRev: raw.memoryRev ?? 0,
     hqAgent: raw.hqAgent || null,
     ...(raw.builtin === true ? { builtin: true } : {}),
+    ...(raw.needsKithAgent === true && raw.kind !== 'group' ? { needsKithAgent: true } : {}),
     autoName: raw.autoName ?? false,
     // A host sends `tasks` only when it's off; one without tasks never marks a message as one.
     tasks: raw.kind !== 'group' && raw.tasks !== false,
@@ -170,6 +164,8 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
 }
 
 export const isGroup = (b: Bot) => b.kind === 'group'
+/** A host-native row the host refuses to run. Never a room, and never a row from a host that doesn't say. */
+export const needsKithAgent = (b: Pick<Bot, 'kind' | 'needsKithAgent'>) => b.kind !== 'group' && b.needsKithAgent === true
 export const isWorking = (b: Bot) => b.status === 'working' || b.status === 'needsInput'
 export const needsInput = (b: Bot) => b.status === 'needsInput'
 /** Working right now in this chat's main conversation (`thread == null`) or in that thread. */
@@ -323,7 +319,8 @@ export interface EntryData {
   approver?: 'owner' | 'member'
   /** permission: whether this account may answer it, from who the card names (sent per viewer; older hosts don't). */
   canAnswer?: boolean
-  person?: string
+  /** permission: the person whose run it is; notice (personJoined, personLeft): who joined or left. */
+  person?: string | { id?: string; name?: string }
   personName?: string
   agent?: string
   /** permission, from a run `kith ask` started: "<agent>, asked by <caller agent>" (or "a terminal"). */
@@ -359,8 +356,14 @@ export interface EntryData {
   lateWhy?: string
   /** A bot's post with nothing open: kept, not late. */
   unprompted?: boolean
-  /** notice: botJoined | botLeft | botPassed | botTimedOut, with the bot it is about. */
+  /** notice: botJoined | botLeft | botPassed | botTimedOut, with the bot it is about; personJoined | personLeft | roomCardWaiting (rooms with people). */
   notice?: string
+  /** The owner's copy of a room message: the people who can't see it (ids; shown only below their join line). */
+  hiddenFrom?: string[]
+  /** agent: the room turn did not answer (its text says why); the person may send the message again. */
+  unanswered?: boolean
+  /** permission, a room turn's card in the owner's 1:1 with the agent: the room it came from. */
+  room?: string
   bot?: { botId?: string; name?: string; provider?: string }
   thread?: ThreadSummary
   /** user, in the main chat: the first message of a task; the task goes on in its thread (see `tasks`). */
@@ -621,7 +624,6 @@ export interface BotDraft {
   permission: string
   model?: string | null
   modelOptions?: Record<string, string>
-  fastMode?: boolean
   pinned?: boolean
   hidden?: boolean
   notify?: boolean | null
@@ -648,7 +650,6 @@ export function draftOf(bot: Bot): BotDraft {
     permission: bot.permission,
     model: bot.model ?? null,
     modelOptions: bot.modelOptions,
-    fastMode: bot.fastMode,
     pinned: bot.pinned,
     hidden: bot.hidden,
     notify: bot.notify ?? null,

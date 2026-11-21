@@ -78,7 +78,8 @@ public final class BotStore {
     /// The host's version and protocol levels, kept even when the rest of its `hello` can't be read.
     public internal(set) var hostVersion: HostVersion?
     public internal(set) var bots: [String: Bot] = [:]
-    public internal(set) var entries: [String: [Entry]] = [:]
+    /// Per chat, each its own observation scope (see `EntryShelf`); the shelf is not observed itself.
+    @ObservationIgnored public let entries = EntryShelf()
     /// Where each thread works, by `threadFolderKey`; filled by `loadThread` and `setPlaceFolder`.
     public internal(set) var threadFolders: [String: PlaceFolder] = [:]
     public internal(set) var usage: Usage
@@ -94,6 +95,14 @@ public final class BotStore {
     /// Bots whose older history has been fully paged in.
     public internal(set) var historyComplete: Set<String> = []
     var composerDrafts: [String: String] = [:]
+    /// The owner's view of each group room's people (stays, and the names behind them), read when a room opens. Never persisted.
+    public internal(set) var roomStays: [String: [RoomStay]] = [:]
+    public internal(set) var roomPeopleEnabled: [String: Bool] = [:]
+    public internal(set) var roomPeopleList: [HostPerson] = []
+    /// An invited person's rooms (`myRooms`): shown as groups, each with the stay its posts must carry. Never persisted.
+    public internal(set) var myRooms: [String: HostContract.MyRoom] = [:]
+    /// A room that went away under an open view (id to name): it shows the one neutral closed state.
+    public internal(set) var closedRooms: [String: String] = [:]
     /// What was pasted into each draft, sent along so memory never takes it as the user's own words.
     @ObservationIgnored var composerPasted: [String: [String]] = [:]
     public var routineDrafts: [String: String] = [:]
@@ -164,6 +173,17 @@ public final class BotStore {
     var hostId: String?
     var streamTask: Task<Void, Never>?
     var eventsTask: Task<Void, Never>?
+    /// Events received and not applied yet (see `enqueue`), and the task that applies them.
+    @ObservationIgnored var pendingEvents: [HostEvent] = []
+    @ObservationIgnored var flushTask: Task<Void, Never>?
+    /// Read receipts the batch being applied owes (see `noteVisibleConversations`).
+    @ObservationIgnored var pendingAcks: Set<ReadingScope> = []
+    /// Bumped by each restart of the events stream, so a batch stops at the event that restarted it.
+    @ObservationIgnored var eventsGeneration = 0
+    /// How long events gather before they are applied: during the catch-up, long enough that a few thousand events
+    /// draw a handful of times; once caught up, short enough that a reply still streams in smoothly.
+    static let catchUpBatchWait: Duration = .milliseconds(150)
+    static let liveBatchWait: Duration = .milliseconds(30)
     var isActive = true
     struct VoiceCall {
         let botId: String
@@ -197,6 +217,9 @@ public final class BotStore {
     @ObservationIgnored var readingViews: [UUID: ReadingScope] = [:]
 
     var cacheStamp: String?
+    /// False until the cached mirror has been read (and applied, when there is one): an empty roster before then is not an empty account.
+    public internal(set) var cacheLoaded = false
+    var cacheLoad: Task<Void, Never>?
 
     /// Loads this context's `DeviceIdentity` itself.
     public convenience init(computer: Computer, storage: SharedStore.Context) {
@@ -265,12 +288,12 @@ public final class BotStore {
     var shownBots: [Bot] {
         guard let granted = hello?.grantedAgents else { return Array(bots.values) }
         let agents = Set(granted.map(\.agent))
-        return bots.values.filter { $0.hqAgent.map(agents.contains) ?? false }
+        return bots.values.filter { myRooms[$0.id] != nil || ($0.hqAgent.map(agents.contains) ?? false) }
     }
 
     /// Cards outside this account's chats that wait for it on this computer (see `GuestPrompt`); `isOwner` is the
     /// account's role here.
-    public func guestPrompts(isOwner: Bool) -> [GuestPrompt] { GuestPrompt.pending(in: entries, known: Set(bots.keys), isOwner: isOwner) }
+    public func guestPrompts(isOwner: Bool) -> [GuestPrompt] { GuestPrompt.pending(in: entries.chats(excluding: Set(bots.keys)), known: Set(bots.keys), isOwner: isOwner) }
 
     /// Display name for a harness id, as the host reports it (falls back to the built-in list).
     public func backendName(_ id: String) -> String {
@@ -302,7 +325,10 @@ public final class BotStore {
     }
 
     /// Display name of an entry's author in a group chat.
-    public func authorName(_ id: String?) -> String { id.flatMap { bots[$0]?.name } ?? "A deleted bot" }
+    /// An invited person has no row for a room's agents: their name comes from `myRooms`.
+    public func authorName(_ id: String?) -> String {
+        id.flatMap { bots[$0]?.name ?? MemberRoomLogic.agentName(in: myRooms.values, id: $0) } ?? "A deleted bot"
+    }
 
     func updateComputer(_ change: (inout Computer) -> Void) {
         var c = computer

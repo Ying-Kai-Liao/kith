@@ -339,7 +339,8 @@ async fn run_bound(
         // The kernel's own commands never carry the host's run token: that is for the run. A person's launch may be
         // handed one of its own in `extra` (see `launch`), bound to the kernel process below.
         .env_remove(crate::runauth::TOKEN_ENV)
-        .env_remove(crate::runauth::SOCKET_ENV);
+        .env_remove(crate::runauth::SOCKET_ENV)
+        .env_remove(crate::runauth::CORE_SOCKET_ENV);
     // Tests give the kernel its temp folders here: the process environment is shared with every other test.
     #[cfg(test)]
     command.envs(
@@ -359,7 +360,7 @@ async fn run_bound(
     }
     let mut child = command.spawn().with_context(|| format!("starting {}", bin.display()))?;
     if let (Some(grant), Some(pid)) = (grant, child.id()) {
-        grant.bind_pid(pid);
+        grant.bind_pid(pid).await;
     }
     let (mut out, mut err) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
     let work = async {
@@ -782,7 +783,7 @@ pub async fn launch(
     person: Option<&str>,
     room: &str,
     members: &Members,
-    access: Option<&(crate::runauth::RunGrant, [(String, String); 2])>,
+    access: Option<&(crate::runauth::RunGrant, Vec<(String, String)>)>,
     engine: Option<&ThreadEngine>,
 ) -> Result<Launch> {
     let mut args = command::launch(agent, backup, project);
@@ -813,6 +814,7 @@ pub async fn launch(
     // Only the host hands a run its token (see `runauth`), whatever the kernel's answer says.
     launch.env.remove(crate::runauth::TOKEN_ENV);
     launch.env.remove(crate::runauth::SOCKET_ENV);
+    launch.env.remove(crate::runauth::CORE_SOCKET_ENV);
     // An owner's ask token (the kernel may fetch one for the owner's run) is no part of a person's launch.
     if person.is_some() {
         launch.env.remove(crate::runauth::ASK_TOKEN_ENV);
@@ -849,6 +851,10 @@ pub enum Members {
     OwnerOnly,
     /// The person each member bot runs as (an invitee, or a bot guest). Never empty.
     People(Vec<String>),
+    /// A room turn with people in the room (rooms with people): the turn's basis, which is the list the kernel reads for
+    /// the launch's grant, the room's notes and recall, and who wrote the message that asked (`owner`, or a person whose
+    /// monthly cap the run spends).
+    Room { people: Vec<String>, author: String, room_gen: i64 },
 }
 
 /// `KITH_ROOM_MEMBERS` (the people in a group room) or `KITH_ROOM_OWNER_ONLY` (nobody but the owner), so memory and
@@ -865,12 +871,25 @@ fn room_env(room: &str, members: &Members) -> Vec<(String, String)> {
                 env.push((MEMBERS_ENV.to_owned(), ids.join(",")));
             }
         }
+        Members::Room { people, author, room_gen } => {
+            env.push((MEMBERS_ENV.to_owned(), people.join(",")));
+            env.push((ROOM_GEN_ENV.to_owned(), room_gen.to_string()));
+            if author != "owner" {
+                env.push((ROOM_AUTHOR_ENV.to_owned(), author.clone()));
+            }
+        }
     }
     env
 }
 
+/// The person whose monthly cap a room turn spends (the one who wrote the message that asked); unset for the owner's.
+/// The launch reads it with the basis in [`MEMBERS_ENV`] (core `launch::room`).
+pub const ROOM_AUTHOR_ENV: &str = "KITH_ROOM_AUTHOR";
+
 /// The kernel reads only this spelling (there was no `HQ_` one).
 pub const MEMBERS_ENV: &str = "KITH_ROOM_MEMBERS";
+/// The room's gen when a room turn started (`Members::Room`): a door the turn runs carries it, never one taken when its result lands.
+pub const ROOM_GEN_ENV: &str = "KITH_ROOM_GEN";
 /// Set to `1` by the host alone: this Kith app group has no member but the owner. A separate name, not a value of
 /// `KITH_ROOM_MEMBERS`, so it can never be read as a person id.
 pub const OWNER_ONLY_ENV: &str = "KITH_ROOM_OWNER_ONLY";
@@ -1185,6 +1204,20 @@ mod tests {
         assert_eq!(session_account(&store, "s1").unwrap().as_deref(), Some("claude:work"));
         assert_eq!(session_account(&store, "s2").unwrap(), None, "no account said: no tag");
         assert_eq!(session_account(&store, "s3").unwrap(), None);
+    }
+
+    /// Rule 13: a room turn's run carries the gen the turn started in, which a door of it keeps; only a room turn's run, and
+    /// only that turn's own gen. A bot guest's group turn (`People`) lists its people but names no gen.
+    #[test]
+    fn a_room_turns_run_carries_the_gen_it_started_in_and_nothing_else_does() {
+        let room =
+            Members::Room { people: vec!["ann".to_owned(), "ben".to_owned()], author: "ann".to_owned(), room_gen: 7 };
+        let env = room_env("grp1", &room);
+        assert!(env.contains(&(MEMBERS_ENV.to_owned(), "ann,ben".to_owned())));
+        assert!(env.contains(&(ROOM_GEN_ENV.to_owned(), "7".to_owned())));
+        for other in [Members::People(vec!["sam".to_owned()]), Members::OwnerOnly, Members::Unknown] {
+            assert!(room_env("grp1", &other).iter().all(|(k, _)| k != ROOM_GEN_ENV), "{other:?}");
+        }
     }
 
     #[test]

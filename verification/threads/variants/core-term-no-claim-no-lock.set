@@ -1,0 +1,6 @@
+CoreWriter = TRUE
+ClaudeForks = FALSE
+Terminals = {"t1"}
+MaxSends = 1
+TermRegistersClaim = FALSE
+TermTakesLock = FALSE

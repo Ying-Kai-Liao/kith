@@ -29,7 +29,7 @@ test('parseGranted drops rows it cannot read and says null when absent', () => {
 })
 
 test('the roster keeps only bots of granted agents, and everything on an owner Mac', () => {
-  const bots = [{ id: '1', hqAgent: 'house' }, { id: '2', hqAgent: 'finance' }, { id: '3', hqAgent: null }]
+  const bots = [{ id: '1', hqAgent: 'house' }, { id: '2', hqAgent: 'finance' }, { id: '3', hqAgent: null }] // 3: a flagged native row; no grant reaches it
   assert.deepEqual(visibleBots(bots, [g('house', 'member')]).map((b) => b.id), ['1'])
   assert.deepEqual(visibleBots(bots, null).map((b) => b.id), ['1', '2', '3'])
   assert.deepEqual(agentsWithoutChat(bots, [g('house', 'member'), g('video', 'guest')]).map((a) => a.agent), ['video'])

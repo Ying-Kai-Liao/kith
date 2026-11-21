@@ -42,7 +42,7 @@ public struct GuestPrompt: Identifiable, Hashable, Sendable {
     public var chatId: String { entry.botId }
     /// "<personName> · <agent>", or the agent alone for the owner's own run.
     public var who: String {
-        let person = [entry.data.personName, entry.data.person].compactMap { $0 }.first { !$0.isEmpty }
+        let person = [entry.data.personName, entry.data.person?.id].compactMap { $0 }.first { !$0.isEmpty }
         guard let agent = entry.data.agent, !agent.isEmpty else { return person ?? "Someone" }
         return person.map { "\($0) · \(agent)" } ?? agent
     }

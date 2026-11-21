@@ -512,6 +512,9 @@ pub enum Stopped {
     /// This platform cannot signal a process tree, or the claim's start cannot be matched to the process: nothing was done
     /// and the claim is kept.
     CantStop(Claim),
+    /// Writer mode and the core could not say who holds it (down, refused, an unclear gate), or refused the stop: nothing was
+    /// signalled and nothing is known. Never "nobody".
+    Unreadable(String),
 }
 
 /// Ends the live holder of `sid` (the owner's Stop for a session held by an old run): SIGTERM to the claimer and its
@@ -520,11 +523,15 @@ pub enum Stopped {
 ///
 /// This is a small kill helper of its own; it should merge with the claim sweep of the kernel-side lease work (#248).
 pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopped {
+    // Writer mode (or a gate that cannot be read while the module is switched): the core's claim is the holder, never a file.
+    if let Some(stopped) = super::core_holders::stop(state, sid, grace) {
+        return stopped;
+    }
     stop_holder_unless(state, sid, grace, core_pid())
 }
 
 /// The running core daemon's pid, from its status (no database read). None when there is no core.
-fn core_pid() -> Option<u32> {
+pub(super) fn core_pid() -> Option<u32> {
     crate::core_front::daemon_pid()
 }
 
@@ -589,11 +596,11 @@ pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Dura
 }
 
 /// How long [`stop_holder`] waits, after SIGKILL, for the processes to leave the table.
-const STOP_REAP: std::time::Duration = std::time::Duration::from_secs(2);
+pub(super) const STOP_REAP: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Whether `pid` still holds anything: running, and not a zombie waiting for its parent (a zombie has released its
 /// descriptors, so its flock is gone).
-fn still_there(pid: u32) -> bool {
+pub(super) fn still_there(pid: u32) -> bool {
     pid_runs(pid)
         && std::process::Command::new("ps")
             .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -611,7 +618,7 @@ fn ps_pids(args: &[&str]) -> Vec<u32> {
         .unwrap_or_default()
 }
 
-fn parent_of(pid: u32) -> Option<u32> {
+pub(super) fn parent_of(pid: u32) -> Option<u32> {
     ps_pids(&["-o", "ppid=", "-p", &pid.to_string()]).first().copied()
 }
 
