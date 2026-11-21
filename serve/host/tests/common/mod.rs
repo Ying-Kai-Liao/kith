@@ -154,6 +154,12 @@ pub async fn agent_bot(base: &str, token: &str, home: &Path, name: &str, fixture
 
 /// [`serve`] with extra environment variables for the host.
 pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
+    serve_with(home, &[], env).await
+}
+
+/// [`serve_env`] with `extra` arguments after `serve --bind .. --port ..` (`--supervise`).
+#[allow(dead_code)]
+pub async fn serve_with(home: &Path, extra: &[&str], env: &[(&str, &str)]) -> (Child, String) {
     let deadline = Instant::now() + Duration::from_secs(30);
     // The host's log, appended across restarts: a start that is too slow shows where it spent its time.
     let log_path = host_log(home);
@@ -164,6 +170,7 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
         let mut child = Reaper(Some(
             Command::new(env!("CARGO_BIN_EXE_kith-serve"))
                 .args(["serve", "--bind", "127.0.0.1", "--port", &port.to_string()])
+                .args(extra)
                 .env("KITH_SERVE_HOME", home)
                 .env("KITH_SERVE_CLOUD", "off")
                 // Never the hq on this computer: a test that wants one passes its own `KITH_KERNEL_BIN`.
