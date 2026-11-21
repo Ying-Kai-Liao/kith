@@ -1005,7 +1005,11 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         // Auto mode has no prompt: a PermissionDenied hook turns a refusal into a card, a PreToolUse hook lets one retry through.
         if run_mode == "auto" {
             let permit = match i.permit_bin.filter(|b| !b.is_empty()) {
-                Some(bin) => format!("{} kernel permit --kernel {}", shquote(bin), shquote(&kernel)),
+                Some(bin) => format!(
+                    "{} kernel permit --kernel {}",
+                    shquote(bin),
+                    shquote(&kernel)
+                ),
                 None => shquote(&format!("{kernel}/bin/kith-permit")),
             };
             let once_dir = shquote(&format!("{machine}/run/once/{}", i.once_id));

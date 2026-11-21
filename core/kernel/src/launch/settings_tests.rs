@@ -587,11 +587,25 @@ fn mcp_merges_granted_with_the_agents_own_and_gives_a_guest_the_permit_server_on
         "kith/agents/echo/role/mcp.json",
         r#"{"mcpServers": {"both": {"command": "own"}, "local": {"command": "b"}}}"#,
     );
-    let m = mcp::merged(true, Some("/usr/local/bin/kith"), &kernel, Some(&granted), &pkg).unwrap();
+    let m = mcp::merged(
+        true,
+        Some("/usr/local/bin/kith"),
+        &kernel,
+        Some(&granted),
+        &pkg,
+    )
+    .unwrap();
     assert_eq!(m["mcpServers"]["svc"]["command"], json!("a"));
     assert_eq!(m["mcpServers"]["both"]["command"], json!("own"));
     assert_eq!(m["mcpServers"]["local"]["command"], json!("b"));
-    let g = mcp::merged(false, Some("/usr/local/bin/kith"), &kernel, Some(&granted), &pkg).unwrap();
+    let g = mcp::merged(
+        false,
+        Some("/usr/local/bin/kith"),
+        &kernel,
+        Some(&granted),
+        &pkg,
+    )
+    .unwrap();
     assert_eq!(g["mcpServers"].as_object().unwrap().len(), 1);
     assert_eq!(
         g["mcpServers"]["kithpermit"],
@@ -730,13 +744,18 @@ fn owner_hooks_and_guest_mcp_name_the_permit_verbs_and_never_the_script() {
         .find(|c| c.contains(" once --dir "))
         .unwrap();
     assert!(
-        once.contains(&format!("exec /usr/local/bin/kith kernel permit --kernel {root}/kernel once --dir ")),
+        once.contains(&format!(
+            "exec /usr/local/bin/kith kernel permit --kernel {root}/kernel once --dir "
+        )),
         "{once}"
     );
     assert!(!once.contains("kith-permit"));
     // a guest's one MCP server: the program, the verbless `kernel permit`
     let g = mcp::permit(Some("/opt/my kith/kith"), &t.root.join("kernel"));
-    assert_eq!(g["mcpServers"]["kithpermit"]["command"], json!("/opt/my kith/kith"));
+    assert_eq!(
+        g["mcpServers"]["kithpermit"]["command"],
+        json!("/opt/my kith/kith")
+    );
     assert_eq!(g["mcpServers"]["kithpermit"]["args"][0], json!("kernel"));
     assert!(!g.to_string().contains("kith-permit"));
 }
@@ -746,8 +765,12 @@ fn without_a_program_the_hooks_keep_the_forwarding_script() {
     let mut t = Tree::new();
     t.permit_bin = None;
     let out = t.settings(&Member::owner(), "").unwrap();
-    let denied = out.settings.as_ref().unwrap()["hooks"]["PermissionDenied"][0]["hooks"][0]["command"]
-        .as_str()
-        .unwrap();
-    assert!(denied.contains("/kernel/bin/kith-permit denied --dir "), "{denied}");
+    let denied =
+        out.settings.as_ref().unwrap()["hooks"]["PermissionDenied"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+    assert!(
+        denied.contains("/kernel/bin/kith-permit denied --dir "),
+        "{denied}"
+    );
 }

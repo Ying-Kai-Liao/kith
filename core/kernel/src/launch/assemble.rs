@@ -1511,7 +1511,14 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
                 None
             }
         };
-    let merged = mcp::merged(p_owner, permit_bin.as_deref(), kernel, granted.as_ref(), &pkg).map_err(|e| {
+    let merged = mcp::merged(
+        p_owner,
+        permit_bin.as_deref(),
+        kernel,
+        granted.as_ref(),
+        &pkg,
+    )
+    .map_err(|e| {
         say(&e);
         1
     })?;

@@ -287,15 +287,13 @@ pub fn print_mcp(a: &Args) -> Result<()> {
     } else {
         None
     };
-    let kith_bin = a
-        .kith_bin
-        .clone()
-        .or_else(|| kith_kernel::paths::process_env("KITH_BIN").filter(|b| !b.is_empty()));
+    let kith_bin = a.kith_bin.clone().or_else(|| kith_kernel::paths::process_env("KITH_BIN").filter(|b| !b.is_empty()));
     let process_env: kith_kernel::launch::assemble::Env = std::env::vars_os()
         .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
         .collect();
     let permit_bin = kith_kernel::launch::assemble::permit_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
-    let merged = mcp::merged(c.member.owner, permit_bin.as_deref(), &c.kernel, granted.as_ref(), &c.pkg).map_err(|e| anyhow!(e))?;
+    let merged = mcp::merged(c.member.owner, permit_bin.as_deref(), &c.kernel, granted.as_ref(), &c.pkg)
+        .map_err(|e| anyhow!(e))?;
     println!("{}", json!({ "mcp_servers": merged["mcpServers"] }));
     Ok(())
 }
