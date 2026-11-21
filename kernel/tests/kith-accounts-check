@@ -6,6 +6,9 @@
 #
 #   KITH_BIN=/path/to/kith kernel/tests/kith-accounts-check     needs the Rust program (every `kith account` verb is its); under a minute; prints each check, exits 1 when one fails
 set -uo pipefail
+# kernel/bin/kith-cost is a stub for the kith program, which writes the ledger rows below: this check needs one.
+BIN=${KITH_DIFFTEST_BIN:-}
+if [ -z "$BIN" ] || [ ! -x "$BIN" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN)"; exit 0; fi
 
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-accounts-check.XXXXXX")
@@ -342,7 +345,7 @@ OUT=$("$KITH" echo "hi" 2>"$T/err"); check "a plain run picked on a Codex accoun
 
 # resume: no start noted on an account the run doesn't use; a handed-on session stays on its account when it is ready
 "$KITH" account policy fill >/dev/null
-printf '{"session_id":"sess-b"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=b KITH_ACCOUNT_ID=claude:b KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
+printf '{"session_id":"sess-b"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=b KITH_ACCOUNT_ID=claude:b KITH_STATE=$M KITH_BIN=$BIN "$KERNEL/bin/kith-cost" tag
 mkdir -p "$HOME/.claude/projects/p" "$T/work"
 printf '{"type":"user","cwd":"%s","message":{"content":"hi"}}\n' "$T/work" > "$HOME/.claude/projects/p/sess-b.jsonl"
 mkdir -p "$M/accounts/claude/b/projects/p"; cp "$HOME/.claude/projects/p/sess-b.jsonl" "$M/accounts/claude/b/projects/p/"

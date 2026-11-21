@@ -213,7 +213,7 @@ pub fn print_settings(a: &Args) -> Result<()> {
         .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
         .collect();
     let ledger_bin = kith_kernel::launch::assemble::ledger_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
-    let cost_bin = kith_kernel::launch::assemble::cost_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
+    let cost_bin = kith_kernel::launch::assemble::cost_hook_bin(kith_bin.as_deref());
     let threads_bin = kith_kernel::launch::assemble::threads_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
     let input = settings::Input {
         agent: &a.agent,

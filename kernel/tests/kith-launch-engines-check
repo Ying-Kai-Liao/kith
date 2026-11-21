@@ -74,10 +74,10 @@ for n, (x, y) in enumerate(zip(a, b), 1):
         print("line %d differs at char %d" % (n, i)); print("  got:    " + x[max(0, i - 150):i + 250]); print("  golden: " + y[max(0, i - 150):i + 250])
 if len(a) != len(b): print("line counts differ: %d vs %d" % (len(a), len(b)))' "$out" "$FIX/launch-$2.json"
 done
-# The cost hook is the Rust `kith kernel cost tag` when `cost` is switched and the program has it (the golden above); KITH_CORE=python
-# is the rollback and writes the Python's.
+# The cost hook is the Rust `kith kernel cost tag` when the program has the module (the golden above); there is no Python cost to
+# go back to, so KITH_CORE=python writes the same hook.
 if [ -n "$BIN" ]; then
-  check "KITH_CORE=python keeps the Python cost hook" "KITH_CORE=python launch cl | grep -q 'bin/kith-cost.* tag'"
+  check "KITH_CORE=python writes the same cost hook" "[ \"\$(KITH_CORE=python launch cl | grep -o 'kernel cost --kernel [^\"]* tag' | head -1)\" = \"\$(launch cl | grep -o 'kernel cost --kernel [^\"]* tag' | head -1)\" ] && launch cl | grep -q 'kernel cost --kernel .* tag'"
   check "the default launch tags with the core's cost verb" "launch cl | grep -q 'kernel cost --kernel .* tag'"
 fi
 

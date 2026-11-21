@@ -146,19 +146,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -337,19 +337,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -528,19 +528,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -716,19 +716,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -907,19 +907,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -1098,19 +1098,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -1290,19 +1290,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -1485,19 +1485,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -1677,19 +1677,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -1869,19 +1869,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -2061,19 +2061,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -2253,19 +2253,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -2445,19 +2445,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -2637,19 +2637,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -2829,19 +2829,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -3021,19 +3021,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -3209,19 +3209,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -3397,19 +3397,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -3581,19 +3581,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -3769,19 +3769,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -3971,19 +3971,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -4173,19 +4173,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -4361,19 +4361,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -4549,19 +4549,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -4741,19 +4741,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -4930,19 +4930,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -5119,19 +5119,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -5308,19 +5308,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -5505,19 +5505,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -5702,19 +5702,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -5899,19 +5899,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -6096,19 +6096,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -6296,19 +6296,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -6493,19 +6493,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -6690,19 +6690,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -6887,19 +6887,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -7095,19 +7095,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -7296,19 +7296,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -7497,19 +7497,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -7695,19 +7695,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -7893,19 +7893,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -8090,19 +8090,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -8287,19 +8287,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -8484,19 +8484,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -8685,19 +8685,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -9006,19 +9006,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -9327,19 +9327,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -9527,19 +9527,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -9720,19 +9720,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -9920,19 +9920,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -10113,19 +10113,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -10313,19 +10313,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -10506,19 +10506,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -10703,19 +10703,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -10899,19 +10899,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -11087,19 +11087,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -11278,19 +11278,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -11470,19 +11470,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -11666,19 +11666,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -11862,19 +11862,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -12059,19 +12059,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -12252,19 +12252,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -12452,19 +12452,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -12656,19 +12656,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -12860,19 +12860,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -13060,19 +13060,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
@@ -13261,19 +13261,19 @@
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-STUB>\""
    ],
    [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
-    "\"command\": \"<COSTTAG>\""
+    "\"command\": \"<COSTTAG-RUST>\""
    ],
    [
     "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG>"
+    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
-    "<COSTTAG>"
+    "<COSTTAG-RUST>"
    ],
    [
     "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
