@@ -34,10 +34,13 @@ launchd credits file access to the program it starts. To let the host read folde
 volume (kith's agents), run it behind a launcher that has Full Disk Access: set `"launcher": [...]` in
 `config.json` or `KITH_SERVE_LAUNCHER='[...]'` when installing. By default the job runs the host
 directly. Set `launcher` if your agents live on an external volume, e.g.
-`["~/.kith/bin/kith-uv", "run", "--quiet", "--script", "<repo>/kernel/bin/kith-serve-launch"]` (full paths).
+`["~/.kith/bin/kith-uv", "run", "--quiet", "--no-project", "--"]` (full paths).
 
-With a launcher, `kernel/bin/kith-serve-launch` passes SIGTERM/SIGINT/SIGHUP to the host and SIGKILLs it if it
-hasn't exited 20 s later (`KITH_SERVE_KILL_GRACE_S`), so a hung host can't keep `host.lock` through a restart.
+With a launcher, the job runs `kith serve --port N --supervise` behind it: that process starts the host as its child
+(never an exec, which would lose the launcher's access), passes SIGTERM/SIGINT/SIGHUP to it and SIGKILLs it if it
+hasn't exited 20 s later (`KITH_SERVE_KILL_GRACE_S`), so a hung host can't keep `host.lock` through a restart. It holds
+no lock and starts exactly one host; restarting is launchd's KeepAlive. A launcher that still ends in
+`--script <path>/kith-serve-launch` is replaced by the form above when the job is installed.
 
 ## Watchdog
 
