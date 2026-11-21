@@ -46,9 +46,16 @@ public final class HostSharingService: SharingService {
             }
             guard let made = await store.createInvite(name: typed, personId: nil, agents: Dictionary(uniqueKeysWithValues: agents.map { ($0, level.role) })) else { return nil }
             links[made.inviteId] = made.link
-            // The invite carries agents only; rooms follow once the person exists.
-            if !rooms.isEmpty, let id = made.personId, let person = store.person(id) {
-                _ = await store.setAccess(id, agents: person.agents, projects: SharingMap.projectsAfterSharing(rooms, to: person))
+            // Rooms here are host projects (setAccess `projects`), not the group rooms createInvite(rooms:) takes, so they
+            // follow the invite. The invite stays (its link is good); a failure to add them is shown, never swallowed.
+            if !rooms.isEmpty {
+                if let id = made.personId, let person = store.person(id) {
+                    if await !store.setAccess(id, agents: person.agents, projects: SharingMap.projectsAfterSharing(rooms, to: person)) {
+                        store.error = "The invite is ready, but the rooms weren't added: \(store.error ?? "the computer refused")"
+                    }
+                } else {
+                    store.error = "The invite is ready, but the rooms can't be added until \(typed) joins."
+                }
             }
             return .invite(made)
         case .existing(let id):

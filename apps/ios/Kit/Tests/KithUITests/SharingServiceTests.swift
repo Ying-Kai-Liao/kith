@@ -107,6 +107,15 @@ private let sam = HostPerson(personId: "sam", name: "Sam", agents: ["ada": .gues
         #expect(s.link(for: "i1") == made.link)
     }
 
+    @Test func newPersonWithRoomsShowsWhyTheRoomsWaitInsteadOfSilentlyDroppingThem() async {
+        let (s, log) = await service([])
+        let outcome = await s.share([.agent("ada"), .room("Launch")], with: .new(name: "Mia"), level: .chat)
+        guard case .invite? = outcome else { Issue.record("expected an invite"); return }
+        #expect(await log.invites.count == 1)
+        #expect(await log.access.isEmpty)
+        #expect(s.error?.contains("rooms can't be added until Mia joins") == true)
+    }
+
     @Test func newPersonNeedsAnAgent() async {
         let (s, log) = await service([])
         #expect(await s.share([.room("Launch")], with: .new(name: "Mia"), level: .chat) == nil)
