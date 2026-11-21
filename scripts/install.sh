@@ -115,7 +115,7 @@ esac
 case $VERSION in *[!0-9A-Za-z.+-]*) die "odd version '$VERSION'" ;; esac
 
 # The cutover gate (retire-python): a release whose Python readers are gone lists the modules that must already be switched
-# to core.db on this Mac (share/kith/kernel/lib/requires-switched.txt). The NEW program is asked, not the installed one (an
+# to the new core on this Mac (share/kith/kernel/lib/requires-switched.txt). The NEW program is asked, not the installed one (an
 # older one answers --require with a usage error), and before anything is copied or cli/current moves, so a refusal leaves
 # the old version current and nothing new on disk. No list, an empty list, or no earlier install (nothing to strand) passes.
 REQ=$SRC/share/kith/kernel/lib/requires-switched.txt
