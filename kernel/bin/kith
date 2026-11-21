@@ -83,7 +83,7 @@
 #   kith acp <agent> [--keep team,…]                     the agent as an ACP agent, one session per chat (kith-acp)
 #   kith bug "<title>" [--details TEXT|-]|list|show ID|send ID|publish ID   report a bug: the owner's stays on this Mac with the transcript; anyone else's is a redacted GitHub issue after a yes (kith-bug)
 #   kith migrate run [--dry-run|--undo|--force]        move this Mac from ~/.hq and the dev.hq.* jobs to ~/.kith and dev.kith.*, reversibly (kith-migrate)
-#   kith paths [--json|--sh]                           where Kith's folders are (lib/kith_paths.py; the core's paths module when switched)
+#   kith paths [--json|--sh]                           where Kith's folders are (the kith program's paths module)
 #   kith engines [--json] | install ID | login ID       the coding engines: installed or not, and the command to install or sign in (the core's engines module)
 #   kith serve start|stop|restart|status|relay [URL]     Kith's host on this Mac (launchd dev.kith.serve, port 19224); `kith` is the same command (kith-serve)
 #
@@ -134,16 +134,28 @@ if [[ $1 == migrate ]]; then
 fi
 # Verbs the Rust core has taken over are listed in lib/core-switched.txt; kith_core_exec returns when this one isn't, or
 # the program is missing or older, and the Python below answers (docs/plans/core-design.md section 3).
-if [[ $1 == paths ]]; then . "$KITH/lib/kith-core.sh"; kith_core_exec paths --kernel "$KITH" "${@:2}" || true; exec python3 "$KITH/lib/kith_paths.py" "${@:2}"; fi
+. "$KITH/lib/kith-core.sh"
+kith_find_bin_set   # the program, looked up once: every call's folders come from it (`kith kernel paths`), and no program is one line and exit 1
+if [[ $1 == paths ]]; then kith_need_bin >/dev/null || exit 1; kbin=$(kith_paths_bin) || { echo "kith: the kith program at $(kith_find_bin) does not answer \`kernel paths\`; update it (kith update self, or scripts/install.sh; kith serve start in a checkout)" >&2; exit 1; }; KITH_BIN=$kbin exec "$kbin" kernel paths --kernel "$KITH" "${@:2}"; fi
 if [[ $1 == engines ]]; then . "$KITH/lib/kith-core.sh"; kith_core_exec engines "${@:2}" || true; echo "kith: \`kith engines\` needs the kith program (kith serve install); this one has no engines table" >&2; exit 1; fi
 . "$KITH/lib/kith-env.sh"   # KITH_X and the old HQ_X agree (role repos read HQ_X)
 export KITH_ROOT=$KITH
-# Where things are, from the one place that knows (lib/kith_paths.py): KITH_HOME (~/kith) holding kernel/ and agents/ (each
+# Where things are, from the one place that knows (`kith kernel paths`): KITH_HOME (~/kith) holding kernel/ and agents/ (each
 # agent: role/ its repo, memory/ data/ files/ its life), and ~/.kith (user.md, projects, this Mac's things). Exported
 # for agents' tools.
 # What the caller gave for the folders: the Rust launch starts from these, as this call did, not from the answer below.
 kith_in=(); for v in KITH_HOME KITH_STATE KITH_AGENTS HQ_HOME HQ_STATE HQ_AGENTS; do [[ -n ${!v+x} ]] && kith_in+=("$v=${!v}"); done
-eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
+# The verbs that install or diagnose the program run without one (they work out their own folders): `serve` builds it from a
+# checkout, `update self` / `update --dev` fetch it, `doctor` says it is missing, `rollback` goes back to Python's files.
+kith_offline_verb() { case ${1:-} in serve|doctor|rollback) return 0 ;; update) [[ ${2:-} == self || ${2:-} == --dev ]] ;; *) return 1 ;; esac; }
+if kith_offline_verb "$@" && ! kbin=$(kith_paths_bin); then
+  :   # no program that gives the folders: this verb goes on without them
+else
+  kith_need_bin >/dev/null || exit 1
+  kbin=$(kith_paths_bin) || { echo "kith: the kith program at $(kith_find_bin) does not answer \`kernel paths\`; update it (kith update self, or scripts/install.sh; kith serve start in a checkout)" >&2; exit 1; }
+  kith_paths_sh=$("$kbin" kernel paths --kernel "$KITH" --sh) && [[ -n $kith_paths_sh ]] || { echo "kith: the kith program at $kbin does not answer \`kernel paths\`; update it (kith update self, or scripts/install.sh; kith serve start in a checkout)" >&2; exit 1; }
+  eval "$kith_paths_sh"
+fi
 
 case $1 in
   attach)             . "$KITH/lib/kith-core.sh"; kith_held_attach_cmd "${@:2}"; exit $? ;;   # held terminals (kith AGENT --held)
@@ -352,7 +364,7 @@ if [[ $agent != prompt && $agent != settings && $agent != mcp ]]; then
     for kv in ${kith_in[@]+"${kith_in[@]}"}; do export "$kv"; done
     kith_core_exec launch "$agent" --kernel "$KITH" "$@" || true
     # Not switched, or no program: the script goes on with its own answer.
-    eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
+    eval "$kith_paths_sh"   # the folders again, from the answer above
     kith_env_sync
   fi
 fi
@@ -818,7 +830,7 @@ unset KITH_LAUNCH_SID_FILE
 # The engine table's row for $1 (an id or alias), from the Rust program's `kernel engines launch`; fails without one.
 engine_spec() {
   local bin
-  bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+  bin=$(kith_find_bin) && [[ -n $bin ]] || return 1
   "$bin" kernel version 2>/dev/null | grep -q '"engines"' || return 1
   "$bin" kernel engines launch "$1" --json 2>/dev/null
 }
@@ -921,7 +933,7 @@ if lbin=$(kith_core_bin room-ledger); then ledger_cmd=$(printf '%q kernel room-l
 ledger_pre=$(printf '%s pre --agent %q --home %q || true' "$ledger_cmd" "$agent" "$home")
 ledger_post=${ledger_pre/ pre --agent / post --agent }
 mem_pre="" mem_post=""
-if mbin=$(python3 "$KITH/lib/kith_paths.py" --bin) && [[ -n $mbin ]]; then
+if mbin=$(kith_find_bin) && [[ -n $mbin ]]; then
   mem_pre=$(printf '%q memory hook pre --agent %q --state %q --agents %q' "$mbin" "$agent" "$KITH_STATE" "$KITH_AGENTS")
   mem_post=${mem_pre/ hook pre / hook post }
   # Claude Code blocks a tool call on exit 2, which an older kith binary's usage error also exits with; the hook says
@@ -1395,7 +1407,7 @@ emit_launch() {
   # A guest's workspace (above): Claude Code reads its temp dir from the process environment, not the settings, so the host
   # has to start it with these.
   local work_env=""; [[ $p_owner == 1 ]] || work_env="CLAUDE_CODE_TMPDIR KITH_WORK CLAUDE_ENV_FILE${guest_kbin:+ KITH_BIN}"
-  ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_CORE_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_GEN KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
+  ENV_NAMES="$(printf '%s\n' "$kith_paths_sh" | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_CORE_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_GEN KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
     ADD_DIRS=$add_dirs ALLOWED=$allowed_tools SETTINGS=$settings MCP=$(merged_mcp) PROMPT=$prompt PERM_MODE=$perm_mode NO_SLASH=$no_slash CALL_MODEL=$call_model \
     BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib ENGINE_SPEC=$engine_spec \
     python3 -I -c '
@@ -1556,11 +1568,17 @@ stub=()
 if [[ -n $csid ]]; then
   stub_bin=${KITH_STUB_BIN:-}
   if [[ -z $stub_bin ]]; then
-    kbin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || kbin=""
+    kbin=$(kith_find_bin) || kbin=""
     # Beside the program where it really lives first: install.sh links only `kith` into ~/.local/bin, so the stub sits next to
     # the link's target (cli/<version>/bin); then beside the path as given.
     if [[ -n $kbin ]]; then
-      for d in "$(python3 -I -c 'import os, sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "$kbin" 2>/dev/null)" "$(dirname "$kbin")"; do
+      kf=$kbin; kn=0
+      while [[ -L $kf && $kn -lt 16 ]]; do   # follow the link by hand: the folder the program really lives in
+        kl=$(readlink "$kf") || break
+        case $kl in /*) kf=$kl ;; *) kf=$(dirname "$kf")/$kl ;; esac
+        kn=$((kn + 1))
+      done
+      for d in "$(cd "$(dirname "$kf")" 2>/dev/null && pwd -P)" "$(dirname "$kbin")"; do
         [[ -n $d && -x $d/kith-stub ]] && { stub_bin=$d/kith-stub; break; }
       done
     fi
