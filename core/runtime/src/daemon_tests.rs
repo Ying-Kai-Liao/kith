@@ -2944,6 +2944,7 @@ fn at_the_connection_limit_a_new_client_is_told_busy_not_no_daemon() {
 
 // --- the rows that name no agent: a sweep and a tick must not decide on a package fact the cache lacks ------------------
 
+#[cfg(unix)]
 const RENDER: &str = "render@03d245db65bb";
 
 /// `house_daemon` for a house that shares a door with `sam` through a job he ticked, and a refresher the test can block.
