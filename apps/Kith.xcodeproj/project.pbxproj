@@ -24,6 +24,7 @@
 		48DAAA1384E5B8D0BA27C895 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1E47C60032C326157E0386B8 /* SwiftUI.framework */; };
 		4DDC38E58D673047B332FDD5 /* AccessRequestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B97102DEC6029268332DF901 /* AccessRequestView.swift */; };
 		A11CE00000000000000000B2 /* InviteJoinView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE00000000000000000A2 /* InviteJoinView.swift */; };
+		A11CE00000000000000000C2 /* InvitePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE00000000000000000C1 /* InvitePreviewView.swift */; };
 		A11CE00000000000000000B1 /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE00000000000000000A1 /* PeopleView.swift */; };
 		A11CE0000000000000000F2 /* ShareAgentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000F1 /* ShareAgentSheet.swift */; };
 		A11CE0000000000000000F4 /* KeysView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000F3 /* KeysView.swift */; };
@@ -158,6 +159,7 @@
 		B6E13F8EA6C7B0DA4D899FEE /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		B97102DEC6029268332DF901 /* AccessRequestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessRequestView.swift; sourceTree = "<group>"; };
 		A11CE00000000000000000A2 /* InviteJoinView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteJoinView.swift; sourceTree = "<group>"; };
+		A11CE00000000000000000C1 /* InvitePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvitePreviewView.swift; sourceTree = "<group>"; };
 		A11CE00000000000000000A1 /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000F1 /* ShareAgentSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareAgentSheet.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000F3 /* KeysView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeysView.swift; sourceTree = "<group>"; };
@@ -298,6 +300,7 @@
 			children = (
 				B97102DEC6029268332DF901 /* AccessRequestView.swift */,
 				A11CE00000000000000000A2 /* InviteJoinView.swift */,
+				A11CE00000000000000000C1 /* InvitePreviewView.swift */,
 				A11CE00000000000000000A1 /* PeopleView.swift */,
 				A11CE0000000000000000F1 /* ShareAgentSheet.swift */,
 				A11CE0000000000000000F3 /* KeysView.swift */,
@@ -688,6 +691,7 @@
 			files = (
 				4DDC38E58D673047B332FDD5 /* AccessRequestView.swift in Sources */,
 				A11CE00000000000000000B2 /* InviteJoinView.swift in Sources */,
+				A11CE00000000000000000C2 /* InvitePreviewView.swift in Sources */,
 				A11CE00000000000000000B1 /* PeopleView.swift in Sources */,
 				A11CE0000000000000000F2 /* ShareAgentSheet.swift in Sources */,
 				A11CE0000000000000000F4 /* KeysView.swift in Sources */,
