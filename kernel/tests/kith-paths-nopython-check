@@ -77,6 +77,20 @@ check "no program: kith paths says so and exits 1" "[ $rc = 1 ] && printf '%s' \
 check "no program: no kith_paths.py" no_paths_py
 check "core-switched.txt has no paths line" "! grep -q '^paths	' '$KERNEL/lib/core-switched.txt'"
 
+# --- a KITH_BIN that is no usable program (/bin/true answers nothing, a plain file is not executable) with no other program:
+# one line, exit 1, and nothing written under HOME or the state folder; with a working program on PATH the bad KITH_BIN is
+# skipped and that one is used.
+: > "$T/not-executable"; chmod 644 "$T/not-executable"
+for bad in /bin/true "$T/not-executable"; do
+  before=$(find "$HOME" | sort | wc -l)
+  out=$(env PATH=$SAFE KITH_BIN="$bad" "$DEV/bin/kith" echo --launch-json 2>&1); rc=$?
+  after=$(find "$HOME" | sort | wc -l)
+  check "KITH_BIN=$bad and no other program: one line, exit 1, nothing written" "[ $rc = 1 ] && [ \"\$(printf '%s\n' \"\$out\" | wc -l | tr -d ' ')\" = 1 ] && printf '%s' \"\$out\" | grep -q 'needs the kith program' && [ \"$before\" = \"$after\" ]"
+  mkdir -p "$T/pathprog"; cp "$REAL" "$T/pathprog/kith"
+  got=$(env PATH="$T/pathprog:$SAFE" KITH_BIN="$bad" "$DEV/bin/kith" paths --json 2>/dev/null)
+  check "KITH_BIN=$bad with a working program on PATH: the bad one is skipped, PATH's is used" "[ \"\$got\" = \"\$WANT\" ]"
+done
+
 # --- a program that answers nothing for `kernel paths` (an old or fake one): one line and exit 1, not an unbound variable
 printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo phase\nexit 0\n' > "$T/fake-kith"; chmod +x "$T/fake-kith"
 out=$(env PATH=$SAFE KITH_BIN="$T/fake-kith" "$DEV/bin/kith" echo --launch-json 2>&1); rc=$?

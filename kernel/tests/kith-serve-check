@@ -176,24 +176,31 @@ check "relay creates the file and folder" "[ -f '$CFG' ]"
 check "relay with no argument shows it" "'$SERVE' relay | grep -q relay.example.workers.dev"
 
 # the real kith dispatches `serve` to kith-serve
-# bin/kith takes its folders from `kith kernel paths --sh`: a stub program that answers it with this check's throwaway folders
-# (never a real program: this check must not reach one).
-mkdir -p "$T/pathsprog"
-cat > "$T/pathsprog/kith" <<'EOS'
+# bin/kith takes its folders from `kith kernel paths --sh`: a stub program (not named kith, never a real program: this check
+# must not reach one) answers that and the hook probe with this check's throwaway folders, logs and fails on anything else.
+cat > "$T/stubs/kith-prog" <<'EOS'
 #!/bin/sh
-[ "$1 $2 $3" = "memory hook --help" ] && echo "<PHASE>"
+case "$1 $2 $3" in
+  "memory hook --help") echo "phase"; echo "$*" >> "$STUB_LOG.prog"; exit 0 ;;
+esac
 if [ "$1 $2" = "kernel paths" ]; then
-  echo "export KITH_HOME=$HOME/kith KITH_STATE=$HOME/.kith KITH_AGENTS=$HOME/kith/agents KITH_MACHINE=$HOME/.kith"
-  echo "export KITH_SECRETS=$HOME/.kith/secrets KITH_LOGS=$HOME/.kith/logs KITH_CACHE=$HOME/.kith/cache KITH_STORE=$HOME/.kith/store"
-  echo "export KITH_HOME_REAL=$HOME/kith KITH_STATE_REAL=$HOME/.kith KITH_AGENTS_REAL=$HOME/kith/agents"
+  echo "$1 $2" >> "$STUB_LOG.prog"
+  for v in KITH HQ; do
+    echo "export ${v}_HOME=$HOME/kith ${v}_STATE=$HOME/.kith ${v}_AGENTS=$HOME/kith/agents ${v}_MACHINE=$HOME/.kith"
+    echo "export ${v}_SECRETS=$HOME/.kith/secrets ${v}_LOGS=$HOME/.kith/logs ${v}_CACHE=$HOME/.kith/cache ${v}_STORE=$HOME/.kith/store"
+    echo "export ${v}_HOME_REAL=$HOME/kith ${v}_STATE_REAL=$HOME/.kith ${v}_AGENTS_REAL=$HOME/kith/agents"
+  done
+  exit 0
 fi
-exit 0
+echo "unexpected call: $*" >> "$STUB_LOG.prog"; exit 1
 EOS
-chmod +x "$T/pathsprog/kith"
-out=$(KITH_BIN=$T/pathsprog/kith "$KERNEL/bin/kith" serve help 2>&1)
+chmod +x "$T/stubs/kith-prog"
+: > "$STUB_LOG.prog"
+out=$(KITH_BIN=$T/stubs/kith-prog "$KERNEL/bin/kith" serve help 2>&1)
 check "kith serve help prints usage" "echo \"\$out\" | grep -q 'kith serve start'"
 ln -s "$KERNEL/bin/kith" "$T/stubs/kith"
-check "kith through a symlink dispatches serve too" "KITH_BIN=$T/pathsprog/kith kith serve help | grep -q 'kith serve start'"
+check "kith through a symlink dispatches serve too" "KITH_BIN=$T/stubs/kith-prog kith serve help | grep -q 'kith serve start'"
+check "the stub program was asked only for the hook probe and the folders" "! grep -q unexpected '$STUB_LOG.prog'"
 
 # a packaged install (no serve/ source): installs the kith binary beside share/ under the name kith-serve, no cargo
 P=$T/pkg; mkdir -p "$P/bin" "$P/share/kith/kernel/bin" "$HOME/.kith/serve"
