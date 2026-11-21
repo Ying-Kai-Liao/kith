@@ -101,8 +101,10 @@ pub(crate) struct Shared {
     /// The call that has the core lock now, for `Error::Busy` and the status: its own small lock, never the core's.
     lock_holder: Mutex<Option<Held>>,
     /// Package facts, filled by a thread of their own so that no call reads an agents folder under the core lock.
+    #[cfg_attr(not(unix), allow(dead_code))]
     packages: Arc<crate::packages::PackageCache>,
     /// The folders this daemon was opened with (the base of a caller's view of them).
+    #[cfg_attr(not(unix), allow(dead_code))]
     own: Paths,
     /// How long a call waits for the core lock: [`LOCK_WAIT`], shorter in tests.
     lock_wait: Duration,
@@ -314,6 +316,7 @@ impl Shared {
     }
 
     /// A call that reads package facts: see `packages::run_call`.
+    #[cfg(unix)]
     fn with_packages<R>(&self, params: &Value, pass: impl FnMut() -> Result<R>) -> Result<R> {
         crate::packages::run_call(&self.packages, &self.own, params, pass)
     }
@@ -872,7 +875,9 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         if shared.stopping() {
             return;
         }
-        *slot = Some(core.with_packages(shared.packages.clone()));
+        #[cfg(unix)]
+        let core = core.with_packages(shared.packages.clone());
+        *slot = Some(core);
     }
     shared.replay_open_removals();
     let for_calls = shared.clone();

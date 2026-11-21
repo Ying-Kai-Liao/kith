@@ -78,6 +78,11 @@ mod log;
 mod marker;
 mod migrations;
 mod owner;
+#[cfg(unix)]
+mod packages;
+// Windows has no `kith_kernel::secrets`, so no rule asks for package facts: the stub keeps the daemon's calls the same.
+#[cfg(not(unix))]
+#[path = "packages_stub.rs"]
 mod packages;
 mod perms;
 mod runs;

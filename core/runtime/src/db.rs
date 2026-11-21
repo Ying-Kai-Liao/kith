@@ -44,6 +44,7 @@ pub struct Core {
     /// The secrets envelope, made on the first `secrets.*` call (it asks the OS key store, which may refuse).
     pub(crate) secrets: std::sync::Mutex<Option<crate::secrets::Envelope>>,
     /// The daemon's package facts: the rules read these under the lock, never the agents' folders. None outside the daemon.
+    #[cfg(unix)]
     packages: Option<std::sync::Arc<dyn kith_kernel::secrets::PackageSource>>,
 }
 
@@ -168,6 +169,7 @@ pub(crate) fn open(layout: &Layout, migrations: &[Migration], mode: Mode) -> Res
         migrated_from,
         folders: None,
         secrets: std::sync::Mutex::new(None),
+        #[cfg(unix)]
         packages: None,
     })))
 }
@@ -211,6 +213,7 @@ impl Core {
         self
     }
 
+    #[cfg(unix)]
     pub(crate) fn with_packages(
         mut self,
         packages: std::sync::Arc<dyn kith_kernel::secrets::PackageSource>,
@@ -219,6 +222,7 @@ impl Core {
         self
     }
 
+    #[cfg(unix)]
     pub(crate) fn packages(
         &self,
     ) -> Option<&std::sync::Arc<dyn kith_kernel::secrets::PackageSource>> {
