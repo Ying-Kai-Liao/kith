@@ -143,3 +143,10 @@ core/runtime/src/wake/queue.rs
 .github/workflows/
 packaging/
 .github/kith-protected-paths
+core/api/src/table/runs.rs
+core/kernel/src/lifecycle/sweep.rs
+core/kernel/src/project/guest.rs
+core/kernel/src/threads/run.rs
+kernel/lib/kith_door_core.py
+kernel/tests/kith-door-core-check
+kernel/tests/kith-project-id-guest-check
