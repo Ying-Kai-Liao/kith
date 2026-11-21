@@ -123,6 +123,7 @@ case $VERSION in *[!0-9A-Za-z.+-]*) die "odd version '$VERSION'" ;; esac
 # because the program would need a "nothing to strand" answer it does not have). gate.sh runs here and again at the start
 # of swap.sh, under the auth.json lock, so a rollback that lands between the two cannot slip past.
 cat > "$WORK/gate.sh" <<'GATE'
+set -u   # an unset variable must refuse, never pass
 REQ=$SRC/share/kith/kernel/lib/requires-switched.txt
 [ -f "$REQ" ] && [ -n "$(sed 's/#.*//; s/[[:space:]]//g; /^$/d' "$REQ")" ] || exit 0
 earlier=
@@ -133,15 +134,15 @@ for f in "$PREFIX/cli/current" "$PREFIX/bin/kith" "$PREFIX/share/kith/kernel" \
 done
 [ -z "$earlier" ] && [ -d "$HOME/.hq" ] && [ ! -L "$HOME/.hq" ] && earlier=1
 [ -n "$earlier" ] || exit 0
-if ! "$SRC/bin/kith" kernel cutover status --require "$REQ" > "$WORK/gate.out" 2> "$WORK/gate.err"; then
+if ! KITH_GATE_PHASE=${KITH_GATE_PHASE:-} "$SRC/bin/kith" kernel cutover status --require "$REQ" > "$WORK/gate.out" 2> "$WORK/gate.err"; then
   cat "$WORK/gate.err" "$WORK/gate.out" >&2
   # The last line is the one the Mac app shows.
   printf '%s\n' "install: the new kith's cutover check said no, so nothing was changed and the old version stays current. If this Mac runs v0.1.3 or older (no 'kith migrate step'), first install the last release whose requires-switched.txt is empty (KITH_VERSION=<that release>, named in the comment of that file), switch each module named above, then run the installer again. Reopen the app afterwards" | tee "$WORK/gate.last" >&2
   exit 1
 fi
 GATE
-export WORK
-sh "$WORK/gate.sh" || exit 1
+export WORK SRC PREFIX
+KITH_GATE_PHASE=pre sh "$WORK/gate.sh" || exit 1
 
 # The install, run under the auth.json lock: the version folder is built beside the others as <version>.partial and
 # renamed into place (a half-copied folder is never <version>, and the next install removes it), then cli/current is
@@ -149,7 +150,7 @@ sh "$WORK/gate.sh" || exit 1
 # already there is kept as it is. Two installs at once wait for each other on the lock.
 cat > "$WORK/swap.sh" <<'SWAP'
 set -eu
-sh "$WORK/gate.sh"   # again, now that the lock is held
+KITH_GATE_PHASE=swap sh "$WORK/gate.sh"   # again, now that the lock is held
 CLI=$PREFIX/cli
 mkdir -p "$CLI"
 for p in "$CLI"/*.partial; do [ ! -e "$p" ] || rm -rf "$p"; done

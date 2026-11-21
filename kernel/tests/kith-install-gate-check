@@ -27,6 +27,7 @@ release() {
   cat > "$d/bin/kith" <<P
 #!/bin/sh
 if [ "\$1 \$2 \$3" = "kernel cutover status" ]; then
+  [ -z "\$GATE_LOG" ] || echo "\$KITH_GATE_PHASE" >> "\$GATE_LOG"
   [ "$3" = accept ] && { echo "all required modules switched"; exit 0; }
   echo "accounts: not switched; run: kith migrate step accounts" >&2; exit 1
 fi
@@ -91,6 +92,8 @@ for kind in dev hqonly coredb cutover cfgkith cfghq; do
   check "state only ($kind), no program, refusing program: refused" '[[ $rc != 0 && $out == *"accounts: not switched"* ]]'
   check "state only ($kind): no cli/ folder was made" '[ ! -e "$h/.kith/cli" ] && [ ! -e "$h/.hq/cli" ]'
   check "state only ($kind): the last line says the check said no and to reopen the app" '[[ $last == *"cutover check said no"* && $last == *"eopen the app"* ]]'
+  : > "$T/gate.log"; out3=$(HOME=$h GATE_LOG=$T/gate.log inst 0.5.0)
+  check "state only ($kind): the pre-check itself refused (the swap's re-check never ran)" '[[ $(cat "$T/gate.log") == pre ]]'
   out2=$(HOME=$h inst 0.5.0); rc=$?
   check "state only ($kind): running it again still refuses" '[[ $rc != 0 && ! -e "$h/.kith/cli" ]]'
 done
