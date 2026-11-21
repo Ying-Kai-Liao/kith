@@ -7,6 +7,7 @@
 # After you have read the changes, updated RevokeDoors.tla / base.consts if needed, and run.sh is as expected,
 # set SYNC below to the commit you checked (and in .claude/skills/revoke-access/SKILL.md).
 set -euo pipefail
+# ACCEPTANCE RUN C (reverted before merge): a drift.sh edit changes no key
 
 # The commit at which the model was confirmed to describe the files below (see the skill's "Sync commit").
 SYNC=f9b5e509f476bb88f6203a125ae863369ba03aa9
