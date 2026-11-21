@@ -142,24 +142,40 @@ fn systemd_quote(s: &str, exec: bool) -> String {
 
 /// The words to run the host behind, from `KITH_SERVE_LAUNCHER` or `launcher` in `<data dir>/config.json`
 /// (a JSON array of strings). launchd credits file access to the first program it starts, so a launcher
-/// that has it (hq's `hq-uv`) lets the host read folders on an external volume.
-fn launcher() -> Vec<String> {
+/// that has it (hq's `hq-uv`) lets the host read folders on an external volume. The flag says the words were the
+/// old `kith-serve-launch` form and were replaced (see `legacy_launcher`).
+fn launcher() -> (Vec<String>, bool) {
     let parse = |text: &str| serde_json::from_str::<Vec<String>>(text).ok().filter(|w| !w.is_empty());
-    if let Some(words) = std::env::var("KITH_SERVE_LAUNCHER").ok().and_then(|t| parse(&t)) {
-        return words;
+    let words = std::env::var("KITH_SERVE_LAUNCHER").ok().and_then(|t| parse(&t)).or_else(|| {
+        let config = std::fs::read_to_string(data_dir().join("config.json")).ok()?;
+        parse(&serde_json::from_str::<serde_json::Value>(&config).ok()?.get("launcher")?.to_string())
+    });
+    match words {
+        Some(words) => match legacy_launcher(&words) {
+            Some(mapped) => (mapped, true),
+            None => (words, false),
+        },
+        None => (Vec::new(), false),
     }
-    let config = std::fs::read_to_string(data_dir().join("config.json")).ok();
-    config
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|v| parse(&v.get("launcher")?.to_string()))
-        .unwrap_or_default()
+}
+
+/// The old launcher, `[<uv>, .., --script, <path>/kith-serve-launch]`, as the supervisor's: `[<uv>, run, --quiet,
+/// --no-project, --]`. Matched by the script's name, not by the file being there, so it keeps working once the
+/// script is deleted; a reinstall writes the new job even if nobody edits `config.json`.
+fn legacy_launcher(words: &[String]) -> Option<Vec<String>> {
+    let [first, .., flag, script] = words else { return None };
+    let named = script == "kith-serve-launch" || script.ends_with("/kith-serve-launch");
+    (flag == "--script" && named)
+        .then(|| [first.as_str(), "run", "--quiet", "--no-project", "--"].map(str::to_owned).to_vec())
 }
 
 /// The `ProgramArguments` entries of the launchd job: the launcher's words, then the host and its arguments.
-fn program_arguments(launcher: &[String], exe: &str, port: u16) -> String {
+/// `--supervise` goes after `--port N`: the schedules cutover gate finds the host as the word before the last
+/// `serve` that is followed by `--port` (`schedules_gate::program_of`).
+fn program_arguments(launcher: &[String], supervise: bool, exe: &str, port: u16) -> String {
     let words = launcher.iter().map(String::as_str).chain([exe, "serve", "--port"]).map(str::to_owned);
     let mut out = String::new();
-    for word in words.chain([port.to_string()]) {
+    for word in words.chain([port.to_string()]).chain(supervise.then(|| "--supervise".to_owned())) {
         out.push_str("<string>");
         out.push_str(&xml_escape(&word));
         out.push_str("</string>");
@@ -173,6 +189,7 @@ fn program_arguments(launcher: &[String], exe: &str, port: u16) -> String {
 fn plist_text(
     label: &str,
     launcher: &[String],
+    supervise: bool,
     exe: &str,
     port: u16,
     path: &str,
@@ -191,7 +208,7 @@ fn plist_text(
   <key>ProgramArguments</key><array>{args}</array>
   <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string><key>KITH_SERVE_HOME</key><string>{data}</string><key>HOME</key><string>{home}</string>{hq}</dict>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key><true/>{exit_timeout}
   <key>ProcessType</key><string>Interactive</string>
   <key>StandardOutPath</key><string>{log}</string>
   <key>StandardErrorPath</key><string>{log}</string>
@@ -199,7 +216,10 @@ fn plist_text(
 </plist>
 "#,
         label = xml_escape(label),
-        args = program_arguments(launcher, exe, port),
+        args = program_arguments(launcher, supervise, exe, port),
+        // The supervisor's kill (20 s after a signal) must come before launchd's own SIGKILL of the launcher (its
+        // default is 20 s too), so the job ends with the host's exit status and not a group sweep.
+        exit_timeout = if supervise { "\n  <key>ExitTimeOut</key><integer>30</integer>" } else { "" },
         path = xml_escape(path),
         data = xml_escape(data),
         home = xml_escape(home),
@@ -266,10 +286,17 @@ pub fn install(port: u16) -> Result<()> {
     std::fs::create_dir_all(data_dir()).context("creating the data directory")?;
     // Opt-in: the holder is the supervised program and starts the host (see `holder_wanted`).
     let holder = holder_words()?.unwrap_or_default();
+    let (launcher, legacy) = launcher();
+    // The holder has its own supervisor; with no launcher the job starts the host itself and launchd's signals reach it.
+    let supervise = supervises(&launcher, &holder);
     if cfg!(target_os = "macos") {
+        if legacy {
+            note_legacy_launcher(&log);
+        }
         let plist = plist_text(
             &job.label,
-            &[launcher(), holder.clone()].concat(),
+            &[launcher, holder.clone()].concat(),
+            supervise,
             &exe,
             port,
             &path,
@@ -307,6 +334,20 @@ pub fn install(port: u16) -> Result<()> {
         println!("Tip: `loginctl enable-linger $USER` keeps the host running while you're logged out.");
     }
     Ok(())
+}
+
+/// Whether the job starts the host through `--supervise`: behind a launcher, and not under the holder's supervisor.
+fn supervises(launcher: &[String], holder: &[String]) -> bool {
+    !launcher.is_empty() && holder.is_empty()
+}
+
+/// One line in `host.log`: `config.json` still names the launcher script this install replaced.
+fn note_legacy_launcher(log: &Path) {
+    use std::io::Write as _;
+    let line = "install: the launcher still names kith-serve-launch (config.json or KITH_SERVE_LAUNCHER); the job runs `kith serve --supervise` behind its first word instead. Set launcher to [<kith-uv>, run, --quiet, --no-project, --] to drop this note.\n";
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log) {
+        let _ = f.write_all(line.as_bytes());
+    }
 }
 
 /// Refuses (an error) from a HOME that is not this account's own; see `job`. Callers that edit other state first
@@ -527,18 +568,115 @@ fn current_uid() -> String {
 #[cfg(test)]
 mod tests {
     use super::{LABEL, choose_job};
-    use super::{plist_text, program_arguments, systemd_quote, unit_text};
+    use super::{legacy_launcher, plist_text, program_arguments, systemd_quote, unit_text};
     use std::path::Path;
+
+    fn words(w: &[&str]) -> Vec<String> {
+        w.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    const UV: [&str; 5] = ["/k/bin/kith-uv", "run", "--quiet", "--no-project", "--"];
+
+    fn plist(launcher: &[String], supervise: bool) -> String {
+        plist_text(
+            "dev.kith.serve.test-x1",
+            launcher,
+            supervise,
+            "/h/kith",
+            19224,
+            "/usr/bin",
+            "/d",
+            "/h",
+            None,
+            None,
+            "/d/host.log",
+        )
+    }
+
+    #[test]
+    fn a_job_behind_a_launcher_runs_the_supervisor_after_the_port() {
+        let args = program_arguments(&words(&UV), true, "/h/kith", 19224);
+        let strings: Vec<&str> = args.split("<string>").skip(1).map(|s| s.trim_end_matches("</string>")).collect();
+        assert_eq!(
+            strings,
+            [
+                "/k/bin/kith-uv",
+                "run",
+                "--quiet",
+                "--no-project",
+                "--",
+                "/h/kith",
+                "serve",
+                "--port",
+                "19224",
+                "--supervise"
+            ]
+        );
+        // The flag is last: the cutover gate looks for `serve --port`, and `require_executable` for the word after `--`.
+        let plain = program_arguments(&words(&UV), false, "/h/kith", 19224);
+        assert!(!plain.contains("--supervise"));
+    }
+
+    #[test]
+    fn the_host_program_is_found_in_the_supervised_job() {
+        let args = program_arguments(&words(&UV), true, "/h/kith", 19224);
+        let all: Vec<String> =
+            args.split("<string>").skip(1).map(|s| s.trim_end_matches("</string>").to_owned()).collect();
+        assert_eq!(super::super::host_program(&all).unwrap(), "/h/kith");
+    }
+
+    #[test]
+    fn only_a_launcher_without_the_holder_supervises() {
+        let (uv, holder) = (words(&UV), words(&["/h/kith-holder", "supervise", "--"]));
+        assert!(super::supervises(&uv, &[]));
+        assert!(!super::supervises(&[], &[]), "no launcher: launchd starts the host itself");
+        assert!(!super::supervises(&uv, &holder), "the holder has its own supervisor");
+        assert!(!super::supervises(&[], &holder));
+    }
+
+    #[test]
+    fn exit_timeout_is_only_in_a_supervised_job() {
+        let supervised = plist(&words(&UV), true);
+        assert!(supervised.contains("<key>ExitTimeOut</key><integer>30</integer>"), "{supervised}");
+        assert!(supervised.contains("<string>--supervise</string></array>"), "{supervised}");
+        for plain in [plist(&[], false), plist(&words(&UV), false)] {
+            assert!(!plain.contains("ExitTimeOut") && !plain.contains("--supervise"), "{plain}");
+        }
+    }
+
+    #[test]
+    fn the_old_launcher_maps_to_the_supervisors_by_name() {
+        let want = words(&["/k/bin/kith-uv", "run", "--quiet", "--no-project", "--"]);
+        let old = words(&[
+            "/k/bin/kith-uv",
+            "run",
+            "--quiet",
+            "--script",
+            "/k/cli/current/share/kith/kernel/bin/kith-serve-launch",
+        ]);
+        assert_eq!(legacy_launcher(&old), Some(want.clone()));
+        // The script need not exist, and a bare name counts.
+        assert_eq!(
+            legacy_launcher(&words(&["uv", "--script", "kith-serve-launch"])),
+            Some(words(&["uv", "run", "--quiet", "--no-project", "--"]))
+        );
+        // Anything else is left as the owner wrote it.
+        assert_eq!(legacy_launcher(&words(&UV)), None);
+        assert_eq!(legacy_launcher(&words(&["/k/bin/kith-uv", "run", "--script", "/x/other-launch"])), None);
+        assert_eq!(legacy_launcher(&words(&["kith-serve-launch"])), None);
+        assert_eq!(legacy_launcher(&words(&["--script", "/x/kith-serve-launch"])), None);
+        assert_eq!(legacy_launcher(&[]), None);
+    }
 
     #[test]
     fn the_job_runs_behind_a_launcher_when_one_is_set() {
         assert_eq!(
-            program_arguments(&[], "/h/kith-serve", 19224),
+            program_arguments(&[], false, "/h/kith-serve", 19224),
             "<string>/h/kith-serve</string><string>serve</string><string>--port</string><string>19224</string>"
         );
         let launcher = ["/hq/hq-uv".to_owned(), "run".to_owned(), "a&b".to_owned()];
         assert_eq!(
-            program_arguments(&launcher, "/h/kith-serve", 19224),
+            program_arguments(&launcher, false, "/h/kith-serve", 19224),
             "<string>/hq/hq-uv</string><string>run</string><string>a&amp;b</string><string>/h/kith-serve</string><string>serve</string><string>--port</string><string>19224</string>"
         );
     }
@@ -549,7 +687,7 @@ mod tests {
             ["/h/kith-holder", "supervise", "--dir", "/d/my core/holder", "--secret-file", "/d/s", "--"]
                 .map(str::to_owned)
                 .to_vec();
-        let args = program_arguments(&holder, "/h/kith-serve", 19224);
+        let args = program_arguments(&holder, false, "/h/kith-serve", 19224);
         assert!(args.starts_with("<string>/h/kith-holder</string><string>supervise</string>"), "{args}");
         assert!(args.ends_with("<string>--</string><string>/h/kith-serve</string><string>serve</string><string>--port</string><string>19224</string>"), "{args}");
         let unit = unit_text(&holder, "/h/kith-serve", 19224, "/usr/bin", "/d", "/h", None, None);
@@ -578,6 +716,7 @@ mod tests {
         let plist = plist_text(
             LABEL,
             &[],
+            false,
             "/h/kith-serve",
             19224,
             "/usr/bin",
@@ -613,7 +752,7 @@ mod tests {
     #[test]
     fn the_job_files_have_no_hq_bin_when_it_is_not_set() {
         assert!(
-            !plist_text(LABEL, &[], "/h/kith-serve", 19224, "/usr/bin", "/d", "/h", None, None, "/d/host.log")
+            !plist_text(LABEL, &[], false, "/h/kith-serve", 19224, "/usr/bin", "/d", "/h", None, None, "/d/host.log")
                 .contains("HQ_BIN")
         );
         assert!(!unit_text(&[], "/h/kith-serve", 19224, "/usr/bin", "/d", "/h", None, None).contains("HQ_BIN"));

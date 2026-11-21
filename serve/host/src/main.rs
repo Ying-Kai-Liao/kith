@@ -35,6 +35,7 @@ mod screen;
 mod service;
 mod shell;
 mod store;
+mod supervise;
 mod terminal;
 mod threads_cmd;
 mod tui;
@@ -96,6 +97,9 @@ enum Sub {
         /// Address to bind. Defaults to all interfaces so the phone can reach it over Tailscale/LAN.
         #[arg(long, default_value = "0.0.0.0")]
         bind: String,
+        /// Run the host as a child and pass signals on (what a launchd job behind a launcher runs); see `supervise.rs`.
+        #[arg(long)]
+        supervise: bool,
     },
     /// Show a one-time pairing QR code for the Kith iOS app (the host must be running).
     Pair {
@@ -1332,6 +1336,10 @@ async fn main() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
     let cli = match kernel::route(&args) {
         kernel::Route::Host(a) => {
+            // Decided before anything else: the supervisor takes no lock and opens nothing, it only runs the host.
+            if supervise::wanted(&args) {
+                std::process::exit(supervise::run(&args).await);
+            }
             // The daemon answers first when one runs and the table says the core serves the verb; otherwise clap and the
             // embedded verbs below do exactly what they did before.
             if let Some(code) = core_front::try_cli(&a) {
@@ -1345,8 +1353,8 @@ async fn main() -> Result<()> {
             return Ok(());
         }
     };
-    match cli.cmd.unwrap_or(Sub::Serve { port: service::DEFAULT_PORT, bind: "0.0.0.0".into() }) {
-        Sub::Serve { port, bind } => serve(&bind, port).await,
+    match cli.cmd.unwrap_or(Sub::Serve { port: service::DEFAULT_PORT, bind: "0.0.0.0".into(), supervise: false }) {
+        Sub::Serve { port, bind, supervise: _ } => serve(&bind, port).await,
         Sub::Pair { port, json } => pair(port, json).await,
         Sub::Info { port, json } => info(port, json).await,
         Sub::Devices { port, action } => match action.unwrap_or(DevicesAction::List) {

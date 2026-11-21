@@ -100,8 +100,8 @@ fn write_plist(home: &Path, words: &[&str]) {
     .unwrap();
 }
 
-/// The three shapes the installer writes around `<kith> serve --port N`: launcher first, holder first (ending in `--`),
-/// and both together.
+/// The shapes the installer writes around `<kith> serve --port N`: launcher first, holder first (ending in `--`),
+/// both together, and the supervised launcher (`--supervise` after the port).
 fn shapes(program: &str) -> Vec<Vec<String>> {
     let tail = [program, "serve", "--port", "7001"].map(str::to_owned);
     let launcher =
@@ -114,10 +114,18 @@ fn shapes(program: &str) -> Vec<Vec<String>> {
             .chain(tail.clone())
             .collect()
     };
+    // `kith serve --port N --supervise` behind the new launcher (`--supervise` after the port, or the gate finds no program).
+    let supervised = ["kith-uv", "run", "--quiet", "--no-project", "--"]
+        .map(str::to_owned)
+        .into_iter()
+        .chain(tail.clone())
+        .chain(["--supervise".to_owned()])
+        .collect();
     vec![
         with(&[&launcher]),
         with(&[&holder]),
         with(&[&launcher, &holder]),
+        supervised,
     ]
 }
 
@@ -129,7 +137,7 @@ fn plist_shape(home: &Path, program: &str, shape: usize) {
 
 #[test]
 fn launchd_must_start_this_binary_or_one_with_its_build_id_in_every_installer_shape() {
-    for shape in 0..3 {
+    for shape in 0..shapes("p").len() {
         let t = tempfile::tempdir().unwrap();
         let mine = t.path().join("kith-a");
         std::fs::write(&mine, b"build one").unwrap();
