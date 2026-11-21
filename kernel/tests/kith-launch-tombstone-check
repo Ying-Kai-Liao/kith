@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# kith-launch-tombstone-check — retire-python P1-15 M0 (design 2026-11-21-mcp-exec §0.1): a guest's and a room person's
+# `kith AGENT --launch-json` once auth.json is the authority tombstone and the core answers.
+#
+# The suspicion: the Rust launch decides who a guest run is for with the in-process `secrets::run(.., "resolve", ..)`
+# (core/kernel/src/launch/assemble.rs), which reads auth.json itself and exits 3 on a tombstone, so every guest and room-person
+# launch would be refused on a switched Mac, while the bash launch (which asks kith-auth, which routes to the core) works.
+#
+# A scratch home is stepped for real (`kith migrate step authority`: import, marker, tombstone) and the same launches run
+# on it, plus the same launches before the step as a control (the fixture is a valid launch):
+#   file       guest (Rust, Python) and room person (Rust) launch.                      Must pass: the fixture's proof.
+#   tombstone  guest (Python): launches.       Room person (Python): no such path, the script refuses room persons (exit 3).
+#              guest (Rust), room person (Rust): EXPECTED FAILURE today (P1-15 M1 flips both rows to passes).
+#   core down  the core folder gone behind the tombstone: nothing launches, on either side (fails closed).
+# The expected-failure rows pass while the launch exits non-zero; when it starts to launch, the row FAILS with the text
+# "XPASS": P1-15 M1 has fixed it, turn the row into a plain launch row.
+#
+#   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-launch-tombstone-check     skips without a built kith (or KITH_BIN)
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+BIN=${KITH_DIFFTEST_BIN:-${KITH_BIN:-}}
+[[ -n $BIN && -x $BIN ]] || { echo "skip: needs the kith program (KITH_DIFFTEST_BIN)"; exit 0; }
+command -v sqlite3 >/dev/null || { echo "skip: needs sqlite3"; exit 0; }
+[[ $(uname) == Darwin || $(uname) == Linux ]] || { echo "skip: Unix only"; exit 0; }
+
+# A short path: the core's sockets live under it.
+T=$(mktemp -d /tmp/klt.XXXXXX)
+T=$(cd "$T" && pwd -P)
+cleanup() { [[ -n ${LT_KEEP:-} ]] && echo "kept: $T" || rm -rf "$T"; }
+trap cleanup EXIT
+export TZ=UTC PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1
+unset KITH_PERSON KITH_AGENT KITH_AUTH HQ_HOME HQ_STATE KITH_CORE KITH_DEV_BIN CARGO_TARGET_DIR KITH_PROJECT KITH_VIA \
+  KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_AUTHOR KITH_CLAUDE_ARGS KITH_HARNESS KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR \
+  KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_CORE_AUTHORITY
+
+mkdir -p "$T/home/.kith" "$T/serve" "$T/bin"
+export HOME=$T/home KITH_HOME=$T/home/.kith KITH_BIN=$BIN
+export KITH_STATE=$KITH_HOME KITH_MACHINE=$KITH_HOME KITH_AGENTS=$KITH_HOME/agents KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1 KITH_WAKE_NO_KICK=1
+AUTHJ=$KITH_HOME/secrets/auth.json
+mkdir -p "$KITH_HOME/agents/echo/role" "$KITH_HOME/projects" "$KITH_HOME/logs"
+printf -- '---\nname: echo\ndescription: test\n---\nYou echo.\n' > "$KITH_HOME/agents/echo/role/agent.md"
+cat > "$T/bin/claude" <<'SH'
+#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)"
+[ "$1 $2" = "plugin list" ] && echo "[]"
+exit 0
+SH
+chmod +x "$T/bin/claude"
+export PATH=$T/bin:$PATH
+
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
+A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
+A person kai owner name=Kai >/dev/null
+A person sam name=Sam >/dev/null
+A member echo sam preset=member >/dev/null
+[[ -f $AUTHJ ]] || { bad "setup: no auth.json"; exit 1; }
+
+# launch KIND [py]: one --launch-json as KIND (guest | room); `py` runs the bash launch. Prints the exit code; stdout in $T/out,
+# stderr in $T/err.
+launch() {
+  local kind=$1 py=${2:-} env=()
+  [[ $kind == guest ]] && env=(KITH_PERSON=sam KITH_VIA=serve)
+  [[ $kind == room ]] && env=(KITH_PERSON=room-g1 KITH_ROOM=g1 KITH_ROOM_MEMBERS=sam KITH_ROOM_AUTHOR=sam KITH_VIA=serve)
+  [[ -n $py ]] && env+=(KITH_CORE=python)
+  (cd "$KITH_HOME/agents/echo" && env "${env[@]}" "$KERNEL/bin/kith" echo --launch-json >"$T/out" 2>"$T/err" </dev/null)
+  echo $?
+}
+launched() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d, dict) and d' "$T/out" 2>/dev/null; }
+# row NAME RC WANT: WANT is launch (rc 0 and a JSON answer) or refuse (rc non-zero)
+row() {
+  local name=$1 rc=$2 want=$3
+  if [[ $want == launch ]]; then
+    [[ $rc == 0 ]] && launched && ok "$name: launches" || bad "$name: should launch" "rc=$rc $(head -c 300 "$T/err")"
+  else
+    [[ $rc != 0 ]] && ok "$name: refused (exit $rc: $(head -c 160 "$T/err" | tr '\n' ' '))" || bad "$name: launched, expected a refusal" "rc=$rc"
+  fi
+}
+# xfail NAME RC: the known bug (P1-15 M1): passes while the launch fails; fails the day it launches.
+xfail() {
+  local name=$1 rc=$2
+  if [[ $rc != 0 ]]; then ok "$name: EXPECTED FAILURE, P1-15 M1 fixes it (exit $rc: $(head -c 160 "$T/err" | tr '\n' ' '))"
+  else bad "$name: XPASS, the Rust launch now works on a tombstone (design §0.1 fixed or wrong): make this a plain launch row"; fi
+}
+
+# 0. the control: authority still a file
+row "file, guest, Rust" "$(launch guest)" launch
+row "file, room person, Rust" "$(launch room)" launch
+row "file, guest, Python" "$(launch guest py)" launch
+
+# step the authority for real
+mig=$(KITH_KERNEL="$KERNEL" "$BIN" migrate step authority 2>&1) || { bad "setup: migrate step authority" "$mig"; exit 1; }
+grep -q '"kith_tombstone"' "$AUTHJ" && ok "setup: auth.json is the tombstone, the core answers" || { bad "setup: not a tombstone" "$mig"; exit 1; }
+
+# 1. a tombstone and a core that answers (embedded: no daemon)
+row "tombstone, guest, Python" "$(launch guest py)" launch
+row "tombstone, room person, Python (no such path: the script refuses a room person)" "$(launch room py)" refuse
+xfail "tombstone, guest, Rust" "$(launch guest)"
+xfail "tombstone, room person, Rust" "$(launch room)"
+
+# 2. the core gone behind the tombstone: fails closed on both sides
+mv "$KITH_HOME/core" "$KITH_HOME/core.away" 2>/dev/null || bad "setup: no core folder to move"
+row "core down, guest, Python" "$(launch guest py)" refuse
+row "core down, guest, Rust" "$(launch guest)" refuse
+row "core down, room person, Rust" "$(launch room)" refuse
+mv "$KITH_HOME/core.away" "$KITH_HOME/core" 2>/dev/null
+
+exit $fail
