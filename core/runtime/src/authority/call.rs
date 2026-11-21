@@ -136,6 +136,9 @@ pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
     let mut ctx = ctx_from(&folders, kernel);
     ctx.serve = ServeDir::Fixed(serve_dir_of(params, &home));
     ctx.person = person_of(params);
+    if let Some(source) = core.packages() {
+        ctx.packages = secrets::Packages::Source(source.clone());
+    }
     Ok(ctx)
 }
 
@@ -161,6 +164,7 @@ pub(crate) fn ctx_from(folders: &kith_kernel::paths::Paths, kernel: PathBuf) -> 
         now_ms: secrets::now_ms(),
         sandbox: Sandbox::Fixed(false),
         serve: ServeDir::Fixed(folders.machine.join("serve")),
+        packages: secrets::Packages::Disk,
     }
 }
 

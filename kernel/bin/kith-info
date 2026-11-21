@@ -197,7 +197,7 @@ def projects(home):
 
 # Words that only launch the real program in a LaunchAgent's ProgramArguments (and their flags). Only the leading run of
 # them is dropped, so the program's own arguments (`run --quiet`) survive.
-LAUNCHERS = {'hq-uv', 'kith-uv', 'uv', 'run', '--quiet', '--script', 'python', 'python3', 'bash', 'sh', 'zsh', 'env'}
+LAUNCHERS = {'hq-uv', 'kith-uv', 'uv', 'run', '--quiet', '--no-project', '--', '--script', 'python', 'python3', 'bash', 'sh', 'zsh', 'env'}
 
 
 def plist_cron(p):

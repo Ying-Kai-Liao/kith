@@ -194,6 +194,12 @@ def base_env(side, side_dir, case):
     # package snapshot is the program's, and only the verbs the router sends to the Python are still Python's under KITH_CORE=python.
     if RUST_BIN and (side == 'new' or case.get('bin_both') or case.get('command') in LAUNCH_COMMANDS):
         env['KITH_BIN'] = RUST_BIN   # where the router finds the Rust program (kernel/lib/kith-core.sh)
+    elif not RUST_BIN:
+        # A run without --rust (the self-test, the Python golden replay): bin/kith still takes its folders from the program
+        # (`kith kernel paths`), so both sides get the caller's, the same one, and KITH_CORE keeps the verbs on Python.
+        prog = os.environ.get('KITH_BIN') or shutil.which('kith')
+        if prog:
+            env['KITH_BIN'] = prog
     for k, v in case.get('env', {}).items():
         if v is None:   # null: this variable is not set at all (e.g. no KITH_HOME, to test the folder rules)
             env.pop(k, None)

@@ -120,6 +120,7 @@ jobs:
               - 'core/api/**'
               - '**/Cargo.toml'
               - 'scripts/ci/**'
+              - 'scripts/install.sh'
               - '.github/workflows/ci.yml'
             # The kernel files the host's own unit tests run for real (the list: scripts/ci/host-kernel-tests.txt). A
             # change here runs only those tests (host-kernel), not the whole host suite.
@@ -145,7 +146,6 @@ jobs:
               - 'verification/threads/**'
               - '.claude/skills/thread-writers/**'
               - 'kernel/bin/kith-sessions'
-              - 'kernel/bin/kith-lifecycle'
               - 'kernel/bin/kith-wake'
               - 'kernel/bin/kith'
               - 'core/kernel/src/lifecycle/**'
@@ -199,7 +199,6 @@ jobs:
               - 'kernel/lib/kith-core.sh'
               - 'serve/host/src/routines/core_runs.rs'
               - 'kernel/bin/kith-sessions'
-              - 'kernel/bin/kith-lifecycle'
               - 'kernel/bin/kith-wake'
               - 'kernel/bin/kith'
               - 'serve/host/src/terminal/**'
@@ -345,7 +344,7 @@ jobs:
             host_core:
               # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
               # memory and summary), and the libs those programs load on every call.
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/bin/kith-account,kernel/bin/kith-lifecycle,kernel/lib/kith_lifecycle.py,kernel/tests/kith-lifecycle-check,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-cost-bots-check,kernel/tests/kith-limit-check,kernel/tests/kith-scratch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check,kernel/tests/kith-agent-set-check,kernel/lib/kith_facets.py,kernel/bin/kith-room-ledger,kernel/tests/kith-load-check,kernel/tests/kith-summary-check,kernel/tests/kith-json-misc-check}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/lib/kith_lifecycle.py,kernel/tests/kith-lifecycle-check,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-cost-bots-check,kernel/tests/kith-limit-check,kernel/tests/kith-scratch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check,kernel/tests/kith-agent-set-check,kernel/lib/kith_facets.py,kernel/bin/kith-room-ledger,kernel/tests/kith-load-check,kernel/tests/kith-summary-check,kernel/tests/kith-json-misc-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -381,7 +380,7 @@ jobs:
   # runs exactly once; a shard runs all its checks even after one fails, then fails naming each failed check.
   kernel:
     name: kernel (${{ matrix.shard }}/3)
-    needs: changes
+    needs: [changes, kernel-program]
     if: needs.changes.outputs.kernel == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -407,6 +406,7 @@ jobs:
               CI names check (every kernel/tests/kith-*-check is run here or exempt with a reason)|kernel/tests/kith-ci-names-check
               CI names self-test (a check dropped from ci.yml fails it)|kernel/tests/kith-ci-names-check --selftest
               Install drain check|kernel/tests/kith-install-drain-check
+              Install gate check (install.sh asks the new release for cutover status --require before cli/current moves)|kernel/tests/kith-install-gate-check
               Agent dirs check|kernel/tests/kith-agent-dirs-check
               Market check|kernel/tests/kith-market-check
               Cutover check|kernel/tests/kith-cutover-check
@@ -423,7 +423,6 @@ jobs:
               Call check|kernel/tests/kith-call-check
               Chain check|kernel/tests/kith-chain-check
               People check (kith people, kith invite, kith bot ls/invite/revoke/decide/auto-allow --json, against a stub host)|kernel/tests/kith-people-check
-              Account stub check (bin/kith-account hands the line to the kith program; with none, one line and exit 1)|kernel/tests/kith-account-stub-check
               Accounts tombstone check (a tombstoned state.json refuses the Python readers)|kernel/tests/kith-accounts-tombstone-check
               Schedules tombstone check (a tombstoned sched state.json stops kith-sched; routine jobs are not its own)|kernel/tests/kith-sched-tombstone-check
               Schedules core check (kith-sched ls/add/rm/pause/resume/run/log ask the core once the schedules are switched; same words and --json shapes, never the Python editor)|kernel/tests/kith-sched-core-check
@@ -434,6 +433,7 @@ jobs:
               Agent deny secrets check|kernel/tests/kith-agent-deny-secrets-check
               Trusted allow check|kernel/tests/kith-trusted-allow-check
               Must ask check|kernel/tests/kith-must-ask-check
+              Guard golden check (guard-must-ask.json still equals what kith_guard.py answers)|kernel/tests/kith-guard-golden-check
               Auth C2 check|kernel/tests/kith-auth-c2-check
               Auth secret check|kernel/tests/kith-auth-secret-check
               Keys check|kernel/tests/kith-keys-check
@@ -441,7 +441,6 @@ jobs:
           - shard: 3
             bun: true
             checks: |
-              Lifecycle check|kernel/tests/kith-lifecycle-check
               Schedule person check|kernel/tests/kith-sched-person-check
               Terminal flags check|kernel/tests/kith-terminal-flags-check
               Recall check|kernel/tests/kith-recall-check
@@ -480,10 +479,20 @@ jobs:
         if: matrix.bun
         with:
           bun-version: 1.3.8
+      # Every kith call finds its folders with `kith kernel paths` (no Python): the program kernel-program built.
+      - uses: actions/download-artifact@v4
+        with:
+          name: kith-kernel-program
+          path: ${{ runner.temp }}/kith-program
+      - name: Make the program executable
+        run: chmod +x "$RUNNER_TEMP/kith-program/kith"
       - name: Checks
         env:
           CHECKS: ${{ matrix.checks }}
         run: |
+          # On PATH last, not KITH_BIN: a check that names its own program (a fake) keeps it, and bin/kith still finds this one
+          # for the folders (`kith kernel paths`) when the fake does not answer.
+          export PATH="$PATH:$RUNNER_TEMP/kith-program"
           failed=0
           while IFS='|' read -r name cmd; do
             [ -n "$name" ] || continue
@@ -854,6 +863,13 @@ jobs:
           save-if: false
       - name: Build the kith program
         run: cargo build --manifest-path serve/host/Cargo.toml --bin kith
+      # The kernel shards run every kith call on this program (kith kernel paths), so they take it from here.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kith-kernel-program
+          path: serve/host/target/debug/kith
+          retention-days: 1
+          compression-level: 0
       - name: Checks
         run: |
           failed=0
@@ -956,6 +972,7 @@ jobs:
               kith-auth-mixed-race-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
               kith-account-state-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
               kith-agent-set-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-agent-set-check
+              kith-paths-nopython-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-paths-nopython-check
               kith-json-misc-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-json-misc-check
               kith-requires-switched-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
               kith-pkg-pid-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
@@ -1001,7 +1018,7 @@ jobs:
           - name: direct lock, schedules cutover
             archive: true
             checks: |
-              Direct lock, stub and held checks|T="$PWD/serve/host/target/debug"; KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" kernel/tests/kith-direct-lock-check && KITH_CORE=python KITH_BIN="$T/kith" KITH_REAL_STUB_BIN="$T/kith-stub" kernel/tests/kith-lifecycle-check && KITH_LIFECYCLE_EXPECT=rust KITH_CORE=rust KITH_BIN="$T/kith" KITH_REAL_STUB_BIN="$T/kith-stub" kernel/tests/kith-lifecycle-check && kernel/tests/kith-stub-install-check && KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" KITH_HOLDER_BIN="$T/kith-holder" kernel/tests/kith-held-check
+              Direct lock, stub and held checks|T="$PWD/serve/host/target/debug"; KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" kernel/tests/kith-direct-lock-check && KITH_LIFECYCLE_EXPECT=rust KITH_CORE=rust KITH_BIN="$T/kith" KITH_REAL_STUB_BIN="$T/kith-stub" kernel/tests/kith-lifecycle-check && KITH_DIFFTEST_BIN="$T/kith" kernel/tests/kith-stub-install-check && KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" KITH_HOLDER_BIN="$T/kith-holder" kernel/tests/kith-held-check
               Schedules cutover end to end (real processes)|cd serve/host && cargo nextest run --profile ci --no-tests=fail --archive-file "$RUNNER_TEMP/host-tests.tar.zst" --extract-to . --extract-overwrite --workspace-remap . -E 'binary(schedules_cutover_e2e)'
     steps:
       - uses: actions/checkout@v4

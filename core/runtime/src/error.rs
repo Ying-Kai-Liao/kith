@@ -38,6 +38,12 @@ pub enum Error {
     /// [`crate::Core::call`]: the method is in the table but nothing in the core answers it yet (a Python verb, or one the
     /// daemon's wiring registers at M0c). The caller does what it did before the table.
     NotServed(String),
+    /// The core's lock was not free within the time limit: nothing ran, and the call may be sent again. The text names
+    /// the call that holds the lock and for how long.
+    Busy(String),
+    /// Internal to one call: a package fact was not in the daemon's cache, so the pass was rolled back and the call is
+    /// asked again once it is. It never reaches a caller.
+    NeedPackages(String),
 }
 
 impl fmt::Display for Error {
@@ -56,7 +62,9 @@ impl fmt::Display for Error {
         | Self::NoSuchMethod(m)
         | Self::NotAllowed(m)
         | Self::BadParams(m)
-        | Self::NotServed(m)) = self;
+        | Self::NotServed(m)
+        | Self::Busy(m)
+        | Self::NeedPackages(m)) = self;
         f.write_str(m)
     }
 }

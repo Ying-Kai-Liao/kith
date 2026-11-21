@@ -249,7 +249,7 @@ impl Routines {
             match v["outcome"].as_str().unwrap_or_default() {
                 "ignored" => {}
                 "ping" => return Ok(json!({"ping": true})),
-                "busy" | "stale" => return Err(Refused::Busy),
+                "busy" | "stale" | "unavailable" => return Err(Refused::Busy),
                 "paused" => return Err(Refused::Paused),
                 "refused" => {
                     return Err(match v["code"].as_str().unwrap_or_default() {

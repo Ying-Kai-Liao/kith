@@ -2,7 +2,7 @@
 //! `kernel/bin/kith-sessions`). It runs the engine as its CHILD, not in its own process: the launcher's shell pid keeps the
 //! terminal's writer claim, claude is a child in the same process group, and the notes about getting the session back can
 //! follow it. So it forks and waits, as the Python does. (The thread-writers model's "execs claude, same pid" row is
-//! `kith-lifecycle compact`'s, not this.)
+//! `kith kernel lifecycle compact`'s, not this.)
 //!
 //! What it does, in this order:
 //!
@@ -263,15 +263,22 @@ fn asleep(c: &Ctx, kernel: &Path, pid: i64) {
     if transcript::cache_life(c.env) > SHORT_CACHE {
         return;
     }
+    // The sweep is this same program's `kernel lifecycle` module, so no lookup can miss it.
+    let Ok(me) = std::env::current_exe() else {
+        return;
+    };
     let args: Vec<OsString> = [
-        kernel.join("bin").join("kith-lifecycle").into_os_string(),
+        "kernel".into(),
+        "lifecycle".into(),
+        "--kernel".into(),
+        kernel.as_os_str().to_owned(),
         "sweep".into(),
         "--session".into(),
         sid.into(),
         "--at-sleep".into(),
     ]
     .into();
-    let _ = runproc::detached("python3", &args);
+    let _ = runproc::detached(&me.to_string_lossy(), &args);
 }
 
 fn record_quit(c: &Ctx, pid: i64) {
