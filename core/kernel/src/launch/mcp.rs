@@ -9,21 +9,39 @@ use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
+/// The command that starts the `kithpermit` server: `<program> kernel permit --kernel K` (no verb, so the MCP server). `None`
+/// (this program could not name itself) leaves the script at the old path, which forwards to a program.
+pub fn permit_command(permit_bin: Option<&str>, kernel: &Path) -> (String, Vec<String>) {
+    match permit_bin.filter(|b| !b.is_empty()) {
+        Some(bin) => (
+            bin.to_owned(),
+            ["kernel", "permit", "--kernel"]
+                .iter()
+                .map(|x| (*x).to_owned())
+                .chain([kernel.display().to_string()])
+                .collect(),
+        ),
+        None => (format!("{}/bin/kith-permit", kernel.display()), vec![]),
+    }
+}
+
 /// `permit_mcp`: a guest's one server, the way out of the sandbox as a request.
-pub fn permit(kernel: &Path) -> Value {
-    json!({"mcpServers": {"kithpermit": {"command": format!("{}/bin/kith-permit", kernel.display()), "args": []}}})
+pub fn permit(permit_bin: Option<&str>, kernel: &Path) -> Value {
+    let (command, args) = permit_command(permit_bin, kernel);
+    json!({"mcpServers": {"kithpermit": {"command": command, "args": args}}})
 }
 
 /// `merged_mcp`: `granted` is the output of `kith-auth mcp-config` (`None`: it failed, no shared services this run);
 /// `own` is the agent's `mcp.json`, read from `pkg` when it is there. Later files win a server of the same name.
 pub fn merged(
     owner: bool,
+    permit_bin: Option<&str>,
     kernel: &Path,
     granted: Option<&Value>,
     pkg: &Path,
 ) -> Result<Value, String> {
     if !owner {
-        return Ok(permit(kernel));
+        return Ok(permit(permit_bin, kernel));
     }
     let own_file = pkg.join("mcp.json");
     let own = if own_file.is_file() {
