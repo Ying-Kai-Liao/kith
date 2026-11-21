@@ -21,11 +21,11 @@ use runvalue::host_program;
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]
-pub use unix::{install, installed, require_executable, start, stop, uninstall};
+pub use unix::{guard, install, installed, require_executable, start, stop, uninstall};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{install, installed, require_executable, start, stop, uninstall};
+pub use windows::{guard, install, installed, require_executable, start, stop, uninstall};
 
 static BINARY_IDENTITY: OnceLock<(String, String)> = OnceLock::new();
 

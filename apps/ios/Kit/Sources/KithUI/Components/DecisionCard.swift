@@ -24,6 +24,8 @@ public struct DecisionCardModel: Equatable, Sendable {
     public var options: [DecisionOption]
     /// A bot from outside's request: its provider, for the avatar before the heading.
     public var botProvider: String?
+    /// Buttons two to a row (Allow | Deny, then This session | Always), so none is left alone on a row.
+    public var pairedRows = false
 
     public init(heading: String? = nil, question: String, detail: String? = nil, options: [DecisionOption]) {
         self.heading = heading
@@ -81,12 +83,28 @@ public struct DecisionCard: View {
     let tint: AgentTint
     let answering: String?
     let onChoose: (String) -> Void
+    private var introView: AnyView?
+    private var detailsView: AnyView?
 
     public init(_ model: DecisionCardModel, tint: AgentTint = .neutral, answering: String? = nil, onChoose: @escaping (String) -> Void) {
         self.model = model
         self.tint = tint
         self.answering = answering
         self.onChoose = onChoose
+    }
+
+    /// In place of the question and its mono line: a card that says what it is another way (the intent-first permission card).
+    public func intro(_ view: some View) -> DecisionCard {
+        var copy = self
+        copy.introView = AnyView(view)
+        return copy
+    }
+
+    /// Room between what the card says and its buttons, for a Details disclosure the caller owns.
+    public func details(_ view: some View) -> DecisionCard {
+        var copy = self
+        copy.detailsView = AnyView(view)
+        return copy
     }
 
     public var body: some View {
@@ -97,18 +115,33 @@ public struct DecisionCard: View {
                     if let heading = model.heading { Text(heading).kithText(.label).foregroundStyle(Palette.muted) }
                 }
             } else if let heading = model.heading { Text(heading).kithText(.label).foregroundStyle(Palette.muted) }
-            Text(model.question).kithText(.body).fontWeight(.semibold).foregroundStyle(Palette.ink)
-            if let detail = model.detail, !detail.isEmpty {
-                Text(detail).kithText(.code).foregroundStyle(Palette.muted).lineLimit(4)
+            if let introView {
+                introView
+            } else {
+                Text(model.question).kithText(.body).fontWeight(.semibold).foregroundStyle(Palette.ink)
+                if let detail = model.detail, !detail.isEmpty {
+                    Text(detail).kithText(.code).foregroundStyle(Palette.muted).lineLimit(4)
+                }
             }
-            if model.fitsInRow {
+            if let detailsView { detailsView }
+            if model.pairedRows {
+                VStack(spacing: 8) {
+                    ForEach(Array(stride(from: 0, to: model.options.count, by: 2)), id: \.self) { i in
+                        let pair = Array(model.options[i..<min(i + 2, model.options.count)])
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 8) { buttons(pair, singleLine: true) }
+                            VStack(spacing: 8) { buttons(pair, singleLine: false) }
+                        }
+                    }
+                }
+            } else if model.fitsInRow {
                 // One row when every label fits on one line; otherwise stacked, never wrapped mid-label.
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) { buttons(singleLine: true) }
-                    VStack(spacing: 8) { buttons(singleLine: false) }
+                    HStack(spacing: 8) { buttons(model.options, singleLine: true) }
+                    VStack(spacing: 8) { buttons(model.options, singleLine: false) }
                 }
             } else {
-                VStack(spacing: 8) { buttons(singleLine: false) }
+                VStack(spacing: 8) { buttons(model.options, singleLine: false) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -117,8 +150,8 @@ public struct DecisionCard: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func buttons(singleLine: Bool) -> some View {
-        ForEach(model.options) { option in
+    private func buttons(_ options: [DecisionOption], singleLine: Bool) -> some View {
+        ForEach(options) { option in
             Button { onChoose(option.id) } label: {
                 HStack(spacing: 6) {
                     Text(option.title)
