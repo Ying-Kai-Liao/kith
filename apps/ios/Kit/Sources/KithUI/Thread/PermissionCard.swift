@@ -9,6 +9,8 @@ struct PermissionCard: View {
     let hostName: String
     /// The agent's colour pair (neutral grey for an old colour).
     var tint: AgentTint = .neutral
+    /// The agent that "says" the intent: its name and avatar (the chat's bot). Nil falls back to `data.agent`.
+    var agent: Bot?
     /// The option whose answer is on its way to the computer, if any.
     var answering: String?
     /// Set when the owner has to answer (a guest's chat): "Waiting for <name>" in place of the buttons.
@@ -40,16 +42,32 @@ struct PermissionCard: View {
         "Runs on \(hostName)\(d.cwd.map { " · \(($0 as NSString).lastPathComponent)" } ?? "")\(d.chain.map { " · \($0)" } ?? "")"
     }
 
-    /// The card's values; the option ids are the host's.
+    /// The facts to draw, or nil for today's card (an older host sends none).
+    private var facts: [CardFact]? { d.shownFacts }
+
+    /// The card's values; the option ids are the host's. "Runs on <Mac>" stays above unless a fact already says where
+    /// it runs (its `place`); then only who asked (`chain`) stays.
     var cardModel: DecisionCardModel {
-        DecisionCardModel(heading: place, question: headline, detail: d.title, options: ordered.map { o in
+        let named = facts?.contains { $0.place == true } ?? false
+        var model = DecisionCardModel(heading: named ? d.chain : place, question: headline, detail: d.title, options: ordered.map { o in
             DecisionOption(id: o.optionId, title: GuestPrompt.label(o, edge: d.edge), role: o.kind == "allow_once" ? .primary : o.kind.hasPrefix("allow") ? .normal : .destructive)
         })
+        model.pairedRows = macOrder
+        return model
     }
+
+    /// The intent-first card lays out its buttons as the Mac does: Allow | Deny, then This session | Always allow.
+    private var macOrder: Bool { facts != nil && d.edge == nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if pending, waiting == nil {
+            if pending, waiting == nil, let facts {
+                // The host read the call: what the agent says, what Kith sees, the check, Details, then the buttons.
+                DecisionCard(cardModel, tint: tint, answering: answering) { respond($0) }
+                    .intro(PermissionIntro(agent: agent?.name ?? d.agent ?? "The agent", avatar: agent, intent: d.intent,
+                                           facts: facts, check: d.check, hostName: hostName, tint: tint))
+                    .details(details)
+            } else if pending, waiting == nil {
                 DecisionCard(cardModel, tint: tint, answering: answering) { respond($0) }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
@@ -72,25 +90,15 @@ struct PermissionCard: View {
             if let stopped {
                 StoppedRunDivider(text: HeldRunModel.stoppedDivider(kind: stopped.kind, at: stopped.at), symbol: HeldRunModel.symbol(stopped.kind))
             }
-            if hasDetail {
-                Disclosure(isExpanded: $expanded) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let command = d.command, !command.isEmpty {
-                            CodeBox(text: command)
-                        }
-                        if let detail = d.detail, !detail.isEmpty {
-                            CodeBox(text: String(detail.prefix(2000)))
-                        }
-                        ForEach(d.diffs ?? [], id: \.self) { DiffView(diff: $0) }
-                    }
-                    .padding(.top, 6)
-                } label: {
-                    Text("Details").kithText(.secondary).fontWeight(.medium).foregroundStyle(Palette.muted)
-                }
-                .padding(.horizontal, 4)
+            // With facts and a live card, Details sits inside the card, above the buttons.
+            if hasDetail, !(pending && waiting == nil && facts != nil) {
+                details.padding(.horizontal, 4)
             }
         }
-        .padding(.trailing, 40)
+        // The intent-first card takes the full width so its quote and button pairs fit (361 pt on an iPhone).
+        .padding(.trailing, pending && waiting == nil && facts != nil ? 0 : 40)
+        // A call the host could not read in full opens Details.
+        .onAppear { if d.detailsOpen == true { expanded = true } }
         .animation(Motion.reduced(Motion.layout, reduceMotion), value: held)
         .kithDialog(held?.confirmTitle ?? "", isPresented: $confirming, message: held?.confirmMessage(agent: d.agent ?? "the agent")) {
             [DialogAction("Stop", destructive: true) { stop() }]
@@ -99,13 +107,34 @@ struct PermissionCard: View {
         .onChange(of: held == nil) { _, gone in if gone { confirming = false } }
     }
 
+    /// The Details disclosure: the raw command, detail text and diffs, as the host sent them.
+    @ViewBuilder private var details: some View {
+        if hasDetail {
+            Disclosure(isExpanded: $expanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let command = d.command, !command.isEmpty {
+                        CodeBox(text: command)
+                    }
+                    if let detail = d.detail, !detail.isEmpty {
+                        CodeBox(text: String(detail.prefix(2000)))
+                    }
+                    ForEach(d.diffs ?? [], id: \.self) { DiffView(diff: $0) }
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Details").kithText(.secondary).fontWeight(.medium).foregroundStyle(Palette.muted)
+            }
+        }
+    }
+
     private var hasDetail: Bool {
         !(d.command ?? "").isEmpty || !(d.detail ?? "").isEmpty || !(d.diffs ?? []).isEmpty
     }
 
-    /// Ordered like Grok Bot: Allow once, Always allow, then Deny.
+    /// Ordered like Grok Bot: Allow once, Always allow, then Deny. The intent-first card goes in the Mac's order.
     private var ordered: [PermissionOption] {
-        let rank = ["allow_once": 0, "allow_always": 1, "reject_once": 2, "reject_always": 3]
+        let rank = macOrder ? ["allow_once": 0, "reject_once": 1, "allow_session": 2, "allow_always": 3, "reject_always": 4]
+                            : ["allow_once": 0, "allow_always": 1, "reject_once": 2, "reject_always": 3]
         return (d.options ?? []).sorted { (rank[$0.kind] ?? 9) < (rank[$1.kind] ?? 9) }
     }
 

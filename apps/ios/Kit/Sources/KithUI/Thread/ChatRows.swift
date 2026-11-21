@@ -139,7 +139,7 @@ struct ChatRow: View {
                           time: Self.clock(entry.date),
                           respond: { option in model.respond(entry, option: option) })
         } else {
-            PermissionCard(entry: entry, hostName: model.hostName, tint: tint, answering: model.answering[entry.id],
+            PermissionCard(entry: entry, hostName: model.hostName, tint: tint, agent: chat, answering: model.answering[entry.id],
                            waiting: heldElsewhere ? "Open in the terminal: answer it there."
                            : chat?.botGuest.map({ !$0.canAnswer(isOwner: model.isOwner) }) == true ? "Only the computer's owner answers this."
                            : GuestPrompt.waitingText(for: entry, activity: chat?.activity, isOwner: model.isOwner),
