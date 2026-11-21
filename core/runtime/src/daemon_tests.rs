@@ -2874,7 +2874,9 @@ fn a_call_that_cannot_get_the_lock_in_time_is_busy_and_runs_nothing_and_the_stat
         "{:?}",
         began.elapsed()
     );
-    // The status answers with the lock held, and says who has it.
+    // The status answers with the lock held, and says who has it. (The client's breaker opened on the busy: this asks the
+    // server again at once.)
+    forget_breaker(&p);
     let began = Instant::now();
     match read(&p, "kernel.coreStatus", &json!({})) {
         Reached::Answered(v) => {
@@ -2907,11 +2909,19 @@ fn a_call_that_cannot_get_the_lock_in_time_is_busy_and_runs_nothing_and_the_stat
         other => panic!("{other:?}"),
     };
     assert_eq!(preset(&p), json!("member"));
+    forget_breaker(&p);
     assert!(matches!(
         crate::reach(&p, "people.grant", &grant, false),
         Reached::Answered(_)
     ));
     assert_eq!(preset(&p), json!("guest"));
+}
+
+/// Closes this process's client breaker for the core of `p`: the server tests above ask again right after a `busy`.
+#[cfg(unix)]
+fn forget_breaker(p: &Paths) {
+    let core = crate::owner::endpoint(&Layout::new(&p.machine));
+    crate::breaker::process().forget(&core);
 }
 
 #[cfg(unix)]
@@ -2924,17 +2934,20 @@ fn at_the_connection_limit_a_new_client_is_told_busy_not_no_daemon() {
     let open: Vec<Raw> = (0..64).map(|_| Raw::connect(&m)).collect();
     // A connection is counted once it is accepted: the 65th is the first one refused.
     until("the 64 connections to be counted", || {
+        forget_breaker(&p);
         matches!(
             crate::reach(&p, "kernel.version", &json!({}), false),
             Reached::Refused(Error::Busy(_))
         )
     });
+    forget_breaker(&p);
     match crate::reach(&p, "kernel.version", &json!({}), true) {
         Reached::Refused(Error::Busy(why)) => assert!(why.contains("64 connections"), "{why}"),
         other => panic!("{other:?}"),
     }
     drop(open);
     until("a slot to free", || {
+        forget_breaker(&p);
         matches!(
             crate::reach(&p, "kernel.version", &json!({}), true),
             Reached::Answered(_)

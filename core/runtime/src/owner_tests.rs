@@ -134,3 +134,124 @@ fn stop_does_not_wait_for_a_client_in_the_middle_of_a_call() {
         "{r:?}"
     );
 }
+
+/// A handler that counts the calls it gets and says `busy` while `busy` is set.
+fn counting(
+    busy: Arc<std::sync::atomic::AtomicBool>,
+) -> (Arc<Handler>, Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::Ordering;
+    let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = seen.clone();
+    let handler: Arc<Handler> = Arc::new(move |_, method, _| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        if busy.load(Ordering::SeqCst) {
+            Err(crate::error::Error::Busy(
+                "lock held; nothing ran".to_owned(),
+            ))
+        } else {
+            Ok(json!({"ran": method}))
+        }
+    });
+    (handler, seen)
+}
+
+#[test]
+fn a_busy_read_opens_one_connection_not_two() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (_t, m) = machine();
+    let (handler, seen) = counting(Arc::new(AtomicBool::new(true)));
+    let (l, server) = serving(&m, handler);
+    let r = super::reach(&l, "paths", &json!({}), true);
+    assert!(
+        matches!(r, Reached::Refused(crate::error::Error::Busy(_))),
+        "{r:?}"
+    );
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        1,
+        "a busy answer is not retried"
+    );
+    server.stop();
+}
+
+#[test]
+fn while_the_breaker_is_open_calls_open_no_connection_and_one_test_call_goes_through_per_window() {
+    use std::sync::atomic::Ordering;
+    let (_t, m) = machine();
+    let busy = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (handler, seen) = counting(busy.clone());
+    let (l, server) = serving(&m, handler);
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), true),
+        Reached::Refused(_)
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 1);
+    // Open: reads and writes alike are `busy`, nothing sent, no connection (never "no daemon", which callers spin on).
+    for repeatable in [true, false, true] {
+        assert!(matches!(
+            super::reach(&l, "paths", &json!({}), repeatable),
+            Reached::Refused(crate::error::Error::Busy(_))
+        ));
+    }
+    assert_eq!(seen.load(Ordering::SeqCst), 1, "no connection while open");
+    // The core's pid comes from `kernel.coreStatus`, which the Stop guard needs while the breaker is open: it goes
+    // through, and neither counts as the test call nor resets the window.
+    assert!(matches!(
+        super::reach(&l, "kernel.coreStatus", &json!({}), true),
+        Reached::Refused(_)
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 2, "coreStatus is not held");
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), true),
+        Reached::Refused(crate::error::Error::Busy(_))
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 2, "and the window still holds");
+    // The first window is 1 s: then one test call goes through, which is busy again and doubles the wait.
+    std::thread::sleep(Duration::from_millis(1100));
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), true),
+        Reached::Refused(_)
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 3, "one test call per window");
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), true),
+        Reached::Refused(crate::error::Error::Busy(_))
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 3);
+    // The core frees up: the next test call (after 2 s) is answered and closes the breaker.
+    busy.store(false, Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(2100));
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), false),
+        Reached::Answered(_)
+    ));
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), true),
+        Reached::Answered(_)
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 5);
+    server.stop();
+}
+
+#[test]
+fn a_panic_in_the_test_call_does_not_leave_the_breaker_open_for_good() {
+    use crate::breaker::{Breakers, Gate};
+    let b = Breakers::default();
+    let core = std::path::Path::new("/panic");
+    b.end(core, true, Instant::now());
+    std::thread::sleep(Duration::from_millis(1100));
+    assert_eq!(b.gate(core, Instant::now()), Gate::Probe);
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _end = super::EndGuard {
+            breakers: &b,
+            core,
+            tripped: false,
+        };
+        panic!("the call went wrong");
+    }));
+    assert!(r.is_err());
+    // Not stuck "probing": the probe ended, and the next window (2 s) ends with another test call.
+    assert_eq!(b.gate(core, Instant::now()), Gate::Hold);
+    std::thread::sleep(Duration::from_millis(2100));
+    assert_eq!(b.gate(core, Instant::now()), Gate::Probe);
+}
