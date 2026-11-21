@@ -4,6 +4,7 @@ import { mockInvitePreviewProvider, type InvitePreview, type InvitePreviewProvid
 import { Button } from '../components/Controls'
 import { Icon } from '../components/Icon'
 import { loadPreview } from './invite-preview-logic'
+import './invite-preview.css'
 
 /** Placeholder: the store pages are not decided yet. */
 export const GET_APP_URL = 'https://kith.app'
