@@ -146,7 +146,8 @@ export KITH_ROOT=$KITH
 # What the caller gave for the folders: the Rust launch starts from these, as this call did, not from the answer below.
 kith_in=(); for v in KITH_HOME KITH_STATE KITH_AGENTS HQ_HOME HQ_STATE HQ_AGENTS; do [[ -n ${!v+x} ]] && kith_in+=("$v=${!v}"); done
 kbin=$(kith_need_bin) || exit 1
-eval "$("$kbin" kernel paths --kernel "$KITH" --sh)"
+kith_paths_sh=$("$kbin" kernel paths --kernel "$KITH" --sh) && [[ -n $kith_paths_sh ]] || { echo "kith: the kith program at $kbin does not answer \`kernel paths\`; update it (kith serve install)" >&2; exit 1; }
+eval "$kith_paths_sh"
 
 case $1 in
   attach)             . "$KITH/lib/kith-core.sh"; kith_held_attach_cmd "${@:2}"; exit $? ;;   # held terminals (kith AGENT --held)
@@ -355,7 +356,7 @@ if [[ $agent != prompt && $agent != settings && $agent != mcp ]]; then
     for kv in ${kith_in[@]+"${kith_in[@]}"}; do export "$kv"; done
     kith_core_exec launch "$agent" --kernel "$KITH" "$@" || true
     # Not switched, or no program: the script goes on with its own answer.
-    eval "$("$(kith_find_bin)" kernel paths --kernel "$KITH" --sh)"
+    eval "$kith_paths_sh"   # the folders again, from the answer above
     kith_env_sync
   fi
 fi

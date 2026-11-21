@@ -77,5 +77,10 @@ check "no program: kith paths says so and exits 1" "[ $rc = 1 ] && printf '%s' \
 check "no program: no kith_paths.py" no_paths_py
 check "core-switched.txt has no paths line" "! grep -q '^paths	' '$KERNEL/lib/core-switched.txt'"
 
+# --- a program that answers nothing for `kernel paths` (an old or fake one): one line and exit 1, not an unbound variable
+printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo phase\nexit 0\n' > "$T/fake-kith"; chmod +x "$T/fake-kith"
+out=$(env PATH=$SAFE KITH_BIN="$T/fake-kith" "$DEV/bin/kith" echo --launch-json 2>&1); rc=$?
+check "a program with no kernel paths: one line, exit 1, no unbound variable" "[ $rc = 1 ] && ! printf '%s' \"\$out\" | grep -q unbound && printf '%s' \"\$out\" | grep -q 'kernel paths'"
+
 echo
 [ "$fails" = 0 ] && echo "all checks passed" || { echo "$fails check(s) failed"; exit 1; }

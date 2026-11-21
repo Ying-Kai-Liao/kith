@@ -381,10 +381,10 @@ jobs:
   # runs exactly once; a shard runs all its checks even after one fails, then fails naming each failed check.
   kernel:
     name: kernel (${{ matrix.shard }}/3)
-    needs: changes
+    needs: [changes, kernel-program]
     if: needs.changes.outputs.kernel == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -480,23 +480,17 @@ jobs:
         if: matrix.bun
         with:
           bun-version: 1.3.8
-      # Every kith call finds its folders with `kith kernel paths` (no Python), so the shards need the program too.
-      - name: Install pinned toolchain
-        working-directory: serve
-        run: rustup show active-toolchain || rustup toolchain install
-      - name: Install system libraries
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
-      - uses: Swatinem/rust-cache@v2
+      # Every kith call finds its folders with `kith kernel paths` (no Python): the program kernel-program built.
+      - uses: actions/download-artifact@v4
         with:
-          workspaces: serve/host
-          shared-key: host-linux-test
-          save-if: false
-      - name: Build the kith program
-        run: cargo build --manifest-path serve/host/Cargo.toml --bin kith
+          name: kith-kernel-program
+          path: ${{ runner.temp }}/kith-program
+      - name: Make the program executable
+        run: chmod +x "$RUNNER_TEMP/kith-program/kith"
       - name: Checks
         env:
           CHECKS: ${{ matrix.checks }}
-          KITH_BIN: ${{ github.workspace }}/serve/host/target/debug/kith
+          KITH_BIN: ${{ runner.temp }}/kith-program/kith
         run: |
           failed=0
           while IFS='|' read -r name cmd; do
@@ -868,6 +862,13 @@ jobs:
           save-if: false
       - name: Build the kith program
         run: cargo build --manifest-path serve/host/Cargo.toml --bin kith
+      # The kernel shards run every kith call on this program (kith kernel paths), so they take it from here.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kith-kernel-program
+          path: serve/host/target/debug/kith
+          retention-days: 1
+          compression-level: 0
       - name: Checks
         run: |
           failed=0
