@@ -117,8 +117,7 @@ fn every_row_that_looks_at_a_persons_folders_runs_through_the_daemon_without_a_r
         &json!({"id": "amy", "unused": true}),
     );
     assert!(text(&r).contains("amy is not unused (garden)"), "{r:?}");
-    // person_remove words its line with them, but never waits for them: a read that already had them gives it the facts
-    let _ = read(&paths(&m), "people.retired", &json!({"id": "amy"}));
+    // person_remove words its line with them once it is committed: the line waits for the facts, the removal does not
     let said = lines(write(&m, "people.removePerson", &json!({"id": "amy"})));
     assert!(
         said[0].contains("their memory and files in garden are kept"),
@@ -174,18 +173,26 @@ fn with_the_package_disk_stuck_a_new_id_is_refused_and_the_narrowings_commit_and
         lines(write(&m, "people.suspend", &json!({"id": "sam"}))).len(),
         1
     );
-    let said = lines(write(&m, "people.removePerson", &json!({"id": "amy"})));
+    // The removal commits (and its revoke takes effect) well before the answer: only the kept line waits for the folders.
+    let asked = {
+        let m = m.clone();
+        std::thread::spawn(move || write(&m, "people.removePerson", &json!({"id": "amy"})))
+    };
+    until("the removal to commit", || rows_named(&d, "amy") == 0);
+    assert!(
+        began.elapsed() < crate::packages::REFRESH_WAIT / 2,
+        "the commit waited for the disk: {:?}",
+        began.elapsed()
+    );
+    assert!(
+        !asked.is_finished(),
+        "the answer was not waiting for the folders"
+    );
+    let said = lines(asked.join().unwrap());
     assert!(
         said[0].contains("can't tell which of their memory and files are kept"),
         "{said:?}"
     );
-    // a removal that waited for the stuck refresher would take REFRESH_WAIT
-    assert!(
-        began.elapsed() < crate::packages::REFRESH_WAIT / 2,
-        "{:?}",
-        began.elapsed()
-    );
-    assert_eq!(rows_named(&d, "amy"), 0);
     match read(
         &paths(&m),
         "people.may",

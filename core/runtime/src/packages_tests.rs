@@ -395,7 +395,10 @@ fn a_move_that_finishes_after_the_caller_gave_up_logs_its_notes() {
     let (t, _c) = machine();
     let life = life_of(&t);
     write(&t.path().join("agents/house/memory/people/sam/n.md"), "x");
-    write(&t.path().join("agents/house/memory/people/anna/o.md"), "taken");
+    write(
+        &t.path().join("agents/house/memory/people/anna/o.md"),
+        "taken",
+    );
     let (hold, probe) = hold_mover();
     hold.store(true, Ordering::SeqCst);
     let cache = PackageCache::start(Some(probe));
@@ -404,7 +407,10 @@ fn a_move_that_finishes_after_the_caller_gave_up_logs_its_notes() {
     cache.set_log(Arc::new(move |n| s.lock().unwrap().push(n.to_owned())));
     let wait = cache.queue_move(mv(&life, "sam", "anna", &["sam"]));
     // the caller's wait ends first: its answer cannot carry the move's notes any more
-    let _ = wait.finish(json!({"lines": ["sam is now anna"]}), Duration::from_millis(50));
+    let _ = wait.finish(
+        json!({"lines": ["sam is now anna"]}),
+        Duration::from_millis(50),
+    );
     hold.store(false, Ordering::SeqCst);
     wait_for("the notes in the log", || !said.lock().unwrap().is_empty());
     let said = said.lock().unwrap().clone();
@@ -423,7 +429,10 @@ fn a_rename_with_no_mover_thread_says_the_folders_move_at_the_next_start() {
         crate::packages::MoveWait::gone_for_test(rx, mv(&life, "sam", "anna", &["sam"]))
     };
     drop(cache);
-    let said = wait.finish(json!({"lines": ["sam is now anna"]}), Duration::from_secs(1));
+    let said = wait.finish(
+        json!({"lines": ["sam is now anna"]}),
+        Duration::from_secs(1),
+    );
     assert_eq!(
         said["lines"],
         json!([

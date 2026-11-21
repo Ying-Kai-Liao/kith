@@ -327,23 +327,9 @@ impl PackageCache {
 
     /// [`Self::refresh`] for several facts in one request, and one wait.
     pub(crate) fn refresh_all(&self, roots: &Roots, wants: Vec<Want>) -> bool {
-        match self.ask(roots, wants) {
-            Some(answered) => answered.recv_timeout(self.wait).is_ok(),
-            None => false,
-        }
-    }
-
-    /// Asks the refresher for facts a call will only read softly (a line that tells what is kept) and does not wait: a
-    /// removal never waits on the disk. What the refresher has read by the time the line is worded is used; else the
-    /// line says it can't tell.
-    pub(crate) fn prefetch(&self, roots: &Roots, wants: Vec<Want>) {
-        drop(self.ask(roots, wants));
-    }
-
-    fn ask(&self, roots: &Roots, wants: Vec<Want>) -> Option<Receiver<()>> {
         if self.queued.fetch_add(1, Ordering::SeqCst) >= MAX_QUEUED {
             self.queued.fetch_sub(1, Ordering::SeqCst);
-            return None;
+            return false;
         }
         let (done, answered) = sync_channel(1);
         let req = Req {
@@ -353,9 +339,35 @@ impl PackageCache {
         };
         if self.tx.send(req).is_err() {
             self.queued.fetch_sub(1, Ordering::SeqCst);
-            return None;
+            return false;
         }
-        Some(answered)
+        answered.recv_timeout(self.wait).is_ok()
+    }
+
+    /// A removal's answer with the line that tells what is kept. The removal is committed and the lock let go: only
+    /// this wording waits for the folders (at most [`REFRESH_WAIT`]); the line says it can't tell when they don't come.
+    pub(crate) fn finish_kept(
+        &self,
+        said: Value,
+        note: &crate::authority::revoke::KeptNote,
+    ) -> Value {
+        let roots = (note.life.agents.clone(), note.life.kernel.clone());
+        let want = Want::Life(note.life.state.clone(), note.pid.clone());
+        // Outside a call nothing is "fresh" (see `fresh`): a fact read after this was asked for is the one to use.
+        let asked = Instant::now();
+        self.refresh_all(&roots, vec![want]);
+        let key = (
+            note.life.agents.clone(),
+            note.life.state.clone(),
+            note.pid.clone(),
+        );
+        let folders = self
+            .lock()
+            .lives
+            .get(&key)
+            .filter(|(at, _)| *at >= asked)
+            .map(|(_, f)| (**f).clone());
+        crate::authority::call::finish_kept(said, folders)
     }
 }
 
@@ -743,7 +755,7 @@ fn named(params: &Value) -> Vec<String> {
 }
 
 /// The person ids a method looks the folders of up, which the first refresh asks for. A narrowing (suspend, undo,
-/// removeBot) is not here, and neither is a removal: it only words a line with them (see [`soft_wants`]).
+/// removeBot) is not here, and neither is a removal: its line is worded after the commit ([`PackageCache::finish_kept`]).
 fn life_ids<'a>(method: &str, params: &'a Value) -> Vec<&'a str> {
     let keys: &[&str] = match method {
         "people.addPerson" | "people.retired" => &["id"],
@@ -753,14 +765,6 @@ fn life_ids<'a>(method: &str, params: &'a Value) -> Vec<&'a str> {
     keys.iter()
         .filter_map(|k| params.get(*k).and_then(Value::as_str))
         .collect()
-}
-
-/// What a call only reads softly, asked for without a wait: the folders a removal tells are kept.
-fn soft_wants(method: &str, params: &Value, state: &Path) -> Vec<Want> {
-    match (method, params.get("id").and_then(Value::as_str)) {
-        ("people.removePerson", Some(id)) => vec![Want::Life(state.to_path_buf(), id.to_owned())],
-        _ => Vec::new(),
-    }
 }
 
 /// The kernel service a secret writer's params name (`service`, or the front of `profile`).
@@ -814,12 +818,6 @@ pub(crate) fn run_call<R>(
         Ok((folders, kernel)) => (Some((folders.agents, kernel)), Some(folders.state)),
         Err(_) => (None, None),
     };
-    if let (Some(roots), Some(state)) = (roots.as_ref(), state.as_deref()) {
-        let soft = soft_wants(method, params, state);
-        if !soft.is_empty() {
-            cache.prefetch(roots, soft);
-        }
-    }
     run_call_in(
         cache,
         roots.as_ref(),

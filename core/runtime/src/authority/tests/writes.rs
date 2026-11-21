@@ -84,7 +84,7 @@ impl Rig {
         let roots = (cached.agents.clone(), cached.kernel.clone());
         let state = crate::authority::revoke::Life::beside(&cached).state;
         let core = &mut self.core;
-        let (said, mv) = crate::packages::run_call_in(
+        let (said, mv, kept) = crate::packages::run_call_in(
             &self.cache,
             Some(&roots),
             crate::packages::first_wants(method, params, Some(&state)),
@@ -97,11 +97,16 @@ impl Rig {
         )
         .map_err(|e| plain(&e))?;
         // The lock is let go: a rename's folders move now, as the daemon's package thread moves them.
-        Ok(match mv {
+        let said = match mv {
             Some(mv) => {
                 let (report, _) = crate::authority::revoke::run_move(&mv);
                 crate::authority::call::finish_move(said, &mv, Some(&report))
             }
+            None => said,
+        };
+        // A removal's kept line is worded last, as the daemon does: it waits for the folders, the removal did not.
+        Ok(match kept {
+            Some(note) => self.cache.finish_kept(said, &note),
             None => said,
         })
     }
