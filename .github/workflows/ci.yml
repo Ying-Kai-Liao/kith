@@ -436,6 +436,7 @@ jobs:
               Agent deny secrets check|kernel/tests/kith-agent-deny-secrets-check
               Trusted allow check|kernel/tests/kith-trusted-allow-check
               Must ask check|kernel/tests/kith-must-ask-check
+              Guard golden check (guard-must-ask.json still equals what kith_guard.py answers)|kernel/tests/kith-guard-golden-check
               Auth C2 check|kernel/tests/kith-auth-c2-check
               Auth secret check|kernel/tests/kith-auth-secret-check
               Keys check|kernel/tests/kith-keys-check

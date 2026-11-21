@@ -76,6 +76,8 @@ RUST_USERS = {"serve/host/src/main.rs", "serve/host/src/core_front.rs", "serve/h
               "serve/host/tests/threads_writer_e2e.rs"}
 # Files that may say "core.db": docs, this check, and the protected-paths list (runtime-design 9b rules 1 and 2).
 EXEMPT_NAME = ("kernel/tests/kith-core-boundary-check", "kernel/lib/kith_guard.py",
+               # the guard lists core.db as a secret path; its golden cases must name it (retire-python P1-8)
+               "kernel/tests/difftest/golden-lib/guard-must-ask.json", "kernel/tests/difftest/golden-lib/gen-guard-must-ask.py",
                "serve/host/tests/direct_park_e2e.rs",   # opens its own temp core's db (P11; Kai 2026-11-15)
                "serve/host/tests/threads_writer_e2e.rs",   # reads its own temp core's thread claims (R5 ports 1/4, PR #1083)
                "serve/host/tests/schedules_cutover_e2e.rs")   # reads its own temp core's fires and turns (M4-5 F; Kai 2026-11-18)
