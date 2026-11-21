@@ -198,7 +198,7 @@ rm -f "$PKG/settings.json"
 
 # --- the Python and Rust guards ask the same trust commands (core/kernel/src/launch/guard.rs TRUST_CMDS) ------------------
 py=$(python3 -c "import sys; sys.path.insert(0, '$KERNEL/lib'); import kith_guard as g; print('\n'.join(g.TRUST_CMDS))")
-rs=$(sed -n '/^const TRUST_CMDS/,/^];/p' "$KERNEL/../core/kernel/src/launch/guard.rs" | grep -o '^ *"[^"]*"' | tr -d '"')
+rs=$(sed -n '/^\(pub(super) \)\{0,1\}const TRUST_CMDS/,/^];/p' "$KERNEL/../core/kernel/src/launch/guard.rs" | grep -o '^ *"[^"]*"' | tr -d '"')
 is "the Rust TRUST_CMDS are the Python ones" "$(printf '%s\n' "$rs" | sed 's/^ *//' | sort)" "$(printf '%s\n' "$py" | sort)"
 
 echo
