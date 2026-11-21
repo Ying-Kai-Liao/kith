@@ -186,26 +186,38 @@ fn while_the_breaker_is_open_calls_open_no_connection_and_one_test_call_goes_thr
         Reached::Refused(_)
     ));
     assert_eq!(seen.load(Ordering::SeqCst), 1);
-    // Open: reads and writes alike are "core down", nothing sent, no connection.
+    // Open: reads and writes alike are `busy`, nothing sent, no connection (never "no daemon", which callers spin on).
     for repeatable in [true, false, true] {
         assert!(matches!(
             super::reach(&l, "paths", &json!({}), repeatable),
-            Reached::NoDaemon
+            Reached::Refused(crate::error::Error::Busy(_))
         ));
     }
     assert_eq!(seen.load(Ordering::SeqCst), 1, "no connection while open");
+    // The core's pid comes from `kernel.coreStatus`, which the Stop guard needs while the breaker is open: it goes
+    // through, and neither counts as the test call nor resets the window.
+    assert!(matches!(
+        super::reach(&l, "kernel.coreStatus", &json!({}), true),
+        Reached::Refused(_)
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 2, "coreStatus is not held");
+    assert!(matches!(
+        super::reach(&l, "paths", &json!({}), true),
+        Reached::Refused(crate::error::Error::Busy(_))
+    ));
+    assert_eq!(seen.load(Ordering::SeqCst), 2, "and the window still holds");
     // The first window is 1 s: then one test call goes through, which is busy again and doubles the wait.
     std::thread::sleep(Duration::from_millis(1100));
     assert!(matches!(
         super::reach(&l, "paths", &json!({}), true),
         Reached::Refused(_)
     ));
-    assert_eq!(seen.load(Ordering::SeqCst), 2, "one test call per window");
+    assert_eq!(seen.load(Ordering::SeqCst), 3, "one test call per window");
     assert!(matches!(
         super::reach(&l, "paths", &json!({}), true),
-        Reached::NoDaemon
+        Reached::Refused(crate::error::Error::Busy(_))
     ));
-    assert_eq!(seen.load(Ordering::SeqCst), 2);
+    assert_eq!(seen.load(Ordering::SeqCst), 3);
     // The core frees up: the next test call (after 2 s) is answered and closes the breaker.
     busy.store(false, Ordering::SeqCst);
     std::thread::sleep(Duration::from_millis(2100));
@@ -217,6 +229,29 @@ fn while_the_breaker_is_open_calls_open_no_connection_and_one_test_call_goes_thr
         super::reach(&l, "paths", &json!({}), true),
         Reached::Answered(_)
     ));
-    assert_eq!(seen.load(Ordering::SeqCst), 4);
+    assert_eq!(seen.load(Ordering::SeqCst), 5);
     server.stop();
+}
+
+#[test]
+fn a_panic_in_the_test_call_does_not_leave_the_breaker_open_for_good() {
+    use crate::breaker::{Breakers, Gate};
+    let b = Breakers::default();
+    let core = std::path::Path::new("/panic");
+    b.end(core, true, Instant::now());
+    std::thread::sleep(Duration::from_millis(1100));
+    assert_eq!(b.gate(core, Instant::now()), Gate::Probe);
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _end = super::EndGuard {
+            breakers: &b,
+            core,
+            tripped: false,
+        };
+        panic!("the call went wrong");
+    }));
+    assert!(r.is_err());
+    // Not stuck "probing": the probe ended, and the next window (2 s) ends with another test call.
+    assert_eq!(b.gate(core, Instant::now()), Gate::Hold);
+    std::thread::sleep(Duration::from_millis(2100));
+    assert_eq!(b.gate(core, Instant::now()), Gate::Probe);
 }
