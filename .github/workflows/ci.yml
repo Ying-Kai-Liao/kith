@@ -120,6 +120,7 @@ jobs:
               - 'core/api/**'
               - '**/Cargo.toml'
               - 'scripts/ci/**'
+              - 'scripts/install.sh'
               - '.github/workflows/ci.yml'
             # The kernel files the host's own unit tests run for real (the list: scripts/ci/host-kernel-tests.txt). A
             # change here runs only those tests (host-kernel), not the whole host suite.

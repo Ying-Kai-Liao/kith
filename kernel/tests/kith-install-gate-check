@@ -69,4 +69,37 @@ release 0.4.0 none refuse
 out=$(inst 0.4.0); rc=$?
 check "a release with no list (v0.1.3 style) installs" '[[ $rc == 0 && $(readlink "$M/cli/current") == 0.4.0 ]]'
 
+# State with no program: Python wrote it and the program is gone (a --dev checkout, a Mac with only ~/.hq, a Mac whose
+# cli/ was removed); the gate must still ask, and a refusal must change nothing. state <kind> builds that HOME.
+release 0.5.0 list refuse
+state() {
+  local h=$T/home-$1; rm -rf "$h"; mkdir -p "$h/.local/bin"
+  case $1 in
+    dev) mkdir -p "$h/.kith/secrets"; echo '{}' > "$h/.kith/secrets/auth.json"; : > "$h/.kith/.migrated" ;;
+    hqonly) mkdir -p "$h/.hq/secrets" ;;
+    coredb) mkdir -p "$h/.kith"; : > "$h/.kith/core.db" ;;
+    cutover) mkdir -p "$h/.kith/cutover" ;;
+    cfgkith) mkdir -p "$h/.config/kith"; echo '{}' > "$h/.config/kith/auth.json" ;;
+    cfghq) mkdir -p "$h/.config/hq"; echo '{}' > "$h/.config/hq/auth.json" ;;
+  esac
+  echo "$h"
+}
+for kind in dev hqonly coredb cutover cfgkith cfghq; do
+  h=$(state $kind)
+  out=$(HOME=$h inst 0.5.0); rc=$?
+  last=$(printf '%s\n' "$out" | tail -n 1)
+  check "state only ($kind), no program, refusing program: refused" '[[ $rc != 0 && $out == *"accounts: not switched"* ]]'
+  check "state only ($kind): no cli/ folder was made" '[ ! -e "$h/.kith/cli" ] && [ ! -e "$h/.hq/cli" ]'
+  check "state only ($kind): the last line says the check said no and to reopen the app" '[[ $last == *"cutover check said no"* && $last == *"eopen the app"* ]]'
+  out2=$(HOME=$h inst 0.5.0); rc=$?
+  check "state only ($kind): running it again still refuses" '[[ $rc != 0 && ! -e "$h/.kith/cli" ]]'
+done
+h=$(state dev)
+out=$(HOME=$h KITH_INSTALL_TARBALL=$T/rel/kith-0.3.0-darwin-arm64.tar.gz sh "$INSTALL" 2>&1); rc=$?
+check "state only (dev), a release with an empty list: installs" '[[ $rc == 0 && $(readlink "$h/.kith/cli/current") == 0.3.0 ]]'
+h=$(state dev)
+release 0.6.0 list accept
+out=$(HOME=$h inst 0.6.0); rc=$?
+check "state only (dev), accepting program: installs" '[[ $rc == 0 && $(readlink "$h/.kith/cli/current") == 0.6.0 ]]'
+
 [ "$fail" = 0 ] && echo "kith-install-gate-check: all ok" || { echo "kith-install-gate-check: failed"; exit 1; }

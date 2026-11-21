@@ -12,3 +12,8 @@
 # This file stays empty until a release deletes a module's Python reader: the PR that deletes it adds that module's line.
 # scripts/install.sh runs this release's own `status --require` on this file before it moves cli/current (an install with
 # no earlier version passes without asking).
+#
+# The PR that deletes a Python reader and adds its first line here also records, in this comment, the BRIDGE release: the
+# last release whose list is empty. A Mac on v0.1.3 or older has no `kith migrate step`, so the installer's refusal
+# sends it to install that release first (KITH_VERSION=<bridge>), switch its modules, then update again.
+# Bridge release: none yet (the list is empty).

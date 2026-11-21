@@ -117,15 +117,31 @@ case $VERSION in *[!0-9A-Za-z.+-]*) die "odd version '$VERSION'" ;; esac
 # The cutover gate (retire-python): a release whose Python readers are gone lists the modules that must already be switched
 # to the new core on this Mac (share/kith/kernel/lib/requires-switched.txt). The NEW program is asked, not the installed one (an
 # older one answers --require with a usage error), and before anything is copied or cli/current moves, so a refusal leaves
-# the old version current and nothing new on disk. No list, an empty list, or no earlier install (nothing to strand) passes.
+# the old version current and nothing new on disk. No list or an empty list passes. So does a Mac with no earlier install
+# at all: no program AND no state (Python may have written state with no program left: a --dev checkout, a Mac with only
+# ~/.hq, one whose cli/ was removed, so state counts as an earlier install; chosen over asking the new program per module
+# because the program would need a "nothing to strand" answer it does not have). gate.sh runs here and again at the start
+# of swap.sh, under the auth.json lock, so a rollback that lands between the two cannot slip past.
+cat > "$WORK/gate.sh" <<'GATE'
 REQ=$SRC/share/kith/kernel/lib/requires-switched.txt
-if [ -f "$REQ" ] && [ -n "$(sed 's/#.*//; s/[[:space:]]//g; /^$/d' "$REQ")" ] \
-   && { [ -e "$PREFIX/cli/current" ] || [ -e "$PREFIX/bin/kith" ] || [ -e "$PREFIX/share/kith/kernel" ]; }; then
-  if ! "$SRC/bin/kith" kernel cutover status --require "$REQ" > "$WORK/gate.out" 2> "$WORK/gate.err"; then
-    cat "$WORK/gate.err" "$WORK/gate.out" >&2
-    die "kith $VERSION needs state that is not switched to the new core on this Mac yet; the installed version stays current. Switch each module named above (kith migrate step MODULE, with the installed kith), then run the installer again"
-  fi
+[ -f "$REQ" ] && [ -n "$(sed 's/#.*//; s/[[:space:]]//g; /^$/d' "$REQ")" ] || exit 0
+earlier=
+for f in "$PREFIX/cli/current" "$PREFIX/bin/kith" "$PREFIX/share/kith/kernel" \
+         "$PREFIX/secrets/auth.json" "$PREFIX/core.db" "$PREFIX/cutover" \
+         "$HOME/.config/kith/auth.json" "$HOME/.config/hq/auth.json"; do
+  [ ! -e "$f" ] && [ ! -L "$f" ] || earlier=1
+done
+[ -z "$earlier" ] && [ -d "$HOME/.hq" ] && [ ! -L "$HOME/.hq" ] && earlier=1
+[ -n "$earlier" ] || exit 0
+if ! "$SRC/bin/kith" kernel cutover status --require "$REQ" > "$WORK/gate.out" 2> "$WORK/gate.err"; then
+  cat "$WORK/gate.err" "$WORK/gate.out" >&2
+  # The last line is the one the Mac app shows.
+  printf '%s\n' "install: the new kith's cutover check said no, so nothing was changed and the old version stays current. If this Mac runs v0.1.3 or older (no 'kith migrate step'), first install the last release whose requires-switched.txt is empty (KITH_VERSION=<that release>, named in the comment of that file), switch each module named above, then run the installer again. Reopen the app afterwards" | tee "$WORK/gate.last" >&2
+  exit 1
 fi
+GATE
+export WORK
+sh "$WORK/gate.sh" || exit 1
 
 # The install, run under the auth.json lock: the version folder is built beside the others as <version>.partial and
 # renamed into place (a half-copied folder is never <version>, and the next install removes it), then cli/current is
@@ -133,6 +149,7 @@ fi
 # already there is kept as it is. Two installs at once wait for each other on the lock.
 cat > "$WORK/swap.sh" <<'SWAP'
 set -eu
+sh "$WORK/gate.sh"   # again, now that the lock is held
 CLI=$PREFIX/cli
 mkdir -p "$CLI"
 for p in "$CLI"/*.partial; do [ ! -e "$p" ] || rm -rf "$p"; done
@@ -364,9 +381,9 @@ if [ -d "$OLD_KERNEL" ]; then
 fi
 export KITH_QUIESCE_ROOTS
 if have python3 && [ -d "$(dirname "$AUTH_LOCK")" ]; then
-  python3 "$WORK/quiesce.py" "$AUTH_LOCK" "$SETTINGS_LOCK" "${KITH_INSTALL_DRAIN_S:-30}" sh "$WORK/swap.sh" || die "could not install kith to $PREFIX"
+  python3 "$WORK/quiesce.py" "$AUTH_LOCK" "$SETTINGS_LOCK" "${KITH_INSTALL_DRAIN_S:-30}" sh "$WORK/swap.sh" || { [ ! -s "$WORK/gate.last" ] || exit 1; die "could not install kith to $PREFIX"; }
 else
-  sh "$WORK/swap.sh" || die "could not install kith to $PREFIX"   # a first install: nothing yet to lock
+  sh "$WORK/swap.sh" || { [ ! -s "$WORK/gate.last" ] || exit 1; die "could not install kith to $PREFIX"; }   # a first install: nothing yet to lock
 fi
 say "installed kith $VERSION to $PREFIX/cli/$VERSION"
 
