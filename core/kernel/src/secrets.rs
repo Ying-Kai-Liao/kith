@@ -24,11 +24,15 @@ use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod jobs;
+mod packages;
 pub mod pyjson;
 #[cfg(test)]
 mod tests;
 
 pub use jobs::{Job, PIECES, effective};
+pub use packages::{
+    AgentFacts, Found, PackageSource, Packages, note_disk_read, on_disk_read, read_names,
+};
 
 /// A refusal `kith-auth` would `die` with: its message and exit code.
 #[derive(Debug, PartialEq, Eq)]
@@ -91,6 +95,8 @@ pub struct Ctx {
     pub now_ms: f64,
     pub sandbox: Sandbox,
     pub serve: ServeDir,
+    /// Where the facts of the agents' package folders come from: the disk, or the daemon's cache.
+    pub packages: Packages,
 }
 
 impl Ctx {
@@ -113,74 +119,8 @@ impl Ctx {
                 },
                 |d| ServeDir::Fixed(PathBuf::from(d)),
             ),
+            packages: Packages::Disk,
         }
-    }
-
-    /// Where an agent's package is (`agent_dirs()` in `kith-auth`): `<agent>/role` when that holds an `agent.md`, else the
-    /// agent's own folder, in the user's agents then the kernel's; else where it would be.
-    pub fn package_dir(&self, agent: &str) -> PathBuf {
-        let plain = !agent.is_empty() && !agent.contains('/') && !agent.starts_with('.');
-        if plain {
-            for root in [self.agents.clone(), self.kernel.join("agents")] {
-                let d = root.join(agent);
-                let pkg = if d.join("role/agent.md").is_file() {
-                    d.join("role")
-                } else {
-                    d
-                };
-                if pkg.join("agent.md").is_file() {
-                    return pkg;
-                }
-            }
-        }
-        self.agents.join(agent)
-    }
-
-    /// Whether `agent` is in `kith-auth`'s `agent_dirs()`: a package with an `agent.md`, in the user's agents or the
-    /// kernel's. The owner's writes (M2-2) refuse an agent that is not.
-    pub fn agent_exists(&self, agent: &str) -> bool {
-        let plain = !agent.is_empty() && !agent.contains('/') && !agent.starts_with('.');
-        plain && self.package_dir(agent).join("agent.md").is_file()
-    }
-
-    /// `agent_dirs()` in `kith-auth`: the names of the agents that have a package, in the user's agents and the kernel's.
-    pub fn agent_names(&self) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        for root in [self.agents.clone(), self.kernel.join("agents")] {
-            let Ok(dir) = std::fs::read_dir(root) else {
-                continue;
-            };
-            let mut names: Vec<String> = dir
-                .filter_map(Result::ok)
-                .filter_map(|d| d.file_name().into_string().ok())
-                .filter(|n| !n.starts_with('.') && self.agent_exists(n))
-                .collect();
-            names.sort();
-            for n in names {
-                if !out.contains(&n) {
-                    out.push(n);
-                }
-            }
-        }
-        out
-    }
-
-    /// `builtin()` in `kith-auth`: one of the kernel's own agents (scratch ...): found under `<kernel>/agents` and not in
-    /// the user's agents folder. Its life folder is one for everyone who runs it, so only the owner does.
-    pub fn is_builtin(&self, agent: &str) -> bool {
-        let has = |root: &Path| {
-            let d = root.join(agent);
-            !agent.is_empty()
-                && !agent.contains('/')
-                && !agent.starts_with('.')
-                && (d.join("role/agent.md").is_file() || d.join("agent.md").is_file())
-        };
-        let kernel_agents = self.kernel.join("agents");
-        let same = |a: &Path, b: &Path| match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
-            (Ok(a), Ok(b)) => a == b,
-            _ => a == b,
-        };
-        !same(&self.agents, &kernel_agents) && !has(&self.agents) && has(&kernel_agents)
     }
 
     fn serve_dir(&self) -> PathBuf {
@@ -664,11 +604,11 @@ impl<'a> Rules<'a> {
     /// `jobs_of`: the jobs the agent's package declares.
     fn jobs_of(&self, pkg: &str) -> Rc<Vec<Job>> {
         let mut cache = self.jobs.borrow_mut();
-        Rc::clone(cache.entry(pkg.to_owned()).or_insert_with(|| {
-            Rc::new(jobs::read(
-                &self.c.package_dir(pkg).join("capabilities.yaml"),
-            ))
-        }))
+        Rc::clone(
+            cache
+                .entry(pkg.to_owned())
+                .or_insert_with(|| Rc::new(self.c.declared_jobs(pkg))),
+        )
     }
 
     /// Whether the agent's package declares a job of this name (capabilities.yaml `jobs:`).
@@ -773,7 +713,9 @@ impl<'a> Rules<'a> {
             // before any row, the `*` row and a helper list included: fail closed
             return Ok((
                 false,
-                format!("{agent} is a built-in agent: only the owner runs it"),
+                self.c.unreadable(agent).unwrap_or_else(|| {
+                    format!("{agent} is a built-in agent: only the owner runs it")
+                }),
             ));
         }
         if truthy(get(entry, "bot_of")) {
@@ -855,7 +797,7 @@ impl<'a> Rules<'a> {
     /// (`guest_domains:` in capabilities.yaml, the owner's consent at install) and the ones the owner kept for everyone
     /// on a card (`agent_access`). Plain host names only.
     pub fn agent_domains(&self, agent: &str) -> Vec<String> {
-        let mut all = jobs::guest_domains(&self.c.package_dir(agent).join("capabilities.yaml"));
+        let mut all = self.c.declared_domains(agent);
         if let Some(kept) = get(get(get(self.auth, "agent_access"), agent), "domains").as_array() {
             all.extend(kept.iter().filter_map(Value::as_str).map(str::to_owned));
         }

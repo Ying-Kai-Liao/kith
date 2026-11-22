@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # kith-account-state-switch-check — the `account-state` switch (kernel/lib/core-switched.txt) and the step of the accounts
 # module: `kith account list|pick|out|clear|usage` is answered by `kith kernel account-state` when the line is there and a
-# kith program lists the module; with KITH_CORE=python, with the line gone or with a program too old there is no Python
-# body left to answer (bin/kith-account is a stub, R3): one line and exit 1, and the core is not asked. After `kith kernel cutover step accounts` the state is the core's table, state.json is a tombstone, and
+# kith program lists the module; with the line gone or with a program too old there is no Python body left to answer
+# (bin/kith-account is a stub, R3): one line and exit 1, and the core is not asked. KITH_CORE=python reaches nothing
+# either (same line, exit 1, the core not asked). After `kith kernel cutover step accounts` the state is the core's table, state.json is a tombstone, and
 # nothing reads the tombstone: the verbs, the Python readers (lib/kith_accounts.py) and a launch's `--record` all go through
-# the core; KITH_CORE=python is refused; the rollback writes the file back with the marks made in between. Needs the Rust
+# the core; KITH_CORE=python is refused ("has moved to the core"); the rollback writes the file back with the marks made in between. Needs the Rust
 # program: KITH_DIFFTEST_BIN=/path/to/kith (without one the check says so and exits 0).
 #
 #   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-account-state-switch-check

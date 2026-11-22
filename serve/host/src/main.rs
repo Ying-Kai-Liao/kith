@@ -35,6 +35,7 @@ mod screen;
 mod service;
 mod shell;
 mod store;
+mod supervise;
 mod terminal;
 mod threads_cmd;
 mod tui;
@@ -96,6 +97,9 @@ enum Sub {
         /// Address to bind. Defaults to all interfaces so the phone can reach it over Tailscale/LAN.
         #[arg(long, default_value = "0.0.0.0")]
         bind: String,
+        /// Run the host as a child and pass signals on (what a launchd job behind a launcher runs); see `supervise.rs`.
+        #[arg(long)]
+        supervise: bool,
     },
     /// Show a one-time pairing QR code for the Kith iOS app (the host must be running).
     Pair {
@@ -459,7 +463,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
-    /// `kith account ...`, every verb of the command (`kernel/bin/kith-account` is a stub for it): the state ones (`list|pick|out|clear|usage`) and the ones that
+    /// `kith account ...`, every verb of the command (the program's own; `kernel/bin/kith-account` is gone): the state ones (`list|pick|out|clear|usage`) and the ones that
     /// write the set (`add|login|remove|order|move|set|policy|pin|unpin|cross-harness|migrate|use|backup`). `add` and `remove`
     /// with `--json` return the login command and run nothing; without it the harness's own login runs.
     // -h/--help belong to the usage text of `kith kernel account`, so clap must not answer them.
@@ -555,7 +559,7 @@ enum KernelCmd {
     },
     /// `kernel/bin/kith-permit`'s command-line verbs: `issue AGENT SESSION PID`, `denied --dir DIR`, `once --dir DIR` and
     /// `apply SETTINGS_FILE`; any other line is the stdio MCP server (`approve`, `request_access`, `request_secret`, `report_bug`,
-    /// `ask_helper`, `run_door`). Prints what `kith-permit` prints, with its exit codes. Not routed from `kith` yet.
+    /// `ask_helper`, `run_door`). Prints what `kith-permit` prints, with its exit codes. Routed from `kith` while `permit` is switched.
     #[command(disable_help_flag = true)]
     Permit {
         /// The kernel folder (default: the one this program finds).
@@ -1332,6 +1336,10 @@ async fn main() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
     let cli = match kernel::route(&args) {
         kernel::Route::Host(a) => {
+            // Decided before anything else: the supervisor takes no lock and opens nothing, it only runs the host.
+            if supervise::wanted(&args) {
+                std::process::exit(supervise::run(&args).await);
+            }
             // The daemon answers first when one runs and the table says the core serves the verb; otherwise clap and the
             // embedded verbs below do exactly what they did before.
             if let Some(code) = core_front::try_cli(&a) {
@@ -1345,8 +1353,10 @@ async fn main() -> Result<()> {
             return Ok(());
         }
     };
-    match cli.cmd.unwrap_or(Sub::Serve { port: service::DEFAULT_PORT, bind: "0.0.0.0".into() }) {
-        Sub::Serve { port, bind } => serve(&bind, port).await,
+    match cli.cmd.unwrap_or(Sub::Serve { port: service::DEFAULT_PORT, bind: "0.0.0.0".into(), supervise: false }) {
+        // `wanted()` takes the flag before clap; reaching here with it set would run the host unsupervised.
+        Sub::Serve { supervise: true, .. } => anyhow::bail!("--supervise reached the host unhandled"),
+        Sub::Serve { port, bind, supervise: false } => serve(&bind, port).await,
         Sub::Pair { port, json } => pair(port, json).await,
         Sub::Info { port, json } => info(port, json).await,
         Sub::Devices { port, action } => match action.unwrap_or(DevicesAction::List) {

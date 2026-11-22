@@ -264,7 +264,7 @@ has "...and the classes are asked all the same" "$(js "d['permissions']['ask']" 
 
 # --- kith-pkg check ----------------------------------------------------------------------------------------------------
 check() { (cd "$KITH_HOME/agents/echo" && "$KERNEL/bin/kith-pkg" check echo 2>&1); }
-printf '%s' '{"permissions": {"allow": ["Bash(git -C * log:*)", "Edit(/{{HOME_DIR}}/files/**)"]}, "autoMode": {"allow": ["Writing under the files folder is routine"]}}' \
+printf '%s' '{"permissions": {"allow": ["Bash(git -C * log *)", "Edit(/{{HOME_DIR}}/files/**)"]}, "autoMode": {"allow": ["Writing under the files folder is routine"]}}' \
   > "$PKG/settings.json"
 is "kith-pkg check: routine rules pass" "$(check | tail -1)" "ok"
 printf '%s' '{"permissions": {"allow": ["Bash(npx:*)", "Edit(/{{AGENT_DIR}}/agent.md)"]}, "autoMode": {"allow": ["Merging pull requests is routine"]}}' \
@@ -273,11 +273,15 @@ C=$(check)
 has "kith-pkg check: a code rule fails" "$C" "allow Bash(npx:*) is must-ask (code)"
 has "kith-pkg check: an own-package rule fails" "$C" "is must-ask (trust)"
 has "kith-pkg check: an autoMode.allow sentence naming a class fails" "$C" "autoMode.allow names a must-ask class (outward)"
+printf '%s' '{"permissions": {"allow": ["Bash(git -C * fetch:*)"], "deny": ["Bash(rm * x:*)"]}}' > "$PKG/settings.json"
+C=$(check)
+has "kith-pkg check: a * before a trailing :* fails" "$C" "Bash(git -C * fetch:*): a * before the trailing :* makes Claude Code read it as a literal prefix"
+has "kith-pkg check: ...in deny too" "$C" "Bash(rm * x:*): a * before"
 rm -f "$PKG/settings.json"
 
 # --- the Python and Rust guards ask the same trust commands (core/kernel/src/launch/guard.rs TRUST_CMDS) ------------------
 py=$(python3 -c "import sys; sys.path.insert(0, '$KERNEL/lib'); import kith_guard as g; print('\n'.join(g.TRUST_CMDS))")
-rs=$(sed -n '/^const TRUST_CMDS/,/^];/p' "$KERNEL/../core/kernel/src/launch/guard.rs" | grep -o '^ *"[^"]*"' | tr -d '"')
+rs=$(sed -n '/^\(pub(super) \)\{0,1\}const TRUST_CMDS/,/^];/p' "$KERNEL/../core/kernel/src/launch/guard.rs" | grep -o '^ *"[^"]*"' | tr -d '"')
 is "the Rust TRUST_CMDS are the Python ones" "$(printf '%s\n' "$rs" | sed 's/^ *//' | sort)" "$(printf '%s\n' "$py" | sort)"
 
 echo

@@ -151,6 +151,9 @@ pub(super) enum Outcome {
     Nothing,
     /// The `jobs.json` read is no longer the file's: nothing was written, read again and retry.
     Stale,
+    /// A package fact the may check needed could not be read in time: nothing was written (no final row), so the slot stays
+    /// due and a later call decides it.
+    Unavailable,
 }
 
 #[allow(clippy::unnecessary_wraps, reason = "the shape of `Fire::after`")]
@@ -334,6 +337,7 @@ fn fire_with(tx: &Transaction<'_>, f: &Fire<'_>, event: Option<&Value>) -> Resul
         finish(tx, f, seen)?;
         return Ok(o);
     }
+    let missed_before = crate::packages::miss_count();
     let refusal = if person.is_empty() {
         Some("denied: no one to run it as".to_owned())
     } else if epoch != f.revoke_seen || secrets::cut_off(&auth, &person) {
@@ -346,6 +350,14 @@ fn fire_with(tx: &Transaction<'_>, f: &Fire<'_>, event: Option<&Value>) -> Resul
             Err(e) => return Err(e),
         }
     };
+    // A tick names no agent, so no fact was refreshed for it: a miss may be why the rule said no (or yes). Decide again once
+    // it is read (nothing committed), and on the last round write nothing rather than a final row from an unknown.
+    if crate::packages::miss_count() > missed_before {
+        if crate::packages::pass_missed() {
+            return Err(crate::packages::need_packages());
+        }
+        return Ok(Outcome::Unavailable);
+    }
     if let Some(why) = refusal {
         let o = skip(tx, f, slot, &why)?;
         finish(tx, f, seen)?;
@@ -443,7 +455,7 @@ pub(super) fn settings_of(def: &Value) -> Value {
 pub(super) fn fire(core: &mut Core, f: &Fire<'_>) -> Result<Outcome> {
     let tx = core.claim_tx()?;
     let out = fire_in(&tx, f)?;
-    if out == Outcome::Stale {
+    if matches!(out, Outcome::Stale | Outcome::Unavailable) {
         return Ok(out);
     }
     tx.commit()?;
@@ -454,7 +466,7 @@ pub(super) fn fire(core: &mut Core, f: &Fire<'_>) -> Result<Outcome> {
 pub(super) fn fire_event(core: &mut Core, f: &Fire<'_>, event: &Value) -> Result<Outcome> {
     let tx = core.claim_tx()?;
     let out = fire_with(&tx, f, Some(event))?;
-    if out == Outcome::Stale {
+    if matches!(out, Outcome::Stale | Outcome::Unavailable) {
         return Ok(out);
     }
     tx.commit()?;
@@ -837,6 +849,7 @@ pub(super) fn tick(
     // depends on what else went through.
     let mut failed: Vec<(usize, String)> = Vec::new();
     let mut went_through = false;
+    let mut need: Option<Error> = None;
     for (i, w) in work.iter().enumerate() {
         let a = &agents[w.agent];
         // An agent planned from its index has no file to compare with.
@@ -870,6 +883,10 @@ pub(super) fn tick(
                 problems.push(json!({"agent": a.agent, "job": w.job, "error": "the jobs file changed while it was being fired; tried again next tick"}));
                 blocked = true;
             }
+            Ok(Outcome::Unavailable) => {
+                problems.push(json!({"agent": a.agent, "job": w.job, "error": "package facts could not be read in time; tried again next tick"}));
+                blocked = true;
+            }
             Ok(out) => {
                 went_through = true;
                 if let Err(e) = clear_failure(core, &a.agent, &w.job) {
@@ -877,12 +894,22 @@ pub(super) fn tick(
                 }
                 report.push(outcome_json(&a.agent, &w.job, w.slot.as_deref(), &out));
             }
+            // Not the job's failure: the call runs again once the facts are read (see `packages::run_call`). The jobs after
+            // this one are still looked at, so every agent whose fact was missed is refreshed in one round (not two a
+            // round); the watermark stays (`blocked`) so a later fire of this pass cannot move it past this slot.
+            Err(e @ Error::NeedPackages(_)) => {
+                need = Some(e);
+                blocked = true;
+            }
             Err(e) => {
                 let why = e.to_string();
                 problems.push(json!({"agent": a.agent, "job": w.job, "error": why}));
                 failed.push((i, why));
             }
         }
+    }
+    if let Some(e) = need {
+        return Err(e);
     }
     // Every failing tick counts. Whether the job is likely the fault decides only how soon it is given up on: something
     // else went through this tick, or it was the only job due, is the job's own failure; otherwise it may be the core,
@@ -953,6 +980,10 @@ pub(super) fn outcome_json(agent: &str, job: &str, slot: Option<&str>, out: &Out
         Outcome::Nothing => o["outcome"] = json!("missed"),
         Outcome::Stale => {
             o["outcome"] = json!("stale");
+            o["retry"] = json!(true);
+        }
+        Outcome::Unavailable => {
+            o["outcome"] = json!("unavailable");
             o["retry"] = json!(true);
         }
     }

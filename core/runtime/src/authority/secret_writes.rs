@@ -16,7 +16,7 @@
 //! There is no lent check at write time: `granted()` checks at use, and the secrets view keeps that. One thing the file
 //! never had: a caller whose environment names a non-owner `KITH_PERSON` is refused (the file's permissions stood in).
 
-use kith_kernel::secrets::{self, Ctx, Die, Rules};
+use kith_kernel::secrets::{self, Ctx, Die, Found, Rules};
 use serde_json::{Map, Value, json};
 
 use super::revoke::Life;
@@ -129,27 +129,45 @@ fn spec_of(c: &Ctx, life: &Life, svc: &str, agent: Option<&str>) -> R<Option<(Or
         return Ok(None);
     }
     let file = format!("{svc}.json");
-    let mut dirs = vec![
-        (Origin::Kernel, life.kernel.join("services")),
-        (Origin::Mac, life.machine.join("services")),
-    ];
-    if let Some(a) = agent.filter(|a| c.agent_exists(a)) {
-        dirs.push((Origin::Agent, c.package_dir(a).join("services")));
-    }
-    for (origin, dir) in dirs {
-        let path = dir.join(&file);
-        if !path.is_file() {
-            continue;
-        }
-        let spec = std::fs::read(&path)
+    let parse = |bytes: &[u8]| {
+        serde_json::from_slice::<Value>(bytes)
             .ok()
-            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .filter(Value::is_object)
             .ok_or_else(|| Die {
                 msg: format!("the service spec of {svc} cannot be read"),
                 code: 1,
-            })?;
-        return Ok(Some((origin, spec)));
+            })
+    };
+    // The kernel's folder is not the core's own: its spec comes through the package facts, and a disk that did not answer
+    // refuses the write (nothing is committed). This Mac's folder is the core's own; the agent's package is read through
+    // the package facts too.
+    let Some(kernel) = life.kernel_service(svc) else {
+        return Err(Die {
+            msg: format!(
+                "the service spec of {svc} cannot be read: the disk did not answer, try again"
+            ),
+            code: 1,
+        });
+    };
+    match &*kernel {
+        Found::Bytes(b) => return Ok(Some((Origin::Kernel, parse(b)?))),
+        Found::Unreadable => return parse(b"").map(|_| None),
+        Found::Absent => {}
+    }
+    let path = life.machine.join("services").join(&file);
+    if path.is_file() {
+        let spec = std::fs::read(&path).map_err(|_| Die {
+            msg: format!("the service spec of {svc} cannot be read"),
+            code: 1,
+        })?;
+        return Ok(Some((Origin::Mac, parse(&spec)?)));
+    }
+    if let Some(a) = agent.filter(|a| c.agent_exists(a)) {
+        match c.service_file(a, &file) {
+            Found::Absent => {}
+            Found::Bytes(b) => return Ok(Some((Origin::Agent, parse(&b)?))),
+            Found::Unreadable => return parse(b"").map(|_| None),
+        }
     }
     Ok(None)
 }
@@ -302,6 +320,9 @@ pub(crate) fn secret_grant(auth: &mut Value, c: &Ctx, life: &Life, a: &GrantArgs
     need_service(c, life, svc, a.agents.first().map(|n| base(n)).as_deref())?;
     if a.known_only {
         for n in a.agents {
+            if let Some(why) = c.unreadable(&base(n)) {
+                return die(why);
+            }
             if !c.agent_exists(&base(n)) && !matches!(*n, "bridge" | "serve") {
                 return die(format!("no agent '{n}' (kith ls)"));
             }

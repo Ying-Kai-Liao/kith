@@ -8,6 +8,15 @@ use std::sync::Arc;
 
 /// A scripted core with these waiting host turns `(turn, key)`; it records every cancel.
 fn core(listed: Vec<(i64, String)>, answers: bool) -> (CoreWriter, Arc<Mutex<Vec<i64>>>, std::path::PathBuf) {
+    core_with(listed, answers, false)
+}
+
+/// [`core`] whose cancels (not its list) say `busy` when `cancel_busy`: the cancels are counted all the same.
+fn core_with(
+    listed: Vec<(i64, String)>,
+    answers: bool,
+    cancel_busy: bool,
+) -> (CoreWriter, Arc<Mutex<Vec<i64>>>, std::path::PathBuf) {
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let dir =
         std::env::temp_dir().join(format!("kith-strays-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
@@ -37,12 +46,24 @@ fn core(listed: Vec<(i64, String)>, answers: bool) -> (CoreWriter, Arc<Mutex<Vec
         }
         "hostclaim.cancel" => {
             c.lock().unwrap().push(p["turn"].as_i64().unwrap());
+            if cancel_busy {
+                return Answer::Down { why: "the core is busy".into(), lost: false };
+            }
             Answer::Done(json!({"cancelled": true}))
         }
         other => Answer::Refused(format!("no {other}")),
     });
     script(&state, fake);
     (CoreWriter::new(folders), cancelled, dir)
+}
+
+#[test]
+fn the_sweep_stops_cancelling_at_the_first_busy_core() {
+    let (a, b, c) = (key(), key(), key());
+    let (w, asked, dir) = core_with(vec![(21, a), (22, b), (23, c)], true, true);
+    assert_eq!(w.sweep_strays(), 0);
+    assert_eq!(*asked.lock().unwrap(), vec![21], "one call went out, the rest of the pass did not");
+    std::fs::remove_dir_all(dir).ok();
 }
 
 fn key() -> String {

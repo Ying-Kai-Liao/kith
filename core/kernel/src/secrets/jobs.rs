@@ -471,6 +471,27 @@ fn doors(caps: &Path, text: &str) -> Vec<(String, String)> {
     out
 }
 
+/// The lockfiles the doors of a capabilities.yaml name, as `doors` finds them: the files a door's digest is read from.
+/// A cache of the package's jobs watches these too.
+pub fn door_lockfiles(caps: &Path) -> Vec<PathBuf> {
+    let Ok(bytes) = std::fs::read(caps) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    let base: PathBuf = std::fs::canonicalize(caps)
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| caps.parent().map(Path::to_path_buf).unwrap_or_default());
+    block(&text, "doors")
+        .into_iter()
+        .flatten()
+        .filter_map(|d| match field(&d, "lockfile") {
+            Some(V::Str(l)) => Some(base.join(l)),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The valid jobs of a capabilities.yaml in package order (`kith_jobs.read(caps)[0]`).
 pub fn read(caps: &Path) -> Vec<Job> {
     let text = if caps.is_file() {
