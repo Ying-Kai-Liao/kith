@@ -934,8 +934,8 @@ async fn the_other_requests_of_a_turn_are_said_even_when_its_cards_died() {
     let note = &spawned[0].args[3];
     assert!(note.contains("use the staging box"), "{note}");
     assert!(!note.contains(&card.shown) && !note.contains("0 things"), "{note}");
-    assert_eq!(crate::wake::status(&state(&r), "ask:job-1/1").as_deref(), Some("answered"));
-    assert_eq!(crate::wake::status(&state(&r), &format!("card:{}", card.id)).as_deref(), Some("answered"));
+    queue_says_of(&r, "ask:job-1/1", "answered").await;
+    queue_says_eventually(&r, &card, "answered").await;
 }
 
 #[tokio::test]
