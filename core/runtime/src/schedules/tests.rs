@@ -76,7 +76,7 @@ const STATE: &str = r#"{
   "tick": "2026-11-04T11:59",
   "pruned": 1.0,
   "last": {
-    "mel/digest": {"at": "2026-11-04T08:00", "pid": 4242, "log": "/logs/digest.log", "why": "due 08:00"},
+    "mel/digest": {"at": "2026-11-04T08:00", "pid": 999999999, "log": "/logs/digest.log", "why": "due 08:00"},
     "mel/gone": {"at": "2026-11-03T08:00", "pid": 1, "log": "/logs/gone.log", "why": "due 08:00"},
     "bad-key": {"at": "x"},
     "mel/noat": {"pid": 3}
@@ -449,10 +449,11 @@ fn matches_the_fixture_of_kith_sched_json_ls_until_the_golden_lands() {
         .iter()
         .map(project)
         .collect();
-    // pid 4242 is not a process on the test machine; kith-sched says running only for a live pid.
+    // pid 999999999 is above pid_max on Linux (at most 4194304) and macOS (99998), so it is never a live process; a small
+    // pid such as 4242 can be one on a fresh runner. kith-sched says running only for a live pid.
     let want = json!([
         {"agent": "mel", "id": "digest", "cron": "0 8 * * *", "task": "send the digest", "paused": false, "person": "kai",
-         "last": {"at": "2026-11-04T08:00", "why": "due 08:00", "pid": 4242, "log": "/logs/digest.log", "running": false}},
+         "last": {"at": "2026-11-04T08:00", "why": "due 08:00", "pid": 999999999, "log": "/logs/digest.log", "running": false}},
         {"agent": "mel", "id": "poll", "cron": "*/5 * * * *", "task": "poll", "paused": true, "last": null},
         {"agent": "mel", "id": "norun", "cron": "*/5 * * * *", "task": "never ran", "paused": false, "last": null},
         {"agent": "mel", "id": "weird", "cron": "bad", "task": "x", "paused": false, "last": null}
