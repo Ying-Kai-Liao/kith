@@ -453,7 +453,7 @@ fn matches_the_fixture_of_kith_sched_json_ls_until_the_golden_lands() {
     // pid such as 4242 can be one on a fresh runner. kith-sched says running only for a live pid.
     let want = json!([
         {"agent": "mel", "id": "digest", "cron": "0 8 * * *", "task": "send the digest", "paused": false, "person": "kai",
-         "last": {"at": "2026-11-04T08:00", "why": "due 08:00", "pid": 999999999, "log": "/logs/digest.log", "running": false}},
+         "last": {"at": "2026-11-04T08:00", "why": "due 08:00", "pid": 999_999_999, "log": "/logs/digest.log", "running": false}},
         {"agent": "mel", "id": "poll", "cron": "*/5 * * * *", "task": "poll", "paused": true, "last": null},
         {"agent": "mel", "id": "norun", "cron": "*/5 * * * *", "task": "never ran", "paused": false, "last": null},
         {"agent": "mel", "id": "weird", "cron": "bad", "task": "x", "paused": false, "last": null}
