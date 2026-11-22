@@ -110,6 +110,10 @@ pub fn switch_file_exists(folders: &Paths, module: &str) -> bool {
 fn answer_of(reached: kith_core::Reached) -> Answer {
     match reached {
         kith_core::Reached::Answered(v) => Answer::Done(v),
+        // A `busy` is the core's lock or connection limit, not its rules: nothing ran, and it said nothing about this
+        // call. Read as a refusal it would be a definite no (a grant denied, an access request recorded as declined);
+        // it fails closed like "core down" instead, and `lost: false` says nothing was sent.
+        kith_core::Reached::Refused(kith_core::Error::Busy(why)) => Answer::Down { why, lost: false },
         kith_core::Reached::Refused(e) => Answer::Refused(e.to_string()),
         kith_core::Reached::NoDaemon => Answer::Down { why: "no core is running".to_owned(), lost: false },
         kith_core::Reached::Mismatch(note) => Answer::Down { why: note, lost: false },
@@ -629,6 +633,7 @@ fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> CallEnd 
                 // A daemon that came up meanwhile is used, never raced.
                 match kith_core::reach(folders, method, params, false) {
                     kith_core::Reached::Answered(answer) => return CallEnd::Answered(answer),
+                    kith_core::Reached::Refused(kith_core::Error::Busy(why)) => return CallEnd::NoAnswer(why, 3),
                     kith_core::Reached::Refused(e) => return CallEnd::Refused(e.to_string()),
                     _ => {}
                 }
@@ -696,6 +701,8 @@ fn core_call_dispatch(method: &str, params: &Value) -> CallEnd {
         matches!(method, "terminal.list" | "claim.list" | "claim.epoch" | "schedule.jobs" | "schedule.runs");
     match kith_core::reach(&folders, method, params, repeatable) {
         kith_core::Reached::Answered(answer) => CallEnd::Answered(answer),
+        // Busy: nothing ran, and the core did not decide; exit 3 like "no daemon" (a hook keeps its spool entry).
+        kith_core::Reached::Refused(kith_core::Error::Busy(why)) => CallEnd::NoAnswer(why, 3),
         kith_core::Reached::Refused(e) => CallEnd::Refused(e.to_string()),
         #[cfg(unix)]
         // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
@@ -902,6 +909,18 @@ pub fn print_status(json: bool) {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    /// A `busy` is not the core's rules saying no: it fails closed as "core down" (nothing sent), never as a definite refusal.
+    #[test]
+    fn a_busy_core_is_down_and_not_a_refusal() {
+        let busy = kith_core::Reached::Refused(kith_core::Error::Busy("lock held; nothing ran".into()));
+        match answer_of(busy) {
+            Answer::Down { why, lost } => assert!(why.contains("lock held") && !lost),
+            _ => panic!("busy must not be a refusal"),
+        }
+        let said = kith_core::Reached::Refused(kith_core::Error::NotAllowed("no".into()));
+        assert!(matches!(answer_of(said), Answer::Refused(_)));
+    }
 
     /// The lists are written by hand; a routed method missing from one would only show on a switched Mac.
     #[test]

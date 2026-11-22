@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use super::{Answer, CoreWriter};
+use super::{Answer, CoreWriter, Told};
 
 /// How long a key with no turn is kept: the item has not begun, or its begin was dropped.
 const UNBOUND_FOR: Duration = Duration::from_secs(3600);
@@ -123,11 +123,16 @@ impl CoreWriter {
         }
         // After the list, never before it: see the module doc.
         let keys = live_keys();
-        listed
-            .into_iter()
-            .filter(|(_, key)| !keys.contains(key))
-            .filter(|(turn, _)| self.cancel(*turn, "no item of this host is waiting for it"))
-            .count()
+        let mut cancelled = 0;
+        for (turn, _) in listed.into_iter().filter(|(_, key)| !keys.contains(key)) {
+            match self.cancel_told(turn, "no item of this host is waiting for it") {
+                Told::Done => cancelled += 1,
+                Told::Refused(_) => {}
+                // A core that is busy or down answers the rest the same: the pass ends, the next sweep looks again.
+                Told::Down(_) => break,
+            }
+        }
+        cancelled
     }
 }
 

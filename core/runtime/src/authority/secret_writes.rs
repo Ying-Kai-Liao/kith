@@ -138,19 +138,29 @@ fn spec_of(c: &Ctx, life: &Life, svc: &str, agent: Option<&str>) -> R<Option<(Or
                 code: 1,
             })
     };
-    // the kernel's and this Mac's folders are the core's own; the agent's package is read through the package facts
-    for (origin, dir) in [
-        (Origin::Kernel, life.kernel.join("services")),
-        (Origin::Mac, life.machine.join("services")),
-    ] {
-        let path = dir.join(&file);
-        if path.is_file() {
-            let spec = std::fs::read(&path).map_err(|_| Die {
-                msg: format!("the service spec of {svc} cannot be read"),
-                code: 1,
-            })?;
-            return Ok(Some((origin, parse(&spec)?)));
-        }
+    // The kernel's folder is not the core's own: its spec comes through the package facts, and a disk that did not answer
+    // refuses the write (nothing is committed). This Mac's folder is the core's own; the agent's package is read through
+    // the package facts too.
+    let Some(kernel) = life.kernel_service(svc) else {
+        return Err(Die {
+            msg: format!(
+                "the service spec of {svc} cannot be read: the disk did not answer, try again"
+            ),
+            code: 1,
+        });
+    };
+    match &*kernel {
+        Found::Bytes(b) => return Ok(Some((Origin::Kernel, parse(b)?))),
+        Found::Unreadable => return parse(b"").map(|_| None),
+        Found::Absent => {}
+    }
+    let path = life.machine.join("services").join(&file);
+    if path.is_file() {
+        let spec = std::fs::read(&path).map_err(|_| Die {
+            msg: format!("the service spec of {svc} cannot be read"),
+            code: 1,
+        })?;
+        return Ok(Some((Origin::Mac, parse(&spec)?)));
     }
     if let Some(a) = agent.filter(|a| c.agent_exists(a)) {
         match c.service_file(a, &file) {
