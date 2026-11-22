@@ -185,8 +185,8 @@ fixture was re-recorded for that, and the `advance` row that showed the bug chan
 `golden/cost.json` freezes the verbs of `kith-cost` that the launch and the apps call: `limit` (text, `--json`,
 `--sh`), `spent`, `usage --json`, `agent NAME --json`, `members`, `bots --json`, `sync`, and the usage text. The cases are
 `needs: rust` with `program` set and `bin_both`. They were recorded against the Python `kith-cost` as `program.old` and `{BIN} kernel cost --kernel {KERNEL}` as
-`program.new`; the Python is gone (R2), `program.old` is the stub `bin/kith-cost` (it runs the same program, so a re-record proves nothing)
-and the frozen facets are the Python's. There is no `corpus/cost.json` and no `cost` line in `lib/core-switched.txt`. Ledgers are built from transcripts (`home/.claude/projects/**`, with
+`program.new`; the Python is gone (R2) and so is the stub `bin/kith-cost`, so `program.old` is now the same program line as `program.new`
+(a re-record proves nothing) and the frozen facets are the Python's. There is no `corpus/cost.json` and no `cost` line in `lib/core-switched.txt`. Ledgers are built from transcripts (`home/.claude/projects/**`, with
 subagent `.meta.json`), a hand-written `cost.db`, the bridge's `state.json`, an extra Claude account, `settings.json` limits and an `auth.json`.
 
 **The clock.** `kith-cost` takes `KITH_COST_NOW` (ISO local time or epoch seconds; unset it reads the clock) for the calendar month, the
@@ -201,7 +201,7 @@ cases use `all`. Tag/record error texts after `kith-cost tag: ` are masked (`<E>
 and exit 0 are. Left out on purpose: reports on a NULL project, a model-less row in `agent NAME`, NULL output tokens (the Python
 raises a traceback; the core prints a line). A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
 that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`). This is the one intended
-difference of the port (`kernel/tests/kith-cost-switch-check` reads the stub's side): the Python raised, the core does not.
+difference of the port: the Python raised, the core does not.
 
 ### Settings (M5-4)
 

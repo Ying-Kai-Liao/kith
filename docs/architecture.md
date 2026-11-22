@@ -114,7 +114,7 @@ user's machine. MCP services start only when needed and granted, with secrets in
 ask `kith-auth get`. Every secret handed out is logged. Least privilege between cooperating agents, not a sandbox.
 
 **Model, effort and cost.** `model:` and `effort:` in `agent.md` set what an agent runs on, in `kith` runs and as an
-`kith:<name>` subagent. `bin/kith-cost` keeps a ledger of every request; `kith` tags its sessions with agent, version,
+`kith:<name>` subagent. `kith kernel cost` keeps a ledger of every request; `kith` tags its sessions with agent, version,
 model and effort, so `kith cost agents` / `kith cost agent <name>` show what each agent and each version costs.
 
 **Harnesses** (`adapters/harness.py`, 2026-10-18). An agent runs on Claude Code or, with `harness:` in `agent.md`
