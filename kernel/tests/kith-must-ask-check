@@ -166,6 +166,10 @@ for w in ("a project .env", "no secret", "no trust file", ".github", "no delete"
           "does nothing but read and write ordinary files"):
     print("OWNER_ALLOW says %s\t%s\tTrue" % (w, w in g.OWNER_ALLOW))
 print("OWNER_ALLOW names no script file\t%s\tFalse" % ("script file" in g.OWNER_ALLOW))
+# The public-web sentence: a GET of what anyone can see, and what it does not cover (anything sent, a POST, running it).
+for w in ("with a GET", "no login, cookie, key or token", "behind a sign-in or a paywall", "no POST or upload",
+          "nothing from the owner's files or memory in the URL", "never running what was downloaded as code"):
+    print("OWNER_WEB says %s\t%s\tTrue" % (w, w in g.OWNER_WEB))
 r = g.must_ask_rules(places)
 print("deny holds the key files\t%s\tTrue" % any(".ssh/id_" in x and x.startswith("Read(") for x in r["deny"]))
 print("ask holds the own package but learned\t%s %s\tTrue False" % (
@@ -204,9 +208,11 @@ has "owner: the own package is asked" "$(js "d['permissions']['ask']" <<< "$S")"
 hasnt "owner: ...but not its learned skills" "$(js "d['permissions']['ask']" <<< "$S")" "skills/learned"
 has "owner: secrets are denied" "$(js "d['permissions']['deny']" <<< "$S")" "/.ssh/id_*)"
 OWN=$(KERNEL="$KERNEL" python3 -c 'import os,sys; sys.path.insert(0, os.environ["KERNEL"] + "/lib"); import kith_guard; print(kith_guard.OWNER_ALLOW)')
-is "owner: the defaults, then the package's autoMode.allow" "$(js "d['autoMode']['allow'][:-1]" <<< "$S")" \
+WEB=$(KERNEL="$KERNEL" python3 -c 'import os,sys; sys.path.insert(0, os.environ["KERNEL"] + "/lib"); import kith_guard; print(kith_guard.OWNER_WEB)')
+is "owner: the defaults, then the package's autoMode.allow" "$(js "d['autoMode']['allow'][:-2]" <<< "$S")" \
   "['\$defaults', 'Writing under the files folder is routine']"
-is "owner: ...then the kernel's own-code sentence" "$(js "d['autoMode']['allow'][-1]" <<< "$S")" "$OWN"
+is "owner: ...then the kernel's own-code sentence" "$(js "d['autoMode']['allow'][-2]" <<< "$S")" "$OWN"
+is "owner: ...then the public-web sentence" "$(js "d['autoMode']['allow'][-1]" <<< "$S")" "$WEB"
 is "owner: soft_deny keeps the defaults first" "$(js "d['autoMode']['soft_deny'][0]" <<< "$S")" "\$defaults"
 is "owner: one soft_deny sentence per class" "$(js "len(d['autoMode']['soft_deny'])" <<< "$S")" "6"
 # What the emitted Bash ask rules match, read as Claude Code reads them: `*` spans any characters, spaces and slashes

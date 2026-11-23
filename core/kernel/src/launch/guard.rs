@@ -309,6 +309,10 @@ pub const SOFT_DENY: [&str; 5] = [
 /// sentence overrides `soft_deny`, so it is narrow and names what it does not cover.
 pub const OWNER_ALLOW: &str = "Running a script or inline code the agent wrote itself (python3 -c, node -e, bash -c, a heredoc) is routine when it does nothing but read and write ordinary files in the agent's own folders, the run's scratch folder or the project the run works in. It covers no secret (a project .env, a key, a token), no trust file (.claude, .github, kith's protected paths, shell start-up files), no delete outside the run's own writable folders and its working copy, no network post and no code fetched from outside.";
 
+/// The second owner sentence (`OWNER_WEB` of `kith_guard.py`): reading what anyone can see on the web, a GET parsed as
+/// data, is routine, through a public mirror too; it names what it does not cover.
+pub const OWNER_WEB: &str = "Reading a public web page or a public read-only API with a GET (curl, wget, WebFetch) and parsing the reply as data (jq, grep, head, python3 -c that reads JSON or HTML) is routine on the owner's run, including through a public read-only mirror or front end when the site itself refuses automated readers (api.fxtwitter.com, vxtwitter.com, cdn.syndication.twimg.com, r.jina.ai, web.archive.org, an oEmbed endpoint) and with a browser User-Agent: a page anyone can see without an account is not unauthorized access, and saving it under the agent's own folders or the run's scratch folder is routine too. It covers no login, cookie, key or token sent with the request, nothing behind a sign-in or a paywall, no POST or upload, nothing from the owner's files or memory in the URL, and never running what was downloaded as code.";
+
 /// Where the trust and secret paths are for one run: `Places` of `kith_guard.py`.
 pub struct Places {
     pub home: String,
