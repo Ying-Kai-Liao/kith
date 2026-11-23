@@ -2,7 +2,8 @@
 # kith-run-once-cost-check — a one-shot over ACP that crashes or times out still reports what the engine had spent:
 # `kith kernel run-once --json` puts cost_usd in its error, harness.py takes it into the result (total_cost_usd), so
 # kith ask settles it and a delegation's cap counts it. An older host binary sends none: no cost, no crash.
-# Also: `kith kernel accounts` notes reach core.log.
+# Also: a good run on another harness leaves its row in the cost ledger (`kith kernel cost session`), with a control
+# where `kernel cost record` fails; and `kith kernel accounts` notes reach core.log.
 # Needs the Rust kith program (KITH_BIN, else a build under CARGO_TARGET_DIR / serve/host/target, before any installed one); skips without one.
 #
 #   kernel/tests/kith-run-once-cost-check     a few seconds; exits 1 when a check fails
@@ -38,6 +39,17 @@ run() {
 check "a crash after 0.25 spent: an error that carries the cost (kith ask settles it)" "[ \"\$(FAKE_ACP_MODE=crash FAKE_ACP_COST=0.25 run)\" = 'True 0.25' ]"
 check "a crash with nothing spent: an error, no cost, no traceback" "[ \"\$(FAKE_ACP_MODE=crash run)\" = 'True None' ]"
 check "a good run still reports its cost" "[ \"\$(FAKE_ACP_COST=0.25 run)\" = 'False 0.25' ]"
+
+# The ledger row. harness.py swallows every failure of `kernel cost record`, so a run can succeed and leave no row.
+# Asserted on the ledger (`kith kernel cost session`), not on harness.py, so it holds when the engine replaces harness.py.
+# The fake ACP agent's session is qwen:fake-session-1; the row's turn is the task text.
+ledger() { "$BIN" kernel cost --kernel "$KERNEL" session qwen:fake-session-1 2>&1; }
+check "no row for a task that has not run (the assertion can fail)" "! ledger | grep -q 'say-it-lands'"
+check "a run on another harness ends with its cost row in the ledger" "FAKE_ACP_COST=0.25 python3 '$KERNEL/adapters/harness.py' qwen --output json -- say-it-lands >/dev/null 2>&1 && ledger | grep -q 'say-it-lands'"
+# control: the program works except `kernel cost record`, which fails; the run still succeeds, no row lands, and the check sees it
+mkdir -p "$T/broken"
+printf '#!/bin/sh\ncase " $* " in *" record "*) exit 1;; esac\nexec "%s" "$@"\n' "$BIN" > "$T/broken/kith"; chmod +x "$T/broken/kith"
+check "control: a failing cost record leaves no row (the run still succeeds)" "KITH_BIN='$T/broken/kith' FAKE_ACP_COST=0.25 python3 '$KERNEL/adapters/harness.py' qwen --output json -- never-recorded >/dev/null 2>&1 && ! ledger | grep -q 'never-recorded'"
 
 # `kith kernel accounts` exits before the verbs that run through the core, yet its notes (a state write or a settings
 # migration it could not do) still go to core.log: the hook is set once for every kernel verb.
