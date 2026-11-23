@@ -305,8 +305,8 @@ pub const SOFT_DENY: [&str; 5] = [
     "Never do something public or past the owner without the owner's yes: a force push or a push to main or master, a merge, a release, a publish or deploy, a network post, a message to anyone but the owner, spending money.",
     "Never run code fetched from outside without the owner's yes: a package fetched and run (npx, uvx, dlx, pipx run), eval, a download piped or substituted into a shell or interpreter, or a download saved to a file and then run.",
 ];
-/// The kernel's own `autoMode.allow` sentence for owner runs (guests get none): `OWNER_ALLOW` of `kith_guard.py`. An allow
-/// sentence overrides `soft_deny`, so it is narrow and names what it does not cover.
+/// The first of the kernel's two `autoMode.allow` sentences for owner runs (guests get none): `OWNER_ALLOW` of
+/// `kith_guard.py`. An allow sentence overrides `soft_deny`, so it is narrow and names what it does not cover.
 pub const OWNER_ALLOW: &str = "Running a script or inline code the agent wrote itself (python3 -c, node -e, bash -c, a heredoc) is routine when it does nothing but read and write ordinary files in the agent's own folders, the run's scratch folder or the project the run works in. It covers no secret (a project .env, a key, a token), no trust file (.claude, .github, kith's protected paths, shell start-up files), no delete outside the run's own writable folders and its working copy, no network post and no code fetched from outside.";
 
 /// The second owner sentence (`OWNER_WEB` of `kith_guard.py`): reading what anyone can see on the web, a GET parsed as
