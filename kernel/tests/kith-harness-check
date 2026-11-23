@@ -65,4 +65,15 @@ $T/real/dir
 $T/link" PYTHONPATH=$KERNEL/adapters python3 -c 'import harness; print("|".join(harness.Run("codex", "t", None, None, None).dirs))' 2>&1)
 check "run dirs: symlinks resolved, duplicates collapsed" "[ '$OUT' = '$T/real/dir' ]"
 
+# Network on codex: an owner run's sandbox lets commands reach the network (a curl, a link saved); anyone else's does not,
+# and a bypass run has no sandbox to open. KITH_RUN_OWNER comes from bin/kith.
+argv() { KITH_RUN_PROMPT=/dev/null KITH_RUN_DIRS=$T KITH_RUN_OWNER=$1 PYTHONPATH=$KERNEL/adapters python3 -c 'import harness, sys; print(" ".join(harness.Run("codex", "t", None, None, sys.argv[1] or None).codex()))' "$2"; }
+check "codex owner run: sandbox network on" "argv 1 '' | grep -q 'sandbox_workspace_write.network_access=true'"
+check "codex run for anyone else: no network" "! argv 0 '' | grep -q network_access"
+check "codex run without KITH_RUN_OWNER: no network" "! argv '' '' | grep -q network_access"
+check "codex owner bypass run: no sandbox keys at all" "! argv 1 bypassPermissions | grep -q sandbox_"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" > "%s/codex-args"\n' "$T" > "$T/bin/codex"
+(cd "$KITH_HOME/agents/echo" && "$KITH" echo 'say hi' >/dev/null 2>&1)
+check "a real codex owner run through bin/kith carries network_access" "grep -q 'sandbox_workspace_write.network_access=true' '$T/codex-args'"
+
 [ $fails = 0 ] && echo "all harness checks passed" || { echo "$fails check(s) failed"; exit 1; }

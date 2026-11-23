@@ -16,7 +16,8 @@ directories, the MCP servers the agent is granted, the model and effort. This tu
 
 Inputs from bin/kith's environment: KITH_RUN_PROMPT (the prompt file), KITH_RUN_DIRS (directories, one per line),
 KITH_RUN_MCP (MCP config files, one per line, each {"mcpServers": {...}}), KITH_RUN_GLOBAL_SKILLS (1: the harness's own
-skills and plugins stay on), KITH_MODEL, KITH_EFFORT, plus KITH_AGENT, KITH_PROJECT, KITH_VIA for the cost ledger.
+skills and plugins stay on), KITH_RUN_OWNER (1: the owner's own run), KITH_MODEL, KITH_EFFORT, plus KITH_AGENT,
+KITH_PROJECT, KITH_VIA for the cost ledger.
 
 With a task the answer goes to stdout: the text alone, or with --output json one object in the shape `claude -p
 --output-format json` has (result, session_id, is_error, total_cost_usd, num_turns), so kith ask and the bridge read
@@ -73,6 +74,7 @@ class Run:
         self.dirs = list(dict.fromkeys(os.path.realpath(d) for d in os.environ.get('KITH_RUN_DIRS', '').split('\n') if d))
         self.model, self.effort = os.environ.get('KITH_MODEL', ''), os.environ.get('KITH_EFFORT', '')
         self.global_skills = os.environ.get('KITH_RUN_GLOBAL_SKILLS') == '1'
+        self.owner = os.environ.get('KITH_RUN_OWNER') == '1'
         self.mcp = mcp_servers()
         self.bypass = self.mode == 'bypassPermissions'
         self.env = dict(os.environ)
@@ -101,6 +103,9 @@ class Run:
             cfg.append('model_reasoning_effort=' + toml(effort))
         if not self.bypass:
             cfg += ['sandbox_mode="workspace-write"', 'sandbox_workspace_write.writable_roots=' + toml(self.dirs)]
+            # The owner's run may reach the network (read a page, call an API); anyone else's sandbox stays offline.
+            if self.owner:
+                cfg.append('sandbox_workspace_write.network_access=true')
         for name, s in self.mcp.items():
             entry = {'url': s['url']} if s.get('url') else {'command': s['command'], 'args': s.get('args', [])}
             if s.get('env'):
