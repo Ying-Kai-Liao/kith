@@ -71,4 +71,27 @@ else
   echo "skip launch-exec on (no kith program: KITH_DIFFTEST_BIN)"
 fi
 
+# Which command lines the entry hands to the program as a one-shot (kith_oneshot_flag): a task after the flags, and nothing else.
+P="oneshot flag: "
+KITH=$KERNEL . "$KERNEL/lib/kith-core.sh"
+oneshot() { if kith_oneshot_flag "$@"; then echo yes; else echo no; fi; }
+expect "a task" "$(oneshot do it)" yes
+expect "no arguments is a terminal" "$(oneshot)" no
+expect "flags alone are a terminal" "$(oneshot --account a -m opus)" no
+expect "flags then a task" "$(oneshot --account a -m opus -e low --bypass do it)" yes
+expect "the chat turn: --backup ID -- -r text" "$(oneshot --backup a -- -r text)" yes
+expect "dashes and nothing after" "$(oneshot --)" no
+expect "-r ID then a task" "$(oneshot -r abc-123 do it)" yes
+expect "-r then a flag is a pick, and a terminal with nothing after" "$(oneshot -r -m opus)" no
+expect "--resume ID is a terminal without a task, a one-shot with one" "$(oneshot --resume abc)$(oneshot --resume abc note)" noyes
+expect "-c with a task" "$(oneshot -c do it)" yes
+expect "--held with a task" "$(oneshot --held do it)" yes
+expect "--print stays with the script" "$(oneshot --print do it)" no
+expect "--launch-json stays with the script" "$(oneshot --launch-json)" no
+expect "--inspect and --render stay with the script" "$(oneshot --inspect)$(oneshot --render)" nono
+expect "an unknown flag is the script's to refuse" "$(oneshot --nope do it)" no
+expect "a flag with no value is the script's to refuse" "$(oneshot -m)" no
+expect "a task that starts with a dash and holds a blank" "$(oneshot '- one thing')" yes
+expect "a task word after a flag value" "$(oneshot -p proj --hold 12 go)" yes
+
 exit $((fails > 0))
