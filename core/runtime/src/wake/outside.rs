@@ -83,6 +83,7 @@ pub(crate) fn random_id() -> String {
 pub(super) fn gh_in(
     path: Option<&std::ffi::OsStr>,
     program_files: Option<&std::ffi::OsStr>,
+    fixed: &[&str],
 ) -> PathBuf {
     let names: &[&str] = if cfg!(windows) {
         &["gh.exe", "gh"]
