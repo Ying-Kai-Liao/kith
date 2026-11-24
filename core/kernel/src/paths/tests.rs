@@ -263,3 +263,19 @@ fn text_formats() {
     assert_eq!(shell_quote("/a/b-c"), "/a/b-c");
     assert_eq!(quote("é\"\\"), "\"\\u00e9\\\"\\\\\"");
 }
+
+#[test]
+fn which_on_unix_wants_a_file_with_an_execute_bit_and_no_pathext() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let d = std::env::temp_dir().join(format!("kith-which-unix-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("run"), b"").unwrap();
+    std::fs::write(d.join("plain"), b"").unwrap();
+    std::fs::set_permissions(d.join("run"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::set_permissions(d.join("plain"), std::fs::Permissions::from_mode(0o644)).unwrap();
+    let path = std::env::join_paths([&d]).unwrap();
+    assert_eq!(which_on("run", &path), Some(d.join("run")));
+    assert_eq!(which_on("plain", &path), None);
+    assert_eq!(which_on("run.exe", &path), None);
+    std::fs::remove_dir_all(&d).unwrap();
+}
