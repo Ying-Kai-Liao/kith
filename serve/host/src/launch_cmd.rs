@@ -321,11 +321,47 @@ pub fn print_whole(args: &[String]) -> i32 {
     let env: kith_kernel::launch::assemble::Env = std::env::vars_os()
         .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
         .collect();
+    if flags.iter().any(|f| f == "--plan-exec") {
+        return print_exec_plan(agent, flags, &kernel_dir, env);
+    }
     match kith_kernel::launch::assemble::launch(agent, flags, &kernel_dir, env) {
         Ok(json) => {
             let mut out = std::io::stdout().lock();
             let _ = writeln!(out, "{json}");
             let _ = out.flush();
+            0
+        }
+        Err(code) => code,
+    }
+}
+
+/// `kith kernel launch AGENT --plan-exec [--held] [flags] [task]`: a debug verb for the difftest, not a program's interface. It plans
+/// a run in this terminal (what the one-run path will start) and prints what that run is given: whether it is the owner's terminal,
+/// Claude's arguments and the run's account variables.
+fn print_exec_plan(agent: &str, flags: &[String], kernel_dir: &Path, env: kith_kernel::launch::assemble::Env) -> i32 {
+    use kith_kernel::launch::{args, assemble, plan};
+    let flags: Vec<String> = flags.iter().filter(|f| *f != "--plan-exec").cloned().collect();
+    let held = flags.iter().any(|f| f == "--held");
+    let json_out = flags.iter().any(|f| f == "--json");
+    let flags: Vec<String> = flags.into_iter().filter(|f| f != "--held" && f != "--json").collect();
+    let task = assemble::parse_args(&flags).task;
+    let mode = plan::Mode::Exec(plan::ExecOpts::from_process(task, held, ""));
+    match plan::plan(agent, &flags, kernel_dir, env, &mode) {
+        Ok(p) => {
+            let keep = ["KITH_PROVIDER", "KITH_ACCOUNT", "KITH_ACCOUNT_ID", "KITH_ACCOUNT_VAR", "KITH_RUN_OUTBOX", "KITH_CALL_KEY", "KITH_CALL_CHAT"];
+            let env: serde_json::Map<String, Value> = keep
+                .iter()
+                .filter_map(|k| p.env.get(*k).map(|v| ((*k).to_owned(), json!(v))))
+                .collect();
+            if json_out {
+                let out = json!({"owner_terminal": p.owner_terminal, "harness": p.harness, "claude_args": args::claude_args(&p), "env": env});
+                println!("{out}");
+            } else {
+                // The line the difftest's fake `claude` prints for the bash entry's run.
+                let var = p.env.get("KITH_ACCOUNT_VAR").and_then(|v| p.env.get(v)).cloned().unwrap_or_default();
+                let get = |k: &str| p.env.get(k).cloned().unwrap_or_default();
+                println!("claude-run account_id={} provider={} cfg={var}", get("KITH_ACCOUNT_ID"), get("KITH_PROVIDER"));
+            }
             0
         }
         Err(code) => code,
