@@ -361,13 +361,19 @@ impl Rig {
     fn terminal(&self, session: &str) -> i64 {
         let pid = std::process::id();
         let started = kith_kernel::procstart::start_stamp(pid).unwrap();
+        // The conversation exists before a terminal can hold it.
         self.host(
+            "hostclaim.ensure",
+            &json!({"conversation": session, "agent": "echo", "engine": "claude"}),
+        );
+        let claimed = self.host(
             "hostclaim.claim",
             &json!({"conversation": session, "kind": "terminal", "person": "owner", "revokeSeen": 0,
                     "holderInstance": HOST, "pid": pid, "started": started}),
-        )["claimId"]
+        );
+        claimed["claimId"]
             .as_i64()
-            .unwrap()
+            .unwrap_or_else(|| panic!("{claimed}"))
     }
 
     fn end_claim(&self, claim: i64) {
