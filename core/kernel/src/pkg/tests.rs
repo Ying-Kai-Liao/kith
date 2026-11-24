@@ -144,13 +144,23 @@ fn vector_entries(names: &[(&str, &str)]) -> Vec<(Vec<u8>, u64, i128)> {
         .iter()
         .map(|(rel, label)| {
             let (_, text, secs, nanos) = VECTOR_FILES.iter().find(|f| f.0 == *rel).unwrap();
-            let ns = i128::from(*secs) * 1_000_000_000 + i128::from(*nanos);
-            // Windows keeps file times in 100 ns ticks
-            #[cfg(not(unix))]
-            let ns = ns - ns % 100;
-            (label.as_bytes().to_vec(), text.len() as u64, ns)
+            (
+                label.as_bytes().to_vec(),
+                text.len() as u64,
+                i128::from(*secs) * 1_000_000_000 + i128::from(*nanos),
+            )
         })
         .collect()
+}
+
+/// The entries as a file system reads them back: Windows keeps file times in 100 ns ticks.
+fn as_stored(mut entries: Vec<(Vec<u8>, u64, i128)>) -> Vec<(Vec<u8>, u64, i128)> {
+    if cfg!(not(unix)) {
+        for e in &mut entries {
+            e.2 -= e.2 % 100;
+        }
+    }
+    entries
 }
 
 const ROLE_FILES: [(&str, &str); 5] = [
@@ -196,11 +206,17 @@ fn fingerprint_walks_the_package_the_python_way() {
     let root = t.0.display().to_string();
     assert_eq!(
         fingerprint(&ctx, &t.0.join("agents/echo/role")).unwrap(),
-        super::fingerprint_of(&format!("{root}/agents/echo"), &vector_entries(&ROLE_FILES))
+        super::fingerprint_of(
+            &format!("{root}/agents/echo"),
+            &as_stored(vector_entries(&ROLE_FILES))
+        )
     );
     assert_eq!(
         fingerprint(&ctx, &t.0.join("agents/plain")).unwrap(),
-        super::fingerprint_of(&format!("{root}/state"), &vector_entries(&PLAIN_FILES))
+        super::fingerprint_of(
+            &format!("{root}/state"),
+            &as_stored(vector_entries(&PLAIN_FILES))
+        )
     );
 }
 
