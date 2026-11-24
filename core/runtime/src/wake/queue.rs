@@ -132,7 +132,8 @@ pub(crate) fn enqueue(st: &mut State, now: f64, n: &New<'_>) -> Result<Enqueued>
 }
 
 /// Stop: the requests a session is still owed are dropped and their ids kept, so a late copy does not come back; without
-/// `id` its waiters go too. A request a running turn already carries stays with that turn (it was delivered). Returns how
+/// `id` its waiters go too. A request a running turn already carries stays with that turn (it was delivered); a turn that
+/// had not started is given back first (`turns::stop_unstarted_in`, R5). Returns how
 /// many requests and waiters went.
 pub(crate) fn withdraw(st: &mut State, now: f64, session: &str, id: Option<&str>) -> usize {
     // `--id ''` is falsy in the Python: its waiters go, and no request matches the empty id.
@@ -162,17 +163,10 @@ pub(crate) fn withdraw(st: &mut State, now: f64, session: &str, id: Option<&str>
 /// Revoke or removal: everything the sessions of these people are owed is withdrawn as Stop does it, and the waiters of
 /// those sessions go (a waiter carries no person: it is found by its session).
 pub(crate) fn withdraw_person(st: &mut State, now: f64, persons: &[String]) -> usize {
-    let sessions: Vec<String> = st
-        .order()
-        .into_iter()
-        .filter(|s| {
-            st.items[s]
-                .person
-                .as_ref()
-                .is_some_and(|p| persons.contains(p))
-        })
-        .collect();
-    sessions.iter().map(|s| withdraw(st, now, s, None)).sum()
+    sessions_of(st, persons)
+        .iter()
+        .map(|s| withdraw(st, now, s, None))
+        .sum()
 }
 
 /// `[kith wake RUN] why: text`, or a numbered list for several.
@@ -204,13 +198,14 @@ fn claude_session(it: &Item) -> bool {
     it.door == "run" || !(it.session.starts_with("acp:") || it.session.contains('#'))
 }
 
-/// `TurnStart`: the owed requests of `session` go into one turn held by `holder`. The caller has checked the session is
+/// `TurnStart`: the owed requests of `session` go into one turn held by `holder` (none for the tick's runs: their turn in
+/// the conversations lane is their holder). The caller has checked the session is
 /// free (W3). Nothing leaves the queue here (W2).
 fn start_turn(
     st: &mut State,
     out: &dyn Outside,
     session: &str,
-    holder: i64,
+    holder: Option<i64>,
     sid: Option<&str>,
     now: f64,
 ) -> Value {
@@ -232,8 +227,8 @@ fn start_turn(
         .or_else(|| claude_session(it).then(|| it.session.clone()));
     it.turn = Some(Turn {
         run: run.clone(),
-        pid: Some(holder),
-        proc_start: out.proc_start(holder),
+        pid: holder,
+        proc_start: holder.and_then(|h| out.proc_start(h)),
         at: stamp(now),
         sid,
     });
@@ -329,9 +324,35 @@ fn release(st: &mut State, now: f64, session: &str, held: bool) {
     }
 }
 
+/// What the world says about a run whose holder is a process (an imported one, or a `wake.take` holder): the probes
+/// `recover` decides from. The tick makes them with no lock held and decides later, in its own transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Probe {
+    pub alive: bool,
+    pub writer_live: bool,
+    pub marker: bool,
+}
+
+/// Asks the world about `t`: is its holder running, does a live writer hold its session, is its marker in the transcript.
+pub(crate) fn probe(out: &dyn Outside, tr: &dyn Transcripts, t: &Turn) -> Probe {
+    let alive = t.pid.is_some_and(|p| out.alive(p, t.proc_start.as_deref()));
+    let (writer_live, marker) = t.sid.as_deref().map_or((false, false), |sid| {
+        (
+            out.writer_live(sid),
+            tr.has(sid, &format!("[kith wake {}]", t.run)),
+        )
+    });
+    Probe {
+        alive,
+        writer_live,
+        marker,
+    }
+}
+
 /// Restart / `HostBack`: a turn whose holder is gone either reached the session (its marker is in the transcript: answered,
 /// so it is not delivered twice) or did not (owed again). A session whose writer is still live is left alone: the turn may
-/// still be running in a claude the dead holder started.
+/// still be running in a claude the dead holder started. A turn with no holder pid is a tick's run: its turn in the
+/// conversations lane is the holder, and `tick` settles it (R4).
 pub(crate) fn recover(
     st: &mut State,
     out: &dyn Outside,
@@ -342,14 +363,26 @@ pub(crate) fn recover(
     let Some(t) = st.items.get(session).and_then(|it| it.turn.clone()) else {
         return;
     };
-    if t.pid.is_some_and(|p| out.alive(p, t.proc_start.as_deref())) {
+    if t.pid.is_none() {
         return;
     }
-    if let Some(sid) = &t.sid {
-        if out.writer_live(sid) {
+    let p = probe(out, tr, &t);
+    recover_probed(st, session, &t.run, &p, now);
+}
+
+/// [`recover`] from probes made earlier: only if `session` still carries run `run`.
+pub(crate) fn recover_probed(st: &mut State, session: &str, run: &str, p: &Probe, now: f64) {
+    let Some(t) = st.items.get(session).and_then(|it| it.turn.clone()) else {
+        return;
+    };
+    if t.run != run || t.pid.is_none() || p.alive {
+        return;
+    }
+    if t.sid.is_some() {
+        if p.writer_live {
             return;
         }
-        if tr.has(sid, &format!("[kith wake {}]", t.run)) {
+        if p.marker {
             answer_run(st, now, session, &t.run, "recovered");
             return;
         }
@@ -387,9 +420,48 @@ pub(crate) fn take(
         {
             continue;
         }
-        return Some(start_turn(st, out, &s, holder, sid, now));
+        return Some(start_turn(st, out, &s, Some(holder), sid, now));
     }
     None
+}
+
+/// The tick's take: every session with something owed and no run in flight, either door, becomes one run (no holder pid:
+/// its turn is its holder). The caller writes each run's turn in the same transaction (`turns::start_in`).
+pub(crate) fn take_due(st: &mut State, out: &dyn Outside, now: f64) -> Vec<Value> {
+    let mut runs = Vec::new();
+    for s in st.order() {
+        let it = &st.items[&s];
+        if it.turn.is_some() || it.next > now || it.requests.iter().all(|r| r.run.is_some()) {
+            continue;
+        }
+        runs.push(start_turn(st, out, &s, None, None, now));
+    }
+    runs
+}
+
+/// R5: a run whose turn was cancelled before it started goes back to the queue as it was, not as a failed try.
+pub(crate) fn unrun(st: &mut State, session: &str) {
+    let Some(it) = st.items.get_mut(session) else {
+        return;
+    };
+    it.turn = None;
+    it.next = 0.0;
+    for r in &mut it.requests {
+        r.run = None;
+    }
+}
+
+/// The sessions of these people, in the order `ls` lists them.
+pub(crate) fn sessions_of(st: &State, persons: &[String]) -> Vec<String> {
+    st.order()
+        .into_iter()
+        .filter(|s| {
+            st.items[s]
+                .person
+                .as_ref()
+                .is_some_and(|p| persons.contains(p))
+        })
+        .collect()
 }
 
 /// Where request `id` is: `queued`, `running`, how it was answered, or `unknown`; and the turn that carried it.

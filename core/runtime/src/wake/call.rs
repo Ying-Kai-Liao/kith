@@ -11,6 +11,7 @@ use super::outside::{Files, Outside, System, Transcripts};
 use super::queue::{self, New, refused};
 use super::waiters::{self, Ask, WAIT_TIMEOUT};
 use super::{read, turns, write, write_after, write_tx};
+use crate::conversations::claims;
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -27,6 +28,7 @@ pub(crate) fn serves(method: &str) -> bool {
             | "wake.queueList"
             | "wake.queueStatus"
             | "wake.wait"
+            | "wake.released"
     )
 }
 
@@ -105,7 +107,9 @@ pub(crate) fn call_with(
         "wake.withdraw" => {
             let session = need(params, "session")?;
             let id = word(params, "id");
-            let n = write(core, now, |st| Ok(queue::withdraw(st, now, session, id)))?;
+            let n = write_tx(core, now, |tx, st| {
+                turns::withdraw_in(tx, st, now, session, id)
+            })?;
             Ok(json!({"count": n, "lines": [format!("withdrew {n}")]}))
         }
         "wake.withdrawPerson" => {
@@ -113,8 +117,8 @@ pub(crate) fn call_with(
             if persons.is_empty() {
                 return Err(Error::BadParams("wake: persons is required".into()));
             }
-            let n = write(core, now, |st| {
-                Ok(queue::withdraw_person(st, now, &persons))
+            let n = write_tx(core, now, |tx, st| {
+                turns::withdraw_person_in(tx, st, now, &persons)
             })?;
             Ok(json!({"count": n, "lines": [format!("withdrew {n}")]}))
         }
@@ -180,6 +184,15 @@ pub(crate) fn call_with(
             };
             let w = write(core, now, |st| waiters::wait(st, out, now, &ask))?;
             Ok(json!({"waiter": w.to_json(), "lines": [waiters::told(&w)]}))
+        }
+        "wake.released" => {
+            // The terminal's claim has ended; the parked turns of its conversation wait no longer. The claim rows say
+            // nothing holds it, so no probe: a lost call is caught by the next tick.
+            let session = need(params, "session")?;
+            let tx = core.claim_tx()?;
+            let woken = claims::unpark_ready_in(&tx, session, true, false, 0)?;
+            tx.commit()?;
+            Ok(json!({"unparked": woken, "lines": []}))
         }
         _ => Err(refused(format!("{method} is not a wake method"))),
     }
