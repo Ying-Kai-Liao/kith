@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead as _, IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -25,11 +26,65 @@ use super::assemble::{
     plain_number, pyrepr, pystr, random_hex, s, sync_env, threads_hook_bin, truthy,
     usable_kith_bin, which_in,
 };
-use super::{mcp, prompt, settings};
+use super::{mcp, prompt, runenv, settings};
 use crate::secrets::pyjson;
 use crate::{accounts, engines, paths, secrets};
 
+/// What the plan is for: the launch object the host asks for, or a run in this terminal.
+#[derive(Clone, Debug, Default)]
+pub enum Mode {
+    /// `--launch-json`: no prompts, no state-picked account, no origin from the host.
+    #[default]
+    LaunchJson,
+    /// A run that starts here (the terminal, a one-shot, `--print`).
+    Exec(ExecOpts),
+}
+
+/// What `kith AGENT [args]` knows about its own run that the flags do not say.
+#[derive(Clone, Debug, Default)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ExecOpts {
+    /// A task was given (`$# -gt 0` after the flags): a one-shot, not a terminal.
+    pub task: bool,
+    /// `--held`: the session is held by a holder, which has a tty of its own.
+    pub held: bool,
+    /// Stdin and stdout are ttys.
+    pub tty: bool,
+    /// Stdin and stderr are ttys: the limit prompt can be asked and answered.
+    pub prompt_tty: bool,
+    /// The Claude session id `--resume`/`-r`/`-c` named ("" for none).
+    pub resume_sid: String,
+    /// The thread the session was found by, for the line that tells how to run it on another account.
+    pub resume_thread: String,
+}
+
+impl ExecOpts {
+    /// The options of this process: the ttys are the real ones.
+    pub fn from_process(task: bool, held: bool, resume_sid: &str) -> Self {
+        let (i, o, e) = (
+            std::io::stdin().is_terminal(),
+            std::io::stdout().is_terminal(),
+            std::io::stderr().is_terminal(),
+        );
+        Self {
+            task,
+            held,
+            tty: i && o,
+            prompt_tty: i && e,
+            resume_sid: resume_sid.to_owned(),
+            resume_thread: String::new(),
+        }
+    }
+}
+
+/// The owner at their own terminal (the same test `kith` makes twice): no task, a tty on both ends or a held session, not
+/// started by another run, and not by the host, a schedule or an ask (they set `KITH_VIA`).
+pub fn owner_terminal(x: &ExecOpts, print: bool, owner: bool, nested: bool, via: &str) -> bool {
+    !print && !x.task && owner && !nested && via == "terminal" && (x.tty || x.held)
+}
+
 /// What a launch decided, ready to be written as the launch object or to start a run from.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Plan {
     pub agent: String,
     /// The `--backup` account the run was asked for ("" for none).
@@ -58,10 +113,28 @@ pub struct Plan {
     pub physical_cwd: String,
     /// The engine's launch spec when the harness is neither claude nor codex.
     pub spec: Option<Value>,
+    /// The launch object was asked for (not a run here).
+    pub launch: bool,
+    /// The owner's interactive run in this terminal.
+    pub owner_terminal: bool,
+    /// The pinned package folder (its `mcp.json` is the terminal's own MCP config).
+    pub pkg: PathBuf,
 }
 
 /// `kith AGENT [args]` up to the launch object: the plan on success, or the exit code (what was said is already on stderr).
-pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Plan, i32> {
+///
+/// A run that should not start (the owner said no to the limit prompt) is `Err(0)`.
+pub fn plan(
+    agent: &str,
+    argv: &[String],
+    kernel: &Path,
+    env0: Env,
+    mode: &Mode,
+) -> Result<Plan, i32> {
+    let exec = match mode {
+        Mode::LaunchJson => None,
+        Mode::Exec(x) => Some(x),
+    };
     let a = parse_args(argv);
     let mut env = env0;
     sync_env(&mut env);
@@ -412,8 +485,13 @@ pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Pl
         say(msg);
         return Err(*code);
     }
-    if a.resume {
+    // The thread a terminal resumes is `ExecOpts::resume_sid`; the flag itself only says a run is asked for.
+    if a.resume && (exec.is_none() || a.print) {
         say("kith: --resume is for a run in this terminal, not --launch-json or --print");
+        return Err(1);
+    }
+    if a.resume && !p_owner {
+        say("kith: --resume is for the owner's own sessions");
         return Err(1);
     }
     let mut kith_model = a
@@ -451,9 +529,26 @@ pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Pl
                     ));
                     return Err(3);
                 }
-                "ask" => say(&format!(
-                    "kith: {text}; running anyway (your runs never stop at a limit; kith {agent} set limit N raises it)."
-                )),
+                "ask" => {
+                    // A terminal run asks here; a one-shot or the host's launch says so and goes on.
+                    if exec.is_some_and(|x| !a.print && !x.task && x.prompt_tty) {
+                        eprint!("kith: {text}. Run anyway? [Y/n] ");
+                        let _ = std::io::stderr().flush();
+                        let mut l = String::new();
+                        let got = std::io::stdin().lock().read_line(&mut l).unwrap_or(0);
+                        // End of input answers yes, as `read -r ... || l_yes=y` does.
+                        if got > 0 && l.starts_with(['n', 'N']) {
+                            say(&format!(
+                                "kith: not run. Raise it with kith {agent} set limit N."
+                            ));
+                            return Err(0);
+                        }
+                    } else {
+                        say(&format!(
+                            "kith: {text}; running anyway (your runs never stop at a limit; kith {agent} set limit N raises it)."
+                        ));
+                    }
+                }
                 _ => say(&format!("kith: {text}; running anyway.")),
             }
         }
@@ -534,10 +629,7 @@ pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Pl
 
     // ---- run files: the snapshot is held by --hold's pid
     if pkg != src_pkg {
-        let hold = a
-            .hold
-            .clone()
-            .unwrap_or_else(|| std::os::unix::process::parent_id().to_string());
+        let hold = a.hold.clone().unwrap_or_else(parent_pid);
         if hold.is_empty() || !hold.chars().all(|c| c.is_ascii_digit()) {
             say("kith: --hold needs a process id");
             return Err(1);
@@ -602,15 +694,46 @@ pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Pl
         }
     };
     let bget = |be: &HashMap<String, String>, k: &str| be.get(k).cloned().unwrap_or_default();
+    // The account a session was made under (the cost ledger's): --resume runs under it, a handed-on session (KITH_RESUME) is
+    // continued on it when it is a ready candidate.
+    let r_sid = exec.map_or("", |x| x.resume_sid.as_str());
+    let made = {
+        let sid = if r_sid.is_empty() {
+            get(&env, "KITH_RESUME")
+        } else {
+            r_sid
+        };
+        if sid.is_empty() {
+            String::new()
+        } else {
+            accounts::session_account(&p.machine, sid).unwrap_or_default()
+        }
+    };
     if !a.backup.is_empty() {
         use_account(&a.backup, &mut be)?;
         harness = bget(&be, "backup_harness");
         acct = bget(&be, "backup_account");
         account_id = a.backup.split('@').next().unwrap_or_default().to_owned();
+    } else if !r_sid.is_empty() && !made.is_empty() {
+        // Straight to the session's account: no pick (it would note a start on an account this run never uses).
+        let main_now = accounts::main_id(&actx, agent, Some(&agent_md), None);
+        if made != main_now {
+            say(&format!(
+                "kith: that session was made under {made}, so it runs under {made} (main account for {agent}: {main_now})"
+            ));
+        }
+        use_account(&made, &mut be)?;
+        harness = bget(&be, "backup_harness");
+        acct = bget(&be, "backup_account");
+        account_id = made.split('@').next().unwrap_or_default().to_owned();
     } else if harness == own {
+        // A run in a terminal (owner's) starts on the first account that is not out, and on the session's own when it is one
+        // of them; a launch for a program, or a guest's run, on the static main (the host picks per turn itself).
+        let state = exec.is_some() && p_owner;
         let opts = accounts::MainOpts {
+            state,
             record,
-            ..accounts::MainOpts::default()
+            prefer: (state && !made.is_empty()).then_some(made.as_str()),
         };
         match accounts::main_env(&actx, agent, &agent_md, opts) {
             Ok(t) => be = assignments(&t),
@@ -630,9 +753,23 @@ pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Pl
         }
     }
     let mut resume = get(&env, "KITH_RESUME").to_owned();
-    if !resume.is_empty() {
-        let made = accounts::session_account(&p.machine, &resume).unwrap_or_default();
-        if !made.is_empty() && made != account_id {
+    if !made.is_empty() && made != account_id && (!r_sid.is_empty() || !resume.is_empty()) {
+        if !r_sid.is_empty() && a.backup.is_empty() {
+            say(&format!(
+                "kith: that session was made under {made}, so it runs under {made} (main account for {agent}: {account_id})"
+            ));
+            use_account(&made, &mut be)?;
+            harness = bget(&be, "backup_harness");
+            acct = bget(&be, "backup_account");
+            account_id = made.split('@').next().unwrap_or_default().to_owned();
+        } else if !r_sid.is_empty() {
+            let thread = exec.map_or("", |x| x.resume_thread.as_str());
+            say(&format!(
+                "kith: that session was made under {made}, not {}: kith {agent} --resume {thread} --account {made}",
+                a.backup
+            ));
+            return Err(4);
+        } else {
             say(&format!(
                 "kith: session {resume} was made under {made}, not {account_id}; starting a new one"
             ));
@@ -786,6 +923,8 @@ pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Pl
 
     // ---- the settings
     let claude = harness == "claude";
+    let is_terminal =
+        exec.is_some_and(|x| owner_terminal(x, a.print, p_owner, nested, get(&env, "KITH_VIA")));
     let sys = Sys { env: &env };
     let project_dirs = settings::project_dirs(&reg, &project, &home_dir);
     let plugins_json = if claude {
@@ -872,7 +1011,7 @@ pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Pl
             permit_bin: permit_bin.as_deref(),
             threads_bin: threads_bin.as_deref(),
             plugins_json: &plugins_json,
-            owner_terminal: false,
+            owner_terminal: is_terminal && claude,
             api_helper: &bget(&be, "backup_api_helper"),
             once_id: &once_id,
             developer_dir: &developer_dir,
@@ -994,6 +1133,19 @@ pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Pl
     } else {
         String::new()
     };
+    // The origin of an owner's terminal run: the agent's app chat with them, if a host has one (nothing set otherwise).
+    if is_terminal
+        && ["KITH_RUN_OUTBOX", "KITH_BRIDGE_OUTBOX", "KITH_CALL_KEY"]
+            .iter()
+            .all(|k| get(&env, k).is_empty())
+    {
+        for (k, v) in runenv::outbox_env(agent, kernel, &env) {
+            if k == "KITH_RUN_OUTBOX" {
+                env.insert("HQ_RUN_OUTBOX".to_owned(), v.clone());
+            }
+            env.insert(k, v);
+        }
+    }
     sync_env(&mut env);
     Ok(Plan {
         agent: agent.to_owned(),
@@ -1015,5 +1167,68 @@ pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Pl
         call_model,
         physical_cwd,
         spec,
+        launch: exec.is_none(),
+        owner_terminal: is_terminal,
+        pkg,
     })
+}
+
+/// The pid that `--hold` defaults to: the process that started this one.
+#[cfg(unix)]
+fn parent_pid() -> String {
+    std::os::unix::process::parent_id().to_string()
+}
+
+/// Windows has no parent pid in std; `kith --exec` names its own holder with `--hold`.
+#[cfg(not(unix))]
+fn parent_pid() -> String {
+    std::process::id().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opts(task: bool, held: bool, tty: bool) -> ExecOpts {
+        ExecOpts {
+            task,
+            held,
+            tty,
+            ..ExecOpts::default()
+        }
+    }
+
+    #[test]
+    fn the_terminal_is_the_owners_with_no_task_and_a_tty_or_a_holder() {
+        let t = owner_terminal;
+        assert!(t(&opts(false, false, true), false, true, false, "terminal"));
+        assert!(
+            t(&opts(false, true, false), false, true, false, "terminal"),
+            "held needs no tty"
+        );
+        assert!(
+            !t(&opts(false, false, false), false, true, false, "terminal"),
+            "no tty, no holder"
+        );
+        assert!(
+            !t(&opts(true, false, true), false, true, false, "terminal"),
+            "a task is a one-shot"
+        );
+        assert!(
+            !t(&opts(false, false, true), true, true, false, "terminal"),
+            "--print"
+        );
+        assert!(
+            !t(&opts(false, false, true), false, false, false, "terminal"),
+            "a guest"
+        );
+        assert!(
+            !t(&opts(false, false, true), false, true, true, "terminal"),
+            "nested"
+        );
+        assert!(
+            !t(&opts(false, false, true), false, true, false, "chat"),
+            "the host's turns"
+        );
+    }
 }

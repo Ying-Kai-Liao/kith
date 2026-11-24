@@ -1,0 +1,484 @@
+[
+  {
+    "name": "engine-run-ok",
+    "command": "engine-run",
+    "needs": "rust",
+    "bin_both": true,
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/tests/difftest/engine-run-old.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "engine-run"
+      ]
+    },
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "mkdir": "home/work"
+      },
+      {
+        "write": "home/prompt.md",
+        "text": "You echo.\n"
+      },
+      {
+        "write": "home/mcp.json",
+        "text": "{\"mcpServers\": {\"jev\": {\"command\": \"node\", \"args\": [\"x.js\"]}}}"
+      },
+      {
+        "fake": "opencode",
+        "script": "#!/bin/sh\nexec python3 {KERNEL}/tests/fakes/fake-acp-agent\n"
+      }
+    ],
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "KITH_RUN_PROMPT": "{HOME}/prompt.md",
+      "KITH_RUN_DIRS": "{HOME}",
+      "KITH_AGENT": "echo",
+      "FAKE_ACP_ANSWER": "fake-answer",
+      "FAKE_ACP_COST": "0.25"
+    },
+    "run": [
+      [
+        "opencode",
+        "--output",
+        "json",
+        "--",
+        "hello world"
+      ]
+    ],
+    "ignore": [
+      "/\\.git/",
+      "/store/"
+    ],
+    "normalize": [
+      [
+        "@\\d{8}T\\d{6}\\.\\d+",
+        "@<TS>"
+      ],
+      [
+        "\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(\\.\\d+)?Z?",
+        "<TIME>"
+      ]
+    ]
+  },
+  {
+    "name": "engine-run-text",
+    "command": "engine-run",
+    "needs": "rust",
+    "bin_both": true,
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/tests/difftest/engine-run-old.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "engine-run"
+      ]
+    },
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "mkdir": "home/work"
+      },
+      {
+        "write": "home/prompt.md",
+        "text": "You echo.\n"
+      },
+      {
+        "write": "home/mcp.json",
+        "text": "{\"mcpServers\": {\"jev\": {\"command\": \"node\", \"args\": [\"x.js\"]}}}"
+      },
+      {
+        "fake": "opencode",
+        "script": "#!/bin/sh\nexec python3 {KERNEL}/tests/fakes/fake-acp-agent\n"
+      }
+    ],
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "KITH_RUN_PROMPT": "{HOME}/prompt.md",
+      "KITH_RUN_DIRS": "{HOME}",
+      "KITH_AGENT": "echo",
+      "FAKE_ACP_ANSWER": "fake-answer",
+      "FAKE_ACP_COST": "0.25"
+    },
+    "run": [
+      [
+        "opencode",
+        "--",
+        "hello world"
+      ]
+    ],
+    "ignore": [
+      "/\\.git/",
+      "/store/"
+    ],
+    "normalize": [
+      [
+        "@\\d{8}T\\d{6}\\.\\d+",
+        "@<TS>"
+      ],
+      [
+        "\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(\\.\\d+)?Z?",
+        "<TIME>"
+      ]
+    ]
+  },
+  {
+    "name": "engine-run-model-bypass",
+    "command": "engine-run",
+    "needs": "rust",
+    "bin_both": true,
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/tests/difftest/engine-run-old.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "engine-run"
+      ]
+    },
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "mkdir": "home/work"
+      },
+      {
+        "write": "home/prompt.md",
+        "text": "You echo.\n"
+      },
+      {
+        "write": "home/mcp.json",
+        "text": "{\"mcpServers\": {\"jev\": {\"command\": \"node\", \"args\": [\"x.js\"]}}}"
+      },
+      {
+        "fake": "opencode",
+        "script": "#!/bin/sh\nexec python3 {KERNEL}/tests/fakes/fake-acp-agent\n"
+      }
+    ],
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "KITH_RUN_PROMPT": "{HOME}/prompt.md",
+      "KITH_RUN_DIRS": "{HOME}",
+      "KITH_AGENT": "echo",
+      "FAKE_ACP_ANSWER": "fake-answer",
+      "FAKE_ACP_COST": "0.25",
+      "KITH_MODEL": "fast-1"
+    },
+    "run": [
+      [
+        "opencode",
+        "--permission-mode",
+        "bypassPermissions",
+        "--output",
+        "json",
+        "--",
+        "hello world"
+      ]
+    ],
+    "ignore": [
+      "/\\.git/",
+      "/store/"
+    ],
+    "normalize": [
+      [
+        "@\\d{8}T\\d{6}\\.\\d+",
+        "@<TS>"
+      ],
+      [
+        "\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(\\.\\d+)?Z?",
+        "<TIME>"
+      ]
+    ]
+  },
+  {
+    "name": "engine-run-mcp-and-dirs",
+    "command": "engine-run",
+    "needs": "rust",
+    "bin_both": true,
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/tests/difftest/engine-run-old.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "engine-run"
+      ]
+    },
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "mkdir": "home/work"
+      },
+      {
+        "write": "home/prompt.md",
+        "text": "You echo.\n"
+      },
+      {
+        "write": "home/mcp.json",
+        "text": "{\"mcpServers\": {\"jev\": {\"command\": \"node\", \"args\": [\"x.js\"]}}}"
+      },
+      {
+        "fake": "opencode",
+        "script": "#!/bin/sh\nexec python3 {KERNEL}/tests/fakes/fake-acp-agent\n"
+      }
+    ],
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "KITH_RUN_PROMPT": "{HOME}/prompt.md",
+      "KITH_RUN_DIRS": "{HOME}\n{HOME}/work",
+      "KITH_AGENT": "echo",
+      "FAKE_ACP_ANSWER": "fake-answer",
+      "FAKE_ACP_COST": "0.25",
+      "KITH_RUN_MCP": "{HOME}/mcp.json",
+      "FAKE_ACP_DIRS": "1",
+      "FAKE_ACP_LOG": "{HOME}/acp.log"
+    },
+    "run": [
+      [
+        "opencode",
+        "--output",
+        "json",
+        "--",
+        "hello world"
+      ]
+    ],
+    "ignore": [
+      "/\\.git/",
+      "/store/"
+    ],
+    "normalize": [
+      [
+        "@\\d{8}T\\d{6}\\.\\d+",
+        "@<TS>"
+      ],
+      [
+        "\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(\\.\\d+)?Z?",
+        "<TIME>"
+      ]
+    ]
+  },
+  {
+    "name": "engine-run-crash-keeps-cost",
+    "command": "engine-run",
+    "needs": "rust",
+    "bin_both": true,
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/tests/difftest/engine-run-old.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "engine-run"
+      ]
+    },
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "mkdir": "home/work"
+      },
+      {
+        "write": "home/prompt.md",
+        "text": "You echo.\n"
+      },
+      {
+        "write": "home/mcp.json",
+        "text": "{\"mcpServers\": {\"jev\": {\"command\": \"node\", \"args\": [\"x.js\"]}}}"
+      },
+      {
+        "fake": "opencode",
+        "script": "#!/bin/sh\nexec python3 {KERNEL}/tests/fakes/fake-acp-agent\n"
+      }
+    ],
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "KITH_RUN_PROMPT": "{HOME}/prompt.md",
+      "KITH_RUN_DIRS": "{HOME}",
+      "KITH_AGENT": "echo",
+      "FAKE_ACP_ANSWER": "fake-answer",
+      "FAKE_ACP_COST": "0.25",
+      "FAKE_ACP_MODE": "crash"
+    },
+    "run": [
+      [
+        "opencode",
+        "--output",
+        "json",
+        "--",
+        "hello world"
+      ]
+    ],
+    "ignore": [
+      "/\\.git/",
+      "/store/"
+    ],
+    "normalize": [
+      [
+        "@\\d{8}T\\d{6}\\.\\d+",
+        "@<TS>"
+      ],
+      [
+        "\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(\\.\\d+)?Z?",
+        "<TIME>"
+      ]
+    ]
+  },
+  {
+    "name": "engine-run-depleted",
+    "command": "engine-run",
+    "needs": "rust",
+    "bin_both": true,
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/tests/difftest/engine-run-old.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "engine-run"
+      ]
+    },
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "mkdir": "home/work"
+      },
+      {
+        "write": "home/prompt.md",
+        "text": "You echo.\n"
+      },
+      {
+        "write": "home/mcp.json",
+        "text": "{\"mcpServers\": {\"jev\": {\"command\": \"node\", \"args\": [\"x.js\"]}}}"
+      },
+      {
+        "fake": "opencode",
+        "script": "#!/bin/sh\nexec python3 {KERNEL}/tests/fakes/fake-acp-agent\n"
+      }
+    ],
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "KITH_RUN_PROMPT": "{HOME}/prompt.md",
+      "KITH_RUN_DIRS": "{HOME}",
+      "KITH_AGENT": "echo",
+      "FAKE_ACP_ANSWER": "fake-answer",
+      "FAKE_ACP_COST": "",
+      "FAKE_ACP_MODE": "depleted"
+    },
+    "run": [
+      [
+        "opencode",
+        "--output",
+        "json",
+        "--",
+        "hello world"
+      ]
+    ],
+    "ignore": [
+      "/\\.git/",
+      "/store/"
+    ],
+    "normalize": [
+      [
+        "@\\d{8}T\\d{6}\\.\\d+",
+        "@<TS>"
+      ],
+      [
+        "\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(\\.\\d+)?Z?",
+        "<TIME>"
+      ]
+    ]
+  },
+  {
+    "name": "engine-run-no-cost",
+    "command": "engine-run",
+    "needs": "rust",
+    "bin_both": true,
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/tests/difftest/engine-run-old.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "engine-run"
+      ]
+    },
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "mkdir": "home/work"
+      },
+      {
+        "write": "home/prompt.md",
+        "text": "You echo.\n"
+      },
+      {
+        "write": "home/mcp.json",
+        "text": "{\"mcpServers\": {\"jev\": {\"command\": \"node\", \"args\": [\"x.js\"]}}}"
+      },
+      {
+        "fake": "opencode",
+        "script": "#!/bin/sh\nexec python3 {KERNEL}/tests/fakes/fake-acp-agent\n"
+      }
+    ],
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "KITH_RUN_PROMPT": "{HOME}/prompt.md",
+      "KITH_RUN_DIRS": "{HOME}",
+      "KITH_AGENT": "echo",
+      "FAKE_ACP_ANSWER": "fake-answer",
+      "FAKE_ACP_COST": ""
+    },
+    "run": [
+      [
+        "opencode",
+        "--output",
+        "json",
+        "--",
+        "hello world"
+      ]
+    ],
+    "ignore": [
+      "/\\.git/",
+      "/store/"
+    ],
+    "normalize": [
+      [
+        "@\\d{8}T\\d{6}\\.\\d+",
+        "@<TS>"
+      ],
+      [
+        "\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(\\.\\d+)?Z?",
+        "<TIME>"
+      ]
+    ]
+  }
+]

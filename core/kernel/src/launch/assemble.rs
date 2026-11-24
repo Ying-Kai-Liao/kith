@@ -36,6 +36,7 @@ pub(super) const AGENT_ACCESS_TIMEOUT: std::time::Duration = std::time::Duration
 
 /// What `kith AGENT [flags]` was given.
 #[derive(Default, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Args {
     pub print: bool,
     pub launch: bool,
@@ -47,6 +48,8 @@ pub struct Args {
     pub effort: Option<String>,
     pub harness: Option<String>,
     pub perm_mode: Option<String>,
+    /// Words are left after the flags (a task: the run is a one-shot, not a terminal).
+    pub task: bool,
     /// A flag the entry would refuse: (exit code, the line).
     pub error: Option<(i32, String)>,
 }
@@ -121,6 +124,8 @@ pub fn parse_args(args: &[String]) -> Args {
         };
         i += step;
     }
+    // `--` ends the flags and is not itself a task.
+    a.task = args.len() > i + usize::from(args.get(i).is_some_and(|x| x == "--"));
     a
 }
 
@@ -615,7 +620,7 @@ pub(super) fn pj_indent1(v: &Value) -> String {
 
 /// `kith AGENT [args]` with `--launch-json`: the JSON text on success, or the exit code (what was said is already on stderr).
 pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<String, i32> {
-    let plan = super::plan::plan(agent, argv, kernel, env0)?;
+    let plan = super::plan::plan(agent, argv, kernel, env0, &super::plan::Mode::LaunchJson)?;
     Ok(super::json::emit_json(&plan))
 }
 
@@ -710,7 +715,10 @@ mod tests {
             "--bypass",
             "task",
         ]));
-        assert!(a.launch && a.error.is_none() && !a.resume);
+        assert!(a.launch && a.error.is_none() && !a.resume && a.task);
+        assert!(!parse_args(&v(&["-r"])).task);
+        assert!(!parse_args(&v(&["--",])).task);
+        assert!(parse_args(&v(&["--", "do it"])).task);
         assert_eq!(a.hold.as_deref(), Some("7"));
         assert_eq!(a.harness.as_deref(), Some("codex"));
         assert_eq!(a.perm_mode.as_deref(), Some("bypassPermissions"));
