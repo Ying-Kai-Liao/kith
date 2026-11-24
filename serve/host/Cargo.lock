@@ -2148,6 +2148,7 @@ dependencies = [
  "kith-api",
  "kith-holder",
  "kith-kernel",
+ "kith-winsys",
  "proptest",
  "rusqlite",
  "serde_json",
@@ -2308,6 +2309,15 @@ dependencies = [
  "base64 0.23.1",
  "ptts",
  "serde_json",
+]
+
+[[package]]
+name = "kith-winsys"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
