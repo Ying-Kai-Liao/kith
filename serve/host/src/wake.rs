@@ -115,7 +115,9 @@ fn run(state: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
         anyhow::bail!("no kith-wake found");
     };
     #[cfg(test)]
-    *SPAWNS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(state.to_path_buf()).or_default() += 1;
+    {
+        *SPAWNS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(state.to_path_buf()).or_default() += 1;
+    }
     Ok(cmd.args(args).output()?)
 }
 

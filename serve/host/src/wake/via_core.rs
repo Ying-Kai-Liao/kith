@@ -64,7 +64,8 @@ pub fn statuses(f: &Paths, ids: &[String]) -> HashMap<String, String> {
             out.insert(id.to_owned(), if r["run"].is_null() { "queued" } else { "running" }.to_owned());
         }
     }
-    for id in ids.iter().filter(|id| !out.contains_key(*id)) {
+    let missing: Vec<&String> = ids.iter().filter(|id| !out.contains_key(*id)).collect();
+    for id in missing {
         if let Some(state) = status(f, id).filter(|s| s != "unknown") {
             out.insert(id.clone(), state);
         }
