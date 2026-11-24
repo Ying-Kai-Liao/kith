@@ -20,7 +20,18 @@ VERSION=${VERSION#v}
 [ -n "$VERSION" ] || { echo "stage-kernel: no version (pass one, or serve/host/Cargo.toml has none)" >&2; exit 1; }
 mkdir -p "$S"
 if [ -n "$WINDOWS" ]; then
-  # Never copy kernel/bin: it holds symlinks (hq -> kith-*) that Git Bash on Windows cannot create.
+  # What the Windows zip leaves out compared with the Mac tarball, and what stands in (docs/plans/windows-owner.md 4.11).
+  # Later packages must not assume these files exist on Windows:
+  #   kernel/bin   the `kith` router and every kith-* script. A verb the host owns runs in Rust; any other answers
+  #                "not on Windows yet: <verb> (retire-python Pn-m)" from the W17 table. `project-id` ships as
+  #                bin\project-id.exe (W17). No bash fallback.
+  #   kernel/lib   the Python and shell libs (kith_*.py, kith-core.sh, kith-env.sh, core-switched.txt, ...). Nothing on
+  #                Windows yet: each is ported by its own retire-python item (P3-*, P4-*, P5-*), and until then its
+  #                verb is a named refusal. The few data files (starters.json, user.md, *.gitignore) are not staged
+  #                either; a package that needs one moves it into kernel/ data first.
+  #   kernel/tests the repo's tests.
+  #   install.sh   the POSIX installer; Windows uses scripts/install.ps1 (W14).
+  # Also never copy kernel/bin: it holds symlinks (hq -> kith-*) that Git Bash on Windows cannot create.
   mkdir -p "$S/kernel"
   for d in "$ROOT"/kernel/*; do
     case $(basename "$d") in bin | lib | tests) ;; *) cp -R "$d" "$S/kernel/" ;; esac
