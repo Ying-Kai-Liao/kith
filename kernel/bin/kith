@@ -111,6 +111,12 @@
 # agents), else the agent's settings.json defaultMode (its author's suggestion), else kith's default (lib/kith_settings.py:
 # auto, or ~/.kith/settings.json).
 set -euo pipefail
+# The host's claim for this turn (KITH_TURN_CLAIM): taken out of the environment here, so the engine and a nested kith never see
+# it. It goes only to the claim calls below, which attach it; every other branch of an agent's command line refuses it (exit 10).
+turn_claim=${KITH_TURN_CLAIM:-}; unset KITH_TURN_CLAIM; turn_attached=0
+no_turn_claim() { [[ -z $turn_claim ]] || { echo "kith: a turn claim is for a run, not $1; nothing was started" >&2; exit 10; }; }
+# Before an engine starts: a claimed turn that no claim call of this launch attached does not run.
+turn_claim_attached() { [[ -z $turn_claim || $turn_attached == 1 ]] || { echo "kith: the turn claim was not attached by this launch; nothing was started" >&2; exit 10; }; }
 
 # Follow the script's own symlinks but keep the repo's logical path (it may be a symlink to a path with spaces).
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
@@ -365,7 +371,7 @@ fi
 # An agent that ships with kith (scratch): the kernel's own folder, no repo, never backed up or shared. Keyed on where it
 # resolves, so a user's own agent of the same name is an ordinary one.
 builtin=0; [[ $src_pkg == "$KITH"/agents/* ]] && builtin=1
-if [[ $builtin == 1 && ${1:-} =~ ^(keep|thread)$ ]]; then exec "$KITH/bin/kith-scratch" "$agent" "$@"; fi
+if [[ $builtin == 1 && ${1:-} =~ ^(keep|thread)$ ]]; then no_turn_claim "kith $agent $1"; exec "$KITH/bin/kith-scratch" "$agent" "$@"; fi
 # The program answers both when it lists the module (lib/core-switched.txt); else the Python does.
 if [[ ${1:-} == --backups-json ]]; then
   . "$KITH/lib/kith-core.sh"; kith_core_exec "accounts backups-json" "$agent" "$src_pkg/agent.md" --kernel "$KITH" || true
@@ -381,6 +387,7 @@ fi
 if [[ $agent != prompt && $agent != settings && $agent != mcp ]]; then
   . "$KITH/lib/kith-core.sh"
   if kith_launch_json_flag "$@"; then
+    no_turn_claim "--launch-json"
     # The Rust launch finds the folders itself from what the caller gave: put those back for it (kith_in, above).
     unset KITH_HOME KITH_STATE KITH_AGENTS HQ_HOME HQ_STATE HQ_AGENTS
     for kv in ${kith_in[@]+"${kith_in[@]}"}; do export "$kv"; done
@@ -415,6 +422,7 @@ claim_seen=""
 . "$KITH/lib/kith-core.sh"
 [[ -n ${_kith_core_primed:-} ]] || kith_core_prime
 kthreads=""; kthreads=$(kith_core_bin threads) || kthreads=""
+[[ -z $turn_claim || ${_kith_core_ver:-} == *'"turn-claim"'* ]] || kthreads=""   # a program with no `turn-claim` cannot attach
 # Writer mode is either source (kernel/lib/kith_claims.py switched): the marker, or the module's switch file once it says more than
 # `stepping`, so a marker lost while the core serves does not send a taker back to the files.
 claims_core() {
@@ -606,6 +614,9 @@ while [[ $# -gt 0 ]]; do
     *)            break ;;
   esac
 done
+# The Python rollback, or a program that does not list `turn-claim`, has no attach: a claimed turn does not run there.
+[[ $print -eq 0 ]] || no_turn_claim "--print"
+[[ -z $turn_claim || -n $kthreads ]] || { echo "kith: the turn claim needs the Rust threads program; nothing was started" >&2; exit 10; }
 # --resume THREAD: pick up in this terminal a session started in the app (or another terminal); the host names it
 # (bin/kith-sessions), and the run starts in the folder it ran in. Only the owner's own claude sessions are listed.
 # resolve takes the session's writer claim for this shell ($$): it execs into `kith-sessions run` below, so the pid is the
@@ -621,7 +632,7 @@ if [[ -n $resume_thread || -n $resume_pick ]]; then
   # Whatever named the session (--resume, -r ID, the picker, -c), it is claimed and checked here and nowhere else.
   # Not `eval "$(…)" || exit 1`: a refusal prints nothing, eval of nothing succeeds, and claude would start anyway.
   # A one-shot (a task is given) waits a few seconds for a held session; a terminal run refuses at once.
-  resolved=$(kith_threads resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit 1
+  resolved=$(KITH_TURN_CLAIM=$turn_claim kith_threads resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit $?; turn_attached=1
   eval "$resolved"
   [[ -z $r_cwd ]] || cd "$r_cwd" || exit 1
   # A built-in's engine and model are per thread: a resumed one keeps what it started with unless -H/-m say otherwise.
@@ -640,7 +651,7 @@ fi
 # --launch-json (the host picks), --print, a terminal's --resume/-r/-c, or an attempt of the walk itself.
 if [[ $# -gt 0 && -z $backup && $launch -eq 0 && $print -eq 0 && -z $resume_thread && -z $resume_pick && -z ${KITH_CHAIN_CHILD:-} ]] \
    && [[ $p_owner == 1 ]] && [[ $nested -eq 1 || -n ${KITH_BACKUP_CHAIN:-} ]]; then
-  exec env -u KITH_AGENT_DIR -u KITH_AGENT_HOME -u KITH_AGENT_VERSION -u KITH_AGENT ${caller_env:+KITH_AGENT=$caller_env} python3 "$KITH/lib/kith_accounts.py" run-chain "$agent" "$src_pkg/agent.md" "$KITH/bin/kith" -- "${chain_args[@]}"
+  no_turn_claim "an account chain"; exec env -u KITH_AGENT_DIR -u KITH_AGENT_HOME -u KITH_AGENT_VERSION -u KITH_AGENT ${caller_env:+KITH_AGENT=$caller_env} python3 "$KITH/lib/kith_accounts.py" run-chain "$agent" "$src_pkg/agent.md" "$KITH/bin/kith" -- "${chain_args[@]}"
 fi
 # A program reads stdout as the JSON alone: whatever a helper prints on the way goes to stderr; fd 3 is the real stdout.
 [[ $print -eq 1 ]] && launch=0
@@ -1489,6 +1500,7 @@ if [[ $p_owner != 1 && $launch -ne 1 ]]; then
 fi
 # Another harness: the same run, handed to its adapter (prompt in a file, directories and MCP configs as lists).
 if [[ $harness != claude ]]; then
+  turn_claim_attached
   [[ $want_held -eq 0 ]] || echo "kith: --held holds claude sessions only; $harness runs here (--direct)" >&2
   printf '%s\n' "$prompt" > "$runs/$$.prompt.md"
   run_dirs=$(for ((i = 1; i < ${#dirs[@]}; i += 2)); do printf '%s\n' "${dirs[i]}"; done)
@@ -1642,7 +1654,7 @@ if [[ $# -gt 0 ]]; then
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
   if [[ -n $csid ]]; then
-    claimed=$(KITH_REVOKE_SEEN=$claim_seen kith_threads claim "$csid" "$$" "$claim_person" "$agent") || exit 1
+    claimed=$(KITH_TURN_CLAIM=$turn_claim KITH_REVOKE_SEEN=$claim_seen kith_threads claim "$csid" "$$" "$claim_person" "$agent") || exit $?; turn_attached=1
     [[ $claimed != lock-alone || -n $r_alone ]] || lock_alone
   fi
   [[ -z $csid || -z $sid_file ]] || printf '%s\n' "$csid" > "$sid_file"
@@ -1666,12 +1678,14 @@ if [[ $# -gt 0 ]]; then
       "${permit_cmd[@]}" apply "$runs/$$.settings.json" || true
     fi
   fi
+  turn_claim_attached
   exec ${stub[@]+"${stub[@]}"} claude "${args[@]}" -p "$*"
 fi
 # --held: the same launch, handed to the core to start in the holder (kith_held_launch exits when it opened or was busy, and
 # returns here to run it directly, saying why). The ask token below is for a run that descends from this shell: a held
 # engine does not, and the core would drop it from the env anyway.
 if [[ $want_held -eq 1 ]]; then
+  turn_claim_attached
   if [[ $p_owner == 1 && $nested -eq 0 ]]; then
     . "$KITH/lib/kith-core.sh"
     export KITH_TERMINAL_SESSION=1
@@ -1695,7 +1709,7 @@ fi
 # The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
 # claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
 if [[ -n $csid && $csid != "${r_sid:-}" ]]; then
-  claimed=$(KITH_REVOKE_SEEN=$claim_seen kith_threads terminal "$csid" "$$" "$claim_person" "$agent") || exit 1
+  claimed=$(KITH_TURN_CLAIM=$turn_claim KITH_REVOKE_SEEN=$claim_seen kith_threads terminal "$csid" "$$" "$claim_person" "$agent") || exit $?; turn_attached=1
   [[ $claimed != lock-alone || -n $r_alone ]] || lock_alone
 fi
 # An interactive owner run is listed in the apps (the SessionStart hook above) and may be taken over from there, which ends
@@ -1703,6 +1717,7 @@ fi
 # pass through). One-shots above stay exec.
 [[ $p_owner == 1 && $harness == claude ]] && export KITH_TERMINAL_SESSION=1
 [[ -n $r_sid ]] && export KITH_RESUMED_FROM=$r_from
+turn_claim_attached
 # The same side as the claims above (kthreads, decided once) and a program that lists `threads-run`: `kith kernel threads run`, which
 # forks and waits exactly as the Python `run` does. An older program, or the Python side (KITH_CORE=python, `threads` unswitched),
 # runs the Python, which stays the rollback.

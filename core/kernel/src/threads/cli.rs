@@ -34,7 +34,7 @@ use serde_json::Value;
 
 use super::core::Core;
 use super::resolve::{Host, resolve_taking};
-use super::writer::{ProcErr, Taker};
+use super::writer::{ProcErr, TURN_CLAIM_EXIT, TURN_CLAIM_REFUSED, Taker};
 use super::{Claim, Ctx, claim_path, claim_wait, pick, release_claims, spool};
 use crate::secrets::pyjson;
 
@@ -51,6 +51,19 @@ impl Out {
         Self {
             stderr: format!("{msg}\n"),
             code: 1,
+            ..Self::default()
+        }
+    }
+
+    /// A refusal of a host's turn claim exits with its own code; any other is 1.
+    fn refusal(said: &str, msg: &str) -> Self {
+        Self {
+            stderr: format!("{said}kith: {msg}\n"),
+            code: if msg.starts_with(TURN_CLAIM_REFUSED) {
+                TURN_CLAIM_EXIT
+            } else {
+                1
+            },
             ..Self::default()
         }
     }
@@ -144,7 +157,7 @@ pub fn run_with(
                         stderr: r.said,
                         code: 0,
                     },
-                    Err(m) => Out::die(format!("kith: {m}")),
+                    Err(m) => Out::refusal("", &m),
                 },
             )
         })()),
@@ -167,11 +180,7 @@ pub fn run_with(
                     stderr: said,
                     code: 0,
                 },
-                Err(m) => Out {
-                    stderr: format!("{said}kith: {m}\n"),
-                    code: 1,
-                    ..Out::default()
-                },
+                Err(m) => Out::refusal(&said, &m),
             })
         })()),
         Some("proc") if n == 4 => done((|| {
