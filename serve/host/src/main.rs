@@ -1646,6 +1646,27 @@ async fn main() -> Result<()> {
             if let KernelCmd::Permit { kernel, args } = cmd {
                 std::process::exit(print_permit(kernel, &args));
             }
+            // The launch asks the core itself (who the run is for, once authority is the core's), so it must not run inside an
+            // embedded core held here: that call would find the lock taken by its own process.
+            if let KernelCmd::Launch { what: LaunchCmd::Whole(args) } = cmd {
+                std::process::exit(launch_cmd::print_whole(&args));
+            }
+            if let KernelCmd::Launch {
+                what: LaunchCmd::Mcp { agent, person, pkg, snapshot, kernel, granted, resolve, json: _ },
+            } = cmd
+            {
+                launch_cmd::print_mcp(&launch_cmd::Args {
+                    agent,
+                    person,
+                    pkg,
+                    snapshot,
+                    kernel,
+                    resolve,
+                    granted,
+                    ..launch_cmd::Args::default()
+                })?;
+                return Ok(());
+            }
             through_core(|| -> Result<()> {
                 match cmd {
                     KernelCmd::Version => println!("{}", kith_kernel::version_json()),
@@ -1694,23 +1715,6 @@ async fn main() -> Result<()> {
                         resolve,
                         granted: None,
                     })?,
-                    KernelCmd::Launch {
-                        what: LaunchCmd::Mcp { agent, person, pkg, snapshot, kernel, granted, resolve, json: _ },
-                    } => {
-                        launch_cmd::print_mcp(&launch_cmd::Args {
-                            agent,
-                            person,
-                            pkg,
-                            snapshot,
-                            kernel,
-                            resolve,
-                            granted,
-                            ..launch_cmd::Args::default()
-                        })?;
-                    }
-                    KernelCmd::Launch { what: LaunchCmd::Whole(args) } => {
-                        std::process::exit(launch_cmd::print_whole(&args));
-                    }
                     KernelCmd::Settings { kernel, args } => std::process::exit(print_settings(kernel, &args)),
                     KernelCmd::RunOnce { .. }
                     | KernelCmd::Attach { .. }
@@ -1729,6 +1733,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::AccountState { .. }
                     | KernelCmd::Account { .. }
                     | KernelCmd::Secrets { .. }
+                    | KernelCmd::Launch { what: LaunchCmd::Whole(_) | LaunchCmd::Mcp { .. } }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }
                     | KernelCmd::CoreDaemon

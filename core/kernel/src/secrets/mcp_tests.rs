@@ -49,7 +49,16 @@ fn the_program_form_names_this_program_and_the_verb() {
     let args = server["args"].as_array().unwrap();
     assert_eq!(
         Value::Array(args[..8].to_vec()),
-        json!(["kernel", "secrets", "exec", "--for", "echo", "svca", "--", format!("{k}/bin/kith")])
+        json!([
+            "kernel",
+            "secrets",
+            "exec",
+            "--for",
+            "echo",
+            "svca",
+            "--",
+            format!("{k}/bin/kith")
+        ])
     );
     assert_eq!(server["env"], json!({"WHO": "agent-echo"}));
 }
@@ -221,6 +230,9 @@ fn a_browser_service_makes_the_profile_folder_private_and_sets_its_variables() {
                 "mcp": {"command": "b", "args": ["--profile", "$KITH_BROWSER_PROFILE", "$KITH_BROWSER"]}}),
     );
     h.agent("echo", &["svcb"]);
+    let mut t0 = tables();
+    t0["grants"]["echo"] = json!({"svcb": "p1"});
+    h.tables(&t0);
     let (text, notes) = config(&h, &env, &Starter::Script);
     assert_eq!(notes.len(), 0, "{notes:?}");
     let folder = h.0.join("home/.kith/browsers/echo");
@@ -237,9 +249,9 @@ fn a_browser_service_makes_the_profile_folder_private_and_sets_its_variables() {
         .mode();
     assert_eq!(mode & 0o777, 0o700);
     // a browser the service can't drive: skipped, with the reason
-    let mut t = tables();
+    let mut t = t0;
     t["profiles"]["browser/echo"] = json!({"browser": "firefox"});
-    t["grants"]["echo"]["browser"] = json!("browser/echo");
+    t["grants"]["echo"] = json!({"svcb": "p1", "browser": "browser/echo"});
     h.tables(&t);
     let (text, notes) = config(&h, &env, &Starter::Script);
     assert_eq!(text, "{\"mcpServers\": {}}");
@@ -247,7 +259,8 @@ fn a_browser_service_makes_the_profile_folder_private_and_sets_its_variables() {
         notes,
         [
             "kith-auth: svcb can't drive firefox, the browser of browser/echo (echo's profile; kith-auth browser)",
-            "kith: echo: svcb skipped this run"
+            "kith: echo: svcb skipped this run",
+            "kith: echo: browser is granted but its service file is gone; skipped (kith echo connectors)"
         ]
     );
 }

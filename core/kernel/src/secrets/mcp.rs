@@ -221,11 +221,7 @@ pub(super) fn run(c: &Ctx, args: &[String]) -> R<super::Outcome> {
     let made = mcp_config(c, &env, agent, &starter_of(&env))?;
     Ok(super::Outcome {
         stdout: pyjson::dumps(&made.config) + "\n",
-        stderr: made
-            .notes
-            .iter()
-            .flat_map(|n| [n.as_str(), "\n"])
-            .collect(),
+        stderr: made.notes.iter().flat_map(|n| [n.as_str(), "\n"]).collect(),
         code: 0,
     })
 }

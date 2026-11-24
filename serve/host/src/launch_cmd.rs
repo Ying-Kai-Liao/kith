@@ -290,7 +290,8 @@ pub fn print_mcp(a: &Args) -> Result<()> {
             // The shared services this agent is granted, in process: the same code the launch runs.
             let mut sctx = kith_kernel::secrets::Ctx::from_process(&c.kernel);
             sctx.person = Some(c.person.clone()).filter(|p| !p.is_empty());
-            let program = kith_bin.clone().or_else(|| std::env::current_exe().ok().map(|e| e.to_string_lossy().into_owned()));
+            let program =
+                kith_bin.clone().or_else(|| std::env::current_exe().ok().map(|e| e.to_string_lossy().into_owned()));
             let starter = kith_kernel::secrets::exec_program(
                 program.as_deref(),
                 process_env.get("KITH_SECRETS_EXEC").map(String::as_str),
