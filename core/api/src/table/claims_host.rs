@@ -71,14 +71,18 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.claim",
-        "A terminal or `external` writer claim (step 1), or a `scheduleRun`: the claim of a pulled schedule turn for a run that has no process yet (`turn` required; the run attaches itself with `claim.attach`). Refused when a writer holds the conversation; `paused` when the turn's job is paused (the turn is cancelled). An `external` claim names its process. Answers `{claimId, generation}`.",
+        "A terminal or `external` writer claim (step 1), or a `scheduleRun` / `wakeRun`: the claim of a pulled schedule or wake turn for a run that has no process yet (`turn` required; the run attaches itself with `claim.attach`). Refused when a writer holds the conversation; `paused` when the turn's job is paused (the turn is cancelled). An `external` claim names its process. Answers `{claimId, generation}`.",
         &[
             need("conversation", "string", "The session id."),
-            need("kind", "string", "terminal, external or scheduleRun."),
+            need(
+                "kind",
+                "string",
+                "terminal, external, scheduleRun or wakeRun.",
+            ),
             opt(
                 "turn",
                 "int",
-                "The schedule turn a `scheduleRun` claim runs.",
+                "The schedule or wake turn a `scheduleRun` / `wakeRun` claim runs.",
             ),
             need(
                 "person",
@@ -307,7 +311,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.queued",
-        "The turns the core queued that no host began (a schedule's fire: `enq_key` NULL, source `schedule`) and that wait (queued or parked): `{turns: [{turn, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed.",
+        "The turns the core queued that no host began (a schedule's fire or a wake's take: `enq_key` NULL, source `schedule` or `wake`) and that wait (queued or parked): `{turns: [{turn, source, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. A `wake` turn also carries `door` (`run` or `host`), `requestIds` (the requests it carries, in order) and `note`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed.",
         &[],
     ),
     host(

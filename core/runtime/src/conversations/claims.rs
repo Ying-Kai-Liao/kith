@@ -740,7 +740,9 @@ fn apply(tx: &Transaction<'_>, claim_id: i64, kind: &str, body: &str, now: i64) 
             // A report that names no process cannot be matched to the writer's: the claim stays the writer (`ending`)
             // and `end_gone` ends it once the recorded process is gone.
             let nameless = r.pid.is_some() && said_pid.is_none();
-            let n = if nameless {
+            // A detached run's launcher may have died alone (R3a): its report only says so, and its group may still write.
+            let detached = super::detached::holds_after_report(tx, claim_id)?;
+            let n = if nameless || detached {
                 tx.execute(
                     "UPDATE claims SET state = 'ending', end_reason = COALESCE(end_reason, ?2)
                      WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
@@ -753,7 +755,9 @@ fn apply(tx: &Transaction<'_>, claim_id: i64, kind: &str, body: &str, now: i64) 
                     params![claim_id, now, kind],
                 )?
             };
-            if n == 1 {
+            if n == 1 && detached {
+                // The turn stays `running`: `end_gone` finishes it once the group is gone.
+            } else if n == 1 {
                 if kind == "done" {
                     tx.execute(
                         "UPDATE turns SET state = 'done', finished_at = ?2
@@ -1041,11 +1045,15 @@ pub(crate) fn end_gone(core: &mut Core, live: &dyn Liveness, now: i64) -> Result
         )?;
         if n == 1 {
             ended.push(id);
-            // A scheduled run (an external claim with a turn) whose process is gone without a report: its prompt went out, so the
-            // turn ends as failed (outcome unknown) and is never put back. A claim that never got a process is the adopt's.
+            // A detached run (an external claim with a turn) whose process and group are gone: `done` when it reported done,
+            // else failed (outcome unknown: its prompt went out) and never put back. A claim that never got a process is the
+            // adopt's.
             tx.execute(
-                "UPDATE turns SET state = 'failed', finished_at = ?2 WHERE claim_id = ?1 AND state IN ('claimed', 'running')
-                   AND (SELECT kind FROM claims WHERE claim_id = ?1) = 'external'",
+                &format!(
+                    "UPDATE turns SET state = {}, finished_at = ?2 WHERE claim_id = ?1 AND state IN ('claimed', 'running')
+                       AND (SELECT kind FROM claims WHERE claim_id = ?1) = 'external'",
+                    super::detached::END_STATE
+                ),
                 params![id, now],
             )?;
         }
