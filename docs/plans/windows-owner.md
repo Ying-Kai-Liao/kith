@@ -66,9 +66,12 @@ flowchart LR
 
 ## 2. Invariants (what must stay true; how each is checked is coder's call)
 
-- **WI1. No silent no-op.** A Windows branch does the work or refuses with a named reason. Two bugs on Windows today:
-  - Channel Stop does nothing (`serve/host/src/channels/queue.rs:27-28`).
-  - `end_groups` does nothing (`core/runtime/src/holder_link.rs:1086`).
+- **WI1. No silent no-op.** A Windows branch does the work or refuses with a named reason.
+  - A bug on Windows today: channel Stop does nothing (`serve/host/src/channels/queue.rs:27-28`).
+  - Not a bug (corrected 2026-11-24): the empty `end_groups` (`core/runtime/src/holder_link.rs:1085-1094`). Every holder
+    spawn is in a job that kills on close and only the holder holds it (`core/holder/src/platform/windows.rs:632-634`), so
+    the holder's death ends the tree. The empty body is correct only while that holds, and W12's model checks it
+    (HolderKillOnClose).
 - **WI2. Nothing kith itself starts on Windows is a script.** No `.py`, `.sh` or `.cmd` of kith's own, whether as a hook, the
   service, the host's subprocesses or the installer's helpers. Agents' own tools are theirs (retire-python section 4).
 - **WI3. One hook form.** Every hook and status-line command kith writes is `"<absolute exe>" <args>`, with every argument in
@@ -99,7 +102,9 @@ flowchart LR
   - `cli\current` becomes a one-line text file, replaced with a file rename.
   - The user's PATH gets `%LOCALAPPDATA%\Kith\bin\kith.exe`, a small trampoline. It reads `current`, runs that `kith.exe` as a
     child in a kill-on-close job, and forwards stdio, Ctrl-C and the exit code.
-  - A running exe can't be deleted, so pruning skips versions in use by construction. A failed delete counts as "kept".
+  - A running exe can't be deleted, but whether its folder can be renamed is W1's P-W15, so pruning does not rest on that
+    alone: it takes only folders older than current and renames one only under the exclusive `use.lock` (W15 rules 2-3).
+    A failed rename or delete counts as "kept". The trampoline re-reads `current` until the folder it names exists.
 - **D3. Service.** Keep the HKCU Run key and `kith-servew` (`runtime-design.md:237`: a session-0 service could not own the user's
   ConPTYs).
   - **No Task Scheduler jobs.** The launchd jobs become timers inside the host:
@@ -178,7 +183,7 @@ Each row gives the gap, its evidence, and the package (W) or retire-python item 
 |---|---|---|
 | Held terminals refused on Windows | `core/runtime/src/terminal.rs:701-705`, `open_held` Unix-only | W12 |
 | Host turns: `hostclaim.turn` NotServed; `warm_stub` Unix-only | `core/runtime/src/hostclaim.rs:462-537`; `one-bot-model.md:525` | W12 |
-| Old-instance group kill does nothing | `holder_link.rs:1086` | W12 (job objects) |
+| Old-instance group kill does nothing: correct for holder spawns (kill-on-close jobs, `holder/src/platform/windows.rs:632-634`); detached runs the host starts outside the holder have no group stand-in for `recorded_gone` (`conversations/claims.rs:997-1006`) | `holder_link.rs:1085-1094` | W12 (named job per detached run; the probe asks the job) |
 | Kernel tools' group kill | `core/runtime/src/runtools.rs:212-216,271-277` | W12 |
 | `ps`, `pgrep` and `lstart` liveness in the host | `serve/host/src/terminal/claim.rs:472,607-632`, `terminal/registry.rs:214`, `agent/bot/lifecycle.rs:225-260,357` | W12 (procstart's GetProcessTimes, `core/procstart/src/lib.rs:422-497`) |
 | Graceful stop | `holder/src/platform/windows.rs:663-664` (hard only) | W12 (D6) |
@@ -318,6 +323,11 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     - what `sandbox.enabled` with `failIfUnavailable` does (expected: refuses)
     - the `%USERPROFILE%\.claude\projects` folder name for a `C:\…` working folder
     - whether a `#!/bin/sh` stub on PATH runs from the Bash tool (Git Bash)
+    - W12's premises: kill Claude Code (`TerminateProcess`) at points across a delivery. Using the fake model server's
+      request log, check that every prompt the server received has at least a torn transcript line holding the marker
+      token (P-W12a), and that no full marker line exists for a prompt the server never received (P-W12b)
+    - for W15: whether renaming a folder that holds a running exe fails (P-W15, the premise W15's prune rule is checked
+      under)
   - W6, W9, W10 and W13 cite this file. **Start now.**
 - [ ] **W2. The host builds and tests on Windows.** Owner: unowned. Status: not started. L, in two PRs. Depends: none.
   - **W2a: compile and clippy.** `cargo build/clippy -p kith-serve` joins the `windows` job. Changes:
@@ -380,29 +390,47 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     `service/windows.rs:37-150` (stop through the named event, holder found by folder, no `/IM`); a host timer module (cost
     sync, backup, the daemon's wake drain once it exists).
   - The same timers can later replace the Mac plists (P1-10, P4-14).
-- [ ] **W12. Claims, held terminals and host turns on Windows.** Owner: unowned. Status: not started. L. **MODEL FIRST** (premise re-run; see below).
+- [ ] **W12. Claims, held terminals and host turns on Windows.** Owner: unowned. Status: not started. L. **Model passed 2026-11-24** (`model-w12/`, below). Ready for
+  workers once its WAITS are met, and only with the W1 premise answers in hand (P-W12a and P-W12b).
   - **WAITS P1-19** (no Python claim path left) and P1-12 R5. Depends: W2b, W5a, W8.
   - Files: `core/runtime/src/terminal.rs:701-705` and `open_held`; `hostclaim.rs:462-537`; `serve/host/src/terminal/warm_stub.rs`
-    (Windows via the resident stub's named pipe, #731); `holder_link.rs:989-1114` (`end_groups` via job objects);
+    (Windows via the resident stub's named pipe, #731); `conversations/claims.rs:997-1006` (`recorded_gone` asks the run's named job on Windows);
     `runtools.rs:212-216,271-277`; `channels/queue.rs:20-28` (Stop through the job); `terminal/claim.rs`, `registry.rs` and
     `agent/bot/lifecycle.rs` (liveness via procstart); `core/kernel/src/threads/*` and `lifecycle/*` (LockFileEx, spawn
     instead of fork); D6 graceful stop; the transcript reader accepts a torn last line.
   - The core-fired schedule turn runs here as a normal host turn, once P2-4 lands.
-  - **Model:** before the PR is proposed, re-run `thread-writers`, `writer-lock` and `holder-lease` with a table that maps each
-    model action to its Windows primitive:
+  - **Rules the model needs** (each one's broken run fails; `model-w12/results.md`). The model is `WinClaims.tla`, which
+    extends S4's model with processes and job objects. Workers build these:
+    1. **One named job per detached run,** named by the claim id. It is created without kill-on-close, so the run outlives a
+       host restart.
+    2. **The launcher is created inside the job in one call** (`PROC_THREAD_ATTRIBUTE_JOB_LIST`, as the holder's
+       `create_in_job` does). Never suspend-assign-resume: a host restart between create and resume leaves a launcher
+       suspended in the job for ever (`extra-stranded`). Never assign after it runs: its engine starts outside the job.
+    3. **The job forbids breakaway** (no `BREAKAWAY_OK` or `SILENT_BREAKAWAY_OK`), so no tool child leaves it.
+    4. **`recorded_gone` on Windows asks the job:** the launcher's pid with its start time, and then the job's active process
+       count, opened by name, so it works after a host restart. "Gone" means the name is not found or 0 processes are
+       active. Any error answers "not gone" (S4: safe but stuck until the next probe).
+    5. **R3a stays:** a report puts the claim to `ending`; only `end_gone` ends it.
+    6. **Host-door engines run in a host-held job that kills on close.** On Windows a child does not die with its parent, so
+       without the job a warm engine outlives a host restart while its claim is ended.
+    7. **Holder jobs kill on close,** and only the holder holds them. That is today's code, and it is why the empty
+       `end_groups` is right.
+    8. **Every job handle is non-inheritable.** An inherited handle keeps a kill-on-close job open, so its engine survives.
+    9. **D6 Stop:** cancel, then `TerminateJobObject` on the job, found by name after a restart.
+    10. **The transcript reader counts a torn last line that holds the marker token** as the marker (S4 R4). A strict
+        reader delivers twice after a hard kill. On the Mac the same rule closes the same gap after SIGKILL.
+  - **Premises W1 must confirm before W12 code lands:**
+    - **P-W12a:** the user line holding the marker is on disk no later than the prompt reaches the model. Without it,
+      ExactlyOnce fails even with rule 10: the kill comes after the send and before the line's first byte.
+    - **P-W12b:** a full marker line is never written for a prompt that was not sent. Without it, a request can read
+      answered and never have been delivered.
 
-    | Action | Windows primitive |
-    |---|---|
-    | take | LockFileEx, non-inheritable handle |
-    | process death | the handle closes |
-    | kill | TerminateJobObject |
-    | gone | job has no active process |
-    | start time | GetProcessTimes |
-    | detach | CREATE_BREAKAWAY_FROM_JOB |
-
-    One premise differs: stop is a hard kill unless the cancel lands (D6). Add that as a model variant. The models must give
-    each process an identity, and handle inheritance must be modelled as a Leak action (shared memory: the flock CLOEXEC
-    lesson). Architect runs it; no worker before it passes.
+    The W1 probe kills Claude Code at points across a delivery, using the fake model server's request log. S4 assumes both
+    premises on the Mac too.
+  - **Not re-run:** the repo's `thread-writers`, `writer-lock` and `holder-lease` models. Their steps (take, release on death,
+    kill the group, gone) map one to one onto LockFileEx and the job, except "group", which is what `WinClaims` checks.
+    holder-lease kills guest runs only, and guests are refused on Windows (WI6). When W12's code lands, coder updates those
+    skills' drift lists and decides on their re-runs (coder's call).
 - [ ] **W13. Cost and transcripts on Windows.** Owner: unowned. Status: not started. S. Depends: W1, W5a.
   - Files: `core/kernel/src/cost/ledger.rs:290` (match path components, not `"/subagents/"`);
     `core/runtime/src/transcripts/project.rs:42,102,114` (the `C:\` project folder names W1 recorded); the cost sync timer
@@ -413,18 +441,44 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     - stage `cli\<ver>.partial` and rename it into place
     - run the new program's `kith kernel cutover status --require` (the P0-14 gate)
     - write `cli\current` (a file rename)
-    - put `bin\kith.exe` (the trampoline, D2) and `project-id.exe` on the user PATH (HKCU Environment)
+    - put `bin\kith.exe` (the trampoline, D2) and `project-id.exe` on the user PATH (HKCU Environment). The trampoline
+      follows W15 rules 4 and 5 from its first version (shared `use.lock`, re-read `current` until its folder exists)
     - `kith serve install` (the Run key)
   - A Rust `kith kernel install drain` takes the place of `quiesce.py` on Windows. It keeps #1145's rule: agent runs' own
     wrappers are never stopped, and writers are matched by program, not by command-line text.
   - No admin, no Python.
-- [ ] **W15. `kith update` on Windows.** Owner: unowned. Status: not started. M. **MODEL FIRST.** Depends: W14, and the P4-15 design (the host updater absorbs
+- [ ] **W15. `kith update` on Windows.** Owner: unowned. Status: not started. M. **Model passed 2026-11-24** (`model-w15/`, below). Ready for workers once W14
+  and the P4-15 design are in, with W1's P-W15 answer in hand. Depends: W14, and the P4-15 design (the host updater absorbs
   `kith-self-update`).
   - Files: `serve/host/src/update/{mod,install,release}.rs` (a detached updater with breakaway instead of `launchctl submit`,
-    `mod.rs:231-258`; rename-aside for a running exe, `install.rs:93-101`; pruning that treats a failed delete as kept).
-  - **Model:** installer flip, the host updater, the Run-key supervisor restart, prune, and runs in flight whose hooks name a
-    versioned folder, acting in any order. Property: no hook or service start ever names a version folder that is gone, and
-    two updaters never both flip. Architect writes it before the design is shown as proposed.
+    `mod.rs:231-258`; rename-aside for a running exe, `install.rs:93-101`; pruning that treats a failed delete as kept);
+    the trampoline (W14) for rules 4 and 5.
+  - **Model:** `WinUpdate.tla`. Two updaters, supervisors, hosts, agent runs with hooks, a trampoline command, a reboot and
+    sign-in, kills, crashes and gate refusals, in any order. Design passes at K=1 and K=0 (4.8M and 13.4M states), under
+    both rename premises, and its liveness holds (a host ends up serving current). Each rule below has a broken run that
+    fails (`model-w15/results.md`). Workers build these:
+    1. **One install lock** (LockFileEx on `install.lock`) around check, flip, Run key, stop, start and prune. The check
+       refuses a version at or below current, so current never goes back. Staging `<v>.partial` and renaming it to `<v>`
+       needs no lock.
+    2. **A stale updater still repairs (model-added).** An updater whose version is at or below current still, under the
+       lock, sets the Run key to current and restarts the supervisor on current if either differs. Without it, a reboot
+       between the flip and the Run key leaves the old version serving for ever.
+    3. **Prune only folders older than current (model-added).** A newer folder is another updater's staged work: pruning
+       it makes that updater flip to a folder that is gone.
+    4. **The trampoline holds a shared `<v>\use.lock`** from before it starts `<v>\kith.exe` until its child exits, and
+       every agent run keeps one process from its `<v>` (the stub) alive for the run's life. Prune renames a folder to
+       trash only after taking that lock exclusively, never deletes in place (model-added; needed only if P-W15 says a
+       rename succeeds, but build it unless W1 shows the rename fails reliably, antivirus and OneDrive included).
+    5. **The trampoline re-reads `current` until the folder it names exists** (bounded, with a clear error). One retry is
+       not enough (model-added).
+    6. **The Run key is written only after the folder is complete and current flipped.**
+    7. **Stop, then wait until every old supervisor and host is gone, then start the new one.** This is a liveness rule
+       (the new supervisor otherwise gives up its 10 s wait for `hostw.lock` and nothing serves); one supervisor and one
+       host already hold through `hostw.lock` and `host.lock`.
+  - **Not needed:** enumerating processes to skip folders in use. With rules 1-4 the model passes without it, so W15 drops
+    it (a process's image path is not always readable on Windows) and keeps only "never current".
+  - **Premise P-W15 (W1):** whether renaming a folder holding a running exe fails. It decides how much rule 4 carries, not
+    whether the design is safe.
 - [ ] **W16. The desktop app as host on Windows.** Owner: unowned. Status: not started. M. Depends: W7, W11, W14.
   - Files: `apps/desktop/tools/native-host.mjs:30-44` (bundle `kith.exe`, the shim and the data), `electron-builder.yml:109-129`
     (`kith.exe` as the one program name), `host-controller.ts:176` (`ensureCli` on Windows runs the bundled installer verb,
@@ -471,10 +525,12 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     signing (Q2).
 
 ### Marks
-- **MODEL FIRST:** W12 (premise re-run of thread-writers, writer-lock and holder-lease with the Windows mapping and a hard-stop
-  variant) and W15 (update versus runs versus prune versus supervisor).
-- **Model status (2026-11-24):** both owed by the architect, not started. They are queued after the P2 designs (p2-wake,
-  p2-ask-sched). W12 and W15 get no worker until their model passes and this line says so.
+- **MODEL FIRST (done):** W12 (claims, held terminals and host turns with the Job Object as S4's group, `model-w12/`) and W15
+  (update versus runs versus prune versus supervisor, `model-w15/`).
+- **Model status (2026-11-24): both passed.** W12: design 3,102,425 states pass, liveness pass, ten broken rules fail, and
+  the model added rule 2 (create the launcher in the job in one call). W15: design pass at K=1 and K=0 under both rename
+  premises, liveness pass, and the model added rules 2-5. Both are ready for workers once their WAITS and depends are met.
+  Neither may merge before W1 has answered its premises (P-W12a, P-W12b; P-W15).
 - **REDESIGN:** none of this milestone's own (the PowerShell judge was dropped, default for Q5, pending Kai's confirmation). Already REDESIGN in retire-python and
   inherited here: P1-12, P1-15, P1-16, P2-1 to P2-4, P3-5, P3-10, P4-15, P5-1.
 - **WAITS:**
@@ -504,12 +560,12 @@ flowchart TD
   W1 --> W10[W10 guard, cards]
   W5b --> W10
   W2a --> W11[W11 serve verbs, timers]
-  P119[P1-19, P1-12 R5] --> W12[W12 claims, held, host turns, MODEL FIRST]
+  P119[P1-19, P1-12 R5] --> W12[W12 claims, held, host turns, model passed]
   W2b --> W12
   W8 --> W12
   W5a --> W13[W13 cost, transcripts]
   W7 --> W14[W14 install.ps1]
-  W14 --> W15[W15 update, MODEL FIRST]
+  W14 --> W15[W15 update, model passed]
   W14 --> W16[W16 app as host]
   W11 --> W16
   W0 --> W18[W18 e2e, grows]
