@@ -16,7 +16,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 /// The table lives in the kernel crate (`kith_kernel::engines`), shared with the `kith` program. The host lists the
-/// rows that speak ACP; the kernel's other engines (hermes, dsh) run from the CLI only.
+/// rows that speak ACP; the kernel's other engine (dsh) runs from the CLI only.
 pub use kith_kernel::engines::{Engine as Harness, Install};
 
 /// Every engine the phone can pick.

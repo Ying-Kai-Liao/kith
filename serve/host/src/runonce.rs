@@ -182,4 +182,12 @@ mod tests {
             assert_eq!(run(args(engine)).await.unwrap(), NOT_AVAILABLE, "{engine}");
         }
     }
+
+    #[test]
+    fn hermes_runs_over_its_own_acp_with_accept_edits_or_dont_ask() {
+        let hermes = engines::find("hermes").unwrap();
+        assert!(hermes.local.is_some() && matches!(hermes.oneshot, Oneshot::Acp));
+        assert_eq!(modes(hermes, false), ["accept_edits"]);
+        assert_eq!(modes(hermes, true), ["dont_ask"]);
+    }
 }

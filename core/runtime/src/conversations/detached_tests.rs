@@ -466,3 +466,28 @@ fn queued_without_sources_lists_schedule_turns_only_and_refuses_other_sources() 
     crate::call::check(Principal::Host, "hostclaim.queued", &p).unwrap();
     assert!(crate::hostclaim::call_at(&mut core, "hostclaim.queued", &p, NOW).is_err());
 }
+
+#[test]
+fn the_launch_asks_external_after_attach_and_gets_its_claim_again_and_its_exit_leaves_it() {
+    // The calls `kith AGENT --resume SESSION NOTE` makes with KITH_TURN_CLAIM set (threads/writer.rs, S4 WK3): attach,
+    // then claim.external for the same pid and stamp (resolve, then the one-shot's claim step), then the release at exit.
+    let (_t, mut core) = world();
+    let live = Sys::default();
+    let (turn, claim) = running(&mut core, &live, "w1", "wake");
+    let ask =
+        json!({"conversation": "w1", "pid": 700, "started": "e7", "person": "", "agent": "echo"});
+    for _ in 0..2 {
+        let said = owner(&mut core, &live, "claim.external", &ask);
+        assert_eq!(said["claimId"], claim, "{said}");
+        assert_eq!(said["again"], true, "{said}");
+    }
+    let said = owner(
+        &mut core,
+        &live,
+        "claim.release",
+        &json!({"pid": 700, "started": "e7"}),
+    );
+    assert_eq!(said["ended"], json!([]), "{said}");
+    assert_eq!(claim_state(&core, claim).0, "running");
+    assert_eq!(turn_state(&core, turn), "running");
+}

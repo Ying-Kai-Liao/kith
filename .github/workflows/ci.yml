@@ -444,6 +444,7 @@ jobs:
             checks: |
               Schedule person check|kernel/tests/kith-sched-person-check
               Terminal flags check|kernel/tests/kith-terminal-flags-check
+              Turn claim check (a host-claimed turn on the Python rollback exits 10 and starts nothing)|kernel/tests/kith-turn-claim-check
               Recall check|kernel/tests/kith-recall-check
               Guest helper check|kernel/tests/kith-guest-helper-check
               Room ledger stub check (no kith program: silent exit 0, a room note's pre is denied, nothing else)|kernel/tests/kith-room-ledger-stub-check
@@ -967,6 +968,7 @@ jobs:
               Run-once cost and kernel notes|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-once-cost-check
               Engine-run one-shots (kith AGENT -- task, resume, TERM, 78)|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-engine-run-check
               Guest door check with the built kith (kill -9 of the server)|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-guest-door-check
+              Turn claim check with the built kith (Files mode, launches with no claim step)|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-turn-claim-check
               Thread writers, Python and Rust as two actors|kernel/tests/kith-threads-race --bin "$PWD/serve/host/target/debug/kith" --iterations 60
               Core dependency rules|kernel/tests/kith-core-deps-check
           - name: difftest daemon, launch and switch
