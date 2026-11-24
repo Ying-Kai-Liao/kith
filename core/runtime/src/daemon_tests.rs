@@ -2374,7 +2374,7 @@ fn stubborn_leader() -> (u32, String) {
     (pid, started.expect("start time"))
 }
 
-#[cfg(test)]
+#[cfg(unix)]
 #[path = "kill_resend_detached_tests.rs"]
 mod kill_resend_detached;
 
