@@ -270,7 +270,28 @@ fn os_store_linux_secret_tool() {
 }
 
 #[test]
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(windows)]
+fn os_store_windows_credential_manager() {
+    if !os_tests_enabled() {
+        return;
+    }
+    let s = super::keystore::CredentialManager::new(
+        &format!("dev.kith.test.{}", std::process::id()),
+        "master-key",
+    );
+    s.remove();
+    exercise(&s, false);
+    s.remove();
+}
+
+#[test]
+fn the_credential_manager_item_is_named_service_slash_account() {
+    let s = super::keystore::CredentialManager::new("dev.kith.core.secrets", "master-key");
+    assert_eq!(s.target(), "dev.kith.core.secrets/master-key");
+}
+
+#[test]
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn os_store_is_unsupported_here() {
     assert!(super::keystore::os_key_store().is_err());
     let _ = (
