@@ -155,7 +155,8 @@ impl Cmd {
 /// had 2.10.0). Then the last entry of the same agent that was prepared on this computer is used
 /// instead; an entry that never ran here never is.
 pub async fn command(agent: &Value, progress: impl Fn(&str)) -> Result<Cmd> {
-    with_last_good(&last_good_file(), agent, async |a: &Value| build(a, &progress).await).await
+    let progress = &progress;
+    with_last_good(&last_good_file(), agent, |a: Value| async move { build(&a, progress).await }).await
 }
 
 /// The command for `agent`, and whether it was prepared (downloaded or installed) here.
@@ -200,9 +201,15 @@ fn last_good_file() -> PathBuf {
     crate::service::data_dir().join("registry-last-good.json")
 }
 
-async fn with_last_good(file: &Path, agent: &Value, build: impl AsyncFn(&Value) -> Result<(Cmd, bool)>) -> Result<Cmd> {
+/// `build` takes the entry by value: a builder over `&Value` would be higher-ranked, and its
+/// future would not be `Send` for every lifetime, which `tokio::spawn` needs.
+async fn with_last_good<F, Fut>(file: &Path, agent: &Value, build: F) -> Result<Cmd>
+where
+    F: Fn(Value) -> Fut,
+    Fut: Future<Output = Result<(Cmd, bool)>>,
+{
     let id = agent["id"].as_str().unwrap_or_default();
-    let error = match build(agent).await {
+    let error = match build(agent.clone()).await {
         Ok((cmd, prepared)) => {
             if prepared {
                 record_last_good(file, id, agent);
@@ -212,7 +219,7 @@ async fn with_last_good(file: &Path, agent: &Value, build: impl AsyncFn(&Value) 
         Err(error) => error,
     };
     let Some(last) = last_good(file, id).filter(|last| last != agent) else { return Err(error) };
-    let Ok((cmd, _)) = build(&last).await else { return Err(error) };
+    let Ok((cmd, _)) = build(last.clone()).await else { return Err(error) };
     tracing::info!(
         agent = id,
         wanted = agent["version"].as_str().unwrap_or_default(),
@@ -457,22 +464,40 @@ mod tests {
     }
 
     /// A build where npm has every codex-acp release but 2.12.0.
-    async fn npm_without_2_12(agent: &Value) -> Result<(Cmd, bool)> {
+    async fn npm_without_2_12(agent: Value) -> Result<(Cmd, bool)> {
         if agent["version"] == "2.12.0" {
             bail!("couldn't download Codex with npm: npm error 404 No match found for version 2.12.0");
         }
         Ok((npx_cmd(&agent["distribution"]["npx"]), true))
     }
 
-    fn scratch_file() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("kith-lastgood-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join("registry-last-good.json")
+    const NPM_404: &str = "couldn't download Codex with npm: npm error 404 No match found for version 2.12.0";
+
+    /// A folder for one test's record, removed when the test ends.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!("kith-lastgood-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn file(&self) -> PathBuf {
+            self.0.join("registry-last-good.json")
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     #[tokio::test]
     async fn an_unfetchable_build_falls_back_to_the_last_one_prepared_here() {
-        let file = scratch_file();
+        let scratch = Scratch::new();
+        let file = scratch.file();
         with_last_good(&file, &codex("2.10.0"), npm_without_2_12).await.unwrap();
         let cmd = with_last_good(&file, &codex("2.12.0"), npm_without_2_12).await.unwrap();
         assert_eq!(cmd.acp(), npx_cmd(&codex("2.10.0")["distribution"]["npx"]).acp());
@@ -481,23 +506,37 @@ mod tests {
 
     #[tokio::test]
     async fn with_nothing_prepared_here_the_error_is_unchanged() {
-        let file = scratch_file();
+        let scratch = Scratch::new();
+        let file = scratch.file();
         let error = with_last_good(&file, &codex("2.12.0"), npm_without_2_12).await.err().unwrap();
-        assert_eq!(
-            format!("{error:#}"),
-            "couldn't download Codex with npm: npm error 404 No match found for version 2.12.0"
-        );
+        assert_eq!(format!("{error:#}"), NPM_404);
         assert!(!file.exists());
     }
 
     #[tokio::test]
+    async fn a_fallback_that_fails_too_gives_the_original_error() {
+        let scratch = Scratch::new();
+        let file = scratch.file();
+        with_last_good(&file, &codex("2.10.0"), npm_without_2_12).await.unwrap();
+        let npm_down = async |agent: Value| -> Result<(Cmd, bool)> {
+            if agent["version"] == "2.12.0" {
+                bail!(NPM_404);
+            }
+            bail!("couldn't download Codex with npm: network unreachable");
+        };
+        let error = with_last_good(&file, &codex("2.12.0"), npm_down).await.err().unwrap();
+        assert_eq!(format!("{error:#}"), NPM_404);
+    }
+
+    #[tokio::test]
     async fn only_a_prepared_build_is_recorded() {
-        let file = scratch_file();
+        let scratch = Scratch::new();
+        let file = scratch.file();
         with_last_good(&file, &codex("2.9.0"), npm_without_2_12).await.unwrap();
         with_last_good(&file, &codex("2.10.0"), npm_without_2_12).await.unwrap();
         assert_eq!(last_good(&file, "codex-acp"), Some(codex("2.10.0")));
         // A uvx entry runs without a prepare step here, so it never becomes the fallback.
-        let unprepared = async |a: &Value| -> Result<(Cmd, bool)> { Ok((npx_cmd(&a["distribution"]["npx"]), false)) };
+        let unprepared = async |a: Value| -> Result<(Cmd, bool)> { Ok((npx_cmd(&a["distribution"]["npx"]), false)) };
         with_last_good(&file, &codex("2.11.0"), unprepared).await.unwrap();
         assert_eq!(last_good(&file, "codex-acp"), Some(codex("2.10.0")));
     }
