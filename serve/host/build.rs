@@ -1,7 +1,7 @@
 //! Embeds a `longPathAware` application manifest in the Windows binaries (`kith`, `kith-serve`, `kith-servew`), so
-//! paths past 260 characters (agent worktrees, node_modules) work. A no-op on every other target.
+//! paths past 260 characters (agent worktrees, `node_modules`) work. A no-op on every other target.
 //!
-//! No manifest crate: the MSVC linker takes the manifest as an input file. (MinGW targets are not shipped.)
+//! No manifest crate: the MSVC linker takes the manifest as an input file. (`MinGW` targets are not shipped.)
 
 use std::path::PathBuf;
 
