@@ -22,7 +22,7 @@ use super::start::{self, Adapter, Engine, Go};
 use crate::secrets::pyjson;
 use crate::threads::core::Core;
 use crate::threads::resolve::{Host, resolve_taking};
-use crate::threads::writer::{ProcErr, Taker};
+use crate::threads::writer::{ProcErr, TURN_CLAIM_EXIT, Taker};
 use crate::threads::{self, Ctx, claim_wait};
 use crate::{accounts, paths};
 
@@ -221,6 +221,11 @@ impl ExecHooks for Steps<'_> {
     }
 }
 
+/// The exit for a run handed a turn claim that this launch cannot attach: `TURN_CLAIM_EXIT`, as the script's own refusals.
+fn turn_claim_refusal(env: &Env) -> Option<i32> {
+    (!get(env, "KITH_TURN_CLAIM").is_empty()).then_some(TURN_CLAIM_EXIT)
+}
+
 /// `kith kernel launch-exec AGENT [--kernel DIR] ARGS...`: the exit code (only returned when the run did not start or, off Unix, ended).
 pub fn run(argv: &[String], kernel: &Path, env0: Env, deps: &Deps<'_>) -> i32 {
     run_with(argv, kernel, env0, deps, Engine::native())
@@ -241,11 +246,11 @@ pub fn run_with(
     sync_env(&mut env0);
     // The host's claim on a chat turn is attached by the bash body (and later by sched-turn S1); this run would start the turn
     // without it, which delivers twice. Nothing started.
-    if !get(&env0, "KITH_TURN_CLAIM").is_empty() {
+    if let Some(code) = turn_claim_refusal(&env0) {
         eprintln!(
             "kith: --exec does not carry a turn claim yet (KITH_TURN_CLAIM is set); the script's run takes it"
         );
-        return 10;
+        return code;
     }
     let flags = Flags::parse(rest);
     if flags.no_run || flags.task.is_empty() {
@@ -557,6 +562,14 @@ mod tests {
 
     fn v(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_turn_claim_is_refused_with_the_turn_claim_exit() {
+        let mut env = Env::new();
+        assert_eq!(turn_claim_refusal(&env), None);
+        env.insert("KITH_TURN_CLAIM".to_owned(), "c1".to_owned());
+        assert_eq!(turn_claim_refusal(&env), Some(10));
     }
 
     #[test]
