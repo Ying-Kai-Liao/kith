@@ -301,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn only_agents_the_host_can_start_get_bots() {
         // What `hq ls --json` prints: an agent from an older hq has no harness, which means Claude; Codex and the engines of
-        // the table with an ACP mode run (hermes and dsh have none); one this version
+        // the table with an ACP mode run (dsh has none); one this version
         // doesn't know is never started.
         let listed: Vec<HqAgent> = serde_json::from_str(
             r#"[{"name":"a","description":"","home":"/x"},{"name":"b","description":"","home":"/x","harness":"claude"},
@@ -312,7 +312,7 @@ mod tests {
 
         let (hub, dir) = hub();
         let mut codex = agent(&dir, "coder", "");
-        codex.harness = Some(hq::Harness::Hermes);
+        codex.harness = Some(hq::Harness::Dsh);
         let house = agent(&dir, "house", "");
         let done = hub.apply_hq_agents(&[codex.clone(), house.clone()]).unwrap();
         assert_eq!(done.created, ["house"], "no bot that would fail on every message");
