@@ -5,6 +5,7 @@
 
 use super::*;
 
+#[allow(clippy::unnecessary_wraps)] // the Option is what `home_from` takes
 fn os(s: &str) -> Option<OsString> {
     Some(OsString::from(s))
 }
