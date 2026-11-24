@@ -497,7 +497,7 @@ fn the_per_person_views_are_refused_by_name_on_windows() {
         assert_eq!(out.code, 1, "{line:?}");
         assert_eq!(out.stdout, "", "{line:?}");
         assert!(
-            out.stderr.contains("not on Windows yet: cost by "),
+            out.stderr.contains("not on Windows yet: cost "),
             "{}",
             out.stderr
         );

@@ -140,7 +140,7 @@ fn two_handles_on_the_ledger_lock_take_turns() {
     let first = super::lock(&file).unwrap();
     // another handle on the same file is turned away while the first holds it, and gets in once it is dropped
     let name = root.join("state/room-ledger/echo/grp1.json.lock");
-    let other = std::fs::OpenOptions::new().append(true).open(name).unwrap();
+    let other = std::fs::OpenOptions::new().write(true).open(name).unwrap();
     assert!(other.try_lock_exclusive().is_err());
     drop(first);
     // the lock goes with the handle: a new one gets in at once

@@ -274,7 +274,9 @@ pub(crate) fn edit(
     let io = |e: std::io::Error| format!("{}: {e}", file(ctx).display());
     std::fs::create_dir_all(&ctx.machine).map_err(io)?;
     let lock = std::fs::OpenOptions::new()
-        .append(true)
+        // write access, not append: `LockFileEx` refuses a handle that has only append access
+        .write(true)
+        .truncate(false)
         .create(true)
         .open(ctx.machine.join("settings.json.lock"))
         .map_err(io)?;

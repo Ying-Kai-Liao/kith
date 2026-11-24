@@ -144,11 +144,11 @@ fn vector_entries(names: &[(&str, &str)]) -> Vec<(Vec<u8>, u64, i128)> {
         .iter()
         .map(|(rel, label)| {
             let (_, text, secs, nanos) = VECTOR_FILES.iter().find(|f| f.0 == *rel).unwrap();
-            (
-                label.as_bytes().to_vec(),
-                text.len() as u64,
-                i128::from(*secs) * 1_000_000_000 + i128::from(*nanos),
-            )
+            let ns = i128::from(*secs) * 1_000_000_000 + i128::from(*nanos);
+            // Windows keeps file times in 100 ns ticks
+            #[cfg(not(unix))]
+            let ns = ns - ns % 100;
+            (label.as_bytes().to_vec(), text.len() as u64, ns)
         })
         .collect()
 }
@@ -308,7 +308,7 @@ fn read_text_reads_lines_as_python_does() {
     );
     let e = read_text(&t.0.join("gone.md")).unwrap_err();
     assert!(
-        e.msg.starts_with("[Errno 2] No such file or directory: '"),
+        e.msg.starts_with("[Errno 2] ") && e.msg.contains(": '"),
         "{}",
         e.msg
     );

@@ -175,7 +175,11 @@ struct Lock(#[allow(dead_code)] File);
 fn lock(file: &Path) -> io::Result<Lock> {
     let mut name = file.as_os_str().to_owned();
     name.push(".lock");
-    let f = OpenOptions::new().append(true).create(true).open(name)?;
+    let f = OpenOptions::new()
+        .write(true)
+        .truncate(false)
+        .create(true)
+        .open(name)?;
     f.lock_exclusive()?;
     Ok(Lock(f))
 }
