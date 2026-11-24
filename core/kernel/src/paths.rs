@@ -404,7 +404,11 @@ fn home_from(home: Option<OsString>, profile: Option<OsString>, windows: bool) -
 /// A Windows absolute path by its spelling (`C:\x`, `C:/x`, `\\srv\share`), so it can be told apart on every platform.
 fn win_absolute(s: &str) -> bool {
     let b = s.as_bytes();
-    s.starts_with(r"\\") || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/'))
+    s.starts_with(r"\\")
+        || (b.len() >= 3
+            && b[0].is_ascii_alphabetic()
+            && b[1] == b':'
+            && matches!(b[2], b'\\' | b'/'))
 }
 
 /// `$HOME` (Python's `Path.home()`), on Windows else `%USERPROFILE%`; empty when neither is set.
