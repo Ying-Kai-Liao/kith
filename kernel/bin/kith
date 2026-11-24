@@ -575,7 +575,7 @@ sys.exit("kith: MCP servers not connected: %s" % bad if bad else 0)'
 fi
 
 chain_args=("$@")   # for the chain walk below
-print=0 want_held=0 project="" launch=0 hold="" resume_thread="" resume_pick="" backup="" acct="" backup_cfg_var="" backup_cfg_dir="" backup_api_helper="" backup_model=""
+print=0 want_held=0 project="" launch=0 typed_mode="" hold="" resume_thread="" resume_pick="" backup="" acct="" backup_cfg_var="" backup_cfg_dir="" backup_api_helper="" backup_model=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --print)      print=1; shift ;;
@@ -591,8 +591,8 @@ while [[ $# -gt 0 ]]; do
     -m|--model)   KITH_MODEL=$2; shift 2 ;;
     -e|--effort)  KITH_EFFORT=$2; shift 2 ;;
     -H|--harness) KITH_HARNESS=$2; shift 2 ;;
-    --permission-mode) KITH_PERMISSION_MODE=$2; shift 2 ;;
-    --bypass)     KITH_PERMISSION_MODE=bypassPermissions; shift ;;
+    --permission-mode) KITH_PERMISSION_MODE=$2 typed_mode=$2; shift 2 ;;
+    --bypass)     KITH_PERMISSION_MODE=bypassPermissions typed_mode=bypassPermissions; shift ;;
     --)           shift; break ;;
     -*[[:space:]]*) break ;;   # a task that starts with a dash ("- one thing ...")
     -*)           echo "kith: unknown flag '$1' (kith --help lists them)" >&2; exit 1 ;;
@@ -865,8 +865,12 @@ fi
 [[ -z $perm_mode ]] && perm_mode=$(python3 "$KITH/lib/kith_settings.py" permission_mode "$agent")
 # An owner's run of an agent that reads other people's text never starts in bypass (capabilities.yaml reads_others: false
 # lifts that for agents on the owner's own files); the cap wins over the caller and this Mac, the conservative side.
+# Only the owner's own word at their own terminal wins over it: --bypass (or --permission-mode bypassPermissions) typed on
+# this command line, not one another run started (KITH_AGENT) nor an entry point's KITH_PERMISSION_MODE.
 reads_others=$(python3 "$KITH/lib/kith_settings.py" reads-others "$pkg/capabilities.yaml")
-[[ $p_owner == 1 && $perm_mode == bypassPermissions && $reads_others == 1 ]] && perm_mode=auto
+typed_bypass=0
+[[ $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && $typed_mode == bypassPermissions ]] && typed_bypass=1
+[[ $p_owner == 1 && $perm_mode == bypassPermissions && $reads_others == 1 && $typed_bypass == 0 ]] && perm_mode=auto
 # For anyone but the owner the membership sets the permission mode, whatever the caller asked for, and deny rules
 # only Claude Code can enforce keep the run on Claude Code.
 if [[ $p_owner == 0 ]]; then

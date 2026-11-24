@@ -134,6 +134,9 @@ suggestion), then kith's default: `auto`, or `permission_mode` in this Mac's `~/
 own settings: kith-wide, not secret, never committed; `kith doctor` shows the one in force). `bin/kith` writes that default
 into the run's settings, so only Claude Code runs get it; other harnesses tell only `bypassPermissions` apart from the
 rest, so for them an unset mode stays as before. A run for anyone but the owner takes its membership's mode instead.
+An agent that reads other people's text (`reads_others` in its `capabilities.yaml`, unset = yes) is held from
+`bypassPermissions` to `auto`, whichever of these set it, except `--bypass` (or `--permission-mode bypassPermissions`)
+that the owner typed at their own terminal: not one an entry point set, nor one another run's `kith` call passed.
 
 **Auto mode and "Always allow"** (`bin/kith-allow`, `lib/kith_allowed.py`, `bin/kith-permit denied|once`, `serve/host/src/cards/autoallow.rs`).
 In auto mode Claude Code's classifier stands in for the prompt, so a call it blocks is only a refusal. For an owner run in

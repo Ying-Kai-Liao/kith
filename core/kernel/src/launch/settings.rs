@@ -157,6 +157,9 @@ pub struct Input<'a> {
     pub plugins_json: &'a str,
     /// The owner at their own terminal: their plugins stay as their settings have them.
     pub owner_terminal: bool,
+    /// The owner typed `--bypass` (or `--permission-mode bypassPermissions`) on the command line at their own terminal
+    /// (`KITH_VIA` terminal, not started by another run): kept for an agent that reads other people's text too.
+    pub typed_bypass: bool,
     /// The `apiKeyHelper` of a claude-api backup (`""` for none).
     pub api_helper: &'a str,
     /// A fresh id for the folder of a once-allowed retry (`uuid4().hex`).
@@ -476,13 +479,14 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     let mut warnings: Vec<String> = vec![];
 
     // The agent's defaultMode is its author's suggestion: this Mac's choice wins over it, the caller's over both. An owner's
-    // run of an agent that reads other people's text never starts in bypass; anyone else's mode is the membership's.
+    // run of an agent that reads other people's text never starts in bypass unless the owner typed it at their terminal;
+    // anyone else's mode is the membership's.
     let mut perm = i.caller_mode.to_owned();
     if perm.is_empty() {
         perm = machine::agent_permission_mode(&p.machine, i.agent);
     }
     let reads_others = machine::reads_others(&i.pkg.join("capabilities.yaml"));
-    if owner && perm == "bypassPermissions" && reads_others {
+    if owner && perm == "bypassPermissions" && reads_others && !i.typed_bypass {
         perm = "auto".to_owned();
     }
     if !owner {

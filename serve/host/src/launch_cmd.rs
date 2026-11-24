@@ -237,6 +237,7 @@ pub fn print_settings(a: &Args) -> Result<()> {
         threads_bin: threads_bin.as_deref(),
         plugins_json: &plugins_json,
         owner_terminal: a.terminal,
+        typed_bypass: false,
         api_helper: a.api_helper.as_deref().unwrap_or_default(),
         once_id: &once_id,
         developer_dir: &developer_dir,
