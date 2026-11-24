@@ -176,9 +176,10 @@ pub(crate) fn settle_in(
         // The person was revoked since the turn was queued: `revoke_person` cancels their waiting turns with no claim, so the
         // claim cannot say it.
         fenced: claims::stopped_in(tx, run.turn)?.is_some()
-            || run.revoke_seen.is_some_and(|seen| {
-                claims::revoke_epoch_in(tx, &run.person).is_ok_and(|now| now != seen)
-            }),
+            || match run.revoke_seen {
+                Some(seen) => claims::revoke_epoch_in(tx, &run.person)? != seen,
+                None => false,
+            },
         held: claims::person_writer_live_in(tx, &run.conversation)?,
     };
     let verdict = decide(&facts);

@@ -1359,7 +1359,7 @@ pub(crate) fn cancel_waiting_in(
 }
 
 /// [`revoke_epoch`] inside a transaction.
-pub(crate) fn revoke_epoch_in(tx: &Transaction<'_>, person: &str) -> Result<i64> {
+pub(crate) fn revoke_epoch_in(tx: &rusqlite::Connection, person: &str) -> Result<i64> {
     epoch(tx, person)
 }
 
