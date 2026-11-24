@@ -2,18 +2,17 @@
 # kith-launch-tombstone-check — retire-python P1-15 M0 (design 2026-11-21-mcp-exec §0.1): a guest's and a room person's
 # `kith AGENT --launch-json` once auth.json is the authority tombstone and the core answers.
 #
-# The suspicion: the Rust launch decides who a guest run is for with the in-process `secrets::run(.., "resolve", ..)`
-# (core/kernel/src/launch/assemble.rs), which reads auth.json itself and exits 3 on a tombstone, so every guest and room-person
-# launch would be refused on a switched Mac, while the bash launch (which asks kith-auth, which routes to the core) works.
+# The bug it found (fixed by P1-15 M1): the Rust launch decided who a guest run is for with the in-process
+# `secrets::run(.., "resolve", ..)` (core/kernel/src/launch/assemble.rs), which read auth.json itself and exited 3 on a tombstone,
+# so every guest and room-person launch was refused on a switched Mac, while the bash launch (which asks kith-auth, which routes
+# to the core) worked. `secrets::Authority` now asks the core in process on a tombstone.
 #
 # A scratch home is stepped for real (`kith migrate step authority`: import, marker, tombstone) and the same launches run
 # on it, plus the same launches before the step as a control (the fixture is a valid launch):
 #   file       guest (Rust, Python) and room person (Rust) launch.                      Must pass: the fixture's proof.
 #   tombstone  guest (Python): launches.       Room person (Python): no such path, the script refuses room persons (exit 3).
-#              guest (Rust), room person (Rust): EXPECTED FAILURE today (P1-15 M1 flips both rows to passes).
+#              guest (Rust), room person (Rust): launch (the core answers in process).
 #   core down  the core folder gone behind the tombstone: nothing launches, on either side (fails closed).
-# The expected-failure rows pass while the launch exits non-zero; when it starts to launch, the row FAILS with the text
-# "XPASS": P1-15 M1 has fixed it, turn the row into a plain launch row.
 #
 #   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-launch-tombstone-check     skips without a built kith (or KITH_BIN)
 set -uo pipefail
@@ -77,13 +76,6 @@ row() {
     [[ $rc != 0 ]] && ok "$name: refused (exit $rc: $(head -c 160 "$T/err" | tr '\n' ' '))" || bad "$name: launched, expected a refusal" "rc=$rc"
   fi
 }
-# xfail NAME RC: the known bug (P1-15 M1): passes while the launch fails; fails the day it launches.
-xfail() {
-  local name=$1 rc=$2
-  if [[ $rc != 0 ]]; then ok "$name: EXPECTED FAILURE, P1-15 M1 fixes it (exit $rc: $(head -c 160 "$T/err" | tr '\n' ' '))"
-  else bad "$name: XPASS, the Rust launch now works on a tombstone (design §0.1 fixed or wrong): make this a plain launch row"; fi
-}
-
 # 0. the control: authority still a file
 row "file, guest, Rust" "$(launch guest)" launch
 row "file, room person, Rust" "$(launch room)" launch
@@ -96,8 +88,8 @@ grep -q '"kith_tombstone"' "$AUTHJ" && ok "setup: auth.json is the tombstone, th
 # 1. a tombstone and a core that answers (embedded: no daemon)
 row "tombstone, guest, Python" "$(launch guest py)" launch
 row "tombstone, room person, Python (no such path: the script refuses a room person)" "$(launch room py)" refuse
-xfail "tombstone, guest, Rust" "$(launch guest)"
-xfail "tombstone, room person, Rust" "$(launch room)"
+row "tombstone, guest, Rust" "$(launch guest)" launch
+row "tombstone, room person, Rust" "$(launch room)" launch
 
 # 2. the core gone behind the tombstone: fails closed on both sides
 mv "$KITH_HOME/core" "$KITH_HOME/core.away" 2>/dev/null || bad "setup: no core folder to move"

@@ -45,6 +45,7 @@ FILES=(
   serve/host/src/api/authority.rs         # the host's gate for KITH_CORE_AUTHORITY=1: fingerprint latch (CoreGate, GuardP)
   core/runtime/src/import/authority.rs    # M2-18c: record_suspends (a revoke the file has and the core missed gets the open_removals row), record_removals
   core/runtime/src/authority/mod.rs       # the readers: snapshot (revoked), may/resolve/cut_off over secrets
+  core/kernel/src/secrets/authority.rs    # P1-15 M1: the Rust launch's reader on the tombstone: may/resolve are people.may/people.resolve asked in process, mcp-config/exec read people.secretsView; no answer is exit 3, never the replaced file (RouterDoor, RouterStale)
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

@@ -4,8 +4,7 @@
 //! the prompt, the login (`accounts`), the settings, the MCP servers, then one JSON object on stdout.
 //!
 //! Programs it still asks, because their logic stays in Python until their step of the plan: `kith-pkg resolve` (the
-//! snapshot), `kith-cost limit|spent`, `kith-auth mcp-config`
-//! (A5), `kith-permit apply` (a guest's grants), `claude` and `xcode-select`.
+//! snapshot), `kith-cost limit|spent`, `kith-permit apply` (a guest's grants), `claude` and `xcode-select`.
 //!
 //! The environment is a map this module edits as the bash entry edits its exports; the launch object's `env` is read from it.
 
@@ -433,7 +432,7 @@ pub(crate) fn knows_readfence(bin: &Path) -> bool {
 
 /// Whether `bin` lists `module` in `kernel version`: the running program, or one whose `kernel version` names it. An older kith
 /// has `kernel cost` (the read verbs) but not the `cost-ledger` module, which `tag` and `record` are part of.
-pub(crate) fn knows_module(bin: &Path, module: &str) -> bool {
+pub fn knows_module(bin: &Path, module: &str) -> bool {
     let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
     if std::env::current_exe()
         .and_then(fs::canonicalize)
