@@ -18,6 +18,9 @@
 //!   say is the recorded one. A missing, empty or incomparable stamp is logged once per claim and never signalled; a gone
 //!   or reused pid is left alone. Where the leader is gone but its group is still held and the stamp is from this boot,
 //!   the dead leader's group is signalled (the rule of #919's `end_groups`).
+//! - A detached run's `external` claim (a schedule's or a wake's turn) whose report was `done` or `exit` is signalled too
+//!   (`detached`, R3a): the report only said the launcher exited, and what it left in the group would hold the
+//!   conversation for ever, since `end_gone` waits for the whole group.
 //! - A `warm_procs` row with `kill_at` set (a revoke or a host change decided it must die) is signalled the same way, under
 //!   the negative of its pid as its claim id; the row goes when `hostclaim.settle` finds the process gone.
 //! - What is signalled: [`procstart::claim_victims`], the same set the host's `end_claimed` uses: descendants first, the
@@ -85,13 +88,19 @@ pub(crate) fn settle(shared: &Shared) {
 pub(crate) fn pass(shared: &Shared, holder: Option<&str>, grace: Duration) -> Vec<u32> {
     type Row = (i64, i64, Option<String>, Option<String>, String);
     let rows: Vec<Row> = match shared.with_core(|c| {
-        let mut st = c.conn().prepare(
+        // A `done` or `exit` is no kill request, except on a detached run's external claim (R3a): its report only said the
+        // launcher exited, so what it left in the group is signalled here, or the conversation would stay held.
+        let mut st = c.conn().prepare(&format!(
             "SELECT claim_id, pid, pid_started, holder_instance, end_reason FROM claims
              WHERE state = 'ending' AND pid IS NOT NULL
-               AND end_reason IS NOT NULL AND end_reason NOT IN ('done', 'exit', ?1)
+               AND end_reason IS NOT NULL AND end_reason <> ?1
+               AND (end_reason NOT IN ('done', 'exit')
+                    OR (kind = 'external' AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = claims.claim_id
+                                                      AND t.source IN {})))
              UNION ALL
              SELECT DISTINCT -pid, pid, started, instance, 'warm' FROM warm_procs WHERE kill_at IS NOT NULL",
-        )?;
+            crate::conversations::detached::sources_sql()
+        ))?;
         let rows = st
             .query_map([crate::accounts::failover::OUT_OF_USAGE], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
