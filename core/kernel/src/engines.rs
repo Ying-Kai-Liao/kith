@@ -115,6 +115,28 @@ pub enum Oneshot {
     Native(&'static str),
 }
 
+/// How far a run may reach outside what it was asked to read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reach {
+    ReadOnly,
+    /// Writes in its folders; anything more is asked of Kith.
+    Workspace,
+    /// No sandbox, no asking.
+    Full,
+}
+
+/// The ACP session modes that hold `engine` to `reach`, the current adapter's id first. Empty: Kith doesn't know this
+/// engine's modes and leaves its session in the mode it starts in.
+pub fn session_modes(engine: &str, reach: Reach) -> &'static [&'static str] {
+    match (engine, reach) {
+        // codex-acp 2.x, then the Zed adapter's ids. Not 2.x's default "agent": codex's own reviewer answers its asks.
+        ("codex", Reach::ReadOnly) => &["read-only"],
+        ("codex", Reach::Workspace) => &["workspace-write", "auto"],
+        ("codex", Reach::Full) => &["agent-full-access", "full-access"],
+        _ => &[],
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RolePrompt {
     /// Not known to be deliverable.
