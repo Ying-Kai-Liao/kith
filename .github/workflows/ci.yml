@@ -351,7 +351,7 @@ jobs:
               - '!**/*.md'
             # The Windows job builds and tests the holder (and kith-core when the branch has it) and what they stand on.
             windows:
-              - '{core/holder/**,core/stub/**,core/attach/**,core/winsys/**,core/runtime/**,core/api/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
+              - '{core/holder/**,core/stub/**,core/attach/**,core/winsys/**,core/runtime/**,core/api/**,serve/host/tests/support/fakemodel/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
               - '!**/*.md'
             cloud:
               - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
@@ -811,6 +811,9 @@ jobs:
         run: |
           cargo clippy --manifest-path host/Cargo.toml -p kith-attach --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-attach --locked
+      # The fake Anthropic API the Windows e2e runs real Claude Code against (tests/support/fakemodel); its HTTP test runs too.
+      - name: Fake model server
+        run: cargo test --manifest-path host/Cargo.toml -p kith-fakemodel --locked
 
   # kith-procstart reads the process table with `sysctl(KERN_PROCARGS2)` on macOS and `/proc` on Linux; only this job runs
   # its tests (the Rust/Python stamp parity and the launcher-form arguments) on a Mac. Free: the repo is public.
