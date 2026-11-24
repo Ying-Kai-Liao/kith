@@ -21,6 +21,9 @@
 //! - A detached run's `external` claim (a schedule's or a wake's turn) whose report was `done` or `exit` is signalled too
 //!   (`detached`, R3a): the report only said the launcher exited, and what it left in the group would hold the
 //!   conversation for ever, since `end_gone` waits for the whole group.
+//! - A `running` detached `external` claim (R3b) whose recorded leader is gone and whose orphan group from this boot is
+//!   still alive is signalled too: a host restart lost its `done` / `exit` report, so it never reached `ending`, and
+//!   `end_gone` would wait for that group for ever. With the leader alive, or the group empty, nothing is sent.
 //! - A `warm_procs` row with `kill_at` set (a revoke or a host change decided it must die) is signalled the same way, under
 //!   the negative of its pid as its claim id; the row goes when `hostclaim.settle` finds the process gone.
 //! - What is signalled: [`procstart::claim_victims`], the same set the host's `end_claimed` uses: descendants first, the
@@ -40,6 +43,8 @@ use crate::log;
 
 /// The end reason `release_unlisted` writes when a holder's hello did not list a claim.
 const HOLDER_CHANGED: &str = "holder_changed";
+/// The reason this pass gives a `running` detached claim (R3b); no claim's `end_reason` is ever this.
+const RUNNING: &str = "running";
 
 /// How often the daemon's tick looks.
 pub(crate) const EVERY: Duration = Duration::from_secs(5);
@@ -96,10 +101,14 @@ pub(crate) fn pass(shared: &Shared, holder: Option<&str>, grace: Duration) -> Ve
                AND end_reason IS NOT NULL AND end_reason <> ?1
                AND (end_reason NOT IN ('done', 'exit')
                     OR (kind = 'external' AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = claims.claim_id
-                                                      AND t.source IN {})))
+                                                      AND t.source IN {src})))
+             UNION ALL
+             SELECT claim_id, pid, pid_started, holder_instance, '{RUNNING}' FROM claims
+             WHERE state = 'running' AND kind = 'external' AND pid IS NOT NULL
+               AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = claims.claim_id AND t.source IN {src})
              UNION ALL
              SELECT DISTINCT -pid, pid, started, instance, 'warm' FROM warm_procs WHERE kill_at IS NOT NULL",
-            crate::conversations::detached::sources_sql()
+            src = crate::conversations::detached::sources_sql(),
         ))?;
         let rows = st
             .query_map([crate::accounts::failover::OUT_OF_USAGE], |r| {
@@ -136,7 +145,11 @@ pub(crate) fn pass(shared: &Shared, holder: Option<&str>, grace: Duration) -> Ve
         }
         let recorded = started.unwrap_or_default();
         let key = (pid, recorded.clone());
+        let running = reason == RUNNING;
         let victims = match procstart::probe(pid) {
+            // R3b: a running run whose leader still lives is working; only a dead leader with a live group of this boot is
+            // signalled (its report was lost to a host restart), and `end_gone` then ends the claim as `failed`.
+            _ if running && !matches!(procstart::probe(pid), procstart::Probe::Gone) => continue,
             procstart::Probe::Gone => match procstart::orphan_group(pid, &recorded) {
                 Some(group) => procstart::Victims {
                     pids: Vec::new(),
