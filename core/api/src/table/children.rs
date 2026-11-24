@@ -24,7 +24,7 @@ const ENV: Param = caller(
 pub(super) const ROWS: &[Method] = &[
     ask(
         "ask.open",
-        "Opens an ask: the hop and cost-cap check and the insert of its record in ONE transaction, so no second ask passes the cap between them. Answers `{decision, record}` (the chain, hop and cross hops the record got). A cap that refuses it is an error with the words `kith ask` prints. With `--check-only` nothing is written (`record` is null).",
+        "Opens an ask: the hop and cost-cap check and the insert of its record in ONE transaction, so no second ask passes the cap between them. Answers `{decision, record}` (the chain, hop and cross hops the record got); a `bg` ask also answers `turn` (its turn's id) and `out` (the file the host's run writes the callee's answer to), and opening the same `bg` ask again answers the same turn with `replayed`. A cap that refuses it is an error with the words `kith ask` prints. With `--check-only` nothing is written (`record` is null).",
         &[
             pos("id", "string", true, "The new ask's id."),
             flag("asked", "string", &["--asked"], "The agent asked."),
@@ -52,6 +52,36 @@ pub(super) const ROWS: &[Method] = &[
                 "int",
                 &["--claim-id"],
                 "The claim of the ask's own run, so a stop of the ask finds that claim exactly.",
+            ),
+            flag(
+                "mode",
+                "string",
+                &["--mode"],
+                "`fg` (the caller's own process runs the callee) or `bg` (a core turn, source `ask`, that the host starts; the open makes the turn in the same transaction). Without it the record is as before the ledger.",
+            ),
+            flag(
+                "task",
+                "string",
+                &["--task"],
+                "What is asked, whole: the prompt of a `bg` ask's turn.",
+            ),
+            flag(
+                "cliPid",
+                "int",
+                &["--cli-pid"],
+                "`fg`: the caller's own process, so a caller killed with no handler is found by the tick.",
+            ),
+            flag(
+                "cliStart",
+                "string",
+                &["--cli-start"],
+                "`fg`: the start stamp of that process.",
+            ),
+            flag(
+                "engine",
+                "string",
+                &["--engine"],
+                "`bg`: the callee's engine (default: its conversation's, else claude).",
             ),
             sw("checkOnly", &["--check-only"], "Decide, write nothing."),
             KERNEL,
@@ -83,6 +113,82 @@ pub(super) const ROWS: &[Method] = &[
         ],
         &["asks", "settle"],
     ),
+    ask(
+        "ask.finish",
+        "The run behind an ask ended (the host's report, or a `fg` caller's own). An `open` ask that Stop did not end is settled in one transaction: with the callee's JSON answer it is `answered` (`stopped` when the callee failed, `capped` when its cost tipped the chain), without one `lost`; the cost joins the chain; and for a `bg` ask the answer (or the lost notice) becomes a mailbox row and the asker is owed the wake `ask:ID/N`, whether or not a writer holds its session. A `fg` ask prints its answer itself, so it gets no row and no wake. Anything settled already, or ended by `ask.end`, is left alone (the host's report and the tick settle once). An ask parked on a card stays open when its run ended with no answer. Answers `{id, settled, state, row}`.",
+        &[
+            pos("id", "string", true, "The ask."),
+            flag(
+                "out",
+                "string",
+                &["--out"],
+                "The text of the out file the host read; its callee JSON is the answer (the tick reads it the same way).",
+            ),
+            flag(
+                "result",
+                "string",
+                &["--result"],
+                "The callee's answer text, when the caller has it already (a `fg` ask).",
+            ),
+            flag("cost", "json", &["--cost"], "US$ the run cost (a number), with `--result`."),
+            sw("isError", &["--is-error"], "The callee said it failed, with `--result`."),
+            flag(
+                "session",
+                "string",
+                &["--session"],
+                "The callee's session, kept on the record so `-c` resumes it.",
+            ),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["asks", "finish"],
+    )
+    .principals(OWNER_HOST),
+    ask(
+        "ask.post",
+        "One row for an ask's asker (`kith-send --to ask:ID`, `kith ask --answer`): appended to the mailbox; an `answer` also owes the asker the wake `ask:ID/N` (a `progress` report waits for `--wait`). The same row again is a duplicate and wakes no one twice. An ask that was stopped or ended keeps nothing: answers `{id, stopped: true}`. Answers `{id, row}` (`row` null for a duplicate).",
+        &[
+            pos("id", "string", true, "The ask."),
+            pos("text", "string", true, "What it says."),
+            flag(
+                "as",
+                "string",
+                &["--as"],
+                "Who says it (default: the agent asked).",
+            ),
+            flag(
+                "kind",
+                "string",
+                &["--kind"],
+                "answer (default) or progress.",
+            ),
+        ],
+        &["asks", "post"],
+    ),
+    ask(
+        "ask.read",
+        "`kith ask --wait`: the rows of an ask's mailbox nobody has read, marked read, with the wakes owed for them withdrawn in the same transaction (a row reaches the asker by `--wait` or by its wake, never both). An ended ask gives nothing. Answers `{id, state, rows: [{n, as, kind, text, at}]}`.",
+        &[pos("id", "string", true, "The ask.")],
+        &["asks", "read"],
+    ),
+    ask(
+        "ask.park",
+        "The ask waits on an approval card (replaces the `.parked` file): `ask.delegations` shows a waiting ask and every ask above it as `waiting {on: card}`. A parked ask whose run ended with no answer stays open. Answers `{id, parked}`.",
+        &[
+            pos("id", "string", true, "The ask."),
+            pos("card", "string", true, "The card."),
+        ],
+        &["asks", "park"],
+    )
+    .principals(OWNER_HOST),
+    ask(
+        "ask.unpark",
+        "The card's answer: the ask no longer waits on it. Answers `{id, parked: false}`.",
+        &[pos("id", "string", true, "The ask.")],
+        &["asks", "unpark"],
+    )
+    .principals(OWNER_HOST),
     ask(
         "ask.capTold",
         "The host raised the chain's cap card: it is not raised again for this cap. Answers `{marked}`, the records marked.",
@@ -141,7 +247,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     ask(
         "ask.delegations",
-        "`kith ask delegations --json`: every ask record, newest first, as `{delegations}` (money in micro-dollars, times in ms).",
+        "`kith ask delegations --json`: every ask record, newest first, as `{delegations}` (money in micro-dollars, times in ms). An open ask that waits carries `waiting`: `{on: \"card\", card, since}` when it or an open ask below it is parked on a card, else `{on: \"agent\", agent, since}` when it has an open child.",
         &[KERNEL, HOME, ENV],
         &["asks", "delegations"],
     ),

@@ -4,8 +4,11 @@
 
 use serde_json::{Value, json};
 
+use super::ledger::{self, Callee, Finish};
+use super::rows::Kind;
 use super::{
-    EndReq, Open, cap_told, check_to, delegations, end_tree, limits, open, record, settle,
+    EndReq, LedgerOpen, Open, cap_told, check_to, delegations, end_tree, limits, open, record,
+    settle,
 };
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -16,6 +19,11 @@ pub(crate) fn serves(method: &str) -> bool {
         method,
         "ask.open"
             | "ask.settle"
+            | "ask.finish"
+            | "ask.post"
+            | "ask.read"
+            | "ask.park"
+            | "ask.unpark"
             | "ask.capTold"
             | "ask.end"
             | "ask.to"
@@ -84,7 +92,19 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                 pid: params.get("pid").and_then(Value::as_i64),
                 conversation: word(params, "conversation"),
                 claim_id: params.get("claimId").and_then(Value::as_i64),
+                ledger: word(params, "mode").map(|mode| LedgerOpen {
+                    mode,
+                    task: word(params, "task"),
+                    cli_pid: params.get("cliPid").and_then(Value::as_i64),
+                    cli_start: word(params, "cliStart"),
+                    engine: word(params, "engine"),
+                }),
             };
+            if let Some(l) = &o.ledger
+                && !matches!(l.mode, "fg" | "bg")
+            {
+                return Err(bad("mode is fg or bg"));
+            }
             open(
                 core,
                 &folders.machine,
@@ -105,6 +125,40 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
             settle(core, &folders.machine, id, cost, state, now)?
                 .ok_or_else(|| Error::Refused(format!("kith-core: asks: no ask {id}")))
         }
+        "ask.finish" => {
+            let (folders, _) = core.folders_for(params)?;
+            let callee = word(params, "result").map(|text| Callee {
+                text: text.to_owned(),
+                cost: params.get("cost").and_then(Value::as_f64).unwrap_or(0.0),
+                is_error: flag(params, "isError"),
+                session: word(params, "session").map(str::to_owned),
+            });
+            ledger::finish(
+                core,
+                &folders.machine,
+                &Finish {
+                    id: need(params, "id")?,
+                    out: word(params, "out"),
+                    callee,
+                    session: word(params, "session"),
+                },
+                now,
+            )
+        }
+        "ask.post" => {
+            let kind = word(params, "kind").map_or(Some(Kind::Answer), Kind::parse);
+            ledger::post(
+                core,
+                need(params, "id")?,
+                need(params, "text")?,
+                word(params, "as"),
+                kind.ok_or_else(|| bad("kind is answer or progress"))?,
+                now,
+            )
+        }
+        "ask.read" => ledger::read(core, need(params, "id")?, now),
+        "ask.park" => ledger::park(core, need(params, "id")?, Some(need(params, "card")?), now),
+        "ask.unpark" => ledger::park(core, need(params, "id")?, None, now),
         "ask.capTold" => {
             let n = cap_told(core, need(params, "chain")?, now)?;
             Ok(json!({ "marked": n }))
@@ -136,6 +190,8 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
             check_to(core.conn(), id)?;
             Ok(json!({ "id": id, "ok": true }))
         }
+        // The revoke order is Unix only (the authority tables it reads are).
+        #[cfg(unix)]
         "ask.revokeEverywhere" => {
             let out = crate::revoke_order::revoke_everywhere(
                 core,

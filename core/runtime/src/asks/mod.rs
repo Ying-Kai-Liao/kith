@@ -27,17 +27,27 @@ use crate::error::{Error, Result};
 use crate::wake;
 
 pub(crate) mod call;
-#[cfg(test)]
+mod ledger;
+#[cfg(all(test, unix))]
+mod ledger_tests;
+mod rows;
+mod sweep;
+mod waiting;
+// The tests replay the import's files and the daemon's hooks: Unix only, like the import.
+#[cfg(all(test, unix))]
 mod tests;
 
 pub(crate) use call::{call, serves};
+pub(crate) use rows::mark_read_by_wake_in;
+pub(crate) use sweep::{Looked, Seen, look, seen_in, settle_in as sweep_in};
 
 /// Characters of an ask's text a record keeps (`BRIEF_MAX` in kith-ask).
 const BRIEF_MAX: usize = 2000;
 
 const COLS: &str = "id, chain, parent, reply_session, hop, cross_hops, crossed, asked, caller_agent, caller_person, \
 caller_via, conversation, cost, cost_base, cap_usd, state, at_ms, answered_ms, capped_ms, cap_card_ms, ended_ms, pid, \
-pid_at_ms, brief, done, delivered, woke_answer, extra, claim_id";
+pid_at_ms, brief, done, delivered, woke_answer, extra, claim_id, mode, task, out_path, parked_card, parked_ms, turn, \
+cli_pid, cli_start, session";
 
 /// One row of `asks`: the record of one `kith ask`.
 #[derive(Clone, Debug, PartialEq)]
@@ -75,6 +85,22 @@ pub(crate) struct Ask {
     /// The claim the ask's run started (code-only link to the conversations lane, no foreign key). Not part of the
     /// record `kith ask` prints. NULL for a row from before the column: stop then matches the run by `pid`.
     pub claim_id: Option<i64>,
+    /// The ledger's columns (migration 102); NULL on a row from before it.
+    /// `fg` (the caller's own process runs the callee) or `bg` (a core turn the host starts).
+    pub mode: Option<String>,
+    /// What was asked, whole (`brief` keeps 2000 characters).
+    pub task: Option<String>,
+    /// Where the host's run writes the callee's JSON answer (`bg`).
+    pub out_path: Option<String>,
+    pub parked_card: Option<String>,
+    pub parked_ms: Option<i64>,
+    /// A `bg` ask's turn in the conversations lane (code-only link).
+    pub turn: Option<i64>,
+    /// A `fg` ask's own process and its start stamp.
+    pub cli_pid: Option<i64>,
+    pub cli_start: Option<String>,
+    /// The callee's session, written when its run attaches.
+    pub session: Option<String>,
 }
 
 const STATES: [&str; 4] = ["open", "answered", "capped", "stopped"];
@@ -176,6 +202,15 @@ impl Ask {
             woke_answer: take_flag(&mut rest, "woke_answer"),
             extra: None,
             claim_id: None,
+            mode: None,
+            task: None,
+            out_path: None,
+            parked_card: None,
+            parked_ms: None,
+            turn: None,
+            cli_pid: None,
+            cli_start: None,
+            session: None,
         };
         Some(Self {
             extra: (!rest.is_empty()).then_some(rest),
@@ -281,6 +316,15 @@ impl Ask {
             woke_answer: r.get::<_, i64>(26)? != 0,
             extra: extra.and_then(|t| serde_json::from_str(&t).ok()),
             claim_id: r.get(28)?,
+            mode: r.get(29)?,
+            task: r.get(30)?,
+            out_path: r.get(31)?,
+            parked_card: r.get(32)?,
+            parked_ms: r.get(33)?,
+            turn: r.get(34)?,
+            cli_pid: r.get(35)?,
+            cli_start: r.get(36)?,
+            session: r.get(37)?,
         })
     }
 
@@ -289,7 +333,7 @@ impl Ask {
         conn.execute(
             &format!(
                 "INSERT OR REPLACE INTO asks ({COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
-                 ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)"
+                 ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38)"
             ),
             params![
                 self.id,
@@ -323,6 +367,15 @@ impl Ask {
                     .as_ref()
                     .map(|e| Value::Object(e.clone()).to_string()),
                 self.claim_id,
+                self.mode,
+                self.task,
+                self.out_path,
+                self.parked_card,
+                self.parked_ms,
+                self.turn,
+                self.cli_pid,
+                self.cli_start,
+                self.session,
             ],
         )?;
         Ok(())
@@ -366,6 +419,20 @@ pub(crate) struct Open<'a> {
     pub conversation: Option<&'a str>,
     /// The claim the run started, when it already has one (stop and kill then match by it, not by `pid`).
     pub claim_id: Option<i64>,
+    /// What the ledger adds (P2-3): the mode and, for a `bg` ask, the turn the host runs. None: a record as before.
+    pub ledger: Option<LedgerOpen<'a>>,
+}
+
+/// What an open adds when the ask is a job on the ledger.
+pub(crate) struct LedgerOpen<'a> {
+    /// `fg` or `bg`.
+    pub mode: &'a str,
+    pub task: Option<&'a str>,
+    /// `fg`: the CLI's own process and its start stamp.
+    pub cli_pid: Option<i64>,
+    pub cli_start: Option<&'a str>,
+    /// `bg`: the callee's engine, when the caller knows it (else the conversation's own, else claude).
+    pub engine: Option<&'a str>,
 }
 
 /// Opens ask `o.id`: the cap check and the insert as one transaction (`open_record` under the box lock). `env` is the
@@ -389,7 +456,7 @@ pub(crate) fn open(
 /// [`open`] inside a transaction the caller began (`BEGIN IMMEDIATE`) and commits: the check and the insert are one step
 /// because the transaction is. (A test runs it on two connections to prove that.)
 pub(crate) fn open_in(
-    tx: &Connection,
+    tx: &rusqlite::Transaction<'_>,
     machine: &Path,
     env: &dyn Fn(&str) -> Option<String>,
     o: &Open<'_>,
@@ -401,6 +468,19 @@ pub(crate) fn open_in(
             "kith-core: asks: {:?} is not an ask id",
             o.id
         )));
+    }
+    // A `bg` open that is made again (a retry after a lost answer) finds its ask and its one turn, and makes no second.
+    if let (Some(l), Some(old)) = (&o.ledger, get(tx, o.id)?)
+        && l.mode == "bg"
+        && old.mode.as_deref() == Some("bg")
+        && old.turn.is_some()
+        && old.task.as_deref() == l.task
+        && old.asked.as_deref() == Some(o.asked)
+    {
+        return Ok(
+            json!({"decision": null, "record": Value::Object(old.to_reg()),
+                         "turn": old.turn, "out": old.out_path, "replayed": true}),
+        );
     }
     let asks = load_all(tx)?;
     let by_id = regs(&asks);
@@ -503,9 +583,31 @@ pub(crate) fn open_in(
         woke_answer: false,
         extra: None,
         claim_id: o.claim_id,
+        mode: o.ledger.as_ref().map(|l| l.mode.to_owned()),
+        task: o.ledger.as_ref().and_then(|l| l.task.map(str::to_owned)),
+        out_path: None,
+        parked_card: None,
+        parked_ms: None,
+        turn: None,
+        cli_pid: o.ledger.as_ref().and_then(|l| l.cli_pid),
+        cli_start: o
+            .ledger
+            .as_ref()
+            .and_then(|l| l.cli_start.map(str::to_owned)),
+        session: None,
+    };
+    // A `bg` open is one step with its turn: the host starts the callee from it (R1).
+    let ask = match &o.ledger {
+        Some(l) if l.mode == "bg" => ledger::with_turn_in(tx, machine, ask, l, now)?,
+        _ => ask,
     };
     ask.put(tx)?;
-    Ok(json!({"decision": decision, "record": Value::Object(ask.to_reg())}))
+    let mut said = json!({"decision": decision, "record": Value::Object(ask.to_reg())});
+    if let (Some(turn), Some(out)) = (ask.turn, &ask.out_path) {
+        said["turn"] = json!(turn);
+        said["out"] = json!(out);
+    }
+    Ok(said)
 }
 
 /// The run behind `id` ended a turn at `cost` US$: it joins its chain's cost, and a chain that reaches its cap with this
@@ -721,8 +823,8 @@ fn micro(usd: f64) -> i64 {
     (usd * 1e6).round_ties_even() as i64
 }
 
-fn view(a: &Ask, costs: &HashMap<String, f64>, cap: Option<f64>) -> Value {
-    json!({
+fn view(a: &Ask, costs: &HashMap<String, f64>, cap: Option<f64>, all: &[Ask]) -> Value {
+    let mut v = json!({
         "id": a.id,
         "agent": a.asked.clone().unwrap_or_default(),
         "chain": a.chain,
@@ -741,7 +843,12 @@ fn view(a: &Ask, costs: &HashMap<String, f64>, cap: Option<f64>) -> Value {
         "cap_card_ms": a.cap_card_ms,
         "brief": a.brief.as_ref().filter(|b| !b.is_empty()),
         "session": a.conversation.as_ref().filter(|s| !s.is_empty()),
-    })
+    });
+    // R7: only an ask that waits says so, so a record that waits on nothing reads as the contract's own.
+    if let Some(w) = waiting::of(a, all) {
+        v["waiting"] = w;
+    }
+    v
 }
 
 /// `kith ask delegations --json`: every record, newest first (equal starts keep id order), in the shape of the contract's
@@ -752,7 +859,9 @@ pub(crate) fn delegations(core: &Core, machine: &Path) -> Result<Value> {
     let cap = d::chain_cost_cap(machine);
     let mut rows: Vec<&Ask> = asks.iter().collect();
     rows.sort_by_key(|a| std::cmp::Reverse(a.at_ms.unwrap_or(0)));
-    Ok(json!({"delegations": rows.into_iter().map(|a| view(a, &costs, cap)).collect::<Vec<_>>()}))
+    Ok(
+        json!({"delegations": rows.into_iter().map(|a| view(a, &costs, cap, &asks)).collect::<Vec<_>>()}),
+    )
 }
 
 /// The record of `id` as `kith ask` reads it, or None.

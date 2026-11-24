@@ -96,6 +96,9 @@ fn every_row_is_well_formed() {
                 "claim.sweepPerson",
                 "claim.epoch",
                 "claim.list",
+                "ask.finish",
+                "ask.park",
+                "ask.unpark",
             ]
             .contains(&m.name)
         {

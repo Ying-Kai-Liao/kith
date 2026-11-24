@@ -30,6 +30,7 @@ use super::settle::{self, Linked, Verdict};
 use super::turns;
 use super::waiters::{self, Looked};
 use super::{load, queue, save};
+use crate::asks;
 use crate::conversations::claims;
 use crate::db::Core;
 use crate::error::Result;
@@ -66,6 +67,8 @@ struct Seen {
     folders: Paths,
     linked: Vec<Linked>,
     legacy: Vec<(String, Turn)>,
+    /// The asks whose run may have ended (the ask design's R4).
+    asks: asks::Seen,
 }
 
 /// What the world said, with no lock held.
@@ -74,6 +77,7 @@ struct Asked {
     /// The runs whose turn was final in the snapshot, with what their transcript said (only for those that need it).
     final_runs: BTreeMap<String, bool>,
     probes: Vec<(String, String, queue::Probe)>,
+    asks: asks::Looked,
 }
 
 fn phase_one(core: &mut Core, params: &Value) -> Result<Seen> {
@@ -81,11 +85,13 @@ fn phase_one(core: &mut Core, params: &Value) -> Result<Seen> {
     let tx = core.conn().unchecked_transaction()?;
     let state = load(&tx)?;
     let (linked, legacy) = settle::runs_in(&tx, &state)?;
+    let asks = asks::seen_in(&tx)?;
     Ok(Seen {
         state,
         folders,
         linked,
         legacy,
+        asks,
     })
 }
 
@@ -119,6 +125,7 @@ fn ask(seen: &Seen, out: &dyn Outside, tr: &dyn Transcripts, now: f64) -> Asked 
         looks,
         final_runs,
         probes,
+        asks: asks::look(&seen.asks, out),
     }
 }
 
@@ -129,6 +136,7 @@ struct Done {
     settled: Vec<(String, Verdict)>,
     unparked: Vec<i64>,
     taken: Vec<(String, String, i64)>,
+    asks: Vec<String>,
 }
 
 impl Done {
@@ -145,6 +153,7 @@ impl Done {
             "settled": self.settled.iter().map(|(r, v)| json!({"run": r, "how": word(v)})).collect::<Vec<_>>(),
             "unparked": self.unparked,
             "taken": self.taken.iter().map(|(r, s, t)| json!({"run": r, "session": s, "turn": t})).collect::<Vec<_>>(),
+            "asks": self.asks,
         })
     }
 }
@@ -220,7 +229,7 @@ fn phase_two(
     }
 
     // The ask part of the tick (A1 of the ask design) plugs in here: it runs in this transaction, after the queue.
-    ask_part(&tx, &mut after, now)?;
+    done.asks = ask_part(&tx, &mut after, &seen.folders, &seen.asks, &asked.asks, ms)?;
 
     turns::close_gone_in(&tx, &before, &after, now)?;
     close_orphans(&tx, &after, ms)?;
@@ -229,11 +238,18 @@ fn phase_two(
     Ok(done)
 }
 
-/// The seam for the ask design's part of the tick (its A1 package): something that must run each tick in the tick's own
-/// transaction, after the queue's work. The bridge that hands answers over (`kith-ask --sweep`) is the host's until then.
-#[allow(clippy::unnecessary_wraps, clippy::needless_pass_by_ref_mut)]
-fn ask_part(_tx: &rusqlite::Connection, _st: &mut State, _now: f64) -> Result<()> {
-    Ok(())
+/// The ask design's part of the tick (R4, `asks/sweep.rs`): in the tick's own transaction, after the queue's work, it settles
+/// the asks whose run ended with no report, and owes their askers the wakes through the same queue state. What it needed from
+/// the world (out files, the process table) was read between the phases.
+fn ask_part(
+    tx: &rusqlite::Connection,
+    st: &mut State,
+    folders: &Paths,
+    seen: &asks::Seen,
+    looked: &asks::Looked,
+    now_ms: i64,
+) -> Result<Vec<String>> {
+    asks::sweep_in(tx, st, &folders.machine, seen, looked, now_ms)
 }
 
 #[allow(clippy::cast_possible_truncation)]
