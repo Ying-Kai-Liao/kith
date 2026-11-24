@@ -801,12 +801,18 @@ jobs:
             cargo test --manifest-path host/Cargo.toml -p kith-stub --locked
           fi
       # The host itself (W2a): its Unix-only parts (host.sock, the screen helper, the kernel's launch/threads/pkg/lifecycle verbs,
-      # ps/pgrep) are cfg-gated and refuse by name here. All three bins; the tests (clippy --all-targets) are W2b.
+      # ps/pgrep) are cfg-gated and refuse by name here. All three bins and every test target (W2b); tests that need Unix
+      # carry an ignore or a cfg(unix) with the reason.
       - name: Host (kith-serve)
         run: |
-          cargo clippy --manifest-path host/Cargo.toml -p kith-serve --bins --locked -- -D warnings
+          cargo clippy --manifest-path host/Cargo.toml -p kith-serve --all-targets --locked -- -D warnings
           cargo build --manifest-path host/Cargo.toml -p kith-serve --locked
           test -f host/target/debug/kith.exe && test -f host/target/debug/kith-serve.exe && test -f host/target/debug/kith-servew.exe
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.100
+      - name: Host tests (kith-serve)
+        run: cargo nextest run --manifest-path host/Cargo.toml -p kith-serve --profile ci --locked --no-fail-fast
       # The two programs the Windows app bundles (apps/desktop/tools/native-host.mjs builds exactly these .exe names).
       - name: Bundled programs build
         run: |
