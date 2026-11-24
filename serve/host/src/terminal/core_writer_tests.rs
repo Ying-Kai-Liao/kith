@@ -1343,6 +1343,81 @@ async fn a_lost_end_report_is_sent_again_by_the_caller_and_a_begin_does_not_end_
     assert!(matches!(r.writer.retry_end(&next, End::OutOfUsage), Finished::ReportLost(_)));
 }
 
+/// The pids in `group` other than its leader, from one `ps` listing.
+fn group_members(group: u32) -> Vec<u32> {
+    let out = Command::new("ps").args(["-A", "-o", "pid=,pgid="]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut f = l.split_whitespace().map(|x| x.parse::<u32>().ok());
+            Some((f.next()??, f.next()??))
+        })
+        .filter(|&(pid, pgid)| pgid == group && pid != group)
+        .map(|(pid, _)| pid)
+        .collect()
+}
+
+/// SIGKILL to the stub alone (not its group), and its reap: the engine runs on in the stub's group, as on macOS when a stub is
+/// killed alone (Linux's parent-death signal ends it with the stub). The engine's pids, read before the kill.
+fn kill_stub_alone(stub: &Real) -> Vec<u32> {
+    let pid = stub.pid();
+    let engine = group_members(pid);
+    assert!(!engine.is_empty(), "the stub's engine runs in its group");
+    let id = i32::try_from(pid).unwrap();
+    // SAFETY: a signal to the stub this test started, and the reap of it (a zombie still "runs").
+    unsafe {
+        libc::kill(id, libc::SIGKILL);
+        libc::waitpid(id, std::ptr::null_mut(), 0);
+    }
+    engine
+}
+
+fn runs(pid: u32) -> bool {
+    !matches!(kith_kernel::procstart::probe(pid), kith_kernel::procstart::Probe::Gone)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stub_killed_alone_has_its_engine_group_killed_before_the_claim_ends() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    let engine = kill_stub_alone(&stub);
+    if cfg!(target_os = "macos") {
+        assert!(engine.iter().all(|p| runs(*p)), "macOS: the engine outlives its stub");
+    }
+    // Watches the core: whether any engine pid still ran when the end report arrived.
+    let (world, watched) = (r.world.clone(), engine.clone());
+    let watcher = std::thread::spawn(move || {
+        let until = std::time::Instant::now() + Duration::from_secs(20);
+        while std::time::Instant::now() < until {
+            if !world.lock().unwrap().reports.is_empty() {
+                return Some(watched.iter().any(|p| runs(*p)));
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        None
+    });
+    assert_eq!(r.writer.retry_end(&run, End::Died), Finished::Reported);
+    assert_eq!(watcher.join().unwrap(), Some(false), "the claim was not ended while the engine lived");
+    assert!(engine.iter().all(|p| !runs(*p)), "the engine's group was killed");
+    assert_eq!(r.w().reports[0].0, "exit");
+    assert_eq!(r.w().reports[0].1["pid"], run.pid, "named: the core ends the claim");
+    assert_eq!(r.claim_state(run.claim), "ended");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stub_whose_group_is_already_empty_is_reported_as_before() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    stub.kill_now();
+    let at = std::time::Instant::now();
+    assert_eq!(r.writer.retry_end(&run, End::Died), Finished::Reported);
+    assert!(at.elapsed() < ORPHAN_GRACE, "nothing to wait for");
+    assert_eq!(r.w().reports[0].1["pid"], run.pid);
+    assert_eq!(r.claim_state(run.claim), "ended");
+}
+
 // --- the gate is read at every begin -----------------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
