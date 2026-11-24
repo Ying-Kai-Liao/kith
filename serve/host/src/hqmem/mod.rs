@@ -259,6 +259,17 @@ fn read_disk(path: &Path) -> Option<(String, i64, u64)> {
 /// The most of a file a read takes.
 const READ_MAX: u64 = 8 * 1024 * 1024;
 
+/// `FILE_FLAG_OPEN_REPARSE_POINT` (winnt.h): open a link itself instead of what it points to.
+#[cfg(windows)]
+pub(crate) const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+/// Whether an open handle's metadata says the file is a reparse point (a symlink, a junction), `FILE_ATTRIBUTE_REPARSE_POINT`.
+#[cfg(windows)]
+pub(crate) fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+    meta.file_attributes() & 0x0400 != 0
+}
+
 /// Opens a regular file without blocking; with `no_follow`, not through a link either.
 pub(crate) fn open_regular(path: &Path, no_follow: bool) -> Option<std::fs::File> {
     let mut opts = std::fs::OpenOptions::new();
@@ -268,13 +279,20 @@ pub(crate) fn open_regular(path: &Path, no_follow: bool) -> Option<std::fs::File
         use std::os::unix::fs::OpenOptionsExt as _;
         opts.custom_flags(libc::O_NONBLOCK | if no_follow { libc::O_NOFOLLOW } else { 0 });
     }
-    // Windows has no O_NOFOLLOW: look at the link itself before opening.
-    #[cfg(not(unix))]
-    if no_follow && std::fs::symlink_metadata(path).ok()?.file_type().is_symlink() {
-        return None;
+    // Windows has no O_NOFOLLOW: opening the reparse point itself (a link is not followed) and judging the open
+    // handle's own attributes leaves no gap between a check and the open.
+    #[cfg(windows)]
+    if no_follow {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
     let file = opts.open(path).ok()?;
-    file.metadata().ok()?.is_file().then_some(file)
+    let meta = file.metadata().ok()?;
+    #[cfg(windows)]
+    if no_follow && is_reparse_point(&meta) {
+        return None;
+    }
+    meta.is_file().then_some(file)
 }
 
 pub fn read(path: &Path) -> Option<String> {

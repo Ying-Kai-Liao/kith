@@ -209,8 +209,7 @@ fn read_memory_file(dir: &Path, path: &str) -> Result<Value> {
     let (file, _) = resolve_memory_file(dir, path)?;
     // The checks above can go stale before the open (a FIFO or a link swapped in): never block on a pipe, never
     // follow a link, and trust only the open handle's own metadata.
-    // (Windows has neither flag; `resolve_memory_file` has already refused links and the open handle's metadata is
-    // still the check that it is a file.)
+    // (Windows opens a link itself rather than what it points to, then refuses a reparse point on the open handle.)
     let handle = {
         let mut opts = std::fs::OpenOptions::new();
         opts.read(true);
@@ -219,10 +218,19 @@ fn read_memory_file(dir: &Path, path: &str) -> Result<Value> {
             use std::os::unix::fs::OpenOptionsExt as _;
             opts.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
         }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt as _;
+            opts.custom_flags(crate::hqmem::FILE_FLAG_OPEN_REPARSE_POINT);
+        }
         opts.open(&file)
     }
     .map_err(|_| anyhow!("`{path}` can't be opened"))?;
     let meta = handle.metadata()?;
+    #[cfg(windows)]
+    if crate::hqmem::is_reparse_point(&meta) {
+        bail!("`{path}` isn't a file");
+    }
     if !meta.is_file() {
         bail!("`{path}` isn't a file");
     }
