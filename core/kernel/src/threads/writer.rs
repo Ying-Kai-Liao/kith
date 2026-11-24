@@ -104,6 +104,13 @@ impl<'a> Taker<'a> {
         if self.writer() {
             return self.core_take(sid, pid, how, None, how.lifecycle_owner);
         }
+        // The host's claim is a core row: in Files mode there is nothing to attach it to, and a run that started anyway would
+        // leave it `claimed` with no process, for a host restart to requeue and prompt twice.
+        if self.turn_claim()?.is_some() {
+            return Err(format!(
+                "{TURN_CLAIM_REFUSED}: the claims are not the core's here, so the host's claim cannot be attached; nothing was started"
+            ));
+        }
         match take_claim_checked(self.c, sid, pid, how, &|| self.writer()) {
             Err(e) => Err(e.to_string()),
             Ok(Outcome::Taken) => Ok(None),

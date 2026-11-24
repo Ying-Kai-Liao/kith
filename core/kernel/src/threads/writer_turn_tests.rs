@@ -151,3 +151,30 @@ fn without_the_variable_nothing_is_attached() {
         assert_eq!(core.asked(), ["claim.external"]);
     }
 }
+
+#[test]
+fn in_files_mode_a_claimed_turn_is_refused_and_nothing_is_asked() {
+    // No tombstone: the claims are files, so the host's claim has nothing to attach to.
+    let t = Tmp::new();
+    let env = run_env(&[("KITH_TURN_CLAIM", "41")]);
+    let c = ctx(&t, &env);
+    let core = Fake::new(Some(json!({"attached": true})));
+    let holder = Sleeper::new();
+    let pid = holder.pid().to_string();
+    for verb in ["claim", "terminal"] {
+        let o = cli::run(
+            &c,
+            &NoHost,
+            Some(&core),
+            &args(&[verb, "s-1", &pid]),
+            &String::new,
+        );
+        assert_eq!(o.code, TURN_CLAIM_EXIT, "{verb}: {}", o.stderr);
+        assert!(
+            o.stderr.contains("the turn claim was refused"),
+            "{}",
+            o.stderr
+        );
+    }
+    assert!(core.asked().is_empty(), "{:?}", core.asked());
+}

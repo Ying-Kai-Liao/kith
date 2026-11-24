@@ -81,6 +81,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         // uses it only on a program that lists it, else the Python `run` stays.
         "threads-run",
         "threads-writer",
+        // `KITH_TURN_CLAIM`: the launch attaches the host's claim for its turn (`claim.attach`) before anything starts. The
+        // router hands the variable only to a program that lists it (else exit 10); the host checks it before setting it.
+        "turn-claim",
     ]
 } else {
     &[
@@ -109,7 +112,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engines","launch","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engines","launch","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim"]}"#
         );
     }
 }

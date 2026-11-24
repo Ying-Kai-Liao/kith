@@ -966,6 +966,7 @@ jobs:
               Core parity (difftest --rust --core)|kernel/tests/difftest/kith-difftest --rust --core --bin "$PWD/serve/host/target/debug/kith"
               Run-once cost and kernel notes|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-once-cost-check
               Guest door check with the built kith (kill -9 of the server)|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-guest-door-check
+              Turn claim check with the built kith (Files mode, launches with no claim step)|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-turn-claim-check
               Thread writers, Python and Rust as two actors|kernel/tests/kith-threads-race --bin "$PWD/serve/host/target/debug/kith" --iterations 60
               Core dependency rules|kernel/tests/kith-core-deps-check
           - name: difftest daemon, launch and switch
