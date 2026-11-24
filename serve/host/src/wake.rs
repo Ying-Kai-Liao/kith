@@ -42,8 +42,9 @@ fn switched(f: &kith_kernel::paths::Paths) -> Result<bool, String> {
     match std::fs::read_to_string(&record) {
         // Exactly the core's reader: each line split at its first `=`, no trimming, the last recognised `state` wins.
         Ok(text) => {
-            let phase = text.lines().filter_map(|l| l.split_once('=')).filter(|(k, _)| *k == "state").map(|(_, v)| v);
-            Ok(phase.filter(|v| matches!(*v, "stepping" | "switched" | "rolling-back")).next_back() != Some("stepping"))
+            let mut phase =
+                text.lines().filter_map(|l| l.split_once('=')).filter(|(k, _)| *k == "state").map(|(_, v)| v);
+            Ok(phase.rfind(|v| matches!(*v, "stepping" | "switched" | "rolling-back")) != Some("stepping"))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(format!("the wake switch record {} cannot be read: {e}", record.display())),

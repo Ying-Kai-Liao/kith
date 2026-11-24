@@ -172,7 +172,7 @@ fn a_switch_still_stepping_is_the_files_and_a_damaged_one_is_the_cores() {
     assert_eq!(enqueue(st, &ask("acp:c1:t", "card:1", None)).unwrap(), Queued::New);
     assert_eq!(spawns(st), 1, "Python is still the writer while stepping");
     assert!(matches!(via_core::ls(&core.folders), Some(items) if items.is_empty()));
-    // As the core reads it: no trimming (a padded line is no state line, so the record is damaged), the last state wins.
+    // As the core reads it: no trimming (a padded line is no state line: damaged), the last state wins.
     for (n, text) in
         ["state=rolling-back\n", "{}", " state=stepping\n", "state=stepping\nstate=switched\n"].into_iter().enumerate()
     {
