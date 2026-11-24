@@ -636,6 +636,9 @@ enum KernelCmd {
         resume: Option<String>,
         #[arg(long)]
         permission_mode: Option<String>,
+        /// The engine's own terminal session (Codex, Hermes), no task: its CLI with the run's flags.
+        #[arg(long)]
+        interactive: bool,
         #[arg(last = true)]
         task: Vec<String>,
     },
@@ -1601,9 +1604,15 @@ async fn main() -> Result<()> {
                     runonce::Args { engine, model, cwd, dirs, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
-            if let KernelCmd::EngineRun { engine, output, resume, permission_mode, task } = cmd {
-                let args =
-                    engine_run::Args { engine, json: output.as_deref() == Some("json"), resume, permission_mode, task };
+            if let KernelCmd::EngineRun { engine, output, resume, permission_mode, interactive, task } = cmd {
+                let args = engine_run::Args {
+                    engine,
+                    json: output.as_deref() == Some("json"),
+                    resume,
+                    permission_mode,
+                    interactive,
+                    task,
+                };
                 std::process::exit(engine_run::run(args).await?);
             }
             if let KernelCmd::CoreCall { method, params_stdin } = cmd {

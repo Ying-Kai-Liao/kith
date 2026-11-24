@@ -3,7 +3,8 @@
 //! `adapters/harness.py`'s ACP path did (the prompt, directories and MCP servers `bin/kith` hands over in
 //! `KITH_RUN_PROMPT`, `KITH_RUN_DIRS` and `KITH_RUN_MCP`; the result in the shape of `claude -p --output-format json`;
 //! one cost ledger row) on the run that `run-once` does. Exit 78 before anything starts: this engine has no ACP one-shot
-//! here (bin/kith then runs harness.py). Design: 2026-11-21-harness-oneshots, sections 3.1 and 3.2.
+//! here, and that is the final answer. `--interactive` is the terminal session of Codex and Hermes: their own CLI, run
+//! with the run's flags. Design: 2026-11-21-harness-oneshots, sections 3.1 to 3.3.
 
 use crate::runonce;
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -22,6 +23,8 @@ pub struct Args {
     pub json: bool,
     pub resume: Option<String>,
     pub permission_mode: Option<String>,
+    /// The engine's terminal session instead of a one-shot (no task).
+    pub interactive: bool,
     pub task: Vec<String>,
 }
 
@@ -219,10 +222,51 @@ fn record(row: &Value) {
     let _ = row;
 }
 
+/// The engine's own terminal session: its CLI with the run's flags, in place of this process where the system allows.
+fn interactive(engine: &str, bypass: bool) -> Result<i32> {
+    let prompt_file = std::env::var("KITH_RUN_PROMPT").context("KITH_RUN_PROMPT is not set (bin/kith sets it)")?;
+    let inputs = engines::RunInputs {
+        prompt: std::fs::read_to_string(&prompt_file).with_context(|| format!("reading {prompt_file}"))?,
+        dirs: real_dirs(&std::env::var("KITH_RUN_DIRS").unwrap_or_default()),
+        mcp: merge_mcp(&std::env::var("KITH_RUN_MCP").unwrap_or_default()),
+        model: std::env::var("KITH_MODEL").unwrap_or_default(),
+        effort: std::env::var("KITH_EFFORT").unwrap_or_default(),
+        bypass,
+        global_skills: std::env::var("KITH_RUN_GLOBAL_SKILLS").is_ok_and(|v| v == "1"),
+    };
+    let Some(tui) = engines::tui_argv(engine, &inputs) else {
+        eprintln!("kith: no terminal session for {engine}; give a task");
+        return Ok(1);
+    };
+    for note in &tui.notes {
+        eprintln!("kith: {note}");
+    }
+    let mut cmd = std::process::Command::new(&tui.argv[0]);
+    cmd.args(&tui.argv[1..]);
+    for name in run_vars(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok())) {
+        cmd.env_remove(name);
+    }
+    cmd.envs(tui.env.iter().map(|(k, v)| (k, v)));
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        let e = cmd.exec();
+        Err(anyhow!("{} is not installed or would not start ({e})", tui.argv[0]))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = cmd.status().with_context(|| format!("{} is not installed or would not start", tui.argv[0]))?;
+        Ok(status.code().unwrap_or(1))
+    }
+}
+
 /// Runs it and returns the exit code.
 pub async fn run(a: Args) -> Result<i32> {
     let engine =
         engines::find(&a.engine).ok_or_else(|| anyhow!("no engine called {} (kith engines lists them)", a.engine))?;
+    if a.interactive {
+        return interactive(engine.id, a.permission_mode.as_deref() == Some("bypassPermissions"));
+    }
     let Some(command) = runonce::acp_command(engine, None).await? else {
         return Ok(runonce::NOT_AVAILABLE);
     };
@@ -256,6 +300,7 @@ pub async fn run(a: Args) -> Result<i32> {
         env_remove: run_vars(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok())),
         timeout: TIMEOUT,
         approve,
+        allow_granted_mcp: engines::allows_granted_mcp_asks(engine.id),
     };
     let code = Arc::new(AtomicI32::new(0));
     let (result, spent) = kith_acp::run_once_until(spec, stop_signal(code.clone())).await;

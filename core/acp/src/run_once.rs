@@ -36,6 +36,63 @@ pub struct RunSpec {
     pub timeout: Duration,
     /// Answer the engine's permission requests with its first "allow" option; otherwise they are refused.
     pub approve: bool,
+    /// Without `approve`, still allow (once) the ask to run a tool of one of `mcp_servers`, when the agent marks it as an
+    /// MCP tool approval and names the server in the call it reported first (see [`Asks::allows`]). Off: every ask is
+    /// refused. Only for an agent whose own per-tool approval refuses a server the owner granted (codex-acp).
+    pub allow_granted_mcp: bool,
+}
+
+/// What the run answers the agent's permission asks with, and what it has seen to decide that.
+struct Asks {
+    approve: bool,
+    /// The servers of this run's `session/new`, when `allow_granted_mcp` is on; empty otherwise.
+    granted: Vec<String>,
+    /// `toolCallId` -> the MCP server of each tool call the agent reported (`rawInput.server`).
+    servers: std::collections::HashMap<String, String>,
+}
+
+impl Asks {
+    fn of(spec: &RunSpec) -> Self {
+        let granted = if spec.allow_granted_mcp {
+            spec.mcp_servers
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|s| s["name"].as_str().map(str::to_owned))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Self {
+            approve: spec.approve,
+            granted,
+            servers: std::collections::HashMap::new(),
+        }
+    }
+
+    /// The option to answer a `session/request_permission` with, if any. `approve`: the first allow option. Otherwise
+    /// only an MCP tool approval (`_meta.is_mcp_tool_approval`) for a call this run saw reported on one of its granted
+    /// servers, answered with `allow_once`: never an "always" option, which the agent keeps for later calls. If a later
+    /// agent drops the `_meta` flag the run loses its MCP tools; it never gains a permission.
+    fn allows<'a>(&self, params: &'a Value) -> Option<&'a str> {
+        let options = params["options"].as_array()?;
+        let kind = |o: &&Value, want: &dyn Fn(&str) -> bool| o["kind"].as_str().is_some_and(want);
+        if self.approve {
+            return options
+                .iter()
+                .find(|o| kind(o, &|k| k.starts_with("allow")))?["optionId"]
+                .as_str();
+        }
+        if params["_meta"]["is_mcp_tool_approval"].as_bool() != Some(true) {
+            return None;
+        }
+        let call = params["toolCall"]["toolCallId"].as_str()?;
+        let server = self.servers.get(call)?;
+        if !self.granted.contains(server) {
+            return None;
+        }
+        options.iter().find(|o| kind(o, &|k| k == "allow_once"))?["optionId"].as_str()
+    }
 }
 
 /// Tokens a run used, as the agent reported them.
@@ -191,6 +248,7 @@ async fn session(
     cost: &mut Option<f64>,
 ) -> Result<Outcome> {
     // The handshake is answered before anything else is read, but a hung agent still ends at the run's deadline.
+    let mut asks = Asks::of(spec);
     let init = acp
         .request(
             "initialize",
@@ -226,7 +284,7 @@ async fn session(
             if matches!(inc, Incoming::Closed { .. }) {
                 break;
             }
-            handle(acp, Some(inc), &mut old_text, &mut old_cost, spec.approve).await?;
+            handle(acp, Some(inc), &mut old_text, &mut old_cost, &mut asks).await?;
         }
         (loaded, id.to_owned())
     } else {
@@ -269,7 +327,7 @@ async fn session(
                 {
                     break answered?;
                 }
-                handle(acp, inc, &mut text, cost, spec.approve).await?;
+                handle(acp, inc, &mut text, cost, &mut asks).await?;
             }
             r = &mut prompt => break r?,
         }
@@ -279,7 +337,7 @@ async fn session(
         if matches!(inc, Incoming::Closed { .. }) {
             break;
         }
-        handle(acp, Some(inc), &mut text, cost, spec.approve).await?;
+        handle(acp, Some(inc), &mut text, cost, &mut asks).await?;
     }
     Ok(Outcome {
         text,
@@ -400,7 +458,7 @@ async fn handle(
     inc: Option<Incoming>,
     text: &mut String,
     cost: &mut Option<f64>,
-    approve: bool,
+    asks: &mut Asks,
 ) -> Result<()> {
     match inc {
         None => Err(Failure::error(FailureKind::Exited, "agent process exited")),
@@ -419,6 +477,13 @@ async fn handle(
                 match u["sessionUpdate"].as_str() {
                     Some("agent_message_chunk") => text.push_str(&content_text(&u["content"])),
                     Some("usage_update") => *cost = cost_of(u).or(*cost),
+                    Some("tool_call") => {
+                        if let (Some(id), Some(server)) =
+                            (u["toolCallId"].as_str(), u["rawInput"]["server"].as_str())
+                        {
+                            asks.servers.insert(id.to_owned(), server.to_owned());
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -426,16 +491,7 @@ async fn handle(
         }
         Some(Incoming::Request { id, method, params }) => {
             if method == "session/request_permission" {
-                let allow = approve
-                    .then(|| {
-                        params["options"].as_array().and_then(|o| {
-                            o.iter().find(|o| {
-                                o["kind"].as_str().is_some_and(|k| k.starts_with("allow"))
-                            })
-                        })
-                    })
-                    .flatten()
-                    .and_then(|o| o["optionId"].as_str());
+                let allow = asks.allows(&params);
                 let outcome = match allow {
                     Some(option) => json!({"outcome": "selected", "optionId": option}),
                     None => json!({"outcome": "cancelled"}),

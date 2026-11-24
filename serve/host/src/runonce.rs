@@ -10,8 +10,8 @@ use std::io::Read as _;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Exit code for "this engine has no ACP one-shot here" (a native one-shot, or neither an ACP mode nor a registry
-/// adapter Kith may start): the caller runs the engine its own way. Nothing was started. (BSD `EX_CONFIG`.)
+/// Exit code for "this engine has no ACP one-shot here" (neither an ACP mode nor a registry
+/// adapter Kith may start): the final answer, Kith runs non-Claude engines over ACP. Nothing was started. (BSD `EX_CONFIG`.)
 pub const NOT_AVAILABLE: i32 = 78;
 
 pub struct Args {
@@ -37,7 +37,10 @@ pub(crate) async fn acp_command(engine: &engines::Engine, given: Option<String>)
         _ if !matches!(engine.oneshot, Oneshot::Acp)
             || (engine.local.is_none() && engines::session_modes(engine.id, Reach::Workspace).is_empty()) =>
         {
-            eprintln!("kith: {} has no ACP one-shot on this computer; run it its own way", engine.name);
+            eprintln!(
+                "kith: {} has no ACP one-shot on this computer; Kith runs non-Claude engines over ACP",
+                engine.name
+            );
             return Ok(None);
         }
         _ => {
@@ -51,7 +54,10 @@ pub(crate) async fn acp_command(engine: &engines::Engine, given: Option<String>)
                     Ok(cmds) if !cmds.is_empty() => cmds[0].acp(),
                     other => {
                         let why = other.err().map(|e| format!(" ({e:#})")).unwrap_or_default();
-                        eprintln!("kith: {} has no ACP adapter to start here{why}; run it its own way", engine.name);
+                        eprintln!(
+                            "kith: {} has no ACP adapter to start here{why}; Kith runs non-Claude engines over ACP",
+                            engine.name
+                        );
                         return Ok(None);
                     }
                 },
@@ -108,6 +114,7 @@ pub async fn run(a: Args) -> Result<i32> {
         task,
         timeout: Duration::from_secs(a.timeout),
         approve: a.approve,
+        allow_granted_mcp: engines::allows_granted_mcp_asks(engine.id),
         ..RunSpec::default()
     };
     let (result, spent) = kith_acp::run_once_spent(spec).await;
