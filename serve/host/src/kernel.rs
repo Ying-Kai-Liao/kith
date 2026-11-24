@@ -401,6 +401,7 @@ mod tests {
         assert_eq!(route(&v(&["kith", "kernel", "version"])), Route::Host(v(&["kith serve", "kernel", "version"])));
     }
 
+    #[cfg(unix)]
     #[test]
     fn machine_folder_follows_the_migration_marker() {
         let t = std::env::temp_dir().join(format!("kith-machine-test-{}", std::process::id()));
@@ -446,6 +447,7 @@ mod tests {
     }
 
     /// Old link layout (`~/.hq` links elsewhere): the state is `<home>/state`, the machine's own things `~/.config/kith`.
+    #[cfg(unix)]
     #[test]
     fn machine_is_not_state_in_the_old_link_layout() {
         let t = std::env::temp_dir().join(format!("kith-oldlink-test-{}", std::process::id()));

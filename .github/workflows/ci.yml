@@ -765,7 +765,7 @@ jobs:
   windows:
     needs: changes
     if: needs.changes.outputs.windows == 'true' || needs.changes.outputs.host_core == 'true'
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 40
     defaults:
       run:
@@ -785,7 +785,7 @@ jobs:
       - name: Holder and platform layer tests
         run: cargo test --manifest-path host/Cargo.toml -p kith-holder --locked -- --test-threads=1
       # kith-kernel has Unix-only modules (threads) behind cfg; kith-core takes its lifetime lock with LockFileEx and
-      # checks owner-only access lists with icacls. Both only prove themselves here.
+      # checks owner-only access lists natively (core/winsys). Both only prove themselves here.
       - name: Kernel and core runtime tests
         run: |
           cargo clippy --manifest-path host/Cargo.toml -p kith-core --all-targets --locked -- -D warnings
@@ -801,6 +801,13 @@ jobs:
             cargo clippy --manifest-path host/Cargo.toml -p kith-stub --all-targets --locked -- -D warnings
             cargo test --manifest-path host/Cargo.toml -p kith-stub --locked
           fi
+      # The host itself (W2a): its Unix-only parts (host.sock, the screen helper, the kernel's launch/threads/pkg/lifecycle verbs,
+      # ps/pgrep) are cfg-gated and refuse by name here. All three bins; the tests (clippy --all-targets) are W2b.
+      - name: Host (kith-serve)
+        run: |
+          cargo clippy --manifest-path host/Cargo.toml -p kith-serve --bins --locked -- -D warnings
+          cargo build --manifest-path host/Cargo.toml -p kith-serve --locked
+          test -f host/target/debug/kith.exe && test -f host/target/debug/kith-serve.exe && test -f host/target/debug/kith-servew.exe
       # The two programs the Windows app bundles (apps/desktop/tools/native-host.mjs builds exactly these .exe names).
       - name: Bundled programs build
         run: |

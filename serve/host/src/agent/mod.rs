@@ -9,7 +9,9 @@ pub mod bot;
 pub mod folder;
 pub mod gate;
 pub mod hq;
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod hq_person_tests;
 pub mod node;
 pub mod own_memory;
