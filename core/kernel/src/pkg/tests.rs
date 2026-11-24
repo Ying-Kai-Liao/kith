@@ -203,17 +203,15 @@ fn fingerprint_walks_the_package_the_python_way() {
     }
     fs::create_dir_all(t.0.join("state")).unwrap();
     let ctx = t.ctx();
-    let root = t.0.display().to_string();
+    // where the role's life is, as `join` spells it (Windows keeps the `/` of the joined text)
+    let echo_at = t.0.join("agents/echo").display().to_string();
     let seen = super::fingerprint_inputs(&ctx, &t.0.join("agents/echo/role")).unwrap();
     let want = as_stored(vector_entries(&ROLE_FILES));
-    assert_eq!(seen.0, format!("{root}/agents/echo"));
+    assert_eq!(seen.0, echo_at);
     assert_eq!(seen.1, want, "entries as read from disk");
     assert_eq!(
         fingerprint(&ctx, &t.0.join("agents/echo/role")).unwrap(),
-        super::fingerprint_of(
-            &format!("{root}/agents/echo"),
-            &as_stored(vector_entries(&ROLE_FILES))
-        )
+        super::fingerprint_of(&echo_at, &as_stored(vector_entries(&ROLE_FILES)))
     );
     assert_eq!(
         fingerprint(&ctx, &t.0.join("agents/plain")).unwrap(),
