@@ -129,9 +129,17 @@ pub(crate) fn settle_in(
             continue;
         };
         let ended = answer.clone().map_or(Ended::Lost, Ended::Answered);
-        if let Settled::Now(..) =
-            ledger::settle_ask_in(tx, st, machine, &b.id, &ended, None, Some(b.turn), now)?
-        {
+        if let Settled::Now(..) = ledger::settle_ask_in(
+            tx,
+            st,
+            machine,
+            &b.id,
+            &ended,
+            None,
+            Some(b.turn),
+            true,
+            now,
+        )? {
             settled.push(b.id.clone());
         }
     }
@@ -148,7 +156,7 @@ pub(crate) fn settle_in(
             continue;
         }
         if let Settled::Now(..) =
-            ledger::settle_ask_in(tx, st, machine, &f.id, &Ended::Lost, None, None, now)?
+            ledger::settle_ask_in(tx, st, machine, &f.id, &Ended::Lost, None, None, true, now)?
         {
             settled.push(f.id.clone());
         }

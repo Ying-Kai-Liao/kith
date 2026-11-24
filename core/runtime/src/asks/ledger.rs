@@ -224,6 +224,7 @@ pub(crate) fn settle_ask_in(
     ended: &Ended,
     session: Option<&str>,
     turn: Option<i64>,
+    swept: bool,
     now: i64,
 ) -> Result<Settled> {
     let Some(a) = get(tx, id)? else {
@@ -250,7 +251,7 @@ pub(crate) fn settle_ask_in(
         });
     }
     // Only the `fg` CLI's own report, on its first run, was answered on its stdout; a resumed run has no caller to print it.
-    let notify = a.turn.is_some() || a.mode.as_deref() != Some("fg");
+    let notify = swept || a.turn.is_some() || a.mode.as_deref() != Some("fg");
     let state = match ended {
         Ended::Answered(c) if c.is_error => "stopped",
         Ended::Answered(_) => "answered",
@@ -337,7 +338,7 @@ pub(crate) fn finish(
         let Some(a) = get(tx, f.id)? else {
             return Err(Error::Refused(format!("kith-core: asks: no ask {}", f.id)));
         };
-        let said = settle_ask_in(tx, st, machine, f.id, &ended, f.session, f.turn, now)?;
+        let said = settle_ask_in(tx, st, machine, f.id, &ended, f.session, f.turn, false, now)?;
         Ok((said, a.state))
     })?;
     Ok(match done {
