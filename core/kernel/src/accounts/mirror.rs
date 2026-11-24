@@ -117,7 +117,7 @@ fn link_dir(target: &Path, link: &Path) -> std::io::Result<bool> {
 #[cfg(not(unix))]
 fn link_dir(target: &Path, link: &Path) -> std::io::Result<bool> {
     if link.symlink_metadata().is_ok() {
-        if !junction::exists(link)? {
+        if !junction::exists(link).unwrap_or(false) {
             return Ok(false);
         }
         if junction::get_target(link).is_ok_and(|t| realpath(&t) == realpath(target)) {

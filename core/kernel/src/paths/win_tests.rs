@@ -94,14 +94,14 @@ fn which_tries_pathext_in_order_and_skips_the_bare_shim() {
         std::fs::write(d.join(f), b"").unwrap();
     }
     let path = std::env::join_paths([&d]).unwrap();
-    let w = |p: &str, ext: Option<&str>| which_with(p, &path, ext, true);
+    let w = |p: &str, ext: Option<&str>| lower(which_with(p, &path, ext, true));
     // the extensionless sh shim is never picked: .cmd wins
-    assert_eq!(w("claude", None), Some(d.join("claude.cmd")));
-    assert_eq!(w("claude", Some(".exe;.CMD")), Some(d.join("claude.cmd")));
-    assert_eq!(w("tool", Some(".cmd;.exe")), Some(d.join("tool.exe")));
+    assert_eq!(w("claude", None), want(&d, "claude.cmd"));
+    assert_eq!(w("claude", Some(".exe;.CMD")), want(&d, "claude.cmd"));
+    assert_eq!(w("tool", Some(".cmd;.exe")), want(&d, "tool.exe"));
     // a name with an extension is tried as is
-    assert_eq!(w("tool.exe", None), Some(d.join("tool.exe")));
-    assert_eq!(w("claude.ps1", None), Some(d.join("claude.ps1")));
+    assert_eq!(w("tool.exe", None), want(&d, "tool.exe"));
+    assert_eq!(w("claude.ps1", None), want(&d, "claude.ps1"));
     assert_eq!(w("nothing", None), None);
     std::fs::remove_dir_all(&d).unwrap();
 }
@@ -112,6 +112,17 @@ fn which_strips_quotes_and_ignores_empty_path_entries() {
     let d = scratch("q x");
     std::fs::write(d.join("a.exe"), b"").unwrap();
     let path = OsString::from(format!(";\"{}\"", d.display()));
-    assert_eq!(which_with("a", &path, None, true), Some(d.join("a.exe")));
+    assert_eq!(lower(which_with("a", &path, None, true)), want(&d, "a.exe"));
     std::fs::remove_dir_all(&d).unwrap();
+}
+
+// Windows paths are case-insensitive, and the extension comes back in the case PATHEXT spells it.
+#[cfg(windows)]
+fn lower(p: Option<PathBuf>) -> Option<String> {
+    p.map(|p| p.to_string_lossy().to_lowercase())
+}
+
+#[cfg(windows)]
+fn want(d: &Path, name: &str) -> Option<String> {
+    lower(Some(d.join(name)))
 }
