@@ -398,8 +398,9 @@ if [[ $agent != prompt && $agent != settings && $agent != mcp ]]; then
   # A one-shot (`kith AGENT "task"`: the host's chat turns and card resumes, `kith ask`, a schedule): the program runs it in this
   # process when `launch-exec` is switched (lib/core-switched.txt) and it lists the token. It claims for this pid and the engine
   # descends from it (the same shell pid the body below uses); a terminal run, --held and --print stay with the body below.
-  # A turn the host claimed (KITH_TURN_CLAIM) stays on the body, which attaches the claim; launch-exec refuses it (exit 10).
-  elif [[ -z ${KITH_TURN_CLAIM:-} ]] && kith_switched launch-exec && kith_oneshot_flag "$@"; then
+  # A turn the host claimed ($turn_claim, taken from the environment above) stays on the body, which attaches the claim; the
+  # program's launch-exec refuses a KITH_TURN_CLAIM it is handed directly (exit 10).
+  elif [[ -z $turn_claim ]] && kith_switched launch-exec && kith_oneshot_flag "$@"; then
     unset KITH_HOME KITH_STATE KITH_AGENTS HQ_HOME HQ_STATE HQ_AGENTS
     for kv in ${kith_in[@]+"${kith_in[@]}"}; do export "$kv"; done
     kith_core_exec launch-exec "$agent" --kernel "$KITH" "$@" || true

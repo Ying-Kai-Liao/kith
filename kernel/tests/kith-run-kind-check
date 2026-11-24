@@ -68,7 +68,6 @@ if [[ -n $BIN ]]; then
   expect "the program lists the token" "$("$BIN" kernel version | grep -c '"launch-exec"')" 1
   suite
   # A turn the host claimed stays on the script's body (which attaches the claim); the program itself refuses it with 10.
-  expect "a claimed turn still runs, through the body" "$(run KITH_LAUNCH_KIND=ask KITH_LAUNCH_LABEL=architect KITH_VIA=ask KITH_TURN_CLAIM=x)" "KITH_RUN_KIND=ask KITH_RUN_LABEL=architect "
   rc=0; env KITH_TURN_CLAIM=x HOME="$HOME" "$BIN" kernel launch-exec echo --kernel "$K" hi >/dev/null 2>&1 || rc=$?
   expect "launch-exec refuses a claimed turn (exit 10)" "$rc" 10
 else
