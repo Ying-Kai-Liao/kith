@@ -718,7 +718,7 @@ mod tests {
         ]));
         assert!(a.launch && a.error.is_none() && !a.resume && a.task);
         assert!(!parse_args(&v(&["-r"])).task);
-        assert!(!parse_args(&v(&["--", ])).task);
+        assert!(!parse_args(&v(&["--",])).task);
         assert!(parse_args(&v(&["--", "do it"])).task);
         assert_eq!(a.hold.as_deref(), Some("7"));
         assert_eq!(a.harness.as_deref(), Some("codex"));

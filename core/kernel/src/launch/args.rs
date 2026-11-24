@@ -24,7 +24,10 @@ pub fn claude_args(plan: &Plan) -> Vec<String> {
     v.extend(["--mcp-config".into(), plan.mcp_arg.clone()]);
     let own_mcp = plan.pkg.join("mcp.json");
     if !plan.launch && plan.owner && own_mcp.is_file() {
-        v.extend(["--mcp-config".into(), own_mcp.to_string_lossy().into_owned()]);
+        v.extend([
+            "--mcp-config".into(),
+            own_mcp.to_string_lossy().into_owned(),
+        ]);
     }
     if plan.out.disable_slash_commands && !plan.owner_terminal {
         v.push("--disable-slash-commands".into());

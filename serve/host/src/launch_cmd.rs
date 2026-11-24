@@ -348,11 +348,17 @@ fn print_exec_plan(agent: &str, flags: &[String], kernel_dir: &Path, env: kith_k
     let mode = plan::Mode::Exec(plan::ExecOpts::from_process(task, held, ""));
     match plan::plan(agent, &flags, kernel_dir, env, &mode) {
         Ok(p) => {
-            let keep = ["KITH_PROVIDER", "KITH_ACCOUNT", "KITH_ACCOUNT_ID", "KITH_ACCOUNT_VAR", "KITH_RUN_OUTBOX", "KITH_CALL_KEY", "KITH_CALL_CHAT"];
-            let env: serde_json::Map<String, Value> = keep
-                .iter()
-                .filter_map(|k| p.env.get(*k).map(|v| ((*k).to_owned(), json!(v))))
-                .collect();
+            let keep = [
+                "KITH_PROVIDER",
+                "KITH_ACCOUNT",
+                "KITH_ACCOUNT_ID",
+                "KITH_ACCOUNT_VAR",
+                "KITH_RUN_OUTBOX",
+                "KITH_CALL_KEY",
+                "KITH_CALL_CHAT",
+            ];
+            let env: serde_json::Map<String, Value> =
+                keep.iter().filter_map(|k| p.env.get(*k).map(|v| ((*k).to_owned(), json!(v)))).collect();
             if json_out {
                 let out = json!({"owner_terminal": p.owner_terminal, "harness": p.harness, "claude_args": args::claude_args(&p), "env": env});
                 println!("{out}");
@@ -360,7 +366,11 @@ fn print_exec_plan(agent: &str, flags: &[String], kernel_dir: &Path, env: kith_k
                 // The line the difftest's fake `claude` prints for the bash entry's run.
                 let var = p.env.get("KITH_ACCOUNT_VAR").and_then(|v| p.env.get(v)).cloned().unwrap_or_default();
                 let get = |k: &str| p.env.get(k).cloned().unwrap_or_default();
-                println!("claude-run account_id={} provider={} cfg={var}", get("KITH_ACCOUNT_ID"), get("KITH_PROVIDER"));
+                println!(
+                    "claude-run account_id={} provider={} cfg={var}",
+                    get("KITH_ACCOUNT_ID"),
+                    get("KITH_PROVIDER")
+                );
             }
             0
         }

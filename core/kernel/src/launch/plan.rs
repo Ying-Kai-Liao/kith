@@ -78,13 +78,7 @@ impl ExecOpts {
 
 /// The owner at their own terminal (the same test `kith` makes twice): no task, a tty on both ends or a held session, not
 /// started by another run, and not by the host, a schedule or an ask (they set `KITH_VIA`).
-pub fn owner_terminal(
-    x: &ExecOpts,
-    print: bool,
-    owner: bool,
-    nested: bool,
-    via: &str,
-) -> bool {
+pub fn owner_terminal(x: &ExecOpts, print: bool, owner: bool, nested: bool, via: &str) -> bool {
     !print && !x.task && owner && !nested && via == "terminal" && (x.tty || x.held)
 }
 
@@ -928,9 +922,8 @@ pub fn plan(
 
     // ---- the settings
     let claude = harness == "claude";
-    let is_terminal = exec.is_some_and(|x| {
-        owner_terminal(x, a.print, p_owner, nested, get(&env, "KITH_VIA"))
-    });
+    let is_terminal =
+        exec.is_some_and(|x| owner_terminal(x, a.print, p_owner, nested, get(&env, "KITH_VIA")));
     let sys = Sys { env: &env };
     let project_dirs = settings::project_dirs(&reg, &project, &home_dir);
     let plugins_json = if claude {
@@ -1193,12 +1186,33 @@ mod tests {
     fn the_terminal_is_the_owners_with_no_task_and_a_tty_or_a_holder() {
         let t = owner_terminal;
         assert!(t(&opts(false, false, true), false, true, false, "terminal"));
-        assert!(t(&opts(false, true, false), false, true, false, "terminal"), "held needs no tty");
-        assert!(!t(&opts(false, false, false), false, true, false, "terminal"), "no tty, no holder");
-        assert!(!t(&opts(true, false, true), false, true, false, "terminal"), "a task is a one-shot");
-        assert!(!t(&opts(false, false, true), true, true, false, "terminal"), "--print");
-        assert!(!t(&opts(false, false, true), false, false, false, "terminal"), "a guest");
-        assert!(!t(&opts(false, false, true), false, true, true, "terminal"), "nested");
-        assert!(!t(&opts(false, false, true), false, true, false, "chat"), "the host's turns");
+        assert!(
+            t(&opts(false, true, false), false, true, false, "terminal"),
+            "held needs no tty"
+        );
+        assert!(
+            !t(&opts(false, false, false), false, true, false, "terminal"),
+            "no tty, no holder"
+        );
+        assert!(
+            !t(&opts(true, false, true), false, true, false, "terminal"),
+            "a task is a one-shot"
+        );
+        assert!(
+            !t(&opts(false, false, true), true, true, false, "terminal"),
+            "--print"
+        );
+        assert!(
+            !t(&opts(false, false, true), false, false, false, "terminal"),
+            "a guest"
+        );
+        assert!(
+            !t(&opts(false, false, true), false, true, true, "terminal"),
+            "nested"
+        );
+        assert!(
+            !t(&opts(false, false, true), false, true, false, "chat"),
+            "the host's turns"
+        );
     }
 }

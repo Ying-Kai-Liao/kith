@@ -116,7 +116,11 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
 
-    fn answer(listener: TcpListener, status: &str, body: &'static str) -> std::thread::JoinHandle<String> {
+    fn answer(
+        listener: TcpListener,
+        status: &str,
+        body: &'static str,
+    ) -> std::thread::JoinHandle<String> {
         let status = status.to_owned();
         std::thread::spawn(move || {
             let (mut c, _) = listener.accept().unwrap();
@@ -159,8 +163,12 @@ mod tests {
         assert!(sent.ends_with(r#"{"agent":"sam","person":null,"outbox":true}"#));
         assert_eq!(
             got,
-            [("KITH_CALL_CHAT", "c"), ("KITH_CALL_KEY", "k"), ("KITH_RUN_OUTBOX", "/o")]
-                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            [
+                ("KITH_CALL_CHAT", "c"),
+                ("KITH_CALL_KEY", "k"),
+                ("KITH_RUN_OUTBOX", "/o")
+            ]
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
         );
     }
 
@@ -169,9 +177,15 @@ mod tests {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let env = rig("no", l.local_addr().unwrap().port());
         let h = answer(l, "403 Forbidden", r#"{"error":"no"}"#);
-        assert!(outbox_env("sam", Path::new("/nowhere"), &env).is_empty(), "no origin");
+        assert!(
+            outbox_env("sam", Path::new("/nowhere"), &env).is_empty(),
+            "no origin"
+        );
         h.join().unwrap();
         // Nothing listens here any more.
-        assert!(outbox_env("sam", Path::new("/nowhere"), &env).is_empty(), "no origin");
+        assert!(
+            outbox_env("sam", Path::new("/nowhere"), &env).is_empty(),
+            "no origin"
+        );
     }
 }
