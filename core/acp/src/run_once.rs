@@ -3,7 +3,7 @@
 //! `chat/oneshot.rs`; this is the launcher the `kith` program and the kernel's one-shots use.
 
 use crate::client::{Acp, Failure, FailureKind, Incoming, content_text};
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -12,9 +12,13 @@ pub struct RunSpec {
     /// The engine's ACP command line (its row's `local` mode with `{bin}` resolved, or a registry adapter's).
     pub command: String,
     pub cwd: String,
+    /// More folders the engine may work in (ACP `additionalDirectories`); sent only to an agent that says it takes them.
+    pub dirs: Vec<String>,
     /// Added to the agent's environment; kept out of the command line (it can hold API keys).
     pub env: Vec<(String, String)>,
     pub model: Option<String>,
+    /// ACP session modes to run in, best first: the first the agent lists is set. Empty: the agent's own.
+    pub modes: Vec<String>,
     /// ACP `mcpServers` for the session (see [`mcp_servers`]).
     pub mcp_servers: Value,
     pub task: String,
@@ -163,25 +167,35 @@ async fn session(
     cost: &mut Option<f64>,
 ) -> Result<Outcome> {
     // The handshake is answered before anything else is read, but a hung agent still ends at the run's deadline.
-    acp.request(
-        "initialize",
-        json!({
-            "protocolVersion": 1,
-            "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
-            "clientInfo": {"name": "kith", "title": "Kith", "version": env!("CARGO_PKG_VERSION")},
-        }),
-    )
-    .await?;
-    let created = acp
+    let init = acp
         .request(
-            "session/new",
-            json!({"cwd": spec.cwd, "mcpServers": spec.mcp_servers}),
+            "initialize",
+            json!({
+                "protocolVersion": 1,
+                "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
+                "clientInfo": {"name": "kith", "title": "Kith", "version": env!("CARGO_PKG_VERSION")},
+            }),
         )
         .await?;
+    let mut new_session = json!({"cwd": spec.cwd, "mcpServers": spec.mcp_servers});
+    if !spec.dirs.is_empty() {
+        if init["agentCapabilities"]["sessionCapabilities"]["additionalDirectories"].is_object() {
+            new_session["additionalDirectories"] = json!(spec.dirs);
+        } else {
+            eprintln!(
+                "kith: this agent works in one directory over ACP; this run is without {}",
+                spec.dirs.join(", ")
+            );
+        }
+    }
+    let created = acp.request("session/new", new_session).await?;
     let sid = created["sessionId"]
         .as_str()
         .ok_or_else(|| anyhow!("agent returned no sessionId"))?
         .to_owned();
+    if !spec.modes.is_empty() {
+        select_mode(acp, &created, &sid, &spec.modes, spec.approve).await?;
+    }
     if let Some(model) = spec.model.as_deref().filter(|m| !m.is_empty()) {
         select_model(acp, &created, &sid, model).await?;
     }
@@ -223,6 +237,44 @@ async fn session(
         cost_usd: cost_of(&result).or(*cost),
         session_id: sid,
     })
+}
+
+/// The first of `modes` the agent lists in `session/new`. None listed: a run without `approve` ends before its task is
+/// sent (the agent's own mode may reach further than asked); an approved one stays as it started, said on stderr.
+async fn select_mode(
+    acp: &Acp,
+    created: &Value,
+    sid: &str,
+    modes: &[String],
+    approve: bool,
+) -> Result<()> {
+    let listed = created["modes"]["availableModes"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let Some(mode) = modes
+        .iter()
+        .find(|m| listed.iter().any(|l| l["id"].as_str() == Some(m.as_str())))
+    else {
+        if !approve {
+            bail!(
+                "this agent offers none of the session modes {}; the task was not sent",
+                modes.join(", ")
+            );
+        }
+        eprintln!(
+            "kith: this agent offers none of the session modes {}; this run is in its own mode",
+            modes.join(", ")
+        );
+        return Ok(());
+    };
+    acp.request(
+        "session/set_mode",
+        json!({"sessionId": sid, "modeId": mode}),
+    )
+    .await
+    .map(|_| ())
+    .map_err(|e| e.context(format!("Couldn't set session mode {mode}")))
 }
 
 /// The agent's model list may be a config option (`category: model`) or the older `session/set_model`.
