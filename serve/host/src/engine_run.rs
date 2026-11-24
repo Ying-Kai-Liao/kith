@@ -300,7 +300,7 @@ pub async fn run(a: Args) -> Result<i32> {
         env_remove: run_vars(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok())),
         timeout: TIMEOUT,
         approve,
-        allow_granted_mcp: engines::allows_granted_mcp_asks(engine.id),
+        allow_granted_mcp: engines::allows_granted_mcp_asks(engine.id) && !runonce::command_overridden(None),
     };
     let code = Arc::new(AtomicI32::new(0));
     let (result, spent) = kith_acp::run_once_until(spec, stop_signal(code.clone())).await;

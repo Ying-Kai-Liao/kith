@@ -1518,6 +1518,7 @@ if [[ $harness != claude ]]; then
     exit 1
   fi
   if [[ $# -eq 0 ]]; then
+    "$kbin" kernel version 2>/dev/null | grep -q '"engine-run-tui"' || { echo "kith: this Mac's kith program has no terminal session for $harness (install or update kith)" >&2; exit 1; }
     [[ -t 0 && -t 1 ]] || { echo "kith: no terminal for an interactive session; give a task (kith $agent \"...\") or run it in a terminal" >&2; exit 1; }
     exec "$kbin" kernel engine-run "$harness" --interactive "${hargs[@]}"
   fi

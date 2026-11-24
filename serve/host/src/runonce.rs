@@ -27,6 +27,12 @@ pub struct Args {
     pub task: Vec<String>,
 }
 
+/// A command was given (`--acp-command`, `KITH_RUN_ONCE_ACP_COMMAND`) in place of the engine's own adapter: whatever it
+/// starts is not the one whose asks Kith knows how to read.
+pub(crate) fn command_overridden(given: Option<&str>) -> bool {
+    given.is_some_and(|c| !c.is_empty()) || std::env::var("KITH_RUN_ONCE_ACP_COMMAND").is_ok_and(|c| !c.is_empty())
+}
+
 /// The ACP command line to run `engine` with, or `None` when it has no ACP one-shot here (said on stderr; the caller
 /// exits [`NOT_AVAILABLE`]). `given` overrides it (tests, `KITH_RUN_ONCE_ACP_COMMAND`); empty counts as not given.
 pub(crate) async fn acp_command(engine: &engines::Engine, given: Option<String>) -> Result<Option<String>> {
@@ -114,7 +120,7 @@ pub async fn run(a: Args) -> Result<i32> {
         task,
         timeout: Duration::from_secs(a.timeout),
         approve: a.approve,
-        allow_granted_mcp: engines::allows_granted_mcp_asks(engine.id),
+        allow_granted_mcp: engines::allows_granted_mcp_asks(engine.id) && !command_overridden(a.acp_command.as_deref()),
         ..RunSpec::default()
     };
     let (result, spent) = kith_acp::run_once_spent(spec).await;

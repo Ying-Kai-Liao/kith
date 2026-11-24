@@ -286,6 +286,8 @@ async fn session(
             }
             handle(acp, Some(inc), &mut old_text, &mut old_cost, &mut asks).await?;
         }
+        // Only calls made in this run count towards an ask, not the ones the history replay reported.
+        asks.servers.clear();
         (loaded, id.to_owned())
     } else {
         let created = acp.request("session/new", new_session).await?;
@@ -478,9 +480,12 @@ async fn handle(
                     Some("agent_message_chunk") => text.push_str(&content_text(&u["content"])),
                     Some("usage_update") => *cost = cost_of(u).or(*cost),
                     Some("tool_call") => {
-                        if let (Some(id), Some(server)) =
-                            (u["toolCallId"].as_str(), u["rawInput"]["server"].as_str())
-                        {
+                        // An MCP call names its server and its tool; anything less is not one.
+                        if let (Some(id), Some(server), Some(_)) = (
+                            u["toolCallId"].as_str(),
+                            u["rawInput"]["server"].as_str(),
+                            u["rawInput"]["tool"].as_str(),
+                        ) {
                             asks.servers.insert(id.to_owned(), server.to_owned());
                         }
                     }

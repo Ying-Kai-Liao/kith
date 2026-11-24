@@ -440,6 +440,12 @@ async fn every_other_ask_stays_refused_without_approve() {
         ask_run(mcp_call("c1", "h3"), mcp_ask("zz"), &["h3"], true, false).await,
         REFUSED
     );
+    // A reported call with a server but no tool name.
+    let no_tool = json!({"toolCallId": "c1", "rawInput": {"server": "h3"}});
+    assert_eq!(
+        ask_run(no_tool, mcp_ask("c1"), &["h3"], true, false).await,
+        REFUSED
+    );
     // A server this session did not get.
     assert_eq!(
         ask_run(mcp_call("c1", "other"), mcp_ask("c1"), &["h3"], true, false).await,
