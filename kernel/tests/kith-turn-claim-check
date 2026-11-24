@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# kith-turn-claim-check — a host-claimed turn (KITH_TURN_CLAIM, retire-python S4 WK3) on the Python rollback: the launch
+# cannot attach the claim there, so it exits 10 and starts nothing; the variable never reaches claude. Without the variable
+# the same launch is unchanged. (The Rust branch is asserted by the difftest case launch-whole-turn-claim-not-passed and the
+# threads:: tests in core/kernel.)
+#
+#   kernel/tests/kith-turn-claim-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-turn-claim-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state CLAUDE_CONFIG_DIR=$T/claude KITH_CORE=python
+export KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1
+unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE HQ_HOME HQ_STATE KITH_VIA KITH_RESUME KITH_CLAUDE_ARGS KITH_TURN_CLAIM
+export KITH_MACHINE=$(python3 "$KERNEL/lib/kith_paths.py" --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["KITH_MACHINE"])')
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_MACHINE" "$T/serve" "$T/bin" "$KITH_HOME/agents/designer/role"
+printf -- '---\nname: designer\ndescription: test agent\n---\nbody\n' > "$KITH_HOME/agents/designer/role/agent.md"
+cat > "$T/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+[[ $1 == plugin ]] && { echo '[]'; exit 0; }
+printf 'claim=[%s]\n' "${KITH_TURN_CLAIM:-none}" > "$STUB_OUT"
+STUB
+chmod +x "$T/bin/claude"
+export PATH=$T/bin:$PATH STUB_OUT=$T/stub.out
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
+is() { [[ $2 == "$3" ]] && ok "$1" || bad "$1" "got '$2', wanted '$3'"; }
+
+rm -f "$STUB_OUT"
+KITH_TURN_CLAIM=claim-1 "$KERNEL/bin/kith" designer --resume s-1 "do it" >"$T/out" 2>"$T/err"; rc=$?
+is "a claimed --resume turn exits 10" "$rc" 10
+[[ ! -e $STUB_OUT ]] && ok "a claimed --resume turn starts no engine" || bad "engine started" "$(cat "$STUB_OUT")"
+grep -q "turn claim" "$T/err" && ok "it says why" || bad "no reason" "$(cat "$T/err")"
+
+rm -f "$STUB_OUT"
+KITH_TURN_CLAIM=claim-1 "$KERNEL/bin/kith" designer "do it" >"$T/out" 2>"$T/err"; rc=$?
+is "a claimed fresh one-shot exits 10" "$rc" 10
+[[ ! -e $STUB_OUT ]] && ok "a claimed fresh one-shot starts no engine" || bad "engine started" "$(cat "$STUB_OUT")"
+
+rm -f "$STUB_OUT"
+"$KERNEL/bin/kith" designer "do it" >"$T/out" 2>"$T/err"; rc=$?
+is "without the variable the launch runs" "$rc" 0
+is "and the engine sees no claim" "$(cat "$STUB_OUT" 2>/dev/null)" "claim=[none]"
+
+exit "$fail"

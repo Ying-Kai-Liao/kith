@@ -66,7 +66,7 @@ fn the_claim_is_attached_for_the_launchers_pid_before_claim_external_and_again_o
     for _ in 0..2 {
         taker
             .claim_start("s-1", holder.pid(), "oneshot", Duration::ZERO, None, None)
-            .unwrap();
+            .expect("claim_start");
     }
     assert_eq!(
         core.asked(),
@@ -147,7 +147,7 @@ fn without_the_variable_nothing_is_attached() {
         let core = Fake::new(Some(json!({"refused": "gone", "state": "ended"})));
         Taker::new(&c, Some(&core))
             .claim_start("s-1", holder.pid(), "oneshot", Duration::ZERO, None, None)
-            .unwrap();
+            .expect("claim_start");
         assert_eq!(core.asked(), ["claim.external"]);
     }
 }

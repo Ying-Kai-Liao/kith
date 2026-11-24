@@ -279,8 +279,7 @@ impl<'a> Taker<'a> {
     /// check-and-set refuses a claim that was cancelled, adopted by a host restart, another conversation's, or already
     /// attached by another process; the same process asking again (once per claim step) is told `again`.
     fn attach_turn(&self, claim: i64, sid: &str, pid: i64, started: &str) -> Result<(), String> {
-        let params =
-            json!({"claimId": claim, "conversation": sid, "pid": pid, "started": started});
+        let params = json!({"claimId": claim, "conversation": sid, "pid": pid, "started": started});
         match self.ask("claim.attach", &params) {
             Ok(a) if a.get("attached").is_some_and(truthy) => Ok(()),
             Ok(a) => {
