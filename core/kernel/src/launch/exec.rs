@@ -239,6 +239,14 @@ pub fn run_with(
         return 2;
     };
     sync_env(&mut env0);
+    // The host's claim on a chat turn is attached by the bash body (and later by sched-turn S1); this run would start the turn
+    // without it, which delivers twice. Nothing started.
+    if !get(&env0, "KITH_TURN_CLAIM").is_empty() {
+        eprintln!(
+            "kith: --exec does not carry a turn claim yet (KITH_TURN_CLAIM is set); the script's run takes it"
+        );
+        return 10;
+    }
     let flags = Flags::parse(rest);
     if flags.no_run || flags.task.is_empty() {
         eprintln!(

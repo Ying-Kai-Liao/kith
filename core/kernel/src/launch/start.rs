@@ -233,6 +233,18 @@ pub struct Adapter<'a> {
     pub task: String,
 }
 
+/// Runs the engine-run child and waits. Bash trapped TERM, INT and HUP and passed them on, so a TERM to this run ends the engine
+/// (and a guest's run claim does not outlive a still-running engine); elsewhere there is no signal to pass.
+#[cfg(unix)]
+fn run_engine(cmd: &mut Command) -> std::io::Result<std::process::ExitStatus> {
+    crate::threads::runproc::run_passing_signals(cmd)
+}
+
+#[cfg(not(unix))]
+fn run_engine(cmd: &mut Command) -> std::io::Result<std::process::ExitStatus> {
+    cmd.status()
+}
+
 /// A program that lists `engine-run` runs the task over ACP; exit 78 (no ACP one-shot for this engine, nothing started) and an
 /// older program go on to the adapter script (`adapters/harness.py`, until the last engine has a Rust one-shot).
 pub fn other(a: Adapter<'_>, how: Engine) -> i32 {
@@ -246,12 +258,9 @@ pub fn other(a: Adapter<'_>, how: Engine) -> i32 {
         ];
         args.extend(a.flags.iter().cloned());
         args.push(a.task.clone());
-        let rc = match Command::new(me)
-            .args(&args)
-            .env_clear()
-            .envs(&a.env)
-            .status()
-        {
+        let mut cmd = Command::new(me);
+        cmd.args(&args).env_clear().envs(&a.env);
+        let rc = match run_engine(&mut cmd) {
             Ok(s) => code_of(s),
             Err(e) => failed("kith", &e),
         };
