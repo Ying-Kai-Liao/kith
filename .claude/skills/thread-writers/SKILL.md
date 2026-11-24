@@ -1,6 +1,6 @@
 ---
 name: thread-writers
-description: Model-checks (TLA+/TLC) that one thread has one writer at a time. Use when a change touches kernel/bin/kith-sessions (resolve, the writer claims, record), the claim and `--resume` / take-over parts of kernel/bin/kith, the compact claim in core/kernel/src/lifecycle/{sweep,proc}.rs (the Rust port of the former kernel/bin/kith-lifecycle), a wake's start in kernel/bin/kith-wake or cards/resume.rs, serve/host/src/terminal/ (sync.rs, claim.rs, registry.rs), serve/host/src/api/threads.rs, the thread `send` in api/bots.rs, the bot guest gate in api/botguests.rs, the host turn queue, start and claim (`claim_for_turn`) in agent/bot/{queue,turn,session}.rs, working_lanes in hub/actors.rs, or when a new path starts Claude on a thread's session. Also use to answer "can two things write to this conversation?".
+description: Model-checks (TLA+/TLC) that one thread has one writer at a time. Use when a change touches kernel/bin/kith-sessions (resolve, the writer claims, record) or its Rust port core/kernel/src/threads/ (resolve.rs, writer.rs Taker, cli.rs, run.rs, spool.rs), the claim and `--resume` / take-over parts of kernel/bin/kith, the one-shot run in one process `kith kernel launch-exec` (core/kernel/src/launch/{exec,start,plan,session}.rs), the compact claim in core/kernel/src/lifecycle/{sweep,proc}.rs (the Rust port of the former kernel/bin/kith-lifecycle), a wake's start in kernel/bin/kith-wake or cards/resume.rs, serve/host/src/terminal/ (sync.rs, claim.rs, registry.rs), serve/host/src/api/threads.rs, the thread `send` in api/bots.rs, the bot guest gate in api/botguests.rs, the host turn queue, start and claim (`claim_for_turn`) in agent/bot/{queue,turn,session}.rs, working_lanes in hub/actors.rs, or when a new path starts Claude on a thread's session. Also use to answer "can two things write to this conversation?".
 ---
 
 # Thread writers: one writer per thread
@@ -42,8 +42,11 @@ used. First run downloads about 60 MB.
 
 ## Sync commit
 
-**Last confirmed to describe the code: `f9b5e509f476bb88f6203a125ae863369ba03aa9`** (origin/rust-rebuild after #1015, #1016, #1017,
-2026-11-17, the re-sync before the claims step runs on a Mac). The changes since `b3f38db7` were re-read and none changes who may
+**Last confirmed to describe the code: `SYNC_R3A_PLACEHOLDER`** (origin/main after #1173, R3a `kith kernel launch-exec` shipped off,
+2026-11-25; what was read is in "Re-sync 2026-11-25 (R3a)" at the end: `Threads.tla`, `base.consts` and the rows are unchanged).
+
+The sync before it, `f9b5e509f476bb88f6203a125ae863369ba03aa9` (origin/rust-rebuild after #1015, #1016, #1017,
+2026-11-17, the re-sync before the claims step runs on a Mac): the changes since `b3f38db7` were re-read and none changes who may
 write the thread, so `Threads.tla` and `base.consts` are unchanged:
 - **Rule K** (#1015, `conversations/reconcile.rs`, moved out of `claims.rs`): step 5 after a core restart keeps the host's `claimed`
   claims and its `running` ones whose recorded process is alive; a running one whose process is gone is reconciled. This model
@@ -95,7 +98,7 @@ The claim-file half of the model (`CoreWriter = FALSE`) was confirmed earlier at
 (`kith-sessions` `core_take`, `kith_claims.py`), `--held`, the host writer (`core_writer.rs`, `writer*.rs`, `warm_stub.rs`),
 the stub's lock (`resident.rs`) and the core's claim rows (`claims.rs`, `external.rs`, `warm.rs`). The Rust twin's
 internals (`core/kernel/src/threads*`) were not re-read line by line: it is the same `take_claim` and is raced against the
-Python by `kernel/tests/kith-threads-race`. The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
+Python by `kernel/tests/kith-threads-race` (R5 then routed `kith` to it; read at the 2026-11-25 re-sync). The current sha is in `drift.sh` (`SYNC=`). Move it only after you have
 confirmed that the model describes the code at the new commit (steps below), and change both places.
 
 **The core writer (`CoreWriter = TRUE`, M3, P10).** With the claims module switched there is no claim file. The claim is a
@@ -176,12 +179,13 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 
 | Code | Model action |
 |---|---|
-| `kernel/bin/kith-sessions` `resolve()`: `host_call('resolveThread')` names the session, `claim(sid)` (`claim_waiting` -> `take_claim`: exclusive link, a live claim of anyone refuses, a one-shot waits `KITH_CLAIM_WAIT`; a live `.takeover.claim` refuses) | `TermClaim` (`ResumeClaims`) |
-| `resolve()` with the claim held: `resolveThread` again, `hostBusy` die, `live_pid(e)` die; `die` gives the claim back (`release_claims`) | `TermResolve` (`ResumeChecksHostBusy`, `ResumeChecksOpen`) |
-| `kernel/bin/kith` `csid` (the session the run continues, a `--session-id`, or a new uuid for a fresh run or a fork), then `kith-sessions claim` (one-shot) or `kith-sessions terminal` (interactive) when resolve did not claim it; neither asks the host nor reads the registry | `TermLaunch` (`FreshClaims`) |
+| `kernel/bin/kith-sessions` `resolve()`: `host_call('resolveThread')` names the session, `claim(sid)` (`claim_waiting` -> `take_claim`: exclusive link, a live claim of anyone refuses, a one-shot waits `KITH_CLAIM_WAIT`; a live `.takeover.claim` refuses); its Rust port, which `bin/kith` calls through `kith_threads` while `threads` is switched (`kthreads`, decided once per launch): `core/kernel/src/threads/resolve.rs` `resolve_taking` -> `writer.rs` `Taker::claim_waiting` -> `Taker::take` (Files: `threads.rs` `take_claim_checked`, the link then the mode re-checked under the claim's lock; Writer: `core_take`, `claim.external`) | `TermClaim` (`ResumeClaims`) |
+| `resolve()` with the claim held: `resolveThread` again, `hostBusy` die, `live_pid(e)` die; `die` gives the claim back (`release_claims`); the same order in `resolve_taking` (`host.resolve_thread` again, `hostBusy`, then the registry's live pid; `die` -> `Taker::release_claims`) | `TermResolve` (`ResumeChecksHostBusy`, `ResumeChecksOpen`) |
+| `kernel/bin/kith` `csid` (the session the run continues, a `--session-id`, or a new uuid for a fresh run or a fork), then `kith-sessions claim` (one-shot) or `kith-sessions terminal` (interactive) when resolve did not claim it; neither asks the host nor reads the registry (Rust: `cli.rs` `claim` / `terminal` -> `Taker::claim_start`, which also refuses a live `.takeover.claim` in Files mode) | `TermLaunch` (`FreshClaims`) |
+| `kith kernel launch-exec` (R3a, `core/kernel/src/launch/exec.rs` `run_with`; `bin/kith` execs it, same pid, for a one-shot while `launch-exec` is in `lib/core-switched.txt`, shipped commented out): the revoke epoch (I1, not this model), `plan::plan` (kith-auth, then `--resume`/`-r`/`-c` through `ExecHooks::resume` = `resolve_taking` for this pid, then the account walk, each attempt a launch of its own), the person's `proc` claim (a `proc-<pid>-<start>` conversation, not the thread's), then `start.rs` `claude`: `session.rs` `session_of` (the id: `--session-id`, the `--resume` one, or a new uuid), `lock_for` (the stub's path, no lock yet), `Taker::claim_start(csid, pid, "oneshot")` (for a resumed session a second take by the same pid: `claim_waiting` answers taken), the permit token and a guest's grants, then `execve` of `kith-stub [--lock-alone] --key csid -- claude ... -p task` (`stub_argv`; `--lock-alone` when resolve or the claim said the core gave no answer), so the claim's pid is the stub's. Row for row the bash one-shot (`resolve`, `claim`, `exec stub claude`) | `--resume`: `TermClaim`, `TermResolve`, `TermUp`; a caller's session (`KITH_RESUME`, `--resume` in `KITH_CLAUDE_ARGS`): `TermLaunch`, `TermUp`; end: `TermExit` (no new action) |
 | `exec claude` / `exec kith-sessions run -- claude`, and its Rust port `kith kernel threads run` (`core/kernel/src/threads/run.rs`, `runproc.rs`; `bin/kith` runs it when the launch's `kthreads` is set and the program lists `threads-run`, else the Python stays): both FORK and wait, so the shell's pid keeps the claim and claude is its child in the same process group, not an exec in place (the "child execs claude, same pid" row above is `kith kernel lifecycle compact`'s). The post-exit steps run in one order whatever happened, a failed exec included: quit intent, `release_claims` for the wrapper's own pid, the sleep sweep, the take-over or resume note, `wake_owed` (run gives the claims back after claude exits; a one-shot's claim goes stale with its pid, `prune_stale`) | `TermUp`, `TermExit` (the launch gap: `LaunchIsInstant` removes it) |
 | `kernel/bin/kith` `--held` (M1-7: `kith_held_launch` in `lib/kith-core.sh`, `kith-sessions release SID`, `core/runtime/src/terminal.rs` `open_held`): for a `--resume` the shell's claim is given back only when `terminal.list` says a holder is up and the claim's pid is the caller's parent with the same start time; `terminal.open` then takes the claim for the daemon's pid (`kind: starting`; also refused while a live `.takeover.claim` exists), and `retarget`s it to the stub's pid once spawned; busy answers 75 and starts nothing. When open answers direct or is refused, the claim is taken again by `kith-sessions terminal` and the run goes on with `kith-sessions run`. No daemon or no holder: the claim is never given back | `TermClaim` and `TermUp` by another actor (the core as claimer), and the gap below; **not modelled** |
-| `kith-sessions` `record()` (SessionStart hook, `write_atomic`, one file per session id, pid replaced by a later terminal; `resumedFrom` = `KITH_RESUMED_FROM`) | `TermHook` (incl. a new session id claude moved to: `ClaudeForks`) |
+| `kith-sessions` `record()` (SessionStart hook, `write_atomic`, one file per session id, pid replaced by a later terminal; `resumedFrom` = `KITH_RESUMED_FROM`); the Rust `threads/spool.rs` `record`; once the registry is the core's (transcripts step) the hook spools, calls `session.record`, and the core writes the same file from its row | `TermHook` (incl. a new session id claude moved to: `ClaudeForks`) |
 | claude's `~/.claude/sessions/<pid>.json` status idle vs other; user prompt and end | `TermPrompt`, `TermDone`, `TermExit` (a crash may leave a ghost: pid reused) |
 | `terminal/sync.rs` `writer()`: `taking`; for the lane's session and the scanned copy's: `claim::holder` (not the host's own `App` claim; `Kind::Bot` -> `Writer::Bot`), then a live `registry::read_one`; last the copy's liveness | `Writer`, `WriterOf`, `RegLive` |
 | `terminal/sync.rs` `send_gate_blocking()` (via `api/bots.rs` `send` -> `terminal::send_gate`, and `cards/resume.rs` `bot_door` -> `terminal_holds` for a wake), under `thread_lock`: `writer()` -> 409 (a bot guest's thread, an invited person's chat), or for the owner's own app chat `Waits` (the message is saved `queued` and enqueued as wake `msg:<entry>`; nothing is written to the session, so in the model this is the refused branch, with the same state; the wake's later delivery is a fresh `AppGate` (`resume.rs` `handle` asks `terminal_holds` for a turn that carries a waiting message; held -> back to the wake queue) then `Enqueue` (`bot_door` -> `Cmd::WakeBatch`), so it can never skip the gate); then `sync_one` (`mapped` adopts a fork, info, `import_locked` with `forget_loaded` on new lines), `stale` delete + `forget_loaded` | `AppGate` (`SendChecksLive`, `TakingBlocksSend`, `ForgetOnImport`) |
@@ -206,7 +210,7 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 | `agent/bot/queue.rs` `Queued::Group` (group rooms, `botguests.rs` `ask_room` -> `chat::group::ask_agent`) and `agent/bot/hq.rs` (an hq lane loads its session after `claim_for_turn`): both start through `start_turn` / `claim_for_turn`; not thread lanes | none (outside the thread, claimed like any turn) |
 | the Rust `Sweep::end` (the former `kith-lifecycle end()`): `take_claim` for the sweep's own pid, `still`, writes the decision `ended`, `release_claims`. Starts no Claude and writes nothing to the session | none (not a writer) |
 
-The Rust rows for the lifecycle (`core/kernel/src/lifecycle/sweep.rs`, `proc.rs`) were read against this model at the head of #1086 (R5 ports 4/4: the claim is the one `Taker::take`, the child execs only after the checks under it); the sync commit in `drift.sh` still waits for the full re-sync, so `drift.sh` lists these two files as changed until then.
+The Rust rows for the lifecycle (`core/kernel/src/lifecycle/sweep.rs`, `proc.rs`) were read against this model at the head of #1086 (R5 ports 4/4: the claim is the one `Taker::take`, the child execs only after the checks under it) and again at the 2026-11-25 re-sync (since #1086 only `proc.rs` `high` became `pub(crate)`).
 
 **Core writer (`CoreWriter = TRUE`)**
 
@@ -226,7 +230,7 @@ The Rust rows for the lifecycle (`core/kernel/src/lifecycle/sweep.rs`, `proc.rs`
 | `offturn.rs`: an agent that woke itself writes before the gate and the begin, no claim, no lock; anything short of Running kills its group | `OffTurnWrite`, `OffTurnKilled` |
 | `external.rs` `blocked_in`: `claim.external` answers `waiting` and marks the idle warm process for a kill | `WarmOK` (`ExternalChecksWarm`), `WarmKilled` |
 | host restart: the stub keeps the engine and the lock, the claim row stays; `adopt` ends claims never redeemed and marks processes | `HostRestartCore` (`RestartKeepsClaim`), `HostAdopt`, `OrphanGone` |
-| `kith-sessions` `core_take` (`claim.external`, `claim_terminal`), the core not answering: the owner's run goes on under the lock alone, marked so (`LOCK_ALONE`: `claim` / `terminal` print `lock-alone`, `resolve` adds `r_alone=1`; `kith_held_launch` sets `held_alone`) | `TermClaim`, `TermLaunch` (`OwnerNoAnswer`, gate held) |
+| `kith-sessions` `core_take` and the Rust `threads/writer.rs` `Taker::core_take` (`claim.external`, `claim_terminal`), the core not answering (no daemon, `busy`, a timeout or a lost answer: `core_front.rs` `core_call_within` reads all as no answer): the owner's run goes on under the lock alone, marked so (`LOCK_ALONE`: `claim` / `terminal` print `lock-alone`, `resolve` adds `r_alone=1`; `kith_held_launch` sets `held_alone`) | `TermClaim`, `TermLaunch` (`OwnerNoAnswer`, gate held) |
 | `writer.rs` `sync_warm` (from `warm_session`, before every `session/load`, and before each begin): with each `warm_procs` row the stub's ctl `loaded <key>` (`core/stub/src/resident.rs`, `loaded.rs`: `<locks>/<key>.loaded/<stubpid>-<start>`; a marker that cannot be made fails the load); with a row forgotten, `forgot`; the stub removes the rest when its engine has exited | `ld` (the one warm process's marker), `WarmOn` |
 | `bin/kith` passes `--lock-alone` to `kith-stub`; `core/stub/src/main.rs` after the take, before the engine: `clear.rs` `clear` (stale marker removed; a marked stub holding another key's lock: exit 75; else `killpg` SIGKILL, wait gone, at most 5 s, else 75). No process is spawned under the lock (`the_clear_forks_nothing`) | `TermUp`'s locked branch (`LockAloneClearsWarm`, `StubLocksOther`, `ClearWarm`); `ClearBeforeLock` is the what-if at `TermClaim` / `TermLaunch` |
 | `bin/kith` `exec kith-stub`: the lock taken when claude starts, busy = exit 75 and the claim given back; no stub program = unlocked unless `KITH_REQUIRE_STUB` | `TermUp` (`TermTakesLock`, `RequireStub`) |
@@ -246,7 +250,7 @@ same order in `resolve` (claim, then ask the host, then the checks), `take_in` =
 `claim.rs` and the crate are three actors on one folder, and the model's one-step `take` holds for each as long as all
 use the lock. That is run, not modelled: `kernel/tests/kith-threads-race` races the Python `kith-sessions` and the Rust
 verb for one thread (fresh, stale, reused pid, damaged, live) and fails on a second winner; CI runs it after the
-difftest. Nothing calls the crate for claims yet (the router and the host switch together, later); the differences
+difftest. Since R5 ports 1/4 (a1f18bc59) `bin/kith` and `kith-core.sh` call it for every verb while `threads` is switched (`kith_threads`, one side per launch); the host's own claims (`terminal/claim.rs`) still do not go through it. The differences
 from `kith-sessions` and `claim.rs` are in `docs/plans/one-bot-model.md` (A4-2).
 
 `kith kernel threads run AGENT -- CMD...` (`run.rs`, `runproc.rs`, R5 ports 2/4) is the Rust `kith-sessions run`, read against this model without a TLC run (it adds no step: the claim it keeps is taken before it starts and given back by `release_claims`, both already rows above). What it must keep: it forks and waits (above); the child gets every signal back at its default, an empty mask and only fds 0-2 plus the stub's status pipe; TERM and HUP reach the child through a raw `sigaction` handler and an atomic pid (no async-runtime signal stream; the process is a tokio runtime, so the handler can run on any thread and holds a signal that arrives before the pid is known, which the thread that stores the pid or the handler itself sends), `^C` is ignored, SIGCHLD is at its default; the post-exit steps run even when the exec failed, none can stop the next, and none writes to stderr with a macro that panics; the idle stop is the only timer that ends a terminal session, it writes its intent before the signal, re-reads the keystroke clock after, and reports busy whenever it cannot tell (`ps` silent, a pid it cannot look up); the helpers that outlive it (`kith kernel lifecycle sweep --at-sleep`, the wake queue) start in a session of their own with no stdio.
@@ -333,10 +337,11 @@ Fixed since the last sync (rows turned from `fail` to `pass`, evidence in the co
   Not covered by the clear: a run that goes on unclaimed because its id cannot be locked or its start read (`core_take`'s
   `unclaimable`: no lock either); a warm process started before this change (no markers); a key the stub took before the host
   marked it (a restart at begin step 4, the take at step 5 before the mark at step 7: the probe sees only marked keys, so that
-  turn's key is not probed and the turn may be killed: a lost turn, never a second writer); `warm_procs` rows still go when the
-  host stops serving a session, so with the core up `blocked_in` can miss an engine that still has it loaded (open, logged by
-  the architect); Windows (the stub refuses `--lock-alone` there, so an owner run with no core answer fails instead of
-  running; accepted until M5). In the model a clear that kills the process while the host is mid-begin on another key
+  turn's key is not probed and the turn may be killed: a lost turn, never a second writer); Windows (the stub takes
+  `--lock-alone` as the plain lock and clears nothing, dc0ebe1b1; the host never selects Writer mode there, `core_writer.rs`
+  `Mode::select`: Files, or Held on a switched Mac, so it has no warm stubs and marks nothing; accepted until M5). Closed since
+  (1b98a63c6): a `warm_procs` row once went when the host stopped serving a session, so `blocked_in` could miss an engine that
+  still had it loaded; `writer.rs` `sync_warm` now drops a row only for a session the engine closed, as `WarmOK` assumes. In the model a clear that kills the process while the host is mid-begin on another key
   dead-ends (the host's take needs the process loaded): harmless for `OneWriter`, but those traces stop there.
 - Old finding 1 (check, then act, with no claim) and 2 (the send gate trusting a copy from the next scan), on
   `code-no-fork`: every Claude start claims before claude starts (3cdd9a88, c2477a8b), `resolve` claims before it asks
@@ -449,3 +454,48 @@ host-started compaction and handoff turn (`Queued::Compact`, `start_compaction`,
 No claim step, gate or CAS moved: `start_gate_in`, `claim_for_turn` and `release_turn_claim` are as they were, and every start
 that remains is the kith agent's. Drift was read for `queue.rs`, `turn.rs`, `session.rs`, `writer.rs` and `hub/actors.rs`
 (`api/bots.rs` only lost `createBot`'s test exception); SYNC not moved.
+
+## Re-sync 2026-11-25 (R3a) - model unchanged
+Read: `git diff f9b5e509 HEAD` of every file `drift.sh` lists (42 files, about 7.4k lines, most of it new Rust files) and their
+commits, at origin/main ca9b5dd34 with #1173 merged. Nothing changes who may write the thread: `Threads.tla`, `base.consts`, the
+variants and the rows are unchanged. `drift.sh` gained `serve/host/src/launch_cmd.rs`, `conversations/sched_run.rs`, `detached.rs`.
+- **R3a, `kith kernel launch-exec`** (`launch/exec.rs` `run_with`, `start.rs` `claude`, `plan.rs` `plan`, `session.rs`,
+  `launch_cmd.rs` `run_exec`; shipped off, `#launch-exec` in `core-switched.txt`): `bin/kith` `exec`s the program for a one-shot,
+  so the pid is the shell's and stays so to the engine. Its order: the revoke epoch (I1, revoke-access's); the plan (kith-auth with
+  its sync hold, then `--resume`/`-r`/`-c` through `ExecHooks::resume` = `resolve_taking` for this pid: `TermClaim`, then
+  `TermResolve`; the account walk only for a run that is not a resume, each attempt a launch of its own); the person's `proc` claim
+  (I5, a `proc-<pid>-<start>` conversation, not the thread's); `session_of` (the id), `lock_for` (the stub's path, no lock yet);
+  `Taker::claim_start(csid, pid, "oneshot")` (`TermLaunch` for a caller's session; for a resume a second take by the same pid,
+  which `claim_waiting` answers taken); the permit token and a guest's grants; `execve` of `kith-stub [--lock-alone] --lock-dir
+  <machine>/core/locks --key csid -- claude ... -p TASK` (`TermUp`: the stub's take, busy 75, the lock-alone clear; `--lock-alone`
+  when resolve or the claim met no core answer). Row for row the bash one-shot (`kith_threads resolve`, `kith_threads claim`,
+  `exec stub claude`), so the model holds with the line on or off. Not steps: the walk re-runs `launch-exec` per attempt; a
+  `KITH_TURN_CLAIM` is refused at once (exit 10, bin/kith keeps such a turn on the body); Unix only (`Engine::Spawn`, a waiting
+  parent, is the tests' and a later Windows').
+- **R5 ports** (`threads/{writer,core,cli,resolve,spool,run,runproc}.rs`, `threads.rs` `take_claim_checked`, `threads_cmd.rs`,
+  `core_front.rs` `core_call_within`; `bin/kith` `kith_threads` / `kthreads`, `kith-core.sh`): the Python's steps in both modes.
+  `core_call_within` reads a core `busy` (ee78110d4), a timeout and a lost answer as no answer, so an owner's run goes on under the
+  lock alone with the core up: the model's no-answer branch needs `gate = "held"`, and a host gate that reads ok around it is a
+  `GateFlip`, covered where `GateFlips = TRUE` (the `core-held*` rows). A lost answer can leave a claim row for the pid: a layer more.
+- **Turn claims** (`KITH_TURN_CLAIM`, `writer.rs` `attach_turn` = `claim.attach`, `sched_run.rs`, `detached.rs`, bin/kith
+  `turn_claim`, WK3): the launch's claim call attaches a host-made turn claim to its pid before `claim.external`; refused in Files
+  mode, on a branch with no claim step and by `launch-exec`. Nothing sets it for a thread yet (a cron run, `kith-sched run-turn`,
+  attaches itself on a schedule conversation, outside the thread). Not modelled: when a wake (`wakeRun`) sets it on a thread's
+  session, that is a new taker (a host claim with no process, then the run's attach by pid) and needs an action.
+- **Host**: the C5 removals (`turn.rs`, `session.rs`, `queue.rs`, `offturn.rs`, `bots.rs`, `botguests.rs`, `actors.rs`) move no claim
+  step. `writer.rs` `adopt_once` is retried until it goes through (4d2d7269d; a begin after a failed one meets the old claims held);
+  `sync_warm` keeps a row while the engine has the session loaded (1b98a63c6, the `blocked_in` gap above closed). `writer_turn.rs`
+  `gone_for` (F3, 155f492a9): a died turn whose stub is a zombie reports `Died` (no release) instead of `Done`; both end the claim
+  after the process exited (`EngineDied`, `HostDied`). `core_writer.rs`: cron `claim_run` / `run_over` (outside the thread), no
+  Writer mode on Windows. `claim.rs`: a Stop never signals serve's own pid. `core_runs.rs`: cron jobs as detached runs.
+  `resume.rs`: the grant is async. None is a modelled step.
+- **Core**: `claims.rs` (a paused job's fence; a report on an `external` claim with a detached turn leaves it `ending` until the
+  group is gone), `external.rs` (`claim.attach`; `release` spares a claim with a turn), `terminal.rs`, stub `main.rs` (Windows takes
+  `--lock-alone` as the plain lock): a conversation is held longer, never less. `lifecycle/{sweep,proc}.rs`: as at #1086.
+- **Kernel**: `kith-sessions` (Writer-mode record, `caps`, the at-sleep sweep on the program), `kith-wake` (the lifecycle program),
+  `kith_claims.py` (a timeout), the rest of `bin/kith` (program lookup, cost, permit, engine-run as a child): no writer effect.
+- Not modelled, new: a registry record held in the spool (the core not answering) reaches `<sid>.json` only at the core's drain,
+  possibly after the run ended; the model's hook runs only while the run lives. It is a late listing like the scan's lag; the
+  claims and the lock do not read the registry. Open outside this folder: the `threads` path filter in `.github/workflows/ci.yml`
+  lacks `core/kernel/src/launch/**`, `serve/host/src/core_front.rs`, `launch_cmd.rs` and `kernel/lib/core-switched.txt`.
+- TLC (no model change, so one smoke row): `core-gate` `NoBeginWhileHeld` pass, 35,618 distinct states, 1 s.
