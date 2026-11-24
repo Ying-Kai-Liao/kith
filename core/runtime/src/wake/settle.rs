@@ -106,8 +106,11 @@ pub(crate) fn linked_in(tx: &Connection, session: &str, t: &Turn) -> Result<Opti
     }))
 }
 
-/// Every run of the state that has a turn, and the runs that have none (the old rule's).
-pub(crate) fn runs_in(tx: &Connection, st: &State) -> Result<(Vec<Linked>, Vec<(String, Turn)>)> {
+/// The runs that have a turn, and those that have none (the old rule's).
+pub(crate) type Runs = (Vec<Linked>, Vec<(String, Turn)>);
+
+/// Every run of the state, told by whether it has a turn.
+pub(crate) fn runs_in(tx: &Connection, st: &State) -> Result<Runs> {
     let (mut linked, mut legacy) = (Vec::new(), Vec::new());
     for (session, it) in &st.items {
         let Some(t) = &it.turn else { continue };
@@ -132,6 +135,10 @@ pub(crate) enum Verdict {
 }
 
 /// The facts R4 decides from.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the rules' own facts, each a yes or no"
+)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Facts {
     pub done: bool,
@@ -143,10 +150,8 @@ pub(crate) struct Facts {
 }
 
 /// The rules above, in their order.
-pub(crate) fn decide(f: &Facts) -> Verdict {
-    if f.done {
-        Verdict::Answered
-    } else if f.redeemed && !f.transcript {
+pub(crate) fn decide(f: Facts) -> Verdict {
+    if f.done || (f.redeemed && !f.transcript) {
         Verdict::Answered
     } else if f.redeemed && f.marker {
         Verdict::Recovered
@@ -182,7 +187,7 @@ pub(crate) fn settle_in(
             },
         held: claims::person_writer_live_in(tx, &run.conversation)?,
     };
-    let verdict = decide(&facts);
+    let verdict = decide(facts);
     match verdict {
         Verdict::Answered => {
             queue::commit(st, now, &run.run, "answered");

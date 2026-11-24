@@ -1053,7 +1053,7 @@ fn a_gh_that_hangs_leaves_every_other_call_answered() {
                 at.elapsed() < Duration::from_millis(300),
                 "a call waited for the tick's gh"
             );
-            assert!(list["waiters"].as_array().unwrap().len() == 1);
+            assert_eq!(list["waiters"].as_array().unwrap().len(), 1);
             r.owner(
                 "wake.enqueue",
                 &json!({"session": "s3", "id": "r3", "agent": "echo", "text": ["hi"]}),
