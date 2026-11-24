@@ -84,6 +84,8 @@ keyring = { version = "3.6.3", features = ["apple-native"] }
 keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust", "vendored"] }
 
 [target.'cfg(windows)'.dependencies]
+# Owner-only access lists by SID (the memory-approvals key); the only unsafe Win32 lives in that crate.
+kith-winsys = { path = "../../core/winsys" }
 keyring = { version = "3.6.3", features = ["windows-native"] }
 
 # rust-skills lint-* rules: all default groups plus pedantic, with the

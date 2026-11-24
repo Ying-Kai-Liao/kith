@@ -862,5 +862,7 @@ pub async fn chat_request(hub: &Arc<Hub>, bot: &str, actor: &str, args: &Value) 
     Ok(request(hub, &origin, service, args["purpose"].as_str().unwrap_or_default()).await)
 }
 
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests;
