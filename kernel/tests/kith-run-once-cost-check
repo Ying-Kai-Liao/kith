@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kith-run-once-cost-check — a one-shot over ACP that crashes or times out still reports what the engine had spent:
-# `kith kernel run-once --json` puts cost_usd in its error, harness.py takes it into the result (total_cost_usd), so
+# `kith kernel run-once --json` puts cost_usd in its error, engine-run takes it into the result (total_cost_usd), so
 # kith ask settles it and a delegation's cap counts it. An older host binary sends none: no cost, no crash.
 # Also: a codex one-shot runs over its registry adapter with its MCP servers by name, in the run's session mode; `kith kernel accounts` notes
 # reach core.log.
@@ -32,7 +32,7 @@ fails=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 # prints "<is_error> <total_cost_usd>" of the run's last JSON line
 run() {
-  python3 "$KERNEL/adapters/harness.py" qwen --output json -- hello 2>"$T/err" |
+  "$BIN" kernel engine-run qwen --output json -- hello 2>"$T/err" |
     python3 -c 'import json,sys; d=json.loads(sys.stdin.read().splitlines()[-1]); print(d["is_error"], d["total_cost_usd"])'
 }
 
@@ -50,7 +50,7 @@ mkdir -p "$T/serve"
 echo '{"agents": [{"id": "codex-acp", "name": "Codex", "distribution": {"uvx": {"package": "codex-acp"}}}]}' > "$T/serve/registry.json"
 echo '{"mcpServers": {"jev-browser": {"command": "node", "args": ["x.js"]}}}' > "$T/mcp.json"
 KITH_SERVE_HOME=$T/serve KITH_RUN_MCP=$T/mcp.json FAKE_ACP_LOG=$T/acp.log FAKE_ACP_MODES=agent,workspace-write \
-  python3 "$KERNEL/adapters/harness.py" codex --output json -- hello 2>"$T/err" | tail -1 > "$T/codex.json"
+  "$BIN" kernel engine-run codex --output json -- hello 2>"$T/err" | tail -1 > "$T/codex.json"
 check "codex one-shot: answered over its registry adapter" "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert not d[\"is_error\"] and \"hello\" in d[\"result\"]' '$T/codex.json' 2>/dev/null"
 check "codex one-shot: the jev-browser MCP server reaches the engine by its own name" "python3 -c 'import json,sys; s=[json.loads(l) for l in open(sys.argv[1])]; n=[m[\"params\"][\"mcpServers\"] for m in s if m[\"method\"]==\"session/new\"]; assert [x[\"name\"] for x in n[0]]==[\"jev-browser\"]' '$T/acp.log' 2>/dev/null"
 
@@ -59,14 +59,14 @@ check "codex one-shot: the jev-browser MCP server reaches the engine by its own 
 codex_mode() {
   rm -f "$T/mode.log"
   KITH_SERVE_HOME=$T/serve FAKE_ACP_LOG=$T/mode.log FAKE_ACP_MODES=agent,read-only,workspace-write,agent-full-access \
-    python3 "$KERNEL/adapters/harness.py" codex --output json "$@" -- hello >/dev/null 2>"$T/err"
+    "$BIN" kernel engine-run codex --output json "$@" -- hello >/dev/null 2>"$T/err"
   python3 -c 'import json,sys; print(",".join(m["params"]["modeId"] for m in map(json.loads, open(sys.argv[1])) if m["method"]=="session/set_mode"))' "$T/mode.log"
 }
 check "codex one-shot: workspace-write, as native codex exec" "[ \"\$(codex_mode)\" = workspace-write ]"
 check "codex one-shot: bypass gets full access" "[ \"\$(codex_mode --permission-mode bypassPermissions)\" = agent-full-access ]"
 rm -f "$T/nomode.log"
 KITH_SERVE_HOME=$T/serve FAKE_ACP_LOG=$T/nomode.log FAKE_ACP_MODES=agent \
-  python3 "$KERNEL/adapters/harness.py" codex --output json -- hello 2>"$T/err" | tail -1 > "$T/nomode.json"
+  "$BIN" kernel engine-run codex --output json -- hello 2>"$T/err" | tail -1 > "$T/nomode.json"
 check "codex one-shot: an adapter with none of its modes gets no task" "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d[\"is_error\"]; assert not any(json.loads(l)[\"method\"]==\"session/prompt\" for l in open(sys.argv[2]))' '$T/nomode.json' '$T/nomode.log' 2>/dev/null"
 
 # `kith kernel accounts` exits before the verbs that run through the core, yet its notes (a state write or a settings

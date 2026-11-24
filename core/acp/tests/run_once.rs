@@ -27,6 +27,7 @@ fn spec(env: &[(&str, &str)]) -> RunSpec {
         task: "say hi".into(),
         timeout: Duration::from_secs(20),
         approve: false,
+        ..RunSpec::default()
     }
 }
 
@@ -254,6 +255,85 @@ async fn a_timeout_kills_the_engine() {
         .unwrap();
     let _ = std::fs::remove_file(&pidfile);
     // run_once returns only once the agent is stopped: no orphan is left.
+    // SAFETY: signal 0 only asks whether the process exists.
+    assert_ne!(
+        unsafe { libc::kill(pid, 0) },
+        0,
+        "the engine outlived the run"
+    );
+}
+
+fn log_of(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("kith-acp-{name}-{}", std::process::id()))
+}
+
+#[tokio::test]
+async fn a_resumed_run_loads_the_session_and_leaves_its_history_out_of_the_answer() {
+    let log = log_of("resume");
+    let mut s = spec(&[
+        ("FAKE_ACP_LOAD", "1"),
+        ("FAKE_ACP_LOG", log.to_str().unwrap()),
+    ]);
+    s.resume = Some("old-session".into());
+    s.task = "note".into();
+    s.fresh_task = Some("instructions and note".into());
+    let out = run_once(s).await.unwrap();
+    let text = std::fs::read_to_string(&log).unwrap();
+    let _ = std::fs::remove_file(&log);
+    assert_eq!(out.text, "echo: note");
+    assert_eq!(out.session_id, "old-session");
+    assert!(
+        text.contains("session/load") && !text.contains("session/new"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn an_agent_that_cannot_load_gets_a_new_session_and_the_fresh_task() {
+    let mut s = spec(&[]);
+    s.resume = Some("old-session".into());
+    s.task = "note".into();
+    s.fresh_task = Some("instructions and note".into());
+    let out = run_once(s).await.unwrap();
+    assert_eq!(out.text, "echo: instructions and note");
+    assert_eq!(out.session_id, "fake-session-1");
+}
+
+#[tokio::test]
+async fn effort_goes_through_a_thought_level_option_when_the_agent_has_one() {
+    let log = log_of("effort");
+    let mut s = spec(&[
+        ("FAKE_ACP_EFFORT", "low,high"),
+        ("FAKE_ACP_LOG", log.to_str().unwrap()),
+    ]);
+    s.effort = Some("high".into());
+    run_once(s).await.unwrap();
+    let text = std::fs::read_to_string(&log).unwrap();
+    let _ = std::fs::remove_file(&log);
+    assert!(
+        text.contains("session/set_config_option") && text.contains(r#""value": "high""#),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn a_stop_ends_the_run_and_the_engine_with_it() {
+    let pidfile = log_of("stop-pid");
+    let s = spec(&[
+        ("FAKE_ACP_MODE", "hang"),
+        ("FAKE_ACP_PIDFILE", pidfile.to_str().unwrap()),
+    ]);
+    let stop = async {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    };
+    let (result, _) = kith_acp::run_once_until(s, stop).await;
+    assert!(result.is_err());
+    let pid: i32 = std::fs::read_to_string(&pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let _ = std::fs::remove_file(&pidfile);
     // SAFETY: signal 0 only asks whether the process exists.
     assert_ne!(
         unsafe { libc::kill(pid, 0) },
