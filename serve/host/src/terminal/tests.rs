@@ -1212,6 +1212,15 @@ async fn stopping_a_claim_that_names_the_core_pid_signals_nothing_whatever_its_k
 }
 
 #[tokio::test]
+async fn stopping_a_claim_that_names_this_process_signals_nothing_even_when_the_core_pid_is_unknown() {
+    let r = Rig::new();
+    // The core's status could not say its pid (an open breaker once hid it): serve's own claim must still be spared.
+    claim::take(&r.state(), "c2", Kind::Terminal, std::process::id(), false).unwrap().unwrap();
+    let got = claim::stop_holder_unless(&r.state(), "c2", GRACE, None);
+    assert!(matches!(got, claim::Stopped::Busy(_)), "{got:?}");
+}
+
+#[tokio::test]
 async fn stopping_a_holder_writes_its_intent_first() {
     let r = Rig::new();
     // The holder is the shell's child, so it is not this process' own turn (`OwnTurn`).

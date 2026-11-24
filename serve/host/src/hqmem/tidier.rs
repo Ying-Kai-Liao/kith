@@ -145,10 +145,28 @@ fn waiting(store: &Store, bot: &str) -> usize {
         .map_or(0, |entries| entries.iter().filter(|e| e.kind == EntryKind::User.as_str()).count())
 }
 
+/// One review check on a blocking thread at a time, for any bot: the check reads the agent's folder, and when that disk
+/// hangs every tick of every bot would otherwise park another blocking thread on it for good (25 of them in the
+/// 2026-11-21 freeze). The bots whose tick finds it taken wait their turn as tasks (no thread) and are not skipped: a
+/// skip would read as "not due", and bots that start together would keep colliding for an hour each time.
+static REVIEW_CHECK_OUT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
 /// [`review_due`] off the async workers: an hq agent's answer reads files.
 async fn review_due_blocking(hub: &Arc<Hub>, bot: &str) -> bool {
     let (hub, bot) = (hub.clone(), bot.to_owned());
-    tokio::task::spawn_blocking(move || review_due(&hub.store, &bot)).await.unwrap_or(false)
+    one_check(&REVIEW_CHECK_OUT, move || review_due(&hub.store, &bot)).await
+}
+
+/// Runs `check` on a blocking thread once `slot` is free; until then the caller waits without holding a thread. The slot is
+/// given back when the check ends (even by a panic, or when the caller stopped waiting), never before.
+async fn one_check(slot: &'static tokio::sync::Semaphore, check: impl FnOnce() -> bool + Send + 'static) -> bool {
+    let Ok(permit) = slot.acquire().await else { return false };
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        check()
+    })
+    .await
+    .unwrap_or(false)
 }
 
 /// Once a day, when the bot's memory holds a dated entry it may rewrite (the time review).
@@ -267,7 +285,7 @@ fn typed(data: &serde_json::Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{dated, message, waiting};
+    use super::{dated, message, one_check, waiting};
     use crate::store::Store;
     use crate::store::{EntryKind, Lane};
     use serde_json::json;
@@ -296,5 +314,65 @@ mod tests {
         assert!(dated("Dentist on Oct 21"));
         assert!(!dated("Prompt is too long: Provided 10,389 tokens"));
         assert!(!dated("Has 2 cats"));
+    }
+
+    fn block_on<T>(f: impl Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(f)
+    }
+
+    #[test]
+    fn with_one_review_check_blocked_another_bot_waits_its_turn_and_gets_its_answer() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, mpsc};
+        static SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let ran = Arc::new(AtomicUsize::new(0));
+        let (started_tx, started) = mpsc::channel::<()>();
+        let (unblock, blocked) = mpsc::channel::<()>();
+        let count = ran.clone();
+        // Bot one's check hangs on the disk.
+        let first = std::thread::spawn(move || {
+            block_on(one_check(&SLOT, move || {
+                count.fetch_add(1, Ordering::SeqCst);
+                started_tx.send(()).unwrap();
+                blocked.recv().unwrap();
+                true
+            }))
+        });
+        started.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        // Bot two's tick waits: its check does not run, and no thread is spawned for it.
+        let count = ran.clone();
+        let second = std::thread::spawn(move || {
+            block_on(one_check(&SLOT, move || {
+                count.fetch_add(1, Ordering::SeqCst);
+                true
+            }))
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(ran.load(Ordering::SeqCst), 1, "no second check while one is out");
+        assert!(!second.is_finished(), "it waits, it is not answered \"not due\"");
+        unblock.send(()).unwrap();
+        assert!(first.join().unwrap());
+        assert!(second.join().unwrap(), "both bots get their review answer");
+        assert_eq!(ran.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn two_bots_that_start_together_both_get_their_review() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let ran = Arc::new(AtomicUsize::new(0));
+        let answers = block_on(async {
+            let check = |ran: Arc<AtomicUsize>| {
+                one_check(&SLOT, move || {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    ran.fetch_add(1, Ordering::SeqCst);
+                    true
+                })
+            };
+            tokio::join!(check(ran.clone()), check(ran.clone()))
+        });
+        assert_eq!(answers, (true, true));
+        assert_eq!(ran.load(Ordering::SeqCst), 2);
     }
 }

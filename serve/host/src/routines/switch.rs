@@ -279,6 +279,8 @@ impl Routines {
                     Ok(json!({"run": {"id": key, "routineId": id, "botId": owner, "status": "pending"}, "core": v}))
                 }
                 "busy" => bail!(Refused::Busy),
+                // The core could not read what the fire needed (nothing ran): not an active run, so it must not say so.
+                "unavailable" => bail!("the core is busy; the routine was not started, try again in a moment"),
                 other => bail!("the core did not start the routine ({other})"),
             },
             Answer::Refused(why) => bail!("the core refused to run the routine: {why}"),

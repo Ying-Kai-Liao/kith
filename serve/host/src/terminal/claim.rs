@@ -546,7 +546,9 @@ pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Dura
         }
     }
     let Some(claim) = holder(state, sid) else { return Stopped::Nobody };
-    if claim.kind == Kind::Starting || core == Some(claim.pid) {
+    // Also this process: the core runs inside kith serve, and a status that cannot say its pid must not turn a Stop on the
+    // serve claim into SIGKILL of serve.
+    if claim.kind == Kind::Starting || core == Some(claim.pid) || claim.pid == std::process::id() {
         return Stopped::Busy(claim);
     }
     if parent_of(claim.pid) == Some(std::process::id()) {

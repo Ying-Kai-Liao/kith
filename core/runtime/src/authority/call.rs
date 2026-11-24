@@ -175,6 +175,7 @@ fn life_of(core: &Core, params: &Value) -> Result<Life> {
         state: folders.state.clone(),
         machine: folders.machine.clone(),
         kernel,
+        pkg: core.packages().cloned(),
     })
 }
 
@@ -439,14 +440,155 @@ pub(crate) fn call(core: &mut Core, method: &str, params: &Value) -> Result<Valu
     call_in(core, &c, &life, method, params)
 }
 
+/// [`call`] for a caller that holds the core lock: a rename's folders are not moved here. They come back as a
+/// [`revoke::LifeMove`] for the caller to run once the lock is let go (and the answer is finished with
+/// [`finish_move`]); nothing under the lock touches an agents or state folder.
+pub(crate) fn call_deferred(
+    core: &mut Core,
+    method: &str,
+    params: &Value,
+) -> Result<(Value, Option<revoke::LifeMove>, Option<revoke::KeptNote>)> {
+    let c = ctx_of(core, params)?;
+    let life = life_of(core, params)?;
+    let mut said = call_in_deferred(core, &c, &life, method, params)?;
+    let mv = take_move(&mut said, &life);
+    let kept = take_kept(&mut said, &life, params);
+    Ok((said, mv, kept))
+}
+
+/// The moves the repair runs: for every person with old ids in `was`, each old id's folders to the person's current id.
+pub(crate) fn earlier_moves(core: &mut Core, life: &Life) -> Result<Vec<revoke::LifeMove>> {
+    let pairs = store::read(core, revoke::earlier_ids)?;
+    Ok(pairs
+        .into_iter()
+        .map(|(old, new)| revoke::LifeMove {
+            life: life.clone(),
+            old,
+            new,
+            earlier: Vec::new(),
+        })
+        .collect())
+}
+
+/// The rename's answer with what the move did folded in (a move the disk has not finished is said so: the rename stands).
+pub(crate) fn finish_move(
+    said: Value,
+    mv: &revoke::LifeMove,
+    report: Option<&revoke::MoveReport>,
+) -> Value {
+    match report {
+        Some(r) => renamed(said, &r.moved, r.notes.clone()),
+        None => renamed(
+            said,
+            &[],
+            vec![format!(
+                "note: the folders of {} move to {} when the disk answers",
+                mv.old, mv.new
+            )],
+        ),
+    }
+}
+
+/// [`finish_move`] for a move that has no thread to run on: the startup repair moves the folders at the next start.
+pub(crate) fn finish_unmoved(said: Value, mv: &revoke::LifeMove) -> Value {
+    renamed(
+        said,
+        &[],
+        vec![format!(
+            "note: the folders of {} move to {} at the next start",
+            mv.old, mv.new
+        )],
+    )
+}
+
+/// A removal's answer with the line that tells what is kept: worded by the caller once the lock is let go.
+pub(crate) fn finish_kept(mut said: Value, folders: Option<Vec<(String, PathBuf)>>) -> Value {
+    let clause = revoke::KeptNote::clause(folders);
+    if let Some(first) = said["lines"].get_mut(0)
+        && let Some(line) = first.as_str()
+    {
+        *first = json!(format!("{line}{clause}"));
+    }
+    said
+}
+
+/// Takes the mark a removal left in its answer.
+fn take_kept(said: &mut Value, life: &Life, params: &Value) -> Option<revoke::KeptNote> {
+    said.as_object_mut()?.remove("lifeKept")?;
+    Some(revoke::KeptNote {
+        life: life.clone(),
+        pid: word(params, "id")?.to_owned(),
+    })
+}
+
+/// Takes the move a rename left in its answer.
+fn take_move(said: &mut Value, life: &Life) -> Option<revoke::LifeMove> {
+    let m = said.as_object_mut()?.remove("lifeMove")?;
+    let id = |k: &str| m.get(k).and_then(Value::as_str).map(str::to_owned);
+    Some(revoke::LifeMove {
+        life: life.clone(),
+        old: id("old")?,
+        new: id("new")?,
+        earlier: m
+            .get("earlier")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|w| w.as_str().map(str::to_owned))
+            .collect(),
+    })
+}
+
 /// [`call`] with the context given (a test fixes the clock).
 #[cfg(test)]
 pub(crate) fn call_with(core: &mut Core, c: &Ctx, method: &str, params: &Value) -> Result<Value> {
     call_in(core, c, &Life::beside(c), method, params)
 }
 
-/// [`call_with`] with the folders of a person's life given too.
+/// [`call_with`] for a caller that holds the lock: a rename's move comes back, not done (see [`call_deferred`]).
+#[cfg(test)]
+pub(crate) fn call_with_deferred(
+    core: &mut Core,
+    c: &Ctx,
+    method: &str,
+    params: &Value,
+) -> Result<(Value, Option<revoke::LifeMove>, Option<revoke::KeptNote>)> {
+    let life = Life::beside(c);
+    let mut said = call_in_deferred(core, c, &life, method, params)?;
+    let mv = take_move(&mut said, &life);
+    let kept = take_kept(&mut said, &life, params);
+    Ok((said, mv, kept))
+}
+
+/// [`call_with`] with the folders of a person's life given too. A rename's folders move right here, after its commit:
+/// this caller has no lock to let go first (the daemon's does, and uses [`call_deferred`]).
 pub(crate) fn call_in(
+    core: &mut Core,
+    c: &Ctx,
+    life: &Life,
+    method: &str,
+    params: &Value,
+) -> Result<Value> {
+    let mut said = call_in_deferred(core, c, life, method, params)?;
+    let kept = take_kept(&mut said, life, params);
+    let said = match take_move(&mut said, life) {
+        Some(mv) => {
+            let (report, _) = revoke::run_move(&mv);
+            finish_move(said, &mv, Some(&report))
+        }
+        None => said,
+    };
+    Ok(match kept {
+        Some(note) => {
+            let folders = note.folders_now();
+            finish_kept(said, folders)
+        }
+        None => said,
+    })
+}
+
+/// [`call_in`] that leaves a rename's move in the answer (`lifeMove`) instead of doing it.
+fn call_in_deferred(
     core: &mut Core,
     c: &Ctx,
     life: &Life,
@@ -776,8 +918,15 @@ pub(crate) fn call_in(
             if m == "people.renamePerson"
                 && let (Some(old), Some(new)) = (word(params, "id"), word(params, "to"))
             {
-                let (moved, notes) = revoke::move_life(life, old, new);
-                return Ok(renamed(said, &moved, notes));
+                // The person's old ids, as the rename wrote them to the row it committed. A second read failing must
+                // not answer an error for a rename that stands, and leave its move to a restart.
+                let mut said = said;
+                let earlier = said
+                    .as_object_mut()
+                    .and_then(|o| o.remove("lifeWas"))
+                    .unwrap_or_else(|| json!([]));
+                said["lifeMove"] = json!({ "old": old, "new": new, "earlier": earlier });
+                return Ok(said);
             }
             Ok(said)
         }
@@ -1073,19 +1222,23 @@ pub(super) fn write_in(
             out["joining"] = json!(joining);
             Ok(out)
         }
-        "people.renamePerson" => Ok(lines(revoke::person_rename(
-            a,
-            life,
-            need(params, "id")?,
-            need(params, "to")?,
-        )?)),
+        "people.renamePerson" => {
+            let (said, was) =
+                revoke::person_rename(a, life, need(params, "id")?, need(params, "to")?)?;
+            let mut out = lines(said);
+            // The old ids the rename itself wrote to the row: the move is built from these, not from a second read.
+            out["lifeWas"] = json!(was);
+            Ok(out)
+        }
         "people.removePerson" if switch(params, "unused") => Ok(lines(
             revoke::person_remove_unused(a, life, need(params, "id")?)?,
         )),
         "people.removePerson" => {
             let was = revoke::was_ids(a, need(params, "id")?);
-            let (said, ids) = revoke::person_remove(a, life, c, need(params, "id")?)?;
+            let (said, ids) = revoke::person_remove(a, c, need(params, "id")?)?;
             let mut out = lines(said);
+            // Marks the line the caller finishes once the lock is let go (`finish_kept`).
+            out["lifeKept"] = json!(true);
             // What the write did, for the record and the order below: keyed on the removal, not on the method name.
             out["removedPerson"] = json!(need(params, "id")?);
             out["ids"] = json!(ids);

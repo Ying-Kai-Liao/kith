@@ -1,6 +1,6 @@
 // /docs: "Get started". From nothing to a working agent: install, make one, talk to it, give it a skill, a tool and an
 // account, schedule it, reach it from a chat channel, read its cost, roll a change back. Every command here is checked
-// against kernel/bin (kith, kith-new, kith-ask, kith-skills, kith-auth, kith-keys, kith-sched, kith-cost, kith-pkg).
+// against kernel/bin (kith, kith-new, kith-ask, kith-skills, kith-auth, kith-keys, kith-sched, kith-pkg).
 
 import type { SitePage } from "../site";
 
