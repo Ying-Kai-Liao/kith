@@ -14,6 +14,10 @@ directories, the MCP servers the agent is granted, the model and effort. This tu
   dsh       DeepSeek Harness          dsh --profile headless --json · instructions in front of the first task
   opencode  opencode                  opencode run --format json · instructions and MCP through OPENCODE_CONFIG_CONTENT
 
+A one-shot (a task, resumed or not) over an engine's ACP mode is `kith kernel engine-run`'s, not this file's: bin/kith runs it
+first and comes here only when it exits 78 (no ACP one-shot for the engine) or the kith program is older. What is left here is
+the native path: the engines with no ACP path, an older program, and the interactive terminal session.
+
 Inputs from bin/kith's environment: KITH_RUN_PROMPT (the prompt file), KITH_RUN_DIRS (directories, one per line),
 KITH_RUN_MCP (MCP config files, one per line, each {"mcpServers": {...}}), KITH_RUN_GLOBAL_SKILLS (1: the harness's own
 skills and plugins stay on), KITH_MODEL, KITH_EFFORT, plus KITH_AGENT, KITH_PROJECT, KITH_VIA for the cost ledger.
@@ -351,10 +355,6 @@ class Run:
 
     def go(self):
         self.stdin = None
-        if self.task is not None and not self.resume:
-            r = self.acp_one_shot()
-            if r is not None:
-                return self.finish(r)
         argv = getattr(self, self.harness)()
         if not shutil.which(argv[0]):
             sys.exit('kith: %s is not installed (%s); see kernel/adapters/harness.py' % (argv[0], self.harness))
@@ -370,49 +370,6 @@ class Run:
                     if l.strip() and not l.lstrip().startswith(('{', '[')) and 'Reading additional input' not in l]
             r['error'] = ' '.join(said[-3:])[-500:] or 'exited %d' % p.returncode
         return self.finish(r)
-
-    def acp_one_shot(self):
-        """The run's result (the shape of <harness>_result) from `kith kernel run-once`, when the core does one-shots
-        over ACP (lib/core-switched.txt `run-once`, or KITH_CORE=rust) and the engine's table row says `oneshot: acp`
-        (its native ACP mode, or its registry adapter such as codex-acp). None: this run goes the harness's own way
-        (exit 78: no ACP command for it here). Since run-once is switched, the per-engine argv and *_result code above
-        serves only resumed runs, interactive runs and an older kith program (docs/plans/one-bot-model.md A2b)."""
-        if not shutil.which(self.harness):
-            return None   # the native path says what is missing, as it always has
-        kith = run_once_bin()
-        if not kith:
-            return None
-        if self.effort:
-            note('%s over ACP takes no effort per run; this run is without effort %s' % (self.harness, self.effort))
-        cmd = [kith, 'kernel', 'run-once', self.harness, '--json', '--cwd', os.getcwd(), '--timeout', '86400']
-        for d in self.dirs[1:]:
-            cmd += ['--add-dir', d]   # an engine that does not take extra folders runs without them
-        if self.model:
-            cmd += ['--model', self.model]
-        if self.bypass:
-            cmd.append('--approve')
-        if self.mcp:
-            cmd += ['--mcp-config', json.dumps({'mcpServers': self.mcp})]
-        p = subprocess.run(cmd + ['--', instructions_first(self.prompt, self.task)], env=self.env, text=True,
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
-        if p.returncode == 78:
-            return None   # no ACP one-shot for this engine here; nothing was started
-        if p.returncode == 2 and '--add-dir' in p.stderr:
-            return None   # an older kith program that does not take extra folders; nothing was started
-        sys.stderr.write(p.stderr)
-        d = next(reversed(list(jsonl(p.stdout))), None)
-        r = {'session': None, 'text': '', 'error': None, 'usage': {}, 'turns': 1}
-        if d is None:
-            r['error'] = ' '.join(p.stderr.split())[-500:] or 'exited %d' % p.returncode
-        elif d.get('error'):
-            r['error'] = d['error']
-            r['cost'] = d.get('cost_usd')   # a crash or timeout still spent it; older host binaries send none
-            if d.get('kind') == 'depleted':
-                r['usage_limit'] = {'resets_at': d.get('resets_at')}
-        else:
-            r.update(session=d.get('session_id'), text=d.get('text') or '', cost=d.get('cost_usd'),
-                     usage={k: v for k, v in (d.get('usage') or {}).items() if v or k in ('input', 'output')})
-        return r
 
     def finish(self, r):
         """Records the run in the cost ledger and prints its result."""
@@ -431,33 +388,6 @@ class Run:
             if r['error']:
                 note('%s: %s' % (self.harness, r['error']))
         return 1 if r['error'] else 0
-
-
-def run_once_bin():
-    """The kith program when the core answers `run-once` (the rule of lib/kith-core.sh): not KITH_CORE=python, the verb
-    in lib/core-switched.txt (or KITH_CORE=rust), and the program lists the module in `kith kernel version`."""
-    mode = os.environ.get('KITH_CORE', '')
-    if mode == 'python':
-        return None
-    module = None
-    try:
-        for line in (KITH / 'lib/core-switched.txt').read_text().splitlines():
-            parts = line.split('\t')
-            if len(parts) == 2 and parts[0] == 'run-once':
-                module = parts[1]
-    except OSError:
-        pass
-    if not module:
-        if mode != 'rust':
-            return None
-        module = 'acp'
-    try:
-        kith = subprocess.run([sys.executable, str(KITH / 'lib/kith_paths.py'), '--bin'], capture_output=True,
-                              text=True, timeout=15).stdout.strip()
-        version = subprocess.run([kith, 'kernel', 'version'], capture_output=True, text=True, timeout=15).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return kith if kith and '"%s"' % module in version else None
 
 
 def usage_limit(message):
