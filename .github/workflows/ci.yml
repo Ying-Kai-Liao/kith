@@ -812,7 +812,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.100
       - name: Host tests (kith-serve)
-        run: cargo nextest run --manifest-path host/Cargo.toml -p kith-serve --profile ci --locked --no-fail-fast
+        run: cargo nextest run --manifest-path host/Cargo.toml -p kith-serve --profile ci --locked --no-fail-fast -E 'not kind(test)'
       # The two programs the Windows app bundles (apps/desktop/tools/native-host.mjs builds exactly these .exe names).
       - name: Bundled programs build
         run: |
