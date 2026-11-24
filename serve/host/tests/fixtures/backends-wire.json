@@ -406,6 +406,21 @@
       "curated": true
     },
     {
+      "id": "hermes",
+      "name": "Hermes Agent",
+      "installed": false,
+      "available": false,
+      "path": null,
+      "description": "",
+      "installHint": "Install Hermes Agent and run `hermes` to set it up.",
+      "signedIn": null,
+      "canInstall": false,
+      "node": null,
+      "command": "{bin} acp",
+      "registry": null,
+      "curated": true
+    },
+    {
       "id": "somebody-else",
       "name": "Somebody",
       "installed": false,
@@ -910,6 +925,19 @@
         "unix": "curl -fsSL https://downloads.poolside.ai/pool/install.sh | sh",
         "windows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://downloads.poolside.ai/pool/install.ps1 | iex\""
       },
+      "signedIn": null
+    },
+    {
+      "id": "hermes",
+      "name": "Hermes Agent",
+      "bins": [
+        "hermes"
+      ],
+      "local": "{bin} acp",
+      "registry": null,
+      "setup": "Install Hermes Agent and run `hermes` to set it up.",
+      "login": "",
+      "install": null,
       "signedIn": null
     }
   ]

@@ -35,6 +35,11 @@ serde = { version = "1.0.229", features = ["derive"] }
 # The must-ask judge (launch/judge.rs) ports the guard's regexes; the host links regex 1.x already.
 regex = "1"
 
+# A Windows account mirror links folders with a directory junction, which needs no privilege (a symlink needs Developer
+# Mode or admin). The crate holds the FSCTL_SET_REPARSE_POINT unsafe, so this crate stays `unsafe_code = "deny"`.
+[target.'cfg(windows)'.dependencies]
+junction = "1.2"
+
 [lints.rust]
 # `deny`, not `forbid`: threads/os.rs allows its kill(2) calls (a process check has no safe std spelling).
 unsafe_code = "deny"
