@@ -30,7 +30,7 @@ impl Sid {
         let mut words = vec![0u32; len.div_ceil(4)];
         // SAFETY: `p` holds `len` readable bytes and `words` has room for them; the buffers do not overlap.
         unsafe {
-            std::ptr::copy_nonoverlapping(p.cast::<u8>(), words.as_mut_ptr().cast::<u8>(), len)
+            std::ptr::copy_nonoverlapping(p.cast::<u8>(), words.as_mut_ptr().cast::<u8>(), len);
         };
         Ok(Self(words))
     }
