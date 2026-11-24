@@ -17,7 +17,7 @@ description: A run in a group room (room="group" on the session tag), room notes
   owner's own bots: only the host sets it, only for an owner run, never in a channel group, and it is ignored beside a
   member list or in anyone else's run. A failed read sends neither, which stays "unknown".
 - Room notes (`memory/rooms/<room>/`) load and are recalled only where everyone present was in the room when the note
-  was written. A hook (`bin/kith-room-ledger`, on Write, Edit and MultiEdit) records who was present in the state
+  was written. A hook (`kith kernel room-ledger`, on Write, Edit and MultiEdit) records who was present in the state
   folder, not in the note; a rewrite keeps the intersection, and a note with no record counts as the owner's alone.
   Write in a room note only what everyone present may read. A Tidy promotion the owner approved changes its audience.
 - A non-owner run's recall goes to the host with its run token, which says who you work for; inside that run's

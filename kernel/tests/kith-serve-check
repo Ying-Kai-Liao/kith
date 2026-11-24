@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# kith-serve-check — `kith serve` and `kith` against a stub cargo and a stub kith-serve, in a throwaway HOME and a
-# throwaway copy of the repo layout (the real ~/.kith, launchd and host are never touched).
+# kith-serve-check — `kith serve` and `kith` against a stub cargo, a stub launchctl and a stub kith-serve, in a throwaway
+# HOME and a throwaway copy of the repo layout (the real ~/.kith, launchd and host are never touched).
+#
+# launchd is per account, not per HOME, so a throwaway HOME alone does not isolate it. This test therefore (1) forgets every
+# program path it inherited (KITH_BIN, KITH_DEV_BIN, ...: a real kith binary in KITH_BIN was once installed as the host and
+# replaced the owner's real dev.kith.serve job), (2) puts a stub launchctl and cargo first on PATH and stops before running
+# anything if `command -v` finds anything else, and (3) names a test job (KITH_SERVE_TEST_LABEL) that the product uses instead
+# of dev.kith.serve.
 #
 #   kernel/tests/kith-serve-check     a few seconds; prints each check, exits 1 when one fails
 set -uo pipefail
@@ -10,8 +16,10 @@ T=$(mktemp -d "$(dirname "${TMPDIR:-/tmp}/x")/kith-serve-check.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home
 mkdir -p "$HOME" "$T/repo/kernel/bin" "$T/repo/serve/host/src" "$T/stubs" "$T/target/dev-app"
-unset KITH_HOME CARGO_TARGET_DIR KITH_KERNEL_BIN HQ_BIN KITH_SERVE_LAUNCHER KITH_SERVE_DEV
+unset KITH_HOME CARGO_TARGET_DIR KITH_KERNEL_BIN HQ_BIN KITH_SERVE_LAUNCHER KITH_SERVE_DEV KITH_SERVE_HOME \
+  KITH_BIN KITH_DEV_BIN KITH_KERNEL KITH_STATE KITH_LAUNCHCTL RUSTUP_HOME CARGO_HOME RUSTUP_TOOLCHAIN CARGO RUSTC
 export CARGO_TARGET_DIR=$T/target
+export KITH_SERVE_TEST_LABEL=dev.kith.serve.test-${T##*.}
 
 cp "$KERNEL/bin/kith-serve" "$T/repo/kernel/bin/"
 # The kernel command next to kith-serve (what the job runs agents with): a stub that shows what it got.
@@ -34,16 +42,45 @@ EOS
 chmod +x "$CARGO_TARGET_DIR/dev-app/kith-serve"
 EOF
 chmod +x "$T/stubs/cargo"
+# Stub launchctl: records every call and fails, so nothing is ever loaded or booted out by this test.
+printf '#!/bin/sh\necho "launchctl $*" >> "$T_LAUNCHCTL_LOG"\nexit 1\n' > "$T/stubs/launchctl"; chmod +x "$T/stubs/launchctl"
+export T_LAUNCHCTL_LOG=$T/launchctl.log; : > "$T_LAUNCHCTL_LOG"
 export STUB_LOG=$T/log
 : > "$STUB_LOG"
 SYSPATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH=$T/stubs:$SYSPATH
+# Nothing below may reach a real launchctl or cargo: stop now, before any step runs, if the stubs are not what is found.
+for tool in launchctl cargo; do
+  if [ "$(command -v $tool)" != "$T/stubs/$tool" ]; then echo "kith-serve-check: $tool resolves to $(command -v $tool), not the stub; refusing to run" >&2; exit 2; fi
+done
 SERVE=$T/repo/kernel/bin/kith-serve
 BIN=$HOME/.kith/serve/bin/kith-serve
 
 fails=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 count() { grep -c "$1" "$STUB_LOG" || true; }
+
+# The home guard: without a test label the real job is refused unless HOME is this account's own home (here it is not).
+: > "$STUB_LOG"
+for verb in start stop restart; do
+  out=$(env -u KITH_SERVE_TEST_LABEL "$SERVE" $verb 2>&1); rc=$?
+  check "$verb with a throwaway HOME and no test label refuses, naming both homes" "[ $rc = 1 ] && echo \"\$out\" | grep -q 'refusing to touch the job dev.kith.serve' && echo \"\$out\" | grep -q 'HOME is $HOME'"
+done
+out=$(KITH_SERVE_TEST_LABEL=dev.kith.serve "$SERVE" start 2>&1); rc=$?
+check "the real label is never accepted as a test label" "[ $rc = 1 ] && echo \"\$out\" | grep -q 'KITH_SERVE_TEST_LABEL must look like'"
+check "a refusal builds, installs and loads nothing" "[ ! -s '$STUB_LOG' ] && [ ! -s '$T_LAUNCHCTL_LOG' ] && [ ! -e '$BIN' ]"
+# The guard passes for the account's own home (the `home-guard` verb runs only the guard, so nothing starts or installs).
+real_home=$(eval "echo ~$(id -un)")
+if [ -d "$real_home" ]; then
+  out=$(env -u KITH_SERVE_TEST_LABEL HOME="$real_home" "$SERVE" home-guard 2>&1); rc=$?
+  check "the guard passes with HOME set to the account's own home" "[ $rc = 0 ] && echo \"\$out\" | grep -q 'home guard ok'"
+  ln -s "$real_home" "$T/home-link"
+  out=$(env -u KITH_SERVE_TEST_LABEL HOME="$T/home-link" "$SERVE" home-guard 2>&1); rc=$?
+  check "the guard passes with HOME a symlink to the account's own home" "[ $rc = 0 ]"
+else
+  echo "skip guard pass: no home directory for $(id -un)"
+fi
+check "the guard-only verb installs and loads nothing" "[ ! -s '$STUB_LOG' ] && [ ! -s '$T_LAUNCHCTL_LOG' ] && [ ! -e '$BIN' ]"
 
 # The live-host guard: this temp repo is not ~/.kith/hq-serve, so a plain start must not build from it.
 : > "$STUB_LOG"
@@ -109,7 +146,9 @@ check "failed build exits non-zero" "[ $rc != 0 ]"
 check "failed build shows the output tail" "echo \"\$out\" | grep -q 'boom line'"
 check "failed build keeps the installed binary" "[ \"$before\" = \"\$(cksum < '$BIN')\" ]"
 
-# no cargo at all (and no rustup toolchains): a clear error
+# no cargo at all (and no rustup toolchains): a clear error. PATH=$SYSPATH puts the real launchctl on PATH, but this
+# only runs when no cargo is on $SYSPATH, so `start` exits at "cargo not found" before any launchctl call (the
+# final check below would catch one anyway).
 if PATH=$SYSPATH command -v cargo >/dev/null 2>&1; then
   echo "skip no cargo: clear error (a system cargo is on $SYSPATH)"
 else
@@ -176,10 +215,32 @@ check "relay creates the file and folder" "[ -f '$CFG' ]"
 check "relay with no argument shows it" "'$SERVE' relay | grep -q relay.example.workers.dev"
 
 # the real kith dispatches `serve` to kith-serve
-out=$("$KERNEL/bin/kith" serve help 2>&1)
+# bin/kith takes its folders from `kith kernel paths --sh`: a stub program (not named kith, never a real program: this check
+# must not reach one) answers that and the hook probe with this check's throwaway folders, logs and fails on anything else.
+cat > "$T/stubs/kith-prog" <<'EOS'
+#!/bin/sh
+case "$1 $2 $3" in
+  "memory hook --help") echo "phase"; echo "$*" >> "$STUB_LOG.prog"; exit 0 ;;
+esac
+if [ "$1 $2" = "kernel paths" ]; then
+  echo "$1 $2" >> "$STUB_LOG.prog"
+  for v in KITH HQ; do
+    echo "export ${v}_HOME=$HOME/kith ${v}_STATE=$HOME/.kith ${v}_AGENTS=$HOME/kith/agents ${v}_MACHINE=$HOME/.kith"
+    echo "export ${v}_SECRETS=$HOME/.kith/secrets ${v}_LOGS=$HOME/.kith/logs ${v}_CACHE=$HOME/.kith/cache ${v}_STORE=$HOME/.kith/store"
+    echo "export ${v}_HOME_REAL=$HOME/kith ${v}_STATE_REAL=$HOME/.kith ${v}_AGENTS_REAL=$HOME/kith/agents"
+  done
+  exit 0
+fi
+echo "unexpected call: $*" >> "$STUB_LOG.prog"; exit 1
+EOS
+chmod +x "$T/stubs/kith-prog"
+: > "$STUB_LOG.prog"
+out=$(KITH_BIN=$T/stubs/kith-prog "$KERNEL/bin/kith" serve help 2>&1)
 check "kith serve help prints usage" "echo \"\$out\" | grep -q 'kith serve start'"
 ln -s "$KERNEL/bin/kith" "$T/stubs/kith"
-check "kith through a symlink dispatches serve too" "kith serve help | grep -q 'kith serve start'"
+check "kith through a symlink dispatches serve too" "KITH_BIN=$T/stubs/kith-prog kith serve help | grep -q 'kith serve start'"
+check "the stub program was asked only for the hook probe and the folders" "! grep -q unexpected '$STUB_LOG.prog'"
+check "the stub program did answer kernel paths (so no real program was used)" "grep -q '^kernel paths' '$STUB_LOG.prog'"
 
 # a packaged install (no serve/ source): installs the kith binary beside share/ under the name kith-serve, no cargo
 P=$T/pkg; mkdir -p "$P/bin" "$P/share/kith/kernel/bin" "$HOME/.kith/serve"
@@ -239,5 +300,8 @@ stubhook "$T/ptarget/dev-app/kith" built
 )
 fails=$(cat "$T/fails")
 rm -rf "$HOME/.kith" "$T/ptarget"
+
+# Nothing in this test may ever have reached launchctl (the stub host never calls it).
+check "no launchctl call was made" "[ ! -s '$T_LAUNCHCTL_LOG' ]"
 
 [ $fails = 0 ] && echo "all good" || { echo "$fails check(s) failed"; exit 1; }

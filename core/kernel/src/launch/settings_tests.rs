@@ -13,6 +13,13 @@ use crate::paths::{self, Paths};
 
 struct Tree {
     root: PathBuf,
+    /// The program the room-ledger hooks name (None: bin/kith-room-ledger, the stub).
+    ledger_bin: Option<&'static str>,
+    /// The program the `SessionStart` hook of the cost ledger names (None: no cost hook).
+    cost_bin: Option<&'static str>,
+    /// The program the auto-mode hooks name (None: the script bin/kith-permit).
+    permit_bin: Option<&'static str>,
+    threads_bin: Option<&'static str>,
 }
 
 impl Tree {
@@ -29,7 +36,13 @@ impl Tree {
         for d in ["home", "kernel/bin", "kith/state"] {
             fs::create_dir_all(root.join(d)).unwrap();
         }
-        let t = Tree { root };
+        let t = Tree {
+            root,
+            ledger_bin: None,
+            cost_bin: None,
+            permit_bin: Some("/usr/local/bin/kith"),
+            threads_bin: None,
+        };
         t.put(
             "kith/agents/echo/role/agent.md",
             "---\nname: echo\ndescription: t\n---\nYou are echo.\n",
@@ -85,6 +98,16 @@ impl Tree {
         caller_mode: &str,
         claude_version: Option<&str>,
     ) -> Result<settings::Output, settings::Refusal> {
+        self.settings_bin(member, caller_mode, claude_version, "/usr/local/bin/kith")
+    }
+
+    fn settings_bin(
+        &self,
+        member: &Member,
+        caller_mode: &str,
+        claude_version: Option<&str>,
+        kith_bin: &str,
+    ) -> Result<settings::Output, settings::Refusal> {
         let p = self.paths();
         let kernel = self.root.join("kernel");
         let src_pkg = self.root.join("kith/agents/echo/role");
@@ -110,8 +133,12 @@ impl Tree {
             project_dirs: &[],
             cwd: &cwd,
             user_home: &home,
-            kith_bin: Some("/usr/local/bin/kith"),
+            kith_bin: Some(kith_bin),
             fence_bin: Some("/usr/local/bin/kith"),
+            ledger_bin: self.ledger_bin,
+            cost_bin: self.cost_bin,
+            permit_bin: self.permit_bin,
+            threads_bin: self.threads_bin,
             plugins_json: "[]",
             owner_terminal: false,
             api_helper: "",
@@ -238,6 +265,44 @@ fn guest_sandbox_is_closed_and_fails_closed() {
     assert!(hook.starts_with("out=$(") && hook.contains("permissionDecision"));
 }
 
+#[cfg(unix)]
+#[test]
+fn guest_may_read_the_kith_program_and_every_link_on_the_way_to_it() {
+    // ~/.local/bin/kith -> ~/.kith/cli/current/bin/kith, cli/current -> 0.1: a guest's stub starts `kith kernel project-id`,
+    // and the sandbox reads each link as a link before it follows it. `link_chain` follows the file's own links; the link in the
+    // middle of a path (cli/current) is added by the walk up from each allowed path, which the last assertion below pins.
+    let t = Tree::new();
+    let root = t.root.clone();
+    t.put("home/.kith/cli/0.1/bin/kith", "#!/bin/sh\n");
+    std::os::unix::fs::symlink("0.1", root.join("home/.kith/cli/current")).unwrap();
+    fs::create_dir_all(root.join("home/.local/bin")).unwrap();
+    let via = root.join("home/.local/bin/kith");
+    std::os::unix::fs::symlink(root.join("home/.kith/cli/current/bin/kith"), &via).unwrap();
+    let s = t
+        .settings_bin(
+            &t.guest("sam", "default"),
+            "",
+            Some("2.1.309"),
+            via.to_str().unwrap(),
+        )
+        .unwrap()
+        .settings
+        .unwrap();
+    let allow = strs(&s["sandbox"]["filesystem"]["allowRead"]);
+    let r = root.to_string_lossy().into_owned();
+    for want in [
+        format!("{r}/home/.local/bin/kith"),
+        format!("{r}/home/.kith/cli/current/bin/kith"),
+        format!("{r}/home/.kith/cli/0.1/bin/kith"),
+        // the link on the way to the allowed file is allowed as a link
+        format!("{r}/home/.kith/cli/current"),
+    ] {
+        assert!(allow.contains(&want), "{want} missing from {allow:?}");
+    }
+    // and nothing else of the Kith folder: the folder itself stays denied whole
+    assert!(!allow.contains(&format!("{r}/home/.kith")));
+}
+
 #[test]
 fn guest_needs_a_new_enough_claude_code() {
     let t = Tree::new();
@@ -249,6 +314,54 @@ fn guest_needs_a_new_enough_claude_code() {
     }
     assert!(t.settings_with(&m, "", Some("2.1.295")).is_ok());
     assert!(t.settings_with(&m, "", Some("2.10.0")).is_ok());
+}
+
+#[test]
+fn guest_without_a_readfence_program_does_not_run() {
+    let t = Tree::new();
+    let p = t.paths();
+    let home = t.root.join("home");
+    let src_pkg = t.root.join("kith/agents/echo/role");
+    let kernel = t.root.join("kernel");
+    let member = t.guest("sam", "default");
+    let env = |_: &str| None;
+    let cwd = home.to_string_lossy().into_owned();
+    let files = settings::Folders::new(&p, &src_pkg, "echo", &member);
+    settings::prepare_folders(&p, &files, &member).unwrap();
+    let e = settings::build(&Input {
+        agent: "echo",
+        paths: &p,
+        kernel: &kernel,
+        src_pkg: &src_pkg,
+        pkg: &src_pkg,
+        member: &member,
+        claude: true,
+        caller_mode: "",
+        project: "",
+        project_dirs: &[],
+        cwd: &cwd,
+        user_home: &home,
+        kith_bin: Some("/usr/local/bin/kith"),
+        fence_bin: None,
+        ledger_bin: None,
+        cost_bin: None,
+        permit_bin: None,
+        threads_bin: None,
+        plugins_json: "[]",
+        owner_terminal: false,
+        api_helper: "",
+        once_id: "x",
+        developer_dir: "",
+        ctmp: "",
+        claude_version: Some("2.1.309"),
+        guest_domains: Ok(&[]),
+        env: &env,
+    })
+    .err()
+    .unwrap();
+    assert_eq!(e.code, 3);
+    assert!(e.message.contains("readfence"));
+    assert!(!e.message.contains("kith_readfence.py"));
 }
 
 #[test]
@@ -278,6 +391,10 @@ fn guest_work_dir_is_never_the_home_folder() {
         user_home: &home,
         kith_bin: Some("/usr/local/bin/kith"),
         fence_bin: Some("/usr/local/bin/kith"),
+        ledger_bin: None,
+        cost_bin: None,
+        permit_bin: None,
+        threads_bin: None,
         plugins_json: "[]",
         owner_terminal: false,
         api_helper: "",
@@ -321,6 +438,10 @@ fn guest_without_the_memory_check_does_not_run() {
         user_home: &home,
         kith_bin: None,
         fence_bin: None,
+        ledger_bin: None,
+        cost_bin: None,
+        permit_bin: None,
+        threads_bin: None,
         plugins_json: "[]",
         owner_terminal: false,
         api_helper: "",
@@ -388,17 +509,17 @@ fn owner_keeps_the_hooks_command_lines() {
         .unwrap();
     assert!(post.contains(" memory hook post --agent echo "));
     // auto mode (this Mac's default): a refused call turns into a card, and one retry goes through
+    let denied = s["hooks"]["PermissionDenied"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap();
     assert!(
-        s["hooks"]["PermissionDenied"][0]["hooks"][0]["command"]
-            .as_str()
-            .unwrap()
-            .contains("kith-permit' denied")
-            || s["hooks"]["PermissionDenied"][0]["hooks"][0]["command"]
-                .as_str()
-                .unwrap()
-                .contains("kith-permit denied")
+        denied.starts_with("/usr/local/bin/kith kernel permit --kernel ")
+            && denied.contains(" denied --dir "),
+        "{denied}"
     );
-    assert_eq!(s["hooks"]["SessionStart"].as_array().unwrap().len(), 2);
+    assert!(!denied.contains("kith-permit"), "{denied}");
+    // no program with the cost ledger in this tree: only the registry's hook
+    assert_eq!(s["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -467,17 +588,201 @@ fn mcp_merges_granted_with_the_agents_own_and_gives_a_guest_the_permit_server_on
         "kith/agents/echo/role/mcp.json",
         r#"{"mcpServers": {"both": {"command": "own"}, "local": {"command": "b"}}}"#,
     );
-    let m = mcp::merged(true, &kernel, Some(&granted), &pkg).unwrap();
+    let m = mcp::merged(
+        true,
+        Some("/usr/local/bin/kith"),
+        &kernel,
+        Some(&granted),
+        &pkg,
+    )
+    .unwrap();
     assert_eq!(m["mcpServers"]["svc"]["command"], json!("a"));
     assert_eq!(m["mcpServers"]["both"]["command"], json!("own"));
     assert_eq!(m["mcpServers"]["local"]["command"], json!("b"));
-    let g = mcp::merged(false, &kernel, Some(&granted), &pkg).unwrap();
+    let g = mcp::merged(
+        false,
+        Some("/usr/local/bin/kith"),
+        &kernel,
+        Some(&granted),
+        &pkg,
+    )
+    .unwrap();
     assert_eq!(g["mcpServers"].as_object().unwrap().len(), 1);
     assert_eq!(
-        g["mcpServers"]["kithpermit"]["command"],
-        json!(format!("{}/bin/kith-permit", kernel.display()))
+        g["mcpServers"]["kithpermit"],
+        json!({"command": "/usr/local/bin/kith", "args": ["kernel", "permit", "--kernel", kernel.display().to_string()]})
     );
     // kith-auth failed: no shared services, the agent's own file still stands
-    let none = mcp::merged(true, &kernel, None, &pkg).unwrap();
+    let none = mcp::merged(true, Some("/usr/local/bin/kith"), &kernel, None, &pkg).unwrap();
     assert_eq!(none["mcpServers"].as_object().unwrap().len(), 2);
+}
+
+/// The command of the `PreToolUse` or `PostToolUse` hook that records who was in the room.
+fn ledger_hook(out: &settings::Output, event: &str) -> String {
+    let s = out.settings.as_ref().unwrap();
+    s["hooks"][event]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["hooks"][0]["command"].as_str().unwrap().to_owned())
+        .find(|c| c.contains("room-ledger"))
+        .unwrap()
+}
+
+#[test]
+fn room_ledger_hook_names_the_stub_until_the_program_has_the_module() {
+    let t = Tree::new();
+    let out = t.settings(&Member::owner(), "").unwrap();
+    let root = t.root.to_string_lossy().into_owned();
+    let pre = ledger_hook(&out, "PreToolUse");
+    assert!(
+        pre.starts_with(&format!(
+            "{root}/kernel/bin/kith-room-ledger pre --agent echo --home "
+        )),
+        "{pre}"
+    );
+    assert!(pre.ends_with(" || true"));
+    assert!(ledger_hook(&out, "PostToolUse").contains("kith-room-ledger post --agent echo "));
+}
+
+#[test]
+fn room_ledger_hook_calls_the_rust_verb_when_the_program_has_it() {
+    let mut t = Tree::new();
+    // a space in the path: the hook is a shell line, so the program is quoted the way bash's %q does
+    t.ledger_bin = Some("/opt/my kith/kith");
+    let out = t.settings(&Member::owner(), "").unwrap();
+    let root = t.root.to_string_lossy().into_owned();
+    let want = "/opt/my\\ kith/kith kernel room-ledger --kernel";
+    let pre = ledger_hook(&out, "PreToolUse");
+    assert!(
+        pre.starts_with(&format!("{want} {root}/kernel pre --agent echo --home ")),
+        "{pre}"
+    );
+    assert!(pre.ends_with(" || true"));
+    let post = ledger_hook(&out, "PostToolUse");
+    assert!(
+        post.starts_with(&format!("{want} {root}/kernel post --agent echo --home ")),
+        "{post}"
+    );
+}
+
+/// The command of the `SessionStart` hook that tags the session in the cost ledger (the first hook, when there is one).
+fn cost_hook(out: &settings::Output) -> String {
+    let s = out.settings.as_ref().unwrap();
+    s["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn session_start_has_no_cost_hook_until_a_program_has_the_ledger() {
+    let t = Tree::new();
+    let out = t.settings(&t.guest("sam", "acceptEdits"), "plan").unwrap();
+    let hooks = out.settings.as_ref().unwrap()["hooks"]["SessionStart"]
+        .as_array()
+        .unwrap()
+        .clone();
+    // exactly the registry's hook, and nothing that tags or records cost (a temp path may contain "cost", so match the verb)
+    assert_eq!(hooks.len(), 1, "{hooks:?}");
+    let cmd = hooks[0]["hooks"][0]["command"].as_str().unwrap();
+    assert!(
+        !cmd.contains("kernel cost") && !cmd.contains("kith-cost"),
+        "{cmd}"
+    );
+}
+
+#[test]
+fn session_start_tags_with_the_rust_cost_verb_when_the_program_has_it() {
+    let mut t = Tree::new();
+    // a space in the path: the hook is a shell line, so the program is quoted the way bash's %q does
+    t.cost_bin = Some("/opt/my kith/kith");
+    let out = t.settings(&t.guest("sam", "acceptEdits"), "plan").unwrap();
+    let root = t.root.to_string_lossy().into_owned();
+    assert_eq!(
+        cost_hook(&out),
+        format!("/opt/my\\ kith/kith kernel cost --kernel {root}/kernel tag")
+    );
+}
+
+fn sessions_hook(out: &settings::Output) -> String {
+    let s = out.settings.as_ref().unwrap();
+    // the last SessionStart hook: after the cost hook when there is one
+    s["hooks"]["SessionStart"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn session_start_lists_with_the_python_until_the_program_has_the_writer() {
+    let t = Tree::new();
+    let out = t.settings(&t.guest("sam", "acceptEdits"), "plan").unwrap();
+    let root = t.root.to_string_lossy().into_owned();
+    assert_eq!(
+        sessions_hook(&out),
+        format!("\"{root}/kernel/bin/kith-sessions\" record")
+    );
+}
+
+#[test]
+fn session_start_lists_with_the_rust_threads_verb_when_the_program_has_it() {
+    let mut t = Tree::new();
+    // a space in the path: the hook is a shell line, so the program is quoted the way bash's %q does
+    t.threads_bin = Some("/opt/my kith/kith");
+    let out = t.settings(&t.guest("sam", "acceptEdits"), "plan").unwrap();
+    let root = t.root.to_string_lossy().into_owned();
+    assert_eq!(
+        sessions_hook(&out),
+        format!("/opt/my\\ kith/kith kernel threads --kernel {root}/kernel record")
+    );
+}
+
+#[test]
+fn owner_hooks_and_guest_mcp_name_the_permit_verbs_and_never_the_script() {
+    let t = Tree::new();
+    let root = t.root.to_string_lossy().into_owned();
+    let out = t.settings(&Member::owner(), "").unwrap();
+    let s = out.settings.as_ref().unwrap();
+    let once = s["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["hooks"][0]["command"].as_str().unwrap())
+        .find(|c| c.contains(" once --dir "))
+        .unwrap();
+    assert!(
+        once.contains(&format!(
+            "exec /usr/local/bin/kith kernel permit --kernel {root}/kernel once --dir "
+        )),
+        "{once}"
+    );
+    assert!(!once.contains("kith-permit"));
+    // a guest's one MCP server: the program, the verbless `kernel permit`
+    let g = mcp::permit(Some("/opt/my kith/kith"), &t.root.join("kernel"));
+    assert_eq!(
+        g["mcpServers"]["kithpermit"]["command"],
+        json!("/opt/my kith/kith")
+    );
+    assert_eq!(g["mcpServers"]["kithpermit"]["args"][0], json!("kernel"));
+    assert!(!g.to_string().contains("kith-permit"));
+}
+
+#[test]
+fn without_a_program_the_hooks_keep_the_forwarding_script() {
+    let mut t = Tree::new();
+    t.permit_bin = None;
+    let out = t.settings(&Member::owner(), "").unwrap();
+    let denied =
+        out.settings.as_ref().unwrap()["hooks"]["PermissionDenied"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+    assert!(
+        denied.contains("/kernel/bin/kith-permit denied --dir "),
+        "{denied}"
+    );
 }

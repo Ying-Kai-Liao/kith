@@ -390,6 +390,9 @@ pub(crate) fn member(
     let mut out = Vec::new();
     for agent in wanted {
         // taking access away needs no folder: a row must not wait for one to come back
+        if !rm && let Some(why) = c.unreadable(agent) {
+            return die(why);
+        }
         if !rm && !c.agent_exists(agent) {
             return die(format!("no agent '{agent}' (kith ls)"));
         }

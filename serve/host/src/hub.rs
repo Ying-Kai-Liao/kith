@@ -14,7 +14,7 @@ use anyhow::{Result, anyhow, bail};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::{broadcast, watch};
 
@@ -50,7 +50,6 @@ pub struct Runtime {
     pub message: Option<String>,
     /// The ACP session the running turn prompts. A memory write made there is one that session already knows.
     pub session: Option<String>,
-    pub fast_mode: crate::agent::config::FastModeSupport,
 }
 
 /// Reactions per message: a handful of distinct emoji.
@@ -59,7 +58,6 @@ const MAX_REACTIONS: usize = 8;
 pub struct Hub {
     pub analytics: crate::analytics::Analytics,
     pub routines: crate::routines::Routines,
-    pub team: crate::chat::team::Requests,
     pub calls: crate::calls::Calls,
     pub store: Store,
     pub host_id: String,
@@ -76,7 +74,8 @@ pub struct Hub {
     runtime: Mutex<HashMap<String, Runtime>>,
     /// This hub, for starting actors from `&self`.
     me: Weak<Hub>,
-    pub phone_clients: AtomicUsize,
+    /// Connected phone apps by person (`None` is the owner): see `phone_connected_for`.
+    phone_clients: Mutex<HashMap<Option<String>, usize>>,
     pub usage: Mutex<Usage>,
     /// Which backup subscriptions are out of usage until when (see `agent::backups`).
     pub backups: Arc<crate::agent::backups::Backups>,
@@ -178,7 +177,6 @@ impl Hub {
             me: me.clone(),
             analytics: crate::analytics::Analytics::load(&store),
             routines: crate::routines::Routines::default(),
-            team: crate::chat::team::Requests::default(),
             calls: crate::calls::Calls::for_host(),
             store,
             host_id,
@@ -189,7 +187,7 @@ impl Hub {
             emit_lock: Mutex::new(()),
             bots: Mutex::default(),
             runtime: Mutex::default(),
-            phone_clients: AtomicUsize::new(0),
+            phone_clients: Mutex::default(),
             usage: Mutex::default(),
             backups: Arc::new(crate::agent::backups::Backups::new(service::data_dir().join("backups.json"))),
             keep_awake: Mutex::default(),
@@ -214,10 +212,15 @@ impl Hub {
         // Approval cards and queued sends from a previous run can't be honored anymore.
         self.store.expire_pending()?;
         crate::chat::room_pointer::sweep(self);
-        crate::chat::memory::import_old_memory(self);
         self.routines.restore(&self.store)?;
         crate::market::turn_on_installed_once(&self.store)?;
-        for row in self.store.bots()? {
+        let rows = self.store.bots()?;
+        // C5: host-native rows stay listed and readable, but nothing runs them; say how many there are.
+        let native = crate::store::native_ids(&rows);
+        if !native.is_empty() {
+            tracing::warn!(count = native.len(), ids = ?native, "host-native bots are no longer run; each needs to become a kith agent");
+        }
+        for row in rows {
             if row.deleted {
                 self.routines.disable_bot(&self.store, &row.config.id)?;
             } else if !row.config.is_group() {
@@ -244,7 +247,22 @@ impl Hub {
         self.store.bot(id).ok().flatten().map_or_else(|| "A deleted bot".into(), |b| b.config.name)
     }
 
-    pub fn create_bot(self: &Arc<Self>, mut cfg: BotConfig) -> Result<Value> {
+    /// A new row. An agent row needs a kith agent's name (the roster sync and `newKithAgent` set one); a room has none.
+    pub fn create_bot(self: &Arc<Self>, cfg: BotConfig) -> Result<Value> {
+        if !cfg.is_group() && cfg.hq_agent.is_none() {
+            bail!("an agent row needs a kith agent's name");
+        }
+        self.insert_bot(cfg)
+    }
+
+    /// A host-native row as an old release left it, for the tests of what the host does with one (the only way to make
+    /// one: `create_bot` refuses).
+    #[cfg(test)]
+    pub fn create_native_row(self: &Arc<Self>, cfg: BotConfig) -> Result<Value> {
+        self.insert_bot(cfg)
+    }
+
+    fn insert_bot(self: &Arc<Self>, mut cfg: BotConfig) -> Result<Value> {
         cfg.id = uuid::Uuid::new_v4().to_string();
         cfg.created_at = crate::store::now_ms();
         cfg.position = self.new_bot_position()?;
@@ -321,10 +339,9 @@ impl Hub {
             refuse_cli_owned(&row.config, &cfg)?;
             cfg.backend.clone_from(&row.config.backend);
             cfg.command = None;
-            // Model, effort, Fast mode and permission are hq's; an app's (stale) copy doesn't get stored over them.
+            // Model, effort and permission are hq's; an app's (stale) copy doesn't get stored over them.
             cfg.model.clone_from(&row.config.model);
             cfg.model_options.clone_from(&row.config.model_options);
-            cfg.fast_mode = row.config.fast_mode;
             cfg.permission = row.config.permission;
         }
         if cfg.name.trim().is_empty() {
@@ -370,9 +387,6 @@ impl Hub {
             crate::chat::group::members_changed(self, &id, &row.config.members, &cfg.members);
             self.close_group_places(&id, &cfg.members);
         } else {
-            if crate::chat::memory::shared(&cfg) != crate::chat::memory::shared(&row.config) {
-                crate::chat::memory::changed(self, Some(&id));
-            }
             self.send_cmd(&id, Cmd::Reconfigure(Box::new(cfg)))?;
         }
         self.emit_bot(&id);
@@ -381,7 +395,6 @@ impl Hub {
 
     pub fn delete_bot(&self, id: &str) -> Result<()> {
         self.routines.disable_bot(&self.store, id)?;
-        self.team.cancel_bot(id);
         crate::chat::group::stop(self, id);
         self.store.drop_room(id)?;
         // Secrets of this room (if a group), and any this bot sent or was handed in another room (if a member).
@@ -395,14 +408,22 @@ impl Hub {
                 self.events.send(json!({"type": "bot", "rev": rev, "bot": {"id": id, "deleted": true, "rev": rev}}));
         }
         // Its shared files are unreachable once the bot is deleted.
-        let files = crate::chat::files::root(id);
-        let bot = id.to_owned();
+        // The owner's own Delete also takes a host-native row's old memory files and its export bundle (C5 itself
+        // deletes nothing).
+        let folders = [
+            crate::chat::files::root(id),
+            crate::chat::memory::files::folder(Some(id)),
+            crate::api::native_export::bundle_dir(id),
+            // An export that delete interrupted may leave its staging folder.
+            crate::api::native_export::staging_dir(&crate::api::native_export::bundle_dir(id)),
+        ];
         tokio::task::spawn_blocking(move || {
-            crate::chat::memory::files::remove_bot(&bot);
-            if let Err(error) = std::fs::remove_dir_all(&files)
-                && error.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(error = %error, "couldn't remove a deleted bot's shared files");
+            for dir in folders {
+                if let Err(error) = std::fs::remove_dir_all(&dir)
+                    && error.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::warn!(dir = %dir.display(), error = %error, "couldn't remove a deleted bot's folder");
+                }
             }
         });
         // A deleted bot leaves its groups; what it said there stays.
@@ -487,11 +508,7 @@ impl Hub {
             (before, rt.clone())
         };
         let id = bot::bot_of(key);
-        if before.status != after.status
-            || before.activity != after.activity
-            || before.lane != after.lane
-            || before.fast_mode != after.fast_mode
-        {
+        if before.status != after.status || before.activity != after.activity || before.lane != after.lane {
             self.emit_bot(id);
             // A group shows what its busy member is doing.
             for lane in [&before.lane, &after.lane].into_iter().flatten() {
@@ -904,8 +921,31 @@ impl Hub {
         Ok(removed)
     }
 
+    /// A phone app of `person` (`None` is the owner) connected: it counts until `phone_left`.
+    pub fn phone_joined(&self, person: Option<&str>) {
+        *self.phone_clients.locked().entry(person.map(str::to_owned)).or_default() += 1;
+    }
+
+    pub fn phone_left(&self, person: Option<&str>) {
+        let mut clients = self.phone_clients.locked();
+        let key = person.map(str::to_owned);
+        if let Some(n) = clients.get_mut(&key) {
+            *n -= 1;
+            if *n == 0 {
+                clients.remove(&key);
+            }
+        }
+    }
+
+    /// Any person's phone app is connected (a chat alert is held while one is: it shows the chat itself).
     pub fn phone_connected(&self) -> bool {
-        self.phone_clients.load(Ordering::Relaxed) > 0
+        !self.phone_clients.locked().is_empty()
+    }
+
+    /// This person's own phone app is connected. A call rings only its person's devices, so another person's open
+    /// app must not hold it back.
+    pub fn phone_connected_for(&self, person: Option<&str>) -> bool {
+        self.phone_clients.locked().contains_key(&person.map(str::to_owned))
     }
 }
 
@@ -952,8 +992,6 @@ fn refuse_cli_owned(old: &BotConfig, new: &BotConfig) -> Result<()> {
         format!("set it with `kith {agent} set model <name>`")
     } else if new.model_options != old.model_options {
         format!("set it with `kith {agent} set effort <level>`")
-    } else if new.fast_mode != old.fast_mode {
-        "kith has no Fast mode setting".to_owned()
     } else if new.connectors != old.connectors {
         format!("use `kith {agent} connect <connector>` or `kith {agent} disconnect <connector>`")
     } else if new.skills != old.skills {

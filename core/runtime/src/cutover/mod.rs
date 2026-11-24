@@ -685,9 +685,13 @@ pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<
     })?;
     // The caller's view of the folders (`home`, `kernel`, `env` of the params, as `people.*` reads them) goes in the ctx:
     // a module whose sources are the caller's own files (auth.json) is asked about those; the marker stays the daemon's.
+    // No call here goes through `packages::run_call`, so the cache has nothing validated for it: the ctx reads the disk. No
+    // cutover module asks for a package fact (only auth.json and the serve folder), so nothing is read under the lock.
+    let mut ctx = crate::authority::call::ctx_of(core, params)?;
+    ctx.packages = kith_kernel::secrets::Packages::Disk;
     serve_json(
         &registry(),
-        &Env::with_paths(folders).with_ctx(crate::authority::call::ctx_of(core, params)?),
+        &Env::with_paths(folders).with_ctx(ctx),
         core.conn(),
         name,
         opt_in_env(name),
@@ -781,4 +785,10 @@ fn run_lines(reg: &[Box<dyn Module>], env: &Env, args: &[String]) -> Result<Vec<
         ("modules", []) => Ok(reg.iter().map(|m| m.name().to_owned()).collect()),
         _ => Err(usage()),
     }
+}
+
+/// Whether the authority switch is taken. A switch file that cannot be read counts as taken: the caller uses this to
+/// refuse more, never less (a run token's person unknown to core.db is let through only before the authority switch).
+pub(crate) fn authority_switched(layout: &Layout) -> bool {
+    state::read(layout, "authority").map_or(true, |s| s.is_some_and(|s| s.phase == Phase::Switched))
 }

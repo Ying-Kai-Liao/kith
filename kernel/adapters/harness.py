@@ -489,15 +489,17 @@ def jsonl(text):
 
 
 def record(harness, session, model, task, usage, cost):
-    """One ledger row per run (kith-cost record); cost tracking never fails a run."""
+    """One ledger row per run (`kith kernel cost record`); cost tracking never fails a run."""
     if not session:
         return
     row = {'id': '%s@%s' % (session, dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S.%f')),
            'session': session, 'model': '%s/%s' % (harness, model) if model != harness else harness,
            'turn': ' '.join((task or '').split())[:100], 'cost': cost, **usage}
     try:
-        subprocess.run([str(KITH / 'bin/kith-cost'), 'record'], input=json.dumps(row), text=True, timeout=15,
-                       capture_output=True)
+        kith = subprocess.run([sys.executable, str(KITH / 'lib/kith_paths.py'), '--bin'], capture_output=True,
+                              text=True, timeout=15).stdout.strip()
+        subprocess.run([kith, 'kernel', 'cost', '--kernel', str(KITH), 'record'], input=json.dumps(row), text=True,
+                       timeout=15, capture_output=True)
     except (OSError, subprocess.SubprocessError):
         pass
 

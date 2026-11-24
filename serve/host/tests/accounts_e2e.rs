@@ -118,25 +118,6 @@ fn two() -> Value {
 }
 
 #[tokio::test]
-async fn an_agent_asked_by_another_agent_runs_on_its_next_account_when_the_kernel_has_its_first_out() {
-    // Another run (a terminal, an `ask` from a third agent) hit the limit: the kernel has the account out, and this
-    // host has never read `house`'s accounts. The ask arrives through the same actor queue as a message.
-    let kernel = json!({"set": ["claude", "claude:work"], "out": {"claude": {"out_until": now() + 3600, "reason": "rate_limit"}}});
-    let s = start(&kernel).await;
-    let lead = s.host.fixture_bot("lead", "team_agent.py", "").await;
-
-    s.host.reply(&lead, &format!("ASK_REPORT {}", s.bot)).await;
-
-    // The lead got house's answer; an asked agent's own chat keeps it as a trace, not as a final reply.
-    let trace = s.host.call("history", json!({"botId": s.bot})).await;
-    let said = trace["entries"].as_array().unwrap().iter().find(|e| e["kind"] == "agent").unwrap().clone();
-    assert_eq!(said["data"]["text"], "answered by claude:work");
-    assert_eq!(said["data"]["answeredBy"], json!("claude:work"), "house answered on its next account");
-    assert!(s.prompts("primary").is_empty(), "the account that is out was never started: {:?}", s.prompts("primary"));
-    assert_eq!(s.prompts("claude:work").len(), 1);
-}
-
-#[tokio::test]
 async fn a_limit_the_host_meets_is_told_to_the_kernel_and_the_next_turn_starts_on_the_next_account() {
     let s = start(&two()).await;
     s.host.reply(&s.bot, "first").await;

@@ -45,17 +45,6 @@ pub fn settle(cfg: &mut BotConfig, before: &BotConfig, patch: &Value) {
     cfg.harness_memory &= switchable(cfg);
 }
 
-/// Sets the harness's own memory for one launch of the bot's agent: off, unless the user kept it on.
-pub async fn apply(cfg: &BotConfig, env: &mut Vec<(String, String)>, commands: &mut [String]) {
-    let on = kept(cfg);
-    if !on {
-        switch_off(&cfg.backend, env, commands);
-    }
-    if crate::agent::workspace::is_managed(cfg) {
-        write_settings(&cfg.backend, &cfg.cwd, on).await;
-    }
-}
-
 /// Turns the harness's own memory off for one launch in `workspace`, a folder of Kith's own: its environment,
 /// its command, and the settings it reads from the folder.
 pub async fn turn_off(backend: &str, workspace: &str, env: &mut Vec<(String, String)>, commands: &mut [String]) {

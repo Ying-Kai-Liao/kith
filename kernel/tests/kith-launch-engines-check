@@ -74,6 +74,35 @@ for n, (x, y) in enumerate(zip(a, b), 1):
         print("line %d differs at char %d" % (n, i)); print("  got:    " + x[max(0, i - 150):i + 250]); print("  golden: " + y[max(0, i - 150):i + 250])
 if len(a) != len(b): print("line counts differ: %d vs %d" % (len(a), len(b)))' "$out" "$FIX/launch-$2.json"
 done
+# The cost hook is the Rust `kith kernel cost tag` when the program has the module (the golden above); there is no Python cost to
+# go back to, so KITH_CORE=python writes the same hook.
+if [ -n "$BIN" ]; then
+  check "KITH_CORE=python writes the same cost hook" "[ \"\$(KITH_CORE=python launch cl | grep -o 'kernel cost --kernel [^\"]* tag' | head -1)\" = \"\$(launch cl | grep -o 'kernel cost --kernel [^\"]* tag' | head -1)\" ] && launch cl | grep -q 'kernel cost --kernel .* tag'"
+  check "the default launch tags with the core's cost verb" "launch cl | grep -q 'kernel cost --kernel .* tag'"
+  # KITH_CORE=python hands permit back: the hooks name the script again (the rollback).
+  check "KITH_CORE=python keeps the permit hooks on the script" "(export KITH_CORE=python; launch cl) | grep -q 'bin/kith-permit denied --dir' && ! (export KITH_CORE=python; launch cl) | grep -q 'kernel permit'"
+  # The permit hooks name the program's `kernel permit`, never the script as a command (the script's only mention is the deny rule).
+  check "an owner run's permit hooks call kernel permit, not kith-permit" "launch cl | grep -q 'kernel permit --kernel [^ ]* denied --dir' && launch cl | grep -q 'exec [^ ]* kernel permit --kernel [^ ]* once --dir' && ! launch cl | grep -q 'kith-permit [a-z]\\|bin/kith-permit \\(denied\\|once\\)'"
+fi
+
+# The Python fill (bin/kith, KITH_CORE=python) and the Rust fill (launch/guard.rs, settings.rs) write the same must-ask
+# rules and autoMode for an owner run; terminal and kith ask runs get the first, app and host turns the second. Only the
+# Bash rules and autoMode are compared: the file paths and hooks differ by where each fill puts the state folders.
+if [ -n "$BIN" ]; then
+  guard_part() {
+    python3 -c '
+import json, sys
+d = json.load(sys.stdin); a = d["claude_args"]; s = json.loads(a[a.index("--settings") + 1])
+p = s["permissions"]
+print(json.dumps({"ask": [r for r in p["ask"] if r.startswith("Bash(")], "deny": [r for r in p["deny"] if r.startswith("Bash(")], "auto": s["autoMode"]}, indent=1))'
+  }
+  py_part=$(cd "$T/home" && KITH_CORE=python "$KITH" cl --launch-json 2>/dev/null | sed -e "s#$T#<T>#g" | guard_part)
+  rs_part=$(cd "$T/home" && "$KITH" cl --launch-json 2>/dev/null | sed -e "s#$T#<T>#g" | guard_part)
+  check "owner: the Python and the Rust fill write the same Bash must-ask rules and autoMode" "[ -n \"\$py_part\" ] && [ \"\$py_part\" = \"\$rs_part\" ]"
+  [ "$py_part" = "$rs_part" ] || diff <(printf '%s\n' "$py_part") <(printf '%s\n' "$rs_part") | cut -c1-200 | head -20
+else
+  echo "skip the fill parity check (no Rust kith program; KITH_DIFFTEST_BIN names one)"
+fi
 
 HAVE=0
 if [ -n "$BIN" ] && "$BIN" kernel engines launch gemini --json >/dev/null 2>&1; then
@@ -106,5 +135,8 @@ for a in cl cx gm; do "$AUTH" member $a sam mode=default >/dev/null 2>&1; done
 check "guest run on codex is refused, exit 3" "[ $rc = 3 ] && grep -q 'anyone but the owner' '$T/err'"
 (cd "$T/home" && KITH_PERSON=sam "$KITH" cl --launch-json >/dev/null 2>"$T/err"); rc=$?
 check "guest run on claude still starts" "[ $rc = 0 ]"
+if [ -n "$BIN" ]; then
+  check "a guest run's MCP server is kernel permit, not kith-permit" "(cd '$T/home' && KITH_PERSON=sam '$KITH' cl --launch-json) | python3 -c 'import json,sys; s=json.load(sys.stdin)[\"mcp_servers\"][\"kithpermit\"]; sys.exit(0 if s[\"args\"][:2] == [\"kernel\", \"permit\"] and not s[\"command\"].endswith(\"kith-permit\") else 1)'"
+fi
 
 [ $fails = 0 ] && echo "all launch-engines checks passed" || { echo "$fails check(s) failed"; exit 1; }

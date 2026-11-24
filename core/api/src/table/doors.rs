@@ -1,8 +1,8 @@
 //! M2 lane G (doors and their sweep, M2-14): the guest doors' state in the core. Experimental and owner only, served by
 //! the daemon (`Core::call` itself answers NotServed: a start, an end and a sweep change state, so the daemon runs them
-//! on `&mut Core`). Nothing calls them yet: `kernel/lib/kith_door.py` and the host's sweep (`serve/host/src/doors.rs`)
-//! keep their own claim files until a later step switches them, so a door started the old way has no row here and a
-//! core sweep cannot see it.
+//! on `&mut Core`). On a switched Mac `kernel/lib/kith_door.py` (through `kernel/lib/kith_door_core.py`) and the host's sweep
+//! (`serve/host/src/doors.rs`) use them; an unswitched Mac keeps its claim files, so a door started the old way has no
+//! row here and a core sweep cannot see it.
 //!
 //! A door start is refused for a person who is cut off or may not run the agent. A sweep marks doors swept and says
 //! which; it kills nothing, the caller stops the boxes and confirms with `doors.end`. `people.suspend`,

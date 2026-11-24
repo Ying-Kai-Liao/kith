@@ -55,7 +55,7 @@ public struct ThreadView: View {
                 // A bot's tasks carry their own writer banner on the card, so the box stays (a send to a held task
                 // takes it over first, or waits for the terminal); elsewhere the banner sits over the box.
                 switch ThreadFeed.chatBottom(held: bot?.usesTasks == true && bot?.botGuest == nil ? nil : ThreadFeed.heldTask(in: model.chat(botId)),
-                                             mismatch: model.mismatch != nil, guest: bot?.botGuest != nil) {
+                                             mismatch: model.mismatch != nil, guest: bot?.botGuest != nil, flagged: bot?.isFlagged == true) {
                 case .updateNeeded:
                     // Nothing sent now could be read on the other side.
                     if let mismatch = model.mismatch {
@@ -74,6 +74,8 @@ public struct ThreadView: View {
                 case .readOnly:
                     // A bot from outside's conversation: the owner reads along, nothing is sent here.
                     if let guest = bot?.botGuest { ReadOnlyLine(text: guest.readOnlyLine) }
+                case .flagged:
+                    if let bot { NativeBotNotice(bot: bot) }
                 case .composer:
                     // The phone is in the top bar, so the dock has no call button.
                     Composer(botId: botId, visibleTasks: visibleTasks) { model.focusEntry = BotStore.FocusEntry(chat: botId, entry: $0) }
@@ -90,6 +92,7 @@ public struct ThreadView: View {
     /// Why a call can't start now; nil when it can. The phone and header buttons show it.
     var callBlock: String? {
         if bot == nil { return "This chat is no longer available." }
+        if bot?.isFlagged == true { return "This bot no longer runs" }
         if model.isOffline { return "\(model.hostName) is offline." }
         if model.mismatch != nil { return "Update Kith to make calls." }
         return nil

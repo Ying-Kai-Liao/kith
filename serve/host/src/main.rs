@@ -19,6 +19,7 @@ mod hqmem;
 mod hub;
 mod kernel;
 mod launch_cmd;
+mod lifecycle_cmd;
 mod limits;
 mod market;
 mod mcp;
@@ -34,6 +35,7 @@ mod screen;
 mod service;
 mod shell;
 mod store;
+mod supervise;
 mod terminal;
 mod threads_cmd;
 mod tui;
@@ -95,6 +97,9 @@ enum Sub {
         /// Address to bind. Defaults to all interfaces so the phone can reach it over Tailscale/LAN.
         #[arg(long, default_value = "0.0.0.0")]
         bind: String,
+        /// Run the host as a child and pass signals on (what a launchd job behind a launcher runs); see `supervise.rs`.
+        #[arg(long)]
+        supervise: bool,
     },
     /// Show a one-time pairing QR code for the Kith iOS app (the host must be running).
     Pair {
@@ -303,50 +308,8 @@ enum McpServer {
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
         port: u16,
     },
-    /// Invite the user to connect services securely.
-    Connectors {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
-    /// Scheduled and event-triggered bot routines.
-    Routines {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
-    /// Send the user chat messages.
-    Chat {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
     /// Share files with the user (an hq agent's way to send an image or a document in its chat).
     Files {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
-    /// Discover and ask the user's other bots for help.
-    Team {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
-    /// Search the bot's own chat history.
-    Memory {
-        #[arg(long)]
-        bot: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
-    /// Tools of the apps connected through Composio.
-    Composio {
         #[arg(long)]
         bot: String,
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
@@ -356,13 +319,6 @@ enum McpServer {
     Remote {
         #[arg(long)]
         connector: String,
-        #[arg(long, default_value_t = service::DEFAULT_PORT)]
-        port: u16,
-    },
-    /// See and operate this computer's desktop.
-    Computer {
-        #[arg(long)]
-        bot: String,
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
         port: u16,
     },
@@ -496,9 +452,9 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
-    /// `kith account list|pick|out|clear|usage` (`kernel/bin/kith-account`), plus `state` and `started` for the Python readers:
+    /// `kith account list|pick|out|clear|usage`, plus `state` and `started` for the Python readers:
     /// the accounts' state in the file, or in the core once `kith migrate step accounts` moved it.
-    // -h/--help belong to the Python usage text, which this is not routed for.
+    // -h/--help belong to the usage text of `kith kernel account-state`, so clap must not answer them.
     #[command(name = "account-state", disable_help_flag = true)]
     AccountState {
         /// The kernel folder (default: the one this program finds).
@@ -507,9 +463,21 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
-    /// What Claude Code usage costs, the verbs the launch and the apps call (`kernel/bin/kith-cost`): `limit AGENT [--json|--sh]`,
-    /// `spent PERSON [AGENT]`, `usage [PERIOD] --json`, `agent NAME [PERIOD] --json`, `members AGENT`, `bots --json` and `sync`.
-    /// Prints what `kith-cost` prints, with its exit codes (2: a verb the core does not have yet). Not routed from `kith` yet.
+    /// `kith account ...`, every verb of the command (the program's own; `kernel/bin/kith-account` is gone): the state ones (`list|pick|out|clear|usage`) and the ones that
+    /// write the set (`add|login|remove|order|move|set|policy|pin|unpin|cross-harness|migrate|use|backup`). `add` and `remove`
+    /// with `--json` return the login command and run nothing; without it the harness's own login runs.
+    // -h/--help belong to the usage text of `kith kernel account`, so clap must not answer them.
+    #[command(disable_help_flag = true)]
+    Account {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
+    /// What Claude Code usage costs, every verb of the former `kernel/bin/kith-cost`: the launch's and the apps' (`limit`, `spent`, `usage --json`,
+    /// `agent NAME --json`, `members`, `bots --json`, `sync`), the ledger's writers (`tag`, `record`) and the text reports.
+    /// Prints what `kith-cost` prints, with its exit codes. `kith cost` routes here (through `bin/kith`'s `kith_cost`).
     // -h/--help belong to kith-cost's own usage text, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Cost {
@@ -533,7 +501,7 @@ enum KernelCmd {
         args: Vec<String>,
     },
     /// The writer claim of a Claude session and the session registry: `record`, `resolve`, `claim`, `terminal`, `proc`,
-    /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release` and `holder` (not routed from `kith` yet).
+    /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release`, `release-pid`, `holder`, `epoch`, `pick` and `latest` (`bin/kith` and `kith-core.sh` route all of them but `run`).
     // -h/--help belong to kith-sessions' own usage text, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Threads {
@@ -543,8 +511,19 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
-    /// The kith project of a directory, as `kernel/bin/project-id` answers it (routed from `kith` while `project-id` is switched; a guest run is
-    /// refused here and stays with the Python, which asks the host over the run socket).
+    /// What Kith does with a session no process runs, as `kernel/bin/kith-lifecycle` does: `sweep [--session SID] [--at-sleep]`
+    /// (compact, sleep or end, under the writer claim), `status SID`, `intent SID WHY PID`. Routed from the script while `lifecycle` is
+    /// switched.
+    // argparse's own usage and errors (exit 2) belong to the verb, so clap must not answer -h.
+    #[command(disable_help_flag = true)]
+    Lifecycle {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
+    /// The kith project of a directory (`kernel/bin/project-id` is a stub that runs this; a guest run asks the host over the run socket).
     #[command(name = "project-id", disable_help_flag = true)]
     ProjectId {
         /// The kernel folder (default: the one this program finds).
@@ -553,7 +532,7 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// The Pre/PostToolUse hook of `kernel/bin/kith-room-ledger` (not routed from the launch yet; the hook JSON is on stdin).
+    /// The Pre/PostToolUse hook of `kernel/bin/kith-room-ledger` (the launch registers it as the hook; the hook JSON is on stdin).
     #[command(name = "room-ledger", disable_help_flag = true)]
     RoomLedger {
         /// The kernel folder (default: the one this program finds).
@@ -580,7 +559,7 @@ enum KernelCmd {
     },
     /// `kernel/bin/kith-permit`'s command-line verbs: `issue AGENT SESSION PID`, `denied --dir DIR`, `once --dir DIR` and
     /// `apply SETTINGS_FILE`; any other line is the stdio MCP server (`approve`, `request_access`, `request_secret`, `report_bug`,
-    /// `ask_helper`, `run_door`). Prints what `kith-permit` prints, with its exit codes. Not routed from `kith` yet.
+    /// `ask_helper`, `run_door`). Prints what `kith-permit` prints, with its exit codes. Routed from `kith` while `permit` is switched.
     #[command(disable_help_flag = true)]
     Permit {
         /// The kernel folder (default: the one this program finds).
@@ -873,6 +852,32 @@ fn print_account_state(kernel: Option<std::path::PathBuf>, mut args: Vec<String>
     out.code
 }
 
+/// `kith kernel account <verb> ...`: `kernel/bin/kith-account`'s words and exit codes.
+fn print_account(kernel: Option<std::path::PathBuf>, args: Vec<String>) -> i32 {
+    use kith_kernel::accounts::{self, Ctx, System};
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let p = kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env);
+    let system = System { kernel: kernel.clone() };
+    let ctx = Ctx {
+        machine: p.machine.clone(),
+        agents: p.agents.clone(),
+        kernel,
+        home,
+        claude_config_dir: std::env::var("CLAUDE_CONFIG_DIR").ok(),
+        out: &system,
+    };
+    let stdin = || {
+        let mut text = String::new();
+        let _ = std::io::stdin().read_to_string(&mut text);
+        text
+    };
+    let out = accounts::run_account(&ctx, args, &stdin);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    out.code
+}
+
 /// `kith kernel delegation <verb>`; the refusal exits 4 (`REFUSED`), as `kith ask` does.
 fn print_delegation(kernel: Option<std::path::PathBuf>, action: DelegationAction) -> i32 {
     use kith_kernel::delegation as d;
@@ -1011,7 +1016,7 @@ fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
         state: kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env).state,
         home,
         cwd: std::env::current_dir().unwrap_or_default(),
-        guest: kith_kernel::project::is_guest(|n| std::env::var_os(n)),
+        guest: kith_kernel::project::Guest::from_env(|n| std::env::var_os(n)),
     };
     let out = kith_kernel::project::run(&ctx, args);
     print!("{}", out.stdout);
@@ -1334,6 +1339,10 @@ async fn main() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
     let cli = match kernel::route(&args) {
         kernel::Route::Host(a) => {
+            // Decided before anything else: the supervisor takes no lock and opens nothing, it only runs the host.
+            if supervise::wanted(&args) {
+                std::process::exit(supervise::run(&args).await);
+            }
             // The daemon answers first when one runs and the table says the core serves the verb; otherwise clap and the
             // embedded verbs below do exactly what they did before.
             if let Some(code) = core_front::try_cli(&a) {
@@ -1347,8 +1356,10 @@ async fn main() -> Result<()> {
             return Ok(());
         }
     };
-    match cli.cmd.unwrap_or(Sub::Serve { port: service::DEFAULT_PORT, bind: "0.0.0.0".into() }) {
-        Sub::Serve { port, bind } => serve(&bind, port).await,
+    match cli.cmd.unwrap_or(Sub::Serve { port: service::DEFAULT_PORT, bind: "0.0.0.0".into(), supervise: false }) {
+        // `wanted()` takes the flag before clap; reaching here with it set would run the host unsupervised.
+        Sub::Serve { supervise: true, .. } => anyhow::bail!("--supervise reached the host unhandled"),
+        Sub::Serve { port, bind, supervise: false } => serve(&bind, port).await,
         Sub::Pair { port, json } => pair(port, json).await,
         Sub::Info { port, json } => info(port, json).await,
         Sub::Devices { port, action } => match action.unwrap_or(DevicesAction::List) {
@@ -1416,6 +1427,8 @@ async fn main() -> Result<()> {
         }
         Sub::Install { port } => {
             open_store()?;
+            // Before the status line below: a refused install changes nothing.
+            service::guard()?;
             // Windows: the shell Claude Code runs status lines in varies (Git Bash, PowerShell), so
             // the line stays the user's; usage still comes from `claude -p /usage` and ACP.
             if cfg!(unix)
@@ -1486,7 +1499,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Sub::Uninstall => {
-            service::uninstall();
+            service::uninstall()?;
             if let Some(home) = dirs::home_dir()
                 && let Err(e) = service::restore_statusline(&home.join(".claude/settings.json"))
             {
@@ -1609,6 +1622,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::AccountState { kernel, args } = cmd {
                 std::process::exit(print_account_state(kernel, args));
             }
+            if let KernelCmd::Account { kernel, args } = cmd {
+                std::process::exit(print_account(kernel, args));
+            }
             if let KernelCmd::Secrets { kernel, args } = cmd {
                 std::process::exit(print_secrets(kernel, &args));
             }
@@ -1626,6 +1642,9 @@ async fn main() -> Result<()> {
             }
             if let KernelCmd::Threads { kernel, args } = cmd {
                 std::process::exit(threads_cmd::run(kernel, &args));
+            }
+            if let KernelCmd::Lifecycle { kernel, args } = cmd {
+                std::process::exit(lifecycle_cmd::run(kernel, &args));
             }
             if let KernelCmd::ProjectId { kernel, args } = cmd {
                 std::process::exit(project_id_cmd(kernel, &args));
@@ -1713,12 +1732,14 @@ async fn main() -> Result<()> {
                     | KernelCmd::People { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
+                    | KernelCmd::Lifecycle { .. }
                     | KernelCmd::ProjectId { .. }
                     | KernelCmd::RoomLedger { .. }
                     | KernelCmd::Pkg { .. }
                     | KernelCmd::Readfence { .. }
                     | KernelCmd::Permit { .. }
                     | KernelCmd::AccountState { .. }
+                    | KernelCmd::Account { .. }
                     | KernelCmd::Secrets { .. }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }
@@ -1742,16 +1763,7 @@ async fn main() -> Result<()> {
             println!("Token rotated. Restart the host so local helpers pick it up.");
             Ok(())
         }
-        Sub::Mcp { server: McpServer::Connectors { bot, port } } => {
-            mcp::serve(bot, port, mcp::Server::Connectors).await
-        }
-        Sub::Mcp { server: McpServer::Computer { bot, port } } => mcp::serve(bot, port, mcp::Server::Computer).await,
-        Sub::Mcp { server: McpServer::Routines { bot, port } } => mcp::serve(bot, port, mcp::Server::Routines).await,
-        Sub::Mcp { server: McpServer::Chat { bot, port } } => mcp::serve(bot, port, mcp::Server::Chat).await,
         Sub::Mcp { server: McpServer::Files { bot, port } } => mcp::serve(bot, port, mcp::Server::Files).await,
-        Sub::Mcp { server: McpServer::Team { bot, port } } => mcp::serve(bot, port, mcp::Server::Team).await,
-        Sub::Mcp { server: McpServer::Memory { bot, port } } => mcp::serve(bot, port, mcp::Server::Memory).await,
-        Sub::Mcp { server: McpServer::Composio { bot, port } } => mcp::serve(bot, port, mcp::Server::Composio).await,
         Sub::Mcp { server: McpServer::Local { connector, port } } => mcp::serve_local(connector, port).await,
         Sub::Mcp { server: McpServer::Remote { connector, port } } => mcp::serve_remote(connector, port).await,
         Sub::Tui { url, token, port, budget } => {

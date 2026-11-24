@@ -251,7 +251,8 @@ async fn stdout_of(bin: &Path, args: &[&str]) -> Result<String> {
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true)
         .env_remove(crate::runauth::TOKEN_ENV)
-        .env_remove(crate::runauth::SOCKET_ENV);
+        .env_remove(crate::runauth::SOCKET_ENV)
+        .env_remove(crate::runauth::CORE_SOCKET_ENV);
     let out = tokio::time::timeout(WRITE_TIMEOUT, command.output())
         .await
         .map_err(|_| anyhow!("`kith {}` took longer than {}s", args.join(" "), WRITE_TIMEOUT.as_secs()))??;

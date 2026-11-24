@@ -40,7 +40,9 @@ impl Host {
     async fn start() -> Self {
         let home = std::env::temp_dir().join(format!("kith-routines-e2e-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
-        let (child, base) = common::serve(&home).await;
+        let agents = common::agents_env(&home);
+        let env: Vec<(&str, &str)> = agents.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let (child, base) = common::serve_env(&home, &env).await;
         let mut host = Self { child, home, base, token: String::new() };
         common::read_token(&host.home).trim().clone_into(&mut host.token);
         host
@@ -48,7 +50,14 @@ impl Host {
 
     async fn restart(&mut self) {
         common::stop(&mut self.child);
-        (self.child, self.base) = common::serve(&self.home).await;
+        let agents = common::agents_env(&self.home);
+        let env: Vec<(&str, &str)> = agents.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        (self.child, self.base) = common::serve_env(&self.home, &env).await;
+    }
+
+    /// The folder of the kith agent `name`, where its fixture keeps its logs.
+    fn dir(&self, name: &str) -> PathBuf {
+        common::agents_dir(&self.home).join(name)
     }
 
     async fn call(&self, method: &str, body: Value) -> Value {
@@ -74,21 +83,9 @@ impl Host {
         self.bot_fixture(name, "routine_agent.py").await
     }
 
+    /// A kith agent running `fixture`; its bot's id.
     async fn bot_fixture(&self, name: &str, fixture: &str) -> String {
-        let cwd = self.home.join(name);
-        std::fs::create_dir_all(&cwd).unwrap();
-        let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture);
-        self.call(
-            "createBot",
-            json!({
-                "name": name, "backend": "custom", "tasks": false, "cwd": cwd, "permission": "ask", "notify": false,
-                "command": common::python_agent(&agent),
-            }),
-        )
-        .await["bot"]["id"]
-            .as_str()
-            .unwrap()
-            .to_owned()
+        common::agent_bot(&self.base, &self.token, &self.home, name, fixture, "").await
     }
     async fn save(&self, bot: &str, name: &str, instruction: &str, triggers: Value, timeout: u64) -> String {
         self.call(
@@ -121,7 +118,7 @@ impl Host {
     }
 
     fn agent_events(&self, name: &str) -> Vec<Value> {
-        std::fs::read_to_string(self.home.join(name).join("events.jsonl"))
+        std::fs::read_to_string(self.dir(name).join("events.jsonl"))
             .unwrap_or_default()
             .lines()
             .filter_map(|line| serde_json::from_str(line).ok())
@@ -198,9 +195,6 @@ async fn routines_execute_pause_deduplicate_and_reject_wrong_webhook_keys() {
     })
     .await
     .unwrap();
-    let servers: Value =
-        serde_json::from_str(&std::fs::read_to_string(host.home.join("routine-bot/servers.json")).unwrap()).unwrap();
-    assert!(servers.as_array().unwrap().iter().any(|s| s["name"] == "routines" || s["name"] == "kith-routines"));
     host.call("setRoutineEnabled", json!({"botId":bot,"id":id,"enabled":false})).await;
     assert!(
         !client
@@ -266,7 +260,7 @@ async fn crash_resumes_the_same_session_and_publishes_one_result() {
     host.restart().await;
     let resumed = host.wait_event("resume", "resumed", "BLOCK[resume]").await;
     assert_eq!(started["session"], resumed["session"]);
-    std::fs::write(host.home.join("resume/release-resume"), "").unwrap();
+    std::fs::write(host.dir("resume").join("release-resume"), "").unwrap();
     let run = host.wait_status(&bot, &id, "succeeded").await;
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -361,7 +355,7 @@ async fn busy_bot_keeps_work_pending_and_honors_pause_delete_and_edit_across_res
     .await;
     host.restart().await;
     host.wait_event("queue", "resumed", "BLOCK[user]").await;
-    std::fs::write(host.home.join("queue/release-user"), "").unwrap();
+    std::fs::write(host.dir("queue").join("release-user"), "").unwrap();
     host.wait_status(&bot, &kept, "succeeded").await;
     host.wait_event("queue", "finished", "NEW_INSTRUCTION").await;
     assert!(!host.agent_events("queue").iter().any(|e| {
@@ -392,7 +386,7 @@ async fn unavailable_resume_never_replays_work_in_a_fresh_session() {
     let id = host.save(&bot, "unloadable", "BLOCK[original]", json!([{"type":"webhook"}]), 30).await;
     host.call("runRoutine", json!({"botId":bot,"id":id})).await;
     host.wait_event("no-resume", "started", "BLOCK[original]").await;
-    std::fs::write(host.home.join("no-resume/no-load"), "").unwrap();
+    std::fs::write(host.dir("no-resume").join("no-load"), "").unwrap();
     host.restart().await;
     host.wait_status(&bot, &id, "interrupted").await;
     let next = host.save(&bot, "next", "AFTER_INTERRUPTION", json!([{"type":"webhook"}]), 30).await;
@@ -446,20 +440,6 @@ async fn only_one_host_can_own_a_data_directory_even_on_another_port() {
         let _ = other.wait();
     }
     assert!(!status.expect("second host did not exit").success());
-}
-
-#[tokio::test]
-async fn agent_discovers_and_calls_routine_tools_over_real_mcp_stdio() {
-    let host = Host::start().await;
-    let bot = host.stable_bot("mcp-setup").await;
-    host.send(&bot, "VERIFY_ROUTINE_TOOLS").await;
-    host.wait_event("mcp-setup", "tools_verified", "Routine MCP lifecycle").await;
-    let listing = host.call("routines", json!({"botId":bot})).await;
-    let routine = &listing["routines"][0];
-    assert_eq!(routine["name"], "Edited through MCP");
-    assert_eq!(routine["enabled"], false);
-    host.wait_status(&bot, routine["id"].as_str().unwrap(), "succeeded").await;
-    host.wait_event("mcp-setup", "finished", "MCP_TASK_RESULT").await;
 }
 
 #[tokio::test]

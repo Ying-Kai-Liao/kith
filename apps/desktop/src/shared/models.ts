@@ -38,14 +38,8 @@ export interface Bot {
   /** `ask` or `auto`. */
   permission: string
   model?: string | null
-  /** The model's own settings (effort, fast…): agent option id → value. */
+  /** The model's own settings (effort…): agent option id → value. */
   modelOptions: Record<string, string>
-  /** The agent's Fast mode (Claude Code, Codex): faster replies for more usage. */
-  fastMode: boolean
-  /** What the agent says about Fast mode: `unknown` (no session yet), `offered`, `unsupported`,
-   *  or `refused` (it turned it off; `fastModeIssue` says why). */
-  fastModeSupport: string
-  fastModeIssue: string | null
   pinned: boolean
   /** Where the user dragged it, lowest first (after pinned bots); ties sort by recent activity. */
   position: number
@@ -65,6 +59,8 @@ export interface Bot {
   hqAgent?: string | null
   /** The bot of an agent that ships with Kith (scratch): reached through Quick chat, sorted last in the roster. */
   builtin?: boolean
+  /** A host-native row the host no longer runs (one-bot-model C5): it is flagged, exported, or remade as a kith agent. Absent from an older host. */
+  needsKithAgent?: boolean
   autoName: boolean
   /** Each burst of the user's chat is a task with its own thread and session; false keeps one conversation. */
   tasks: boolean
@@ -134,9 +130,6 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
     permission: raw.permission ?? 'auto',
     model: raw.model ?? null,
     modelOptions: raw.modelOptions ?? {},
-    fastMode: raw.fastMode ?? false,
-    fastModeSupport: raw.fastModeSupport ?? 'unknown',
-    fastModeIssue: raw.fastModeIssue ?? null,
     pinned: raw.pinned ?? false,
     position: raw.position ?? 0,
     hidden: raw.hidden ?? false,
@@ -149,6 +142,7 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
     memoryRev: raw.memoryRev ?? 0,
     hqAgent: raw.hqAgent || null,
     ...(raw.builtin === true ? { builtin: true } : {}),
+    ...(raw.needsKithAgent === true && raw.kind !== 'group' ? { needsKithAgent: true } : {}),
     autoName: raw.autoName ?? false,
     // A host sends `tasks` only when it's off; one without tasks never marks a message as one.
     tasks: raw.kind !== 'group' && raw.tasks !== false,
@@ -170,6 +164,8 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
 }
 
 export const isGroup = (b: Bot) => b.kind === 'group'
+/** A host-native row the host refuses to run. Never a room, and never a row from a host that doesn't say. */
+export const needsKithAgent = (b: Pick<Bot, 'kind' | 'needsKithAgent'>) => b.kind !== 'group' && b.needsKithAgent === true
 export const isWorking = (b: Bot) => b.status === 'working' || b.status === 'needsInput'
 export const needsInput = (b: Bot) => b.status === 'needsInput'
 /** Working right now in this chat's main conversation (`thread == null`) or in that thread. */
@@ -279,6 +275,19 @@ export interface HeldRun {
   since: string
 }
 
+/** One line of a permission card's "Kith sees" (host `cards/intent.rs`). */
+export interface CardFact {
+  /** terminal, down, globe, pencil, trash, stop, folder, eye or doc. */
+  icon: string
+  text: string
+  /** Parts of `text` drawn in 600, in order. */
+  strong?: string[]
+  /** Muted words after the text: whose folder it is. */
+  muted?: string
+  /** The app adds this Mac's name after the muted words. */
+  place?: boolean
+}
+
 export interface EntryData {
   /** Structured conversation data added to the existing team-tool notice. */
   botMessage?: BotMessage
@@ -331,6 +340,14 @@ export interface EntryData {
   chain?: string
   /** permission, the owner's card for a guest's run reaching a host or helper: what its options grant (host `cards/edge.rs`). Its options are labelled by name. */
   edge?: { kind: string; value: string; job?: string }
+  /** permission: the agent's own description of the call, one plain line (host `cards/intent.rs`). A label, never what is granted. */
+  intent?: string
+  /** permission: what the host itself read from the call, at most four lines. Absent on older hosts: the plain card shows. */
+  facts?: CardFact[]
+  /** permission, auto mode: the classifier's tag as a sentence ("Safety check stopped it: ..."). */
+  check?: string
+  /** permission: the host could not read the call in full, so Details starts open. */
+  detailsOpen?: boolean
   /** permission, answered: an old run still holds the session this approval resumes in (null/absent otherwise; an older host never sends it). */
   held?: HeldRun | null
   /** permission, answered with This session; or tool, a call that grant let through. */
@@ -628,7 +645,6 @@ export interface BotDraft {
   permission: string
   model?: string | null
   modelOptions?: Record<string, string>
-  fastMode?: boolean
   pinned?: boolean
   hidden?: boolean
   notify?: boolean | null
@@ -655,7 +671,6 @@ export function draftOf(bot: Bot): BotDraft {
     permission: bot.permission,
     model: bot.model ?? null,
     modelOptions: bot.modelOptions,
-    fastMode: bot.fastMode,
     pinned: bot.pinned,
     hidden: bot.hidden,
     notify: bot.notify ?? null,

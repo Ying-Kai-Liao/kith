@@ -1,6 +1,7 @@
 //! The `doors.*` rows the core answers (M2-14): the owner's view of the guest doors. The daemon routes them here (a
 //! change is a claim transaction, so they need `&mut Core`). The params were checked against the row already.
-//! Nothing calls them yet: the host and `kith_door.py` keep their own claim files until a later step switches them.
+//! `kernel/lib/kith_door_core.py` calls them (through `kith kernel core-call`) for a person's own door on a switched Mac;
+//! an unswitched Mac keeps its claim files.
 
 use serde_json::{Value, json};
 

@@ -14,9 +14,9 @@ extension BotStore {
     }
 
     static let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
-    /// Bumped when the cached shapes gain fields (v2: bot folder/project; v3: bot hqAgent; v4: entry answeredBy), so older caches refetch.
+    /// Bumped when the cached shapes gain fields (v2: bot folder/project; v3: bot hqAgent; v4: entry answeredBy; v5: bot needsKithAgent), so older caches refetch.
     /// The stamp uses appBuild, which may not change between dev builds.
-    static let cacheSchema = "+v4"
+    static let cacheSchema = "+v5"
 
     /// Per app, context and computer (`SharedStore.Context.erase()` removes a context's files).
     private var cacheURL: URL {

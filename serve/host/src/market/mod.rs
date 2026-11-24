@@ -34,7 +34,7 @@ pub use install::{add_custom_connector, import_connectors, install_connector, li
 pub use registry::{browse_connectors, connector_info, refresh_first_page};
 pub use skills::{
     add_custom_skill, browse_skills, expand_command, install_skill, list_skills, remove_skill, skill_details,
-    skills_brief, slash_command, turn_on_installed_once,
+    slash_command, turn_on_installed_once,
 };
 
 pub use updates::{automatic_loop, refresh_connector};
@@ -84,26 +84,6 @@ pub struct Connector {
 }
 
 impl Connector {
-    /// ACP `McpServer`. Remote servers run through this host's `remote` proxy (`kith-serve mcp remote`),
-    /// which keeps sign-in tokens fresh and works with agents that only speak stdio.
-    /// A remote server still waiting for sign-in is left out.
-    pub fn acp(&self, exe: &std::path::Path, port: u16) -> Option<Value> {
-        if self.command.is_some() {
-            return Some(
-                json!({"name":self.id,"command":exe,"args":["mcp","local","--connector",self.id,"--port",port.to_string()],"env":[]}),
-            );
-        }
-        self.url.as_ref()?;
-        if self.oauth.as_ref().is_some_and(|o| !o.signed_in()) {
-            return None;
-        }
-        Some(json!({
-            "name": self.id, "command": exe,
-            "args": ["mcp", "remote", "--connector", self.id, "--port", port.to_string()],
-            "env": [],
-        }))
-    }
-
     /// What clients see: everything but the secret values.
     pub fn public(&self) -> Value {
         json!({
@@ -257,10 +237,10 @@ mod tests {
     }
 
     #[test]
-    fn connectors_become_acp_servers() {
+    fn a_connectors_public_view_hides_its_secrets() {
         let mut c = Connector {
             id: "gh".into(),
-            name: "GitHub".into(),
+            name: "Hub".into(),
             description: String::new(),
             registry_name: None,
             command: Some("npx".into()),
@@ -270,17 +250,10 @@ mod tests {
             headers: BTreeMap::new(),
             oauth: None,
         };
-        let exe = std::path::Path::new("/bin/kith-serve");
-        let config = c.acp(exe, 1).unwrap();
-        assert_eq!(config["args"][1], "local");
-        assert_eq!(config["env"], json!([]));
-        assert!(!config.to_string().contains("secret"));
         assert!(c.public().get("env").is_none(), "secrets never leave the host");
         c.command = None;
         c.url = Some("https://example.com/mcp".into());
-        assert_eq!(c.acp(exe, 1).unwrap()["args"][1], "remote", "remote servers go through the proxy");
         c.oauth = Some(oauth::OAuth::default());
-        assert!(c.acp(exe, 1).is_none(), "not signed in yet");
         assert_eq!(c.public()["auth"], "signedOut");
     }
 }

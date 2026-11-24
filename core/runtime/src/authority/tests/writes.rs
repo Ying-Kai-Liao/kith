@@ -15,7 +15,7 @@ use proptest::test_runner::{Config, TestCaseError, TestRunner};
 use serde_json::{Value, json};
 
 use super::{AGENTS, FUTURE, NOW, auth_strategy, got, ids, machine, pick, said, same};
-use crate::authority::call::{call, call_with, write_op};
+use crate::authority::call::{call, call_with, call_with_deferred, write_op};
 use crate::authority::load::load;
 use crate::authority::write::{self, Settings};
 use crate::authority::{Authority, store};
@@ -30,6 +30,8 @@ pub(super) struct Rig {
     pub(super) machine_dir: tempfile::TempDir,
     pub(super) core: Core,
     pub(super) c: Ctx,
+    /// What `call` asks the package facts of, as the daemon does: the whole suite of verbs runs through the cache.
+    pub(super) cache: std::sync::Arc<crate::packages::PackageCache>,
 }
 
 pub(super) fn plain(e: &Error) -> String {
@@ -47,6 +49,7 @@ impl Rig {
             machine_dir,
             core,
             c,
+            cache: crate::packages::PackageCache::start(None),
         }
     }
 
@@ -73,7 +76,39 @@ impl Rig {
     }
 
     pub(super) fn call(&mut self, method: &str, params: &Value) -> Result<Value, String> {
-        call_with(&mut self.core, &self.c, method, params).map_err(|e| plain(&e))
+        // As the daemon runs a call: the package facts come from the cache, the call is decided "under the lock" (marked,
+        // so a read of a package folder there panics), and a fact the cache lacked is asked for and the call run again.
+        crate::packages::forbid_disk_under_lock();
+        let mut cached = self.c.clone();
+        cached.packages = secrets::Packages::Source(self.cache.clone());
+        let roots = (cached.agents.clone(), cached.kernel.clone());
+        let state = crate::authority::revoke::Life::beside(&cached).state;
+        let core = &mut self.core;
+        let (said, mv, kept) = crate::packages::run_call_in(
+            &self.cache,
+            Some(&roots),
+            crate::packages::first_wants(method, params, Some(&state)),
+            || {
+                crate::daemon::mark_lock_held(true);
+                let out = call_with_deferred(core, &cached, method, params);
+                crate::daemon::mark_lock_held(false);
+                out
+            },
+        )
+        .map_err(|e| plain(&e))?;
+        // The lock is let go: a rename's folders move now, as the daemon's package thread moves them.
+        let said = match mv {
+            Some(mv) => {
+                let (report, _) = crate::authority::revoke::run_move(&mv);
+                crate::authority::call::finish_move(said, &mv, Some(&report))
+            }
+            None => said,
+        };
+        // A removal's kept line is worded last, as the daemon does: it waits for the folders, the removal did not.
+        Ok(match kept {
+            Some(note) => self.cache.finish_kept(said, &note),
+            None => said,
+        })
     }
 
     pub(super) fn lines(&mut self, method: &str, params: &Value) -> Result<Vec<String>, String> {

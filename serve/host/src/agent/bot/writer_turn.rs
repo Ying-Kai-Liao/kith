@@ -17,9 +17,9 @@ use tokio::sync::oneshot;
 
 /// An end running on a blocking thread: the lock released, then the report.
 pub(super) struct InFlight {
-    rx: oneshot::Receiver<(Finished, Option<Stub>)>,
+    /// What the end came to, the stub back, and the end it reported (decided on the blocking thread: see [`gone_for`]).
+    rx: oneshot::Receiver<(Finished, Option<Stub>, End)>,
     run: Running,
-    end: End,
 }
 
 /// The actor's Writer-mode state (one field of the actor).
@@ -63,6 +63,25 @@ pub(super) fn end_for(how: Option<Rel>, gone: bool, room: bool) -> End {
         _ if room => End::Room,
         _ => End::Done,
     }
+}
+
+/// How long a prompt that failed waits for its process to go before the end is decided ([`Rel::Died`]).
+const DIED_WITHIN: Duration = Duration::from_secs(2);
+
+/// Whether the claim's process is gone, for [`end_for`]. A prompt that failed (`Died`) fails at the process's end-of-file, which a
+/// killed process reaches while it is still exiting, or a zombie its parent has not reaped yet (both still run to `kill(pid, 0)`):
+/// it is waited for, briefly, and a zombie counts as gone. A process still there after that ended an ordinary failed turn. The
+/// other ends are decided as before.
+pub(super) fn gone_for(how: Option<Rel>, pid: u32) -> bool {
+    if how != Some(Rel::Died) {
+        return !pid_runs(pid);
+    }
+    let gone = || matches!(kith_kernel::procstart::probe(pid), kith_kernel::procstart::Probe::Gone);
+    let until = std::time::Instant::now() + DIED_WITHIN;
+    while !gone() && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    gone()
 }
 
 /// `exit` puts the turn back in the core's queue, and nothing in the host runs a requeued core turn: an end that reports it cancels the
@@ -165,12 +184,8 @@ impl Actor {
             "off"
         } else if self.active_routine.is_some() {
             "routine"
-        } else if self.active_request.is_some() {
-            "bot"
         } else if self.active_group.is_some() {
             "group"
-        } else if self.compacting.is_some() {
-            "compact"
         } else {
             "app"
         }
@@ -474,7 +489,7 @@ impl Actor {
     pub(super) fn writer_release(&mut self) {
         let Some(mut run) = self.writer.run.take() else { return };
         let how = self.writer.end.take();
-        let end = end_for(how, !pid_runs(run.run.pid), self.is_room_actor());
+        let room = self.is_room_actor();
         // The item's last end drops what it carried. A move to the next account, or to another session (a fork), keeps the epochs and
         // starts a new turn: the old turn's row (on the old session) is cancelled below, so the next begin makes its own. A scheduled
         // run the core queued is on the core's conversation, not the session: the move begins the same turn again by its id (`exit`
@@ -493,7 +508,7 @@ impl Actor {
         }
         let Some(proc) = self.conn.as_mut().and_then(|c| c.writer.as_mut()) else {
             // The process is gone: nothing to release (the lock went with it); the end is reported.
-            self.writer_report_only(run, end);
+            self.writer_report_only(run, how, room);
             return;
         };
         let core = proc.core.clone();
@@ -501,49 +516,52 @@ impl Actor {
         let (tx, rx) = oneshot::channel();
         let (r, conv, abandon) = (run.run.clone(), run.conversation.clone(), how == Some(Rel::Abandon));
         tokio::task::spawn_blocking(move || {
+            let gone = gone_for(how, r.pid);
+            let end = end_for(how, gone, room);
             let Some(mut stub) = stub else {
-                let _ = tx.send((end_report(&core, &r, end), None));
+                let _ = tx.send((end_report(&core, &r, end), None, end));
                 return;
             };
             let finished = if abandon {
                 // Stops the claim, kills and waits for the process (the lock must not be free while it lives). The next begin
                 // restarts the stub. A stop the core did not take is sent again on the slow tick (`End::Abandoned`).
                 core.abandon(&r, &stub)
-            } else if !pid_runs(r.pid) {
+            } else if gone {
                 // The stub is gone with its lock: nothing to release, only the end to report (`end` is `Died`, or `Killed`).
                 end_report(&core, &r, end)
             } else {
                 core.finish(&r, &conv, &mut stub, end)
             };
             let finished = cancelled(&core, &r, end, finished);
-            let _ = tx.send((finished, Some(stub)));
+            let _ = tx.send((finished, Some(stub), end));
         });
-        self.writer.ending = Some(InFlight { rx, run: run.run, end });
+        self.writer.ending = Some(InFlight { rx, run: run.run });
     }
 
     /// The process is gone: only the end is reported.
-    fn writer_report_only(&mut self, run: Run, end: End) {
+    fn writer_report_only(&mut self, run: Run, how: Option<Rel>, room: bool) {
         let Some(core) = core(&self.hub) else { return };
         let (tx, rx) = oneshot::channel();
         let r = run.run.clone();
         tokio::task::spawn_blocking(move || {
-            let _ = tx.send((end_report(&core, &r, end), None));
+            let end = end_for(how, gone_for(how, r.pid), room);
+            let _ = tx.send((end_report(&core, &r, end), None, end));
         });
-        self.writer.ending = Some(InFlight { rx, run: run.run, end });
+        self.writer.ending = Some(InFlight { rx, run: run.run });
     }
 
     /// Waits for an end in flight and takes what it came to. A report the core did not take is kept for the slow tick.
     pub(super) async fn writer_settle_end(&mut self) {
         let Some(flight) = self.writer.ending.take() else { return };
-        let Ok((finished, stub)) = flight.rx.await else { return };
-        self.writer_ended(flight.run, flight.end, finished, stub);
+        let Ok((finished, stub, end)) = flight.rx.await else { return };
+        self.writer_ended(flight.run, end, finished, stub);
     }
 
     /// The end in flight, if it is done: for the tick, which never waits.
     pub(super) fn writer_collect(&mut self) {
         let Some(mut flight) = self.writer.ending.take() else { return };
         match flight.rx.try_recv() {
-            Ok((finished, stub)) => self.writer_ended(flight.run, flight.end, finished, stub),
+            Ok((finished, stub, end)) => self.writer_ended(flight.run, end, finished, stub),
             Err(oneshot::error::TryRecvError::Empty) => self.writer.ending = Some(flight),
             Err(oneshot::error::TryRecvError::Closed) => {}
         }

@@ -67,7 +67,7 @@ pub(crate) fn room_agents(store: &Store, room: &str) -> Result<Vec<String>> {
     if agents.is_empty() {
         bail!("A room with no Kith agent takes no people.");
     }
-    Ok(agents.into_iter().collect())
+    Ok(agents.into_iter().map(String::from).collect())
 }
 
 /// The room's open people and its gen, read together under the membership lock (so no join or leave lands between).
@@ -236,7 +236,7 @@ fn agent_of(store: &Store, member: &str) -> Result<String> {
         bail!("A room with people takes only Kith agents; {member} is an outside bot.");
     }
     match store.bot(member)?.filter(|b| !b.deleted).and_then(|b| b.config.hq_agent) {
-        Some(agent) => Ok(agent),
+        Some(agent) => Ok(agent.into()),
         None => bail!("A room with people takes only Kith agents; {member} isn't one."),
     }
 }

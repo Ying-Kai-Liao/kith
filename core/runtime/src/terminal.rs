@@ -143,9 +143,11 @@ pub(crate) const STUB_BUSY: i32 = 75;
 
 /// The names `serve/host/src/runauth.rs` scrubs for tokens and their sockets (`KITH_RUN_*` and `HQ_RUN_*` are dropped by prefix:
 /// `kith_env_sync` mirrors every KITH_ name to its HQ_ spelling, so a run's outbox arrives as `HQ_RUN_OUTBOX` too).
-const SCRUBBED: [&str; 6] = [
+const SCRUBBED: [&str; 8] = [
     "KITH_RUN_TOKEN",
     "KITH_RUN_SOCKET",
+    "KITH_CORE_RUN_SOCKET",
+    "HQ_CORE_RUN_SOCKET",
     "KITH_ASK_TOKEN",
     "KITH_ASK_SOCKET",
     "HQ_ASK_TOKEN",

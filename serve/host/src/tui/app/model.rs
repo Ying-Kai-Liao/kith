@@ -100,11 +100,6 @@ pub struct Bot {
     pub model: Option<String>,
     /// The model's own settings (effort, fast…): option id → value.
     pub model_options: BTreeMap<String, String>,
-    pub fast_mode: bool,
-    /// What the agent says about Fast mode: `unknown`, `offered`, `unsupported` or `refused`.
-    pub fast_support: String,
-    /// Why the agent refused it.
-    pub fast_issue: Option<String>,
     pub pinned: bool,
     /// Where the user dragged it (see `App::roster`).
     pub position: i64,
@@ -166,31 +161,6 @@ impl AgentModel {
 }
 
 impl Bot {
-    /// An agent bot unless its agent said it has no Fast mode (an unknown one may: its first
-    /// session settles it), or one that has it on (so it can be turned off).
-    pub fn fast_shown(&self) -> bool {
-        !self.group && (self.fast_mode || self.fast_support != "unsupported")
-    }
-
-    /// Why Fast mode isn't in effect, when the agent turned it off itself.
-    pub fn fast_refusal(&self) -> Option<String> {
-        (self.fast_mode && self.fast_support == "refused").then(|| {
-            format!(
-                "The agent turned it off: {}. Switch it off and on to try again.",
-                self.fast_issue.as_deref().unwrap_or("not available")
-            )
-        })
-    }
-
-    /// What picking `/fast` does, or why Fast mode isn't in effect.
-    pub fn fast_detail(&self) -> String {
-        match self.fast_refusal() {
-            Some(why) => why,
-            None if self.fast_mode => "Turn off and return to standard speed".to_owned(),
-            None => "Turn on for faster replies and more usage".to_owned(),
-        }
-    }
-
     /// Where it works, as the header shows it.
     pub fn folder(&self, home: &str) -> String {
         if self.managed_workspace { "personal workspace".to_owned() } else { tilde(&self.cwd, home) }
@@ -218,9 +188,6 @@ impl Bot {
                 .flatten()
                 .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
                 .collect(),
-            fast_mode: v["fastMode"].as_bool().unwrap_or(false),
-            fast_support: v["fastModeSupport"].as_str().unwrap_or("unknown").to_owned(),
-            fast_issue: v["fastModeIssue"].as_str().map(str::to_owned),
             pinned: v["pinned"].as_bool().unwrap_or(false),
             position: v["position"].as_i64().unwrap_or(0),
             hidden: v["hidden"].as_bool().unwrap_or(false),
@@ -363,7 +330,7 @@ impl Entry {
         crate::tui::view::unfoldable(self).is_some()
     }
 
-    /// A notice for a bot-to-bot message or request (`chat::team`).
+    /// A notice for a bot-to-bot message or request (written by the removed `chat::team`; old chats keep them).
     pub fn is_bot_message(&self) -> bool {
         self.kind == Kind::Notice
             && self.data["botMessage"].is_object()

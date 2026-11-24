@@ -8,6 +8,7 @@
     "sh",
     "w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -25,7 +26,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/in/a",
@@ -155,6 +156,7 @@
     "sh",
     "w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -172,7 +174,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/in/n1",
@@ -448,6 +450,7 @@
     "sh",
     "w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -465,7 +468,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/in/old1",
@@ -659,6 +662,7 @@
     "sh",
     "w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -676,7 +680,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/in/p_memfile",
@@ -1157,6 +1161,7 @@
     "sh",
     "w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -1174,7 +1179,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/in/empty",
@@ -1681,6 +1686,7 @@
     "sh",
     "w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -1698,7 +1704,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/e/sam",
@@ -2744,6 +2750,7 @@
     "sh",
     "w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -2761,7 +2768,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/in/n",
@@ -2814,6 +2821,7 @@
     "sh",
     "w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -2831,7 +2839,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/in/n",
@@ -2870,6 +2878,7 @@
     "sh",
     "w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -2887,7 +2896,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/in/n",
@@ -3057,6 +3066,7 @@
     "sh",
     "../../w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -3074,7 +3084,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/in/n",
@@ -3146,6 +3156,7 @@
     "sh",
     "w.sh",
     "py",
+    "{BIN}",
     "{KERNEL}"
    ],
    "new": [
@@ -3163,7 +3174,7 @@
   "setup": [
    {
     "write": "home/w.sh",
-    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py KERNEL | rs BIN KERNEL\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nif [ \"$side\" = py ]; then kernel=$1; shift; else bin=$1; kernel=$2; shift 2; fi\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then python3 \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
+    "text": "#!/bin/sh\n# One call of kith-room-ledger: w.sh SIDE... ENVFILE STDIN ARGS...\n#   SIDE     py BIN KERNEL (the stub, bin/kith-room-ledger, which forwards to BIN) | rs BIN KERNEL (the verb itself)\n#   ENVFILE  a file in e/ of KEY=VALUE lines to export, or - for none\n#   STDIN    a file in in/, - for none, or par: eight runs at once, on in/p1 .. in/p8, then wait\nside=$1; shift\nbin=$1; kernel=$2; shift 2\nenvf=$1; in=$2; shift 2\nd=$(cd \"$(dirname \"$0\")\" && pwd)\nif [ \"$envf\" != - ]; then\n  while IFS= read -r l; do [ -n \"$l\" ] && export \"$l\"; done < \"$d/e/$envf\"\nfi\ngo() {\n  if [ \"$side\" = py ]; then KITH_BIN=\"$bin\" sh \"$kernel/bin/kith-room-ledger\" \"$@\"\n  else \"$bin\" kernel room-ledger --kernel \"$kernel\" \"$@\"; fi\n}\nif [ \"$in\" = par ]; then\n  for i in 1 2 3 4 5 6 7 8; do go \"$@\" < \"$d/in/p$i\" & done\n  wait\n  exit 0\nfi\nif [ \"$in\" = - ]; then go \"$@\" < /dev/null; else go \"$@\" < \"$d/in/$in\"; fi\n"
    },
    {
     "write": "home/in/p1",

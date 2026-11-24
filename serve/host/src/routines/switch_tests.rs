@@ -139,6 +139,13 @@ fn edits_and_run_now_are_refused_while_the_core_owns_the_schedules_and_work_as_b
     assert!(said(hub.routines.run_now(&hub, "someone-else", &id)).contains("not found"));
     fake.says(|_, _| Answer::Done(json!({"outcome": "busy", "retry": true})));
     assert!(said(hub.routines.run_now(&hub, &bot, &id)).contains("active run"));
+    // The core could not read what the fire needed: a retry, but not an active run, and not "did not start (unavailable)".
+    fake.says(|_, _| Answer::Done(json!({"outcome": "unavailable", "retry": true})));
+    let said_unavailable = said(hub.routines.run_now(&hub, &bot, &id));
+    assert!(
+        said_unavailable.contains("core is busy") && !said_unavailable.contains("active run"),
+        "{said_unavailable}"
+    );
     fake.says(|_, _| Answer::Down { why: "no core is running".into(), lost: false });
     assert!(said(hub.routines.run_now(&hub, &bot, &id)).contains("not started"));
 }
@@ -182,6 +189,8 @@ fn a_delivery_goes_to_the_core_with_the_raw_headers_and_body_and_its_answers_kee
     );
     assert_eq!(refused(json!({"outcome": "refused", "code": "not-here", "reason": "r"})), Refused::NotHere);
     assert_eq!(refused(json!({"outcome": "busy", "retry": true})), Refused::Busy);
+    // The core could not read a package fact and recorded nothing: the sender must redeliver.
+    assert_eq!(refused(json!({"outcome": "unavailable", "retry": true})), Refused::Busy);
     fake.says(answer(json!({"outcome": "ping"})));
     assert_eq!(hub.routines.receive(&hub, &id, &h, b"{}").unwrap(), json!({"ping": true}));
     fake.says(answer(json!({"outcome": "ignored"})));

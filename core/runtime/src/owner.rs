@@ -28,11 +28,11 @@
 
 use std::fmt::Write as _;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use kith_api::Principal;
 use kith_holder::auth;
@@ -40,6 +40,7 @@ use kith_holder::platform::{self, Stream};
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
+use crate::breaker::{self, Gate};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
 use crate::perms;
@@ -50,8 +51,12 @@ pub(crate) const PROTOCOL: u32 = 1;
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_LINE: u64 = 1 << 20;
 const MAX_CONNECTIONS: usize = 64;
+/// Connections that are being told `busy` at the limit.
+const MAX_REFUSING: usize = 32;
 const STEP_TIMEOUT: Duration = Duration::from_secs(5);
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
+/// What a wait that ran out says; it opens the client's breaker.
+const NO_ANSWER: &str = "no answer in time";
 
 /// Where the daemon of this layout listens.
 #[cfg(unix)]
@@ -95,7 +100,7 @@ fn random_zeroizing() -> Result<Zeroizing<String>> {
 
 /// A new secret at `path`, owner-only, in place through a rename (a reader sees the old one or the new one, never half
 /// of it).
-fn write_secret(path: &std::path::Path) -> Result<Zeroizing<String>> {
+fn write_secret(path: &Path) -> Result<Zeroizing<String>> {
     let token = random_zeroizing()?;
     let tmp = path.with_extension("token.tmp");
     perms::create_private_file(&tmp)?;
@@ -117,13 +122,13 @@ fn host_secrets() -> std::sync::MutexGuard<'static, Vec<(PathBuf, Zeroizing<Stri
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn publish_host_secret(dir: &std::path::Path, secret: &str) {
+fn publish_host_secret(dir: &Path, secret: &str) {
     let mut all = host_secrets();
     all.retain(|(d, _)| d != dir);
     all.push((dir.to_owned(), Zeroizing::new(secret.to_owned())));
 }
 
-fn retire_host_secret(dir: &std::path::Path, secret: &str) {
+fn retire_host_secret(dir: &Path, secret: &str) {
     host_secrets().retain(|(d, s)| !(d == dir && s.as_str() == secret));
 }
 
@@ -210,6 +215,7 @@ struct Ctx {
     handler: Arc<Handler>,
     stop: Arc<AtomicBool>,
     active: AtomicUsize,
+    refusing: AtomicUsize,
 }
 
 impl Server {
@@ -268,6 +274,7 @@ impl Server {
             handler,
             stop: stop.clone(),
             active: AtomicUsize::new(0),
+            refusing: AtomicUsize::new(0),
         });
         let (end_tx, ended) = mpsc::channel::<()>();
         let accept = std::thread::Builder::new()
@@ -345,6 +352,7 @@ fn accept_loop(listener: &platform::Listener, ctx: &Arc<Ctx>) {
         }
         if ctx.active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
             ctx.active.fetch_sub(1, Ordering::SeqCst);
+            refuse_busy(stream, ctx);
             continue;
         }
         let ctx = ctx.clone();
@@ -361,6 +369,44 @@ fn accept_loop(listener: &platform::Listener, ctx: &Arc<Ctx>) {
             ctx.active.fetch_sub(1, Ordering::SeqCst);
         }
     }
+}
+
+/// At the connection limit: says `busy` to the hello instead of dropping the connection, which the client reads as "no
+/// daemon". On a thread of its own (it waits for the hello), itself limited, past which the connection is dropped.
+fn refuse_busy(stream: Stream, ctx: &Arc<Ctx>) {
+    if ctx.refusing.fetch_add(1, Ordering::SeqCst) >= MAX_REFUSING {
+        ctx.refusing.fetch_sub(1, Ordering::SeqCst);
+        return;
+    }
+    let ctx = ctx.clone();
+    let spawned = std::thread::Builder::new()
+        .name("kith-owner-busy".into())
+        .spawn({
+            let ctx = ctx.clone();
+            move || {
+                answer_busy(stream);
+                ctx.refusing.fetch_sub(1, Ordering::SeqCst);
+            }
+        });
+    if spawned.is_err() {
+        ctx.refusing.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn answer_busy(stream: Stream) {
+    // The hello is waited for at most STEP_TIMEOUT: a client that never speaks must not hold one of the busy threads for
+    // good. `Conn`'s drop shuts the socket, which ends its reader thread too.
+    let Ok(mut conn) = Conn::open(stream) else {
+        return;
+    };
+    let Ok(req) = conn.recv(STEP_TIMEOUT) else {
+        return;
+    };
+    let id = req.get("id").cloned().unwrap_or(Value::Null);
+    let e = Error::Busy(format!(
+        "kith-core: busy: {MAX_CONNECTIONS} connections are open; nothing ran, try again"
+    ));
+    let _ = write_line(&mut conn.writer, &error_reply(&id, &e));
 }
 
 enum Phase {
@@ -590,6 +636,7 @@ fn error_reply(id: &Value, e: &Error) -> Value {
         Error::NotAllowed(_) => (-32001, "not_allowed"),
         Error::NotServed(_) => (-32004, "not_served"),
         Error::Stopped(_) => (-32005, "stopped"),
+        Error::Busy(_) => (-32006, "busy"),
         _ => (-32000, "failed"),
     };
     failure(id, code, kind, &e.to_string())
@@ -603,6 +650,7 @@ fn from_error(message: &str, kind: &str) -> Error {
         "not_allowed" => Error::NotAllowed(m),
         "not_served" => Error::NotServed(m),
         "stopped" => Error::Stopped(m),
+        "busy" => Error::Busy(m),
         _ => Error::Io(m),
     }
 }
@@ -700,21 +748,90 @@ pub(crate) fn reach_with(
     rows: Option<&serde_json::Map<String, Value>>,
     who: Principal,
 ) -> Reached {
+    // One breaker per core in this process: a core that said `busy` or did not answer is not asked again at once.
+    // `kernel.coreStatus` is the exception: it is lock-free and carries the core's pid, which the Stop guard needs to
+    // spare serve's own claim, so it is neither held nor counted (nor is it a test call).
+    if method == STATUS_METHOD {
+        return reach_tries(layout, method, params, repeatable, identity, rows, who).0;
+    }
+    let core = endpoint(layout);
+    let breakers = breaker::process();
+    if breakers.gate(&core, Instant::now()) == Gate::Hold {
+        // Nothing sent. It reads as the `busy` the core said: callers fail closed on it, and none of them spins on it
+        // as it would on "no daemon" (or says "not running" of a running core).
+        return Reached::Refused(Error::Busy(
+            "kith-core: busy: the core did not answer a moment ago; nothing was sent, try again"
+                .to_owned(),
+        ));
+    }
+    // The call reports its end from a drop guard: a panic in the test call must not leave the breaker open for good.
+    let mut end = EndGuard {
+        breakers,
+        core: &core,
+        tripped: false,
+    };
+    let (reached, tripped) = reach_tries(layout, method, params, repeatable, identity, rows, who);
+    end.tripped = tripped;
+    reached
+}
+
+const STATUS_METHOD: &str = "kernel.coreStatus";
+
+/// Reports the end of a call the breaker let through, also when it unwinds (a panic counts as a trip, which closes the
+/// test call and opens a new window).
+struct EndGuard<'a> {
+    breakers: &'a breaker::Breakers,
+    core: &'a Path,
+    tripped: bool,
+}
+
+impl Drop for EndGuard<'_> {
+    fn drop(&mut self) {
+        let tripped = self.tripped || std::thread::panicking();
+        self.breakers.end(self.core, tripped, Instant::now());
+    }
+}
+
+/// The tries of one call. The second flag: it came to `busy` or a timeout, which opens the breaker. A `busy` is never
+/// tried again (the core said nothing ran, and asking at once is what it is asking us not to do), nor is a timeout.
+fn reach_tries(
+    layout: &Layout,
+    method: &str,
+    params: &Value,
+    repeatable: bool,
+    identity: (u32, &str),
+    rows: Option<&serde_json::Map<String, Value>>,
+    who: Principal,
+) -> (Reached, bool) {
     let mut tried = 0;
     loop {
         match attempt(layout, method, params, identity, rows, who) {
-            Attempt::Done(r) => return r,
+            Attempt::Done(r) => {
+                let busy = matches!(r, Reached::Refused(Error::Busy(_)));
+                return (r, busy);
+            }
             Attempt::Failed { sent, why } => {
                 tried += 1;
-                if sent && !repeatable {
-                    return Reached::Lost(why);
+                let timed_out = why == NO_ANSWER;
+                if (sent && !repeatable) || timed_out {
+                    return (
+                        if sent {
+                            Reached::Lost(why)
+                        } else {
+                            Reached::NoDaemon
+                        },
+                        timed_out,
+                    );
                 }
                 if tried >= 2 {
-                    return if sent {
-                        Reached::Lost(why)
-                    } else {
-                        Reached::NoDaemon
-                    };
+                    return (
+                        if sent {
+                            Reached::Lost(why)
+                        } else {
+                            Reached::NoDaemon
+                        },
+                        false,
+                    );
                 }
                 std::thread::sleep(Duration::from_millis(150));
             }
@@ -769,7 +886,7 @@ impl Conn {
             Ok(None) | Err(RecvTimeoutError::Disconnected) => {
                 Err("the connection closed".to_owned())
             }
-            Err(RecvTimeoutError::Timeout) => Err("no answer in time".to_owned()),
+            Err(RecvTimeoutError::Timeout) => Err(NO_ANSWER.to_owned()),
         }
     }
 }
@@ -820,6 +937,13 @@ fn attempt(
         Ok(v) => v,
         Err(why) => return before(&why),
     };
+    // A daemon at its connection limit says so; nothing ran, and it is not "no daemon".
+    if hello["error"]["data"]["kind"] == "busy" {
+        let why = hello["error"]["message"]
+            .as_str()
+            .unwrap_or("the core is busy");
+        return Attempt::Done(Reached::Refused(from_error(why, "busy")));
+    }
     if who == Principal::Host {
         // A daemon from before the host principal answers the hello with a protocol error; a daemon of this build
         // that has no Host (a standalone one) names its principals without it. Either way no host row can run, and

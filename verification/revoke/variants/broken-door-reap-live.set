@@ -1,0 +1,8 @@
+\* BROKEN: the sweeper confirms a swept row gone (doors.end) before its box has started
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE
+CoreDoorStart = TRUE
+ReapLive = TRUE

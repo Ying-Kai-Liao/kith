@@ -255,10 +255,17 @@ public extension HostClient {
         return res.bot
     }
 
-    func createBot(_ draft: BotDraft) async throws -> Bot {
-        struct Res: Decodable { var bot: Bot }
-        let res: Res = try await call("createBot", draft)
-        return res.bot
+    /// Makes a kith agent (`kith new --json`; owner only). A refusal throws the host's own words. The host makes no
+    /// host-native bot any more: `createBot` is for rooms (`createGroup`).
+    func newKithAgent(_ params: [String: String]) async throws -> NewAgent.Answer {
+        try await call("newKithAgent", params, timeout: 240)
+    }
+
+    /// Writes a flagged native row out as a folder (owner only) and returns where. Again overwrites the bundle in place.
+    func exportHostBot(botId: String) async throws -> String {
+        struct Res: Decodable { var path: String }
+        let res: Res = try await call("exportHostBot", ["botId": botId], timeout: 60)
+        return res.path
     }
 
     func updateBot(_ draft: BotDraft) async throws -> Bot {

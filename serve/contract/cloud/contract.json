@@ -347,6 +347,26 @@
     "installScript": {
       "doc": "https://kithbot.app/install.sh: a 302 to scripts/install.sh on GitHub, so `curl -fsSL https://kithbot.app/install.sh | sh` works.",
       "method": "GET", "path": "install.sh", "auth": "none", "kind": "redirect"
+    },
+    "docsPage": {
+      "doc": "The getting-started guide at https://kithbot.app/docs.",
+      "method": "GET", "path": "docs", "auth": "none", "kind": "page"
+    },
+    "agentsPage": {
+      "doc": "The agent format reference at https://kithbot.app/agents.",
+      "method": "GET", "path": "agents", "auth": "none", "kind": "page"
+    },
+    "sharingPage": {
+      "doc": "How sharing an agent works, at https://kithbot.app/sharing.",
+      "method": "GET", "path": "sharing", "auth": "none", "kind": "page"
+    },
+    "privacyPage": {
+      "doc": "The privacy page at https://kithbot.app/privacy.",
+      "method": "GET", "path": "privacy", "auth": "none", "kind": "page"
+    },
+    "securityPage": {
+      "doc": "The security page at https://kithbot.app/security.",
+      "method": "GET", "path": "security", "auth": "none", "kind": "page"
     }
   },
   "errors": {

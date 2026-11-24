@@ -37,6 +37,27 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
         "revokeInvite" => revoke_invite(hub, str_arg(&b, "inviteId")?).await?,
         "people" => people(hub).await?,
         "setPersonAccess" => set_person_access(hub, &b).await?,
+        // `kith people grant|revoke` write the core, then ask the host to end what the rows no longer allow.
+        "enforcePersonAccess" => {
+            let id = str_arg(&b, "personId")?;
+            // First what must stop: it needs no kith-auth, so a missing one never leaves a turn running.
+            enforce_person_access(hub, id, b["lost"].as_bool().unwrap_or(false)).await;
+            // The CLI wrote the core outside this lock: bring the People list's copy of their agents up to date. It gates
+            // nothing (the guard reads the core), so a read that fails only leaves the list for the next poll.
+            {
+                let _w = AUTH_WRITES.lock().await;
+                let auth = match auth_bin().await {
+                    Ok(bin) => crate::remote::members::auth_people(&bin).await,
+                    Err(e) => Err(e),
+                };
+                match auth {
+                    Ok(auth) => crate::remote::members::mirror_agents(&hub.store, &auth),
+                    Err(e) => tracing::warn!(error = format!("{e:#}"), person = id, "couldn't refresh the people copy"),
+                }
+            }
+            hub.auth_changed();
+            json!({})
+        }
         "revokePerson" => revoke_person(hub, str_arg(&b, "personId")?, true).await?,
         "unrevokePerson" => revoke_person(hub, str_arg(&b, "personId")?, false).await?,
         "accessLedger" => json!({"grants": access_ledger(&b).await?}),
@@ -508,6 +529,22 @@ pub(super) async fn invited_or_core_person(hub: &Hub, bin: &Path, id: &str) -> R
     invited_person(hub, id)
 }
 
+/// What a change of a person's agents ends, once their rows say what they may use. Under every id the host may hold them
+/// under: a rename leaves their turns, bots and room stays under the old one. `lost` is that an agent was taken away: a
+/// room turn they are part of runs on the meet of everyone's grant, so one of them losing an agent ends it, and its
+/// cards go (adding an agent ends nothing). Changes no row, so it is safe to run again.
+async fn enforce_person_access(hub: &Arc<Hub>, id: &str, lost: bool) {
+    for held in crate::remote::core_revokes::held_under(id).await {
+        // A bot never has more than its owner: a turn on an agent the owner just lost stops now.
+        super::botguests::enforce(hub, &held).await;
+        // So does any other turn of theirs on an agent they may no longer use.
+        stop_runs(hub, &held, true).await;
+        if lost {
+            hub.end_room_turns_and_cards_of(&held);
+        }
+    }
+}
+
 async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
     let id = str_arg(b, "personId")?;
     let bin = auth_bin().await?;
@@ -586,18 +623,7 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         }
     }
     if changed_agents {
-        // Under every id the host may hold them under: a rename leaves their turns, bots and room stays under the old one.
-        for held in crate::remote::core_revokes::held_under(id).await {
-            // A bot never has more than its owner: a turn on an agent the owner just lost stops now.
-            super::botguests::enforce(hub, &held).await;
-            // So does any other turn of theirs on an agent they may no longer use.
-            stop_runs(hub, &held, true).await;
-            // A room turn they are part of runs on the meet of everyone's grant: one of them losing an agent ends it too,
-            // and its cards go. Adding an agent ends nothing.
-            if lost_agent {
-                hub.end_room_turns_and_cards_of(&held);
-            }
-        }
+        enforce_person_access(hub, id, lost_agent).await;
     }
     for w in &warnings {
         tracing::warn!(person = id, "{w}");
@@ -665,11 +691,13 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
             )
         })?;
     }
-    let (core_updated, pending) = local_revoke(hub, &bin, id, revoke).await.map_err(|e| unfinished(id, revoke, &e))?;
-    if who.kith.is_empty() {
+    let (core_updated, pending) = if who.kith.is_empty() {
         // Known only by a chat handle: the cloud knows nothing of them, so the owner's other computers hear it over Mac link.
-        crate::remote::handle_revokes::changed(hub, &who, revoke);
+        crate::remote::handle_revokes::owner_change(hub, &bin, &who, revoke).await
+    } else {
+        local_revoke(hub, &bin, id, revoke).await
     }
+    .map_err(|e| unfinished(id, revoke, &e))?;
     // false: auth.json has it but the core's copy missed it (or may have); the owner runs it again once the core is up.
     let mut out = json!({"revoked": revoke, "everywhere": everywhere, "coreUpdated": core_updated});
     // The core took the revoke but could not finish stopping their runs: said to the owner, not only logged.
@@ -734,18 +762,19 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
             }
         };
         account::note_stderr(id, &said);
-        if !revoke {
+        if revoke {
+            crate::remote::core_revokes::set_aside_held(hub, id).await;
+        } else {
             // In the undo's own locked section: a cut still owed from a revoke without the core must not land after it.
             crate::remote::core_revokes::clear_owed(hub, id).await;
+            // The give-back in the same hold as the unrevoke: after it, a re-revoke could land first and be undone.
+            crate::remote::core_revokes::restore_held(hub, id).await;
         }
         let pending = said.lines().find(|l| l.contains("part of the revoke is pending")).map(str::to_owned);
         (!account::core_missed(&said), pending)
     };
     if revoke {
         cut_off_held(hub, id).await;
-    } else {
-        // an undo gives back what the host set aside under every id it may hold them under
-        crate::remote::core_revokes::restore_held(hub, id).await;
     }
     Ok((core_updated, pending))
 }

@@ -1,0 +1,8 @@
+\* the same with core calls that can time out (unknown: no start, no sweep)
+CoreGate = TRUE
+Switched = TRUE
+RouterDoor = TRUE
+GuestDoor = TRUE
+CoreDoorHook = TRUE
+CoreDoorStart = TRUE
+CoreSlow = TRUE

@@ -21,7 +21,6 @@
 mod call_model;
 mod compaction;
 mod failover;
-mod fast_mode;
 mod files;
 mod hq;
 mod launch;
@@ -43,9 +42,7 @@ pub(crate) use launch::{launch_commands, select_model, start_agent, system_promp
 pub(crate) use room_turn::session_owner;
 
 use crate::agent::acp::{self, Acp, Incoming};
-use crate::agent::config::FastModeSupport;
 use crate::agent::gate::{Admission, Permit};
-use crate::chat::context::{Identity, Snapshot};
 use crate::chat::group::GroupTurn;
 use crate::chat::memory;
 use crate::hub::{BotStatus, Hub};
@@ -97,20 +94,11 @@ pub enum Cmd {
         entry_id: String,
         reply: tokio::sync::oneshot::Sender<bool>,
     },
-    BotRequest(crate::chat::team::BotRequest),
-    /// `send_message` from the bot's `chat` MCP server: a message for the user, now.
-    SendToUser {
-        text: String,
-        reply: tokio::sync::oneshot::Sender<Result<()>>,
-    },
     SendFile {
         paths: Vec<String>,
         name: Option<String>,
         cancelled: Arc<std::sync::atomic::AtomicBool>,
         reply: tokio::sync::oneshot::Sender<Result<()>>,
-    },
-    CancelAsk {
-        id: String,
     },
     /// Its turn in a group's room turn.
     Group(GroupTurn),
@@ -159,11 +147,6 @@ enum Queued {
         alone: bool,
         acc: writer::Accept,
     },
-    BotRequest(crate::chat::team::BotRequest, writer::Accept),
-    /// A compaction the host decided on (see `compaction`); `idle` while the user is away.
-    Compact {
-        idle: bool,
-    },
     Group(GroupTurn, writer::Accept),
 }
 
@@ -186,9 +169,6 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         hub.store.kv_get(&lane_key("session", &session_owner(&cfg), &home)).filter(|s| !s.is_empty())
     };
     let interrupted = place::interrupted(&hub.store, &rt, &home);
-    let fast_support = FastModeSupport::from_stored(hub.store.kv_get(&fast_mode::stored_key(&cfg.id)).as_deref());
-    let support = fast_support.clone();
-    hub.set_runtime(&rt, |r| r.fast_mode = support);
     let retire_after = lifecycle::retire_after(&hub.store);
     let actor = Actor {
         hub,
@@ -210,24 +190,15 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         routine_timed_out: false,
         routine_completion: None,
         session_fresh: false,
-        profile_resend: HashSet::new(),
-        compacting: None,
-        raw_prompt: false,
-        handoff: None,
-        compaction_notice: None,
-        applied_system: HashMap::new(),
         tidier,
         turn_text: None,
         turn_entries: Vec::new(),
         start_entries: Vec::new(),
         project_turn: None,
-        turn_memory_revision: String::new(),
-        announce: None,
         turn: None,
         off_lane: None,
         off_turn: None,
         queue: VecDeque::new(),
-        active_request: None,
         seg: Seg::None,
         tools: HashMap::new(),
         plan_entry: None,
@@ -235,7 +206,6 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         last_text: None,
         last_agent: None,
         context_show: crate::channels::settings::Settings::load().context_show,
-        sent: Vec::new(),
         files: files::FileShares::default(),
         perms: HashMap::new(),
         parked_prompts: HashMap::new(),
@@ -265,7 +235,6 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         attempt_effects: false,
         exhausted: None,
         tools_changed: false,
-        fast_support,
         idle_checked: Instant::now(),
         busy_at: Instant::now(),
         own_tx: tx.downgrade(),
@@ -278,11 +247,9 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
     BotHandle { tx, task }
 }
 
-/// The working line for a tool call: composing a message reads as typing.
+/// The working line for a tool call.
 fn activity(title: &str) -> &str {
-    if title.contains("send_message") {
-        "Typing…"
-    } else if ["memory__", "memory.", "bot-memory", "shared-memory"].iter().any(|m| title.contains(m)) {
+    if ["memory__", "memory.", "bot-memory", "shared-memory"].iter().any(|m| title.contains(m)) {
         // Memory stays out of the chat, its working line included: the memory settings show it.
         "Thinking…"
     } else {
@@ -297,8 +264,6 @@ fn activity(title: &str) -> &str {
 struct SessionCaps {
     /// `session/load`: resume a session after a restart.
     load: bool,
-    /// `session/fork`: a thread starts as a copy of the main session.
-    fork: bool,
     /// `session/close`: an idle session can be released while the agent keeps running.
     close: bool,
     /// ACP `systemPrompt`: instructions on `session/new`, `load` and `fork` that the agent keeps at system level.
@@ -336,8 +301,6 @@ pub(crate) struct Conn {
     /// Sessions already created or loaded in this process, and when each was last used.
     loaded: HashMap<String, Instant>,
     started: Instant,
-    /// Each live session's Fast mode option, as the agent last listed it.
-    fast_options: HashMap<String, Value>,
     /// The agent reports compactions (`compaction_update`); until it does, a fall in usage stands in for them.
     reports_compaction: bool,
     /// Each session's context use and window size at its last `usage_update`.
@@ -424,19 +387,6 @@ struct Actor {
     routine_completion: Option<RoutineCompletion>,
     /// True until the first prompt of a new ACP session has been sent.
     session_fresh: bool,
-    /// Sessions that compacted away the `<bot-profile>` their first message carried; their next prompt carries
-    /// a fresh one.
-    profile_resend: HashSet<String>,
-    /// The running turn is a compaction the host started (`Some(true)` while the user is away).
-    compacting: Option<bool>,
-    /// The next prompt goes as it is: a command such as `/compact`, with nothing put before or after it.
-    raw_prompt: bool,
-    /// What the next prompt carries from the conversation it starts over from.
-    handoff: Option<String>,
-    /// The chat line of the last compaction, which a late summary fills in.
-    compaction_notice: Option<String>,
-    /// Session -> the instructions this process last handed Claude as its system prompt.
-    applied_system: HashMap<String, String>,
     tidier: mpsc::UnboundedSender<memory::TidyEvent>,
     /// The user's words for this turn (None for a hidden turn or one not from the user); feeds memory.
     turn_text: Option<String>,
@@ -448,10 +398,6 @@ struct Actor {
     /// The project set this turn runs under and what the host owes the agent about it (see `agent::project`). None
     /// for a turn that isn't a person's message to an hq agent.
     project_turn: Option<hq::ProjectTurn>,
-    /// The memory change this turn's notice told the agent about (see `memory::change_notice`).
-    turn_memory_revision: String,
-    /// A profile update this turn carried, recorded once the agent got it.
-    announce: Option<(Snapshot, Identity)>,
     turn: Option<i64>,
     /// Where the agent may start a turn of its own (see `offturn`): the lane of the last turn on `turn_session`, none
     /// when that was a room, an ask or a routine.
@@ -459,7 +405,6 @@ struct Actor {
     /// The running turn is one the agent started by itself, and when it last did anything.
     off_turn: Option<Instant>,
     queue: VecDeque<Queued>,
-    active_request: Option<crate::chat::team::BotRequest>,
     seg: Seg,
     tools: HashMap<String, String>,
     plan_entry: Option<String>,
@@ -470,8 +415,6 @@ struct Actor {
     last_agent: Option<String>,
     /// `channels.context_show`: the session fullness (percent) from which a reply gets the hint; None: never.
     context_show: Option<f64>,
-    /// Messages the bot sent the user this turn (`send_message`); none: its last text is the reply.
-    sent: Vec<String>,
     files: files::FileShares,
     /// permission entry id -> JSON-RPC request ids (a repeat of the same ask joins its card and waits on it too)
     perms: HashMap<String, Vec<Value>>,
@@ -533,8 +476,6 @@ struct Actor {
     /// Connectors changed: restart the agent before the next turn so the
     /// session is resumed with the new MCP servers.
     tools_changed: bool,
-    /// What the agent says about Fast mode; clients see it in the bot's runtime.
-    fast_support: FastModeSupport,
     /// When idle sessions and agents were last looked for.
     idle_checked: Instant,
     /// When this actor was last in use (see `lifecycle::retire_if_unused`).
@@ -658,8 +599,6 @@ impl Actor {
             self.tend_room();
         }
         self.files.cancel();
-        self.hub.team.cancel_from(&self.rt);
-        self.complete_request(Err(anyhow!("recipient shut down")), true);
         self.complete_group(Err(anyhow!("bot shut down")));
         if let Some(c) = self.conn.take() {
             c.acp.kill().await;
@@ -686,7 +625,7 @@ impl Actor {
     /// the turn started in (see `room_turn`), whenever they land.
     fn add(&self, kind: EntryKind, turn: i64, mut data: Value) -> Option<Entry> {
         data["author"] = self.cfg.id.clone().into();
-        if kind == EntryKind::Agent && self.is_hq() {
+        if kind == EntryKind::Agent {
             data["answeredBy"] = self.serving.clone().into();
         }
         self.hub.add_entry_from(&self.lane, kind, turn, &data, self.turn_stamp())
@@ -728,7 +667,6 @@ async fn recv_incoming(conn: &mut Option<Conn>) -> Option<Incoming> {
 mod tests {
     #[test]
     fn memory_work_reads_as_thinking() {
-        assert_eq!(super::activity("mcp__chat__send_message"), "Typing…");
         assert_eq!(super::activity("mcp__memory__remember"), "Thinking…");
         assert_eq!(super::activity("Write /Users/me/.kith/serve/bots/b/bot-memory/trip.md"), "Thinking…");
         assert_eq!(super::activity("Terminal"), "Terminal");

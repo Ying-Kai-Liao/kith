@@ -25,6 +25,7 @@ const EXIT_GRACE: Duration = Duration::from_secs(10);
 /// The host's run-token variables (`runauth::TOKEN_ENV`, `SOCKET_ENV`; a host test pins them): never passed on to an agent.
 const RUN_TOKEN_ENV: &str = "KITH_RUN_TOKEN";
 const RUN_SOCKET_ENV: &str = "KITH_RUN_SOCKET";
+const CORE_RUN_SOCKET_ENV: &str = "KITH_CORE_RUN_SOCKET";
 
 type ShellFn = fn(&str) -> Command;
 static SHELL: std::sync::OnceLock<ShellFn> = std::sync::OnceLock::new();
@@ -263,6 +264,7 @@ impl Acp {
         process
             .env_remove(RUN_TOKEN_ENV)
             .env_remove(RUN_SOCKET_ENV)
+            .env_remove(CORE_RUN_SOCKET_ENV)
             .envs(env.iter().map(|(k, v)| (k, v)))
             .current_dir(cwd)
             .stdin(Stdio::piped())

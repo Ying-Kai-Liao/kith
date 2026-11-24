@@ -61,6 +61,12 @@ class H(http.server.BaseHTTPRequestHandler):
             out = {'revoked': body['botId'] == 'bg_grok'}
         elif m == 'decideBot':
             out = {'bot': {'botId': body['botId'], 'name': 'Grok', 'state': 'active' if body['decision'] == 'allow' else 'denied'}}
+        elif m == 'accessRequests':
+            out = {'requests': [{'requestId': 'req_1', 'deviceName': 'Pad', 'platform': 'ios', 'email': None, 'code': '123456'}]}
+        elif m == 'enforcePersonAccess' and body.get('personId') == 'hostfail':
+            st, out = 400, {'error': 'enforce broke'}
+        elif m == 'revokePerson' and body.get('personId') == 'cloudoff':
+            st, out = 400, {'error': 'The Kith cloud can\'t be reached, so nothing was changed.'}
         elif m == 'setAutoAllowBots':
             if body['personId'] != 'sam':
                 st, out = 400, {'error': '`%s` isn\'t someone you invited' % body['personId']}
@@ -205,6 +211,89 @@ run bot
 check "bare bot does not act: exit 2" "[ $rc = 2 ]"
 run bot set bg_grok --turn-timeout 60 --json
 check "kith bot set is still there (setBotLimits, host's answer as is)" "[ $rc = 0 ] && [ \"\$(sent setBotLimits 'r[-1][\"body\"]')\" = \"{'botId': 'bg_grok', 'turnTimeoutS': 60}\" ]"
+
+# ---- the owner's access verbs: grant and revoke (core, then the host), suspend and undo, the device requests ----
+# A stub kith answers `kernel core-call`: every call goes to core.jsonl; a person called nodaemon gets exit 3, refuse gets 4.
+cat > "$T/kith-stub" <<'SH'
+#!/usr/bin/env bash
+[[ $1 = kernel && $2 = core-call ]] || exit 2
+body=$(cat)
+printf '{"m":"%s","body":%s}\n' "$3" "$body" >> "$T/core.jsonl"
+if [[ $3 = people.listPeople ]]; then
+  echo '{"rows":[{"id":"kai","owner":true},{"id":"sam"},{"id":"bot-s","bot_of":"sam"},{"id":"nodaemon"},{"id":"refuse"},{"id":"hostfail"},{"id":"nocore"}]}'
+  exit 0
+fi
+case $body in
+  *'"person": "nocore"'*) echo '{"noCore":true}'; exit 0;;
+  *'"person": "nodaemon"'*) echo "no core daemon answers" >&2; exit 3;;
+  *'"person": "refuse"'*) echo "kith-core: not allowed" >&2; exit 4;;
+esac
+echo '{"lines":["done"]}'
+SH
+chmod +x "$T/kith-stub"
+export KITH_BIN=$T/kith-stub T
+cored() { python3 -c "import json; r=[json.loads(l) for l in open('$T/core.jsonl')]; print($1)"; }
+cp "$KITH_AUTH" "$T/auth.live"
+printf '{"kith_tombstone": 1, "module": "authority", "rollback": "kith rollback authority"}\n' > "$KITH_AUTH"
+rec; : > "$T/core.jsonl"
+run people grant sam house,garden --preset member --mode auto --budget 5 --trusted --json
+check "grant: ok, person, agents, enforced" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['person'], d['agents'], d['enforced'])\")\" = \"(True, 'sam', ['house', 'garden'], True)\" ]"
+check "  core got people.grant with the settings, viaSwitch, no host-only words" "[ \"\$(cored \"(r[-1]['m'], r[-1]['body']['person'], r[-1]['body']['agent'], r[-1]['body']['preset'], r[-1]['body']['mode'], r[-1]['body']['budget'], r[-1]['body']['trusted'], r[-1]['body']['viaSwitch'])\")\" = \"('people.grant', 'sam', 'house,garden', 'member', 'auto', '5', True, True)\" ]"
+check "  then the host was told: enforcePersonAccess, lost false" "[ \"\$(sent enforcePersonAccess 'r[-1][\"body\"]')\" = \"{'personId': 'sam', 'lost': False}\" ]"
+rec
+run people revoke sam house --json
+check "revoke: core people.revoke, then enforce with lost true" "[ $rc = 0 ] && [ \"\$(cored \"r[-1]['m']\")\" = people.revoke ] && [ \"\$(sent enforcePersonAccess 'r[-1][\"body\"]')\" = \"{'personId': 'sam', 'lost': True}\" ]"
+run people grant sam
+check "grant with no agent: usage, exit 2" "[ $rc = 2 ]"
+run people grant sam house --bogus
+check "grant with an unknown flag: exit 2" "[ $rc = 2 ]"
+run people revoke '*' house
+check "revoke of everyone: exit 2" "[ $rc = 2 ]"
+rec; : > "$T/core.jsonl"
+run people grant kai house --json
+check "grant to the owner: refused, exit 1, nothing written" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'owner or a bot'* ]] && nothing && [ \"\$(cored \"[x['m'] for x in r if x['m'] != 'people.listPeople']\")\" = '[]' ]"
+run people revoke bot-s house --json
+check "revoke of a bot: refused, exit 1" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'owner or a bot'* ]] && nothing"
+run people grant ghost house --json
+check "grant to someone nobody invited: refused, exit 1" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'no invited person'* ]] && nothing"
+run people revoke nocore house --json
+check "an embedded core with no database (noCore): exit 1, not recorded, host not asked" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'nothing was recorded'* ]] && nothing"
+rec; run people grant nodaemon house --json
+check "grant with no core daemon: exit 3, ok false, host not asked" "[ $rc = 3 ] && [ \"\$(jv \"d['ok']\")\" = False ] && nothing"
+run people grant refuse house --json
+check "a core refusal is the error, exit 1, host not asked" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'not allowed'* ]] && nothing"
+run people revoke hostfail house --json
+check "core done but enforce failed: exit 1, says the rows changed and to run it again" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'rows were changed'* && \$(jv \"d['error']\") == *'again'* ]]"
+export KITH_SERVE_PORT=1
+run people revoke sam house --json
+check "revoke with the host down: exit 1, the rows changed, says so" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'rows were changed'* ]]"
+export KITH_SERVE_PORT=$PORT
+cp "$T/auth.live" "$KITH_AUTH"
+rec; : > "$T/core.jsonl"
+run people grant sam house --json
+check "grant on a Mac that is not switched: exit 1, nothing asked of core or host" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'not the core'* ]] && nothing && [ ! -s $T/core.jsonl ]"
+rec
+run people suspend sam --json
+check "suspend: the host's revokePerson, never the core" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['suspended'])\")\" = '(True, True)' ] && [ \"\$(sent revokePerson 'r[-1][\"body\"]')\" = \"{'personId': 'sam'}\" ] && [ ! -s $T/core.jsonl ]"
+run people undo sam --json
+check "undo: the host's unrevokePerson" "[ $rc = 0 ] && [ \"\$(sent unrevokePerson 'r[-1][\"body\"]')\" = \"{'personId': 'sam'}\" ]"
+run people suspend cloudoff --json
+check "suspend refused by the host (cloud unreachable): its text, exit 1" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *\"can't be reached\"* ]]"
+run people suspend
+check "suspend without a person: exit 2" "[ $rc = 2 ]"
+run people requests --json
+check "requests --json: the host's list" "[ $rc = 0 ] && [ \"\$(jv \"d['requests'][0]['requestId']\")\" = req_1 ]"
+run people requests
+check "requests (text): id, device, code" "[ $rc = 0 ] && [[ \$OUT == 'req_1  Pad (ios, no email)  code 123456' ]]"
+rec
+run people approve 123456 --json
+check "approve by the device's code: decideAccessRequest with the id, approve true" "[ $rc = 0 ] && [ \"\$(sent decideAccessRequest 'r[-1][\"body\"]')\" = \"{'requestId': 'req_1', 'approve': True}\" ]"
+run people deny req_1 --json
+check "deny by id: approve false" "[ \"\$(sent decideAccessRequest 'r[-1][\"body\"]')\" = \"{'requestId': 'req_1', 'approve': False}\" ]"
+rec
+run people approve nope --json
+check "approve of a request that is not there: exit 1, nothing decided" "[ $rc = 1 ] && [ \"\$(sent decideAccessRequest 'len(r)')\" = 0 ]"
+unset KITH_BIN
 
 # ---- secrets: the host token and a token hash appear nowhere; the link token only where the owner asked for a link ----
 check "the host token is in no output" "! grep -q '$HOSTTOK' $T/all.out"

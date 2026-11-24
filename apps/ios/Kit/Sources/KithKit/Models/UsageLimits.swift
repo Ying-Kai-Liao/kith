@@ -1,7 +1,7 @@
 import Foundation
 
 /// What things cost at API prices (never a bill) and the monthly limits on agents and people: the host's `usageReport`,
-/// `agentUsage` and `agentPeople` (serve/host/src/limits.rs, from kernel/bin/kith-cost), and the at-limit cards it adds.
+/// `agentUsage` and `agentPeople` (serve/host/src/limits.rs, from `kith kernel cost`), and the at-limit cards it adds.
 /// The words are decided here, the same as the desktop's `shared/usage-limits.ts`.
 
 public enum SpendPeriod: String, Codable, Hashable, Sendable, CaseIterable {

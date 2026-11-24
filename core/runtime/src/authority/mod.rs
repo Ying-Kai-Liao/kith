@@ -26,7 +26,7 @@ mod card;
 mod load;
 mod people_json;
 mod requests;
-mod revoke;
+pub(crate) mod revoke;
 mod secret_writes;
 mod store;
 #[cfg(test)]
@@ -101,17 +101,26 @@ impl<'a> Authority<'a> {
     }
 }
 
-/// Whether a run may exist for `person` (M2-13): they are a known person or bot and neither they nor the owner of
-/// the bot are revoked. A removed or never-added id is "no", the same as a revoked one. Read from core.db alone (the
-/// run tokens have no `Ctx` to give).
-pub(crate) fn run_allowed_in(conn: &Connection, person: &str) -> Result<bool> {
+/// Whether a run may exist for `person` (M2-13): they are neither revoked nor the bot of someone revoked, and, once the
+/// authority is switched, a known person or bot. Before the switch core.db holds only the people the import found and
+/// the narrowings `kith-auth` mirrors into it, so an id it does not know (invited after the import) is let through
+/// unless it is retired, which is what a removal leaves: the host's own `may_use` decided the launch. Read from core.db
+/// alone (the run tokens have no `Ctx` to give).
+pub(crate) fn run_allowed_in(conn: &Connection, person: &str, switched: bool) -> Result<bool> {
     let auth = snapshot(conn)?;
     let id = secrets::canonical(&auth, person);
+    if secrets::cut_off(&auth, &id) {
+        return Ok(false);
+    }
     let known = auth
         .get("people")
         .and_then(Value::as_object)
         .is_some_and(|p| p.contains_key(&id));
-    Ok(known && !secrets::cut_off(&auth, &id))
+    let retired = auth
+        .get("retired")
+        .and_then(Value::as_object)
+        .is_some_and(|r| r.contains_key(&id));
+    Ok(known || (!switched && !retired))
 }
 
 /// A rule that stopped with a refusal `kith-auth` would `die` with (a membership naming a preset nobody defined, which
@@ -468,4 +477,10 @@ fn read_env(tx: &Connection) -> Result<Map<String, Value>> {
         }
     }
     Ok(out)
+}
+
+/// Loads `auth` (the auth.json shape) into the tables of a core, for the daemon's tests.
+#[cfg(test)]
+pub(crate) fn load_for_tests(conn: &Connection, auth: &Value) {
+    load::load(conn, auth);
 }
