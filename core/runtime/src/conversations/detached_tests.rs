@@ -361,7 +361,11 @@ fn queued_lists_the_wake_turns_with_their_door_person_request_ids_and_note() {
         [turn],
     )
     .unwrap();
-    let listed = host(&mut core, "hostclaim.queued", &json!({}));
+    let listed = host(
+        &mut core,
+        "hostclaim.queued",
+        &json!({"sources": ["schedule", "wake"]}),
+    );
     let turns = listed["turns"].as_array().unwrap();
     assert_eq!(turns.len(), 2, "{listed}");
     let one = &turns[0];
@@ -406,7 +410,11 @@ fn queued_says_which_wake_turn_ran_before_and_every_item_carries_its_source() {
         "hostclaim.stop",
         &json!({"claimId": id, "reason": "test", "requeue": true}),
     );
-    let listed = host(&mut core, "hostclaim.queued", &json!({}));
+    let listed = host(
+        &mut core,
+        "hostclaim.queued",
+        &json!({"sources": ["schedule", "wake"]}),
+    );
     let by = |t: i64| {
         listed["turns"]
             .as_array()
@@ -420,4 +428,26 @@ fn queued_says_which_wake_turn_ran_before_and_every_item_carries_its_source() {
     assert!(by(sched).get("door").is_none());
     assert_eq!(by(ran)["source"], "wake");
     assert_eq!(by(ran)["redeemedBefore"], true, "{listed}");
+}
+
+#[test]
+fn queued_without_sources_lists_schedule_turns_only_and_refuses_other_sources() {
+    let (_t, mut core) = world();
+    let sched = enqueue(&mut core, "schedule:echo:daily:claude", "schedule");
+    let _wake = enqueue(&mut core, "w1", "wake");
+    let listed = host(&mut core, "hostclaim.queued", &json!({}));
+    let turns: Vec<_> = listed["turns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["turn"].clone())
+        .collect();
+    assert_eq!(
+        turns,
+        vec![json!(sched)],
+        "a host that only runs cron jobs never sees a wake's turn"
+    );
+    let p = json!({"sources": ["app"]});
+    crate::call::check(Principal::Host, "hostclaim.queued", &p).unwrap();
+    assert!(crate::hostclaim::call_at(&mut core, "hostclaim.queued", &p, NOW).is_err());
 }

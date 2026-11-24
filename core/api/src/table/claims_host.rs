@@ -311,8 +311,12 @@ pub(super) const ROWS: &[Method] = &[
     ),
     host(
         "hostclaim.queued",
-        "The turns the core queued that no host began (a schedule's fire or a wake's take: `enq_key` NULL, source `schedule` or `wake`) and that wait (queued or parked): `{turns: [{turn, source, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. A `wake` turn also carries `door` (`run` or `host`), `requestIds` (the requests it carries, in order) and `note`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed.",
-        &[],
+        "The turns the core queued that no host began (a schedule's fire or a wake's take: `enq_key` NULL, source `schedule` or `wake`) and that wait (queued or parked): `{turns: [{turn, source, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. A `wake` turn also carries `door` (`run` or `host`), `requestIds` (the requests it carries, in order) and `note`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed. `sources` (default `[\"schedule\"]`) picks which detached sources are listed: a host that runs only cron jobs never sees a wake's turn.",
+        &[opt(
+            "sources",
+            "[string]",
+            "The turn sources to list: schedule, wake (default schedule).",
+        )],
     ),
     host(
         "hostclaim.park",

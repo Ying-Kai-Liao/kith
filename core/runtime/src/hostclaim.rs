@@ -20,8 +20,8 @@ use serde_json::{Value, json};
 
 use crate::conversations::basis::{self, Basis, Chain, Level};
 use crate::conversations::claims::{self, Kind, NewClaim, NewTurn, Redeemed, Reported};
-use crate::conversations::sched_run;
 use crate::conversations::warm::{self, WarmProc};
+use crate::conversations::{detached, sched_run};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -386,7 +386,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(json!({ "turns": turns }))
         }
-        "hostclaim.queued" => queued(core),
+        "hostclaim.queued" => queued(core, &sources_of(p)?),
         "hostclaim.park" => match claims::park(core, int(p, "turn")?, need(p, "reason")?, now) {
             Ok(parked) => Ok(json!({ "parked": parked })),
             Err(e) => refusal(e),
@@ -408,6 +408,22 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
     }
 }
 
+/// The `sources` a `hostclaim.queued` asks for: default `schedule` alone, so a host that only runs cron jobs never sees a
+/// wake's turn. Each must be a detached source.
+fn sources_of(p: &Value) -> Result<Vec<&str>> {
+    let Some(list) = p.get("sources") else {
+        return Ok(vec!["schedule"]);
+    };
+    let list = list.as_array().ok_or_else(|| bad("sources is a list"))?;
+    list.iter()
+        .map(|s| {
+            s.as_str()
+                .filter(|s| detached::is_source(s))
+                .ok_or_else(|| bad("sources are detached run sources (schedule, wake)"))
+        })
+        .collect()
+}
+
 /// `hostclaim.queued`: the turns the core queued that no host began (a schedule's fire, a wake's take), for the host's runner (design
 /// 2026-11-16-core-queued-runner, `HostRuns.tla` `MayPull`). Only unkeyed turns: a keyed one belongs to the host run that
 /// enqueued it, and the strays sweep cancels it when that run is gone. `redeemedBefore` is any claim of the turn having
@@ -415,9 +431,9 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
 /// (`SkipRedeemed`). Every schedule turn in this core.db was fired on this Mac, for an agent the index lists here. Each item
 /// carries its `source`; a `wake` turn also answers its `door` (`run`: the kernel resumes it; `host`: the host takes it), the
 /// ids of the requests it carries (`requestIds`, in the order they came in) and the `note` it was made from (its prompt).
-fn queued(core: &Core) -> Result<Value> {
+fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
     let owner = owner_id(core);
-    let mut st = core.conn().prepare(
+    let mut st = core.conn().prepare(&format!(
         "SELECT t.id, t.conversation, c.agent, c.engine, t.person, t.prompt, t.deadline, t.parked_reason,
                 EXISTS (SELECT 1 FROM claims k WHERE k.turn = t.id AND k.running_at IS NOT NULL),
                 (SELECT f.job FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1),
@@ -426,9 +442,10 @@ fn queued(core: &Core) -> Result<Value> {
                 (SELECT s.door FROM wake_turns w JOIN wake_sessions s ON s.session = w.session WHERE w.turn_id = t.id),
                 (SELECT w.run FROM wake_turns w WHERE w.turn_id = t.id)
          FROM turns t JOIN conversations c ON c.id = t.conversation
-         WHERE t.enq_key IS NULL AND t.source IN ('schedule', 'wake') AND t.state IN ('queued', 'parked')
+         WHERE t.enq_key IS NULL AND t.source IN {} AND t.state IN ('queued', 'parked')
          ORDER BY t.id",
-    )?;
+        detached::quoted(sources)
+    ))?;
     let mut ids = core
         .conn()
         .prepare("SELECT id FROM wake_items WHERE run = ?1 ORDER BY seq")?;

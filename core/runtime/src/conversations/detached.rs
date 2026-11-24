@@ -22,9 +22,19 @@ pub(crate) fn is_source(source: &str) -> bool {
     SOURCES.contains(&source)
 }
 
-/// [`SOURCES`] as an SQL list, `('schedule', 'wake')`. The names are this module's own literals, never a caller's.
+/// [`SOURCES`] as an SQL list, `('schedule', 'wake')`.
 pub(crate) fn sources_sql() -> String {
-    let quoted: Vec<String> = SOURCES.iter().map(|s| format!("'{s}'")).collect();
+    quoted(SOURCES)
+}
+
+/// `names` as an SQL list. Only names [`is_source`] accepts are put in (the rest are dropped), so no caller's text reaches the
+/// statement.
+pub(crate) fn quoted(names: &[&str]) -> String {
+    let quoted: Vec<String> = names
+        .iter()
+        .filter(|s| is_source(s))
+        .map(|s| format!("'{s}'"))
+        .collect();
     format!("({})", quoted.join(", "))
 }
 
