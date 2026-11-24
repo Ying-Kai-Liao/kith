@@ -175,10 +175,11 @@ impl Liveness for Gone {
     }
 }
 
+/// The daemon goes first and the machine folder last: a daemon that outlives its folder cannot stop.
 struct Rig {
-    _t: tempfile::TempDir,
     d: Daemon,
     f: Arc<Fake>,
+    _t: tempfile::TempDir,
 }
 
 fn rig_with(lock_wait: Duration) -> Rig {
@@ -195,6 +196,10 @@ fn rig_with(lock_wait: Duration) -> Rig {
         },
     );
     d.ready(Duration::from_secs(10)).expect("the daemon serves");
+    // The claims lane takes no claim until the host's reconcile has run (nothing to reconcile on a new machine).
+    d.shared()
+        .with_core(|c| claims::reconcile(c, &[], &[], i64::MAX, 1).map(|_| ()))
+        .unwrap();
     let f = Fake::new();
     d.shared().set_wake_world(f.world());
     Rig { _t: t, d, f }
@@ -292,7 +297,7 @@ impl Rig {
 
     fn tries(&self, session: &str) -> i64 {
         self.sql(
-            "SELECT tries FROM wake_sessions WHERE session = ?1",
+            "SELECT COALESCE((SELECT tries FROM wake_sessions WHERE session = ?1), 0)",
             session,
         )
     }
