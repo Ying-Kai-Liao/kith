@@ -448,7 +448,8 @@ enum KernelCmd {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
-        /// `resolve <agent> [--person ID] [--via CALLER] [--take-once] [--json]` or `may <id> <agent> [--via CALLER] [--once]`.
+        /// `resolve <agent> [--person ID] [--via CALLER] [--take-once] [--json]`, `may <id> <agent> [--via CALLER] [--once]`,
+        /// `mcp-config <agent>` or `exec [--for AGENT] <service> -- CMD...` (a shared MCP server started with its keys).
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
@@ -721,6 +722,19 @@ enum DelegationAction {
 enum AccountsAction {
     /// The chain for `kith AGENT --backups-json`.
     BackupsJson { agent: String, agent_md: String },
+    /// The agent's accounts as one JSON object for `kith AGENT --accounts-json`: its set in order, status, usage, candidates.
+    AccountsJson { agent: String, agent_md: String },
+    /// The id of the agent's static main account (`kith AGENT`'s start when nothing is out).
+    MainId { agent: String, agent_md: String },
+    /// A one-shot over `pick`'s candidates: `kith kernel accounts run-chain AGENT AGENT.MD KITH -- ARGS...` runs
+    /// `KITH AGENT [--account ID] ARGS...`, moving on at exit 4 or a usage-limit message (which marks the account out).
+    RunChain {
+        agent: String,
+        agent_md: String,
+        kith: String,
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
     /// Shell assignments for a backup chain entry; exit 4 and one line on stderr when it can't run.
     LaunchEnv {
         agent: String,
@@ -781,6 +795,23 @@ fn print_accounts(kernel: Option<std::path::PathBuf>, action: AccountsAction) ->
     let result: Result<String, String> = match action {
         AccountsAction::BackupsJson { agent, agent_md } => {
             Ok(accounts::chain(&ctx, &agent, std::path::Path::new(&agent_md)).dumps())
+        }
+        AccountsAction::AccountsJson { agent, agent_md } => {
+            accounts::accounts_json(&ctx, &agent, std::path::Path::new(&agent_md))
+        }
+        AccountsAction::MainId { agent, agent_md } => {
+            Ok(accounts::main_id(&ctx, &agent, Some(std::path::Path::new(&agent_md)), None))
+        }
+        AccountsAction::RunChain { agent, agent_md, kith, args } => {
+            return accounts::chain::run(
+                &ctx,
+                &agent,
+                std::path::Path::new(&agent_md),
+                std::path::Path::new(&kith),
+                &args,
+                &mut std::io::stdout(),
+                &mut std::io::stderr(),
+            );
         }
         AccountsAction::LaunchEnv { agent, entry, record } => accounts::launch_env(&ctx, &agent, &entry, false, record),
         AccountsAction::MainEnv { agent, agent_md, state, record, prefer } => accounts::main_env(
@@ -968,6 +999,7 @@ fn print_secrets(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use std::io::Write as _;
     let home = kith_kernel::paths::process_home();
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    launch_cmd::install_core();
     let ctx = kith_kernel::secrets::Ctx::from_process(&kernel);
     // No verb is `kith-auth` with no arguments: its usage text and exit 0 (not clap's usage error).
     let (verb, rest) = args.split_first().map_or(("--help", &[][..]), |(v, r)| (v.as_str(), r));
@@ -1658,6 +1690,27 @@ async fn main() -> Result<()> {
             if let KernelCmd::Permit { kernel, args } = cmd {
                 std::process::exit(print_permit(kernel, &args));
             }
+            // The launch asks the core itself (who the run is for, once authority is the core's), so it must not run inside an
+            // embedded core held here: that call would find the lock taken by its own process.
+            if let KernelCmd::Launch { what: LaunchCmd::Whole(args) } = cmd {
+                std::process::exit(launch_cmd::print_whole(&args));
+            }
+            if let KernelCmd::Launch {
+                what: LaunchCmd::Mcp { agent, person, pkg, snapshot, kernel, granted, resolve, json: _ },
+            } = cmd
+            {
+                launch_cmd::print_mcp(&launch_cmd::Args {
+                    agent,
+                    person,
+                    pkg,
+                    snapshot,
+                    kernel,
+                    resolve,
+                    granted,
+                    ..launch_cmd::Args::default()
+                })?;
+                return Ok(());
+            }
             through_core(|| -> Result<()> {
                 match cmd {
                     KernelCmd::Version => println!("{}", kith_kernel::version_json()),
@@ -1706,23 +1759,6 @@ async fn main() -> Result<()> {
                         resolve,
                         granted: None,
                     })?,
-                    KernelCmd::Launch {
-                        what: LaunchCmd::Mcp { agent, person, pkg, snapshot, kernel, granted, resolve, json: _ },
-                    } => {
-                        launch_cmd::print_mcp(&launch_cmd::Args {
-                            agent,
-                            person,
-                            pkg,
-                            snapshot,
-                            kernel,
-                            resolve,
-                            granted,
-                            ..launch_cmd::Args::default()
-                        })?;
-                    }
-                    KernelCmd::Launch { what: LaunchCmd::Whole(args) } => {
-                        std::process::exit(launch_cmd::print_whole(&args));
-                    }
                     KernelCmd::Settings { kernel, args } => std::process::exit(print_settings(kernel, &args)),
                     KernelCmd::RunOnce { .. }
                     | KernelCmd::Attach { .. }
@@ -1741,6 +1777,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::AccountState { .. }
                     | KernelCmd::Account { .. }
                     | KernelCmd::Secrets { .. }
+                    | KernelCmd::Launch { what: LaunchCmd::Whole(_) | LaunchCmd::Mcp { .. } }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }
                     | KernelCmd::CoreDaemon

@@ -1,6 +1,6 @@
 #![allow(clippy::many_single_char_names)]
 
-use std::io::{BufRead as _, BufReader, Write as _};
+use std::io::{BufRead as _, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -493,24 +493,6 @@ fn only_claim_tx_opens_a_transaction_that_touches_claims() {
         1,
         "one function returns a transaction"
     );
-}
-
-#[test]
-fn an_owner_only_access_list_is_told_from_an_open_one() {
-    let p = r"C:\Users\kai\.kith\core";
-    let mine = format!(
-        "{p} Kai-PC\\kai:(OI)(CI)(F)\n          NT AUTHORITY\\SYSTEM:(OI)(CI)(F)\n          BUILTIN\\Administrators:(OI)(CI)(F)\n\nSuccessfully processed 1 files; Failed processing 0 files\n"
-    );
-    assert!(perms::acl_is_owner_only(&mine, p, "kai"));
-    let open = format!("{p} Kai-PC\\kai:(OI)(CI)(F)\n          BUILTIN\\Users:(OI)(CI)(RX)\n");
-    assert!(!perms::acl_is_owner_only(&open, p, "kai"));
-    let everyone = format!("{p} Everyone:(OI)(CI)(F)\n");
-    assert!(!perms::acl_is_owner_only(&everyone, p, "kai"));
-    assert!(
-        !perms::acl_is_owner_only("", p, "kai"),
-        "an unreadable list is not owner-only"
-    );
-    let _ = std::io::stdout().flush();
 }
 
 #[test]

@@ -313,8 +313,8 @@ impl RunTokens {
 }
 
 /// Whether `pid` is `ancestor` or has it among its parents. Asks `ps`, which both macOS and Linux have; any failure
-/// (a process gone, `ps` missing, Windows) is "no". On Windows only the run's own pid matches until a process-tree
-/// walk lands there: a grandchild is refused, never let through.
+/// (a process gone, `ps` missing) is "no". On Windows `kith-winsys` walks the parent chain (Toolhelp32) and compares
+/// creation times, so a reused parent pid is refused too.
 #[cfg(unix)]
 pub(crate) fn descends(pid: u32, ancestor: u32) -> bool {
     let mut cur = pid;
@@ -343,7 +343,14 @@ pub(crate) fn descends(pid: u32, ancestor: u32) -> bool {
     false
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub(crate) fn descends(pid: u32, ancestor: u32) -> bool {
+    let _ = MAX_HOPS;
+    kith_winsys::tree::descends(pid, ancestor)
+}
+
+/// No process tree to read here: only the run's own pid matches, a grandchild is refused, never let through.
+#[cfg(not(any(unix, windows)))]
 pub(crate) fn descends(pid: u32, ancestor: u32) -> bool {
     let _ = MAX_HOPS;
     pid == ancestor
