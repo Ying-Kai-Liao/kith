@@ -303,10 +303,12 @@ pub fn exec_kernel(args: &[OsString]) -> anyhow::Error {
     use crate::kernel_windows::{Answer, answer};
     match answer(args) {
         Answer::Refuse(why) => anyhow::anyhow!("kith: {why}"),
-        Answer::Run(own) => match std::env::current_exe().and_then(|e| std::process::Command::new(e).args(own).status()) {
-            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
-            Err(e) => anyhow::Error::new(e).context("running the verb"),
-        },
+        Answer::Run(own) => {
+            match std::env::current_exe().and_then(|e| std::process::Command::new(e).args(own).status()) {
+                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+                Err(e) => anyhow::Error::new(e).context("running the verb"),
+            }
+        }
     }
 }
 

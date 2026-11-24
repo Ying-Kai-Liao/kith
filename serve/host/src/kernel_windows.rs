@@ -124,7 +124,7 @@ mod tests {
                     let (n, m) = p[1..].split_once('-').expect(p);
                     assert!(p.starts_with('P') && n.parse::<u32>().is_ok() && m.parse::<u32>().is_ok(), "{p}");
                 }
-                Row::Ported(lead) => assert!(!lead.is_empty()),
+                Row::Ported(lead) => assert_ne!(lead.len(), 0),
             }
         }
     }
@@ -157,8 +157,14 @@ mod tests {
     #[test]
     fn the_refusal_text_is_exact() {
         assert_eq!(answer(&v(&["doctor"])), Answer::Refuse("not on Windows yet: doctor (retire-python P4-12)".into()));
-        assert_eq!(answer(&v(&["serve", "start"])), Answer::Refuse("not on Windows yet: serve (retire-python P4-8)".into()));
-        assert_eq!(answer(&v(&["coder", "-p", "x"])), Answer::Refuse("not on Windows yet: coder (retire-python P1-12)".into()));
+        assert_eq!(
+            answer(&v(&["serve", "start"])),
+            Answer::Refuse("not on Windows yet: serve (retire-python P4-8)".into())
+        );
+        assert_eq!(
+            answer(&v(&["coder", "-p", "x"])),
+            Answer::Refuse("not on Windows yet: coder (retire-python P1-12)".into())
+        );
         assert_eq!(answer(&v(&[])), Answer::Refuse("not on Windows yet: (no verb) (retire-python P1-12)".into()));
     }
 

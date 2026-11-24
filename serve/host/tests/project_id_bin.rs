@@ -1,6 +1,7 @@
 //! `project-id` (the program) answers like `kernel/bin/project-id` (the sh stub): same stdout, stderr and exit code for the same
 //! input. The stub is run on Unix only; it finds the program through `KITH_BIN`.
 #![cfg(unix)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
