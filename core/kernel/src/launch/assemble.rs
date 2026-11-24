@@ -4,8 +4,7 @@
 //! the prompt, the login (`accounts`), the settings, the MCP servers, then one JSON object on stdout.
 //!
 //! Programs it still asks, because their logic stays in Python until their step of the plan: `kith-pkg resolve` (the
-//! snapshot), `kith-cost limit|spent`, `kith-auth mcp-config`
-//! (A5), `kith-permit apply` (a guest's grants), `claude` and `xcode-select`.
+//! snapshot), `kith-cost limit|spent`, `kith-permit apply` (a guest's grants), `claude` and `xcode-select`.
 //!
 //! The environment is a map this module edits as the bash entry edits its exports; the launch object's `env` is read from it.
 
@@ -429,7 +428,7 @@ pub(crate) fn knows_readfence(bin: &Path) -> bool {
 
 /// Whether `bin` lists `module` in `kernel version`: the running program, or one whose `kernel version` names it. An older kith
 /// has `kernel cost` (the read verbs) but not the `cost-ledger` module, which `tag` and `record` are part of.
-pub(crate) fn knows_module(bin: &Path, module: &str) -> bool {
+pub fn knows_module(bin: &Path, module: &str) -> bool {
     let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
     if std::env::current_exe()
         .and_then(fs::canonicalize)
@@ -1496,17 +1495,32 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     }
 
     // ---- the MCP servers
-    let sys = Sys { env: &env };
-    let granted: Option<Value> =
-        match sys.out(kernel.join("bin/kith-auth"), &["mcp-config", agent], true) {
-            Some(t) => serde_json::from_str(&t).ok(),
-            None => {
+    // The granted shared services, in process (P1-15). Only the owner's run gets them (`mcp::merged`), so a guest's launch
+    // neither reads the keys nor needs the core for them.
+    let granted: Option<Value> = if p_owner {
+        let mut sctx = secrets::Ctx::from_process(kernel);
+        sctx.person = Some(person.clone()).filter(|p| !p.is_empty());
+        let starter = secrets::exec_program(
+            kith_bin.as_deref(),
+            env.get("KITH_SECRETS_EXEC").map(String::as_str),
+            |b| knows_module(b, "secrets-exec"),
+        );
+        match secrets::mcp_config(&sctx, &env, agent, &starter) {
+            Ok(made) => {
+                made.notes.iter().for_each(|n| say(n));
+                Some(made.config)
+            }
+            Err(d) => {
                 say(&format!(
-                    "kith: {agent}: no shared services this run (kith-auth failed)"
+                    "kith: {agent}: no shared services this run (kith-auth: {})",
+                    d.msg
                 ));
                 None
             }
-        };
+        }
+    } else {
+        None
+    };
     let merged = mcp::merged(
         p_owner,
         permit_bin.as_deref(),
