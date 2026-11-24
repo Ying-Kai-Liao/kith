@@ -980,7 +980,7 @@ mod tests {
         }
     }
 
-    /// The wake rows `kith kernel wake` and the terminal exit call (kernel/lib/kith_wake_core.py): on `core-call`, and never run by
+    /// The wake rows `kith kernel wake` and the terminal exit call (`kernel/lib/kith_wake_core.py`): on `core-call`, and never run by
     /// an embedded core, so with the queue the core's and no daemon the call is exit 3 and nothing was written.
     #[test]
     fn the_wake_calls_are_on_core_call_and_never_embedded() {

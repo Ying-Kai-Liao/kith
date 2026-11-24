@@ -26,10 +26,11 @@ fn folders(tag: &str) -> Paths {
 fn kith(f: &Paths, line: &str, env: &[(&str, &str)]) -> (i32, String, String) {
     let call = |method: &str, params: &Value| match kith_core::reach(f, method, params, false) {
         kith_core::Reached::Answered(v) => Ok(v),
-        kith_core::Reached::Refused(kith_core::Error::Busy(w)) => Err(Fail::NoAnswer(w)),
+        kith_core::Reached::Refused(kith_core::Error::Busy(w))
+        | kith_core::Reached::Mismatch(w)
+        | kith_core::Reached::Lost(w) => Err(Fail::NoAnswer(w)),
         kith_core::Reached::Refused(e) => Err(Fail::Refused(e.to_string())),
         kith_core::Reached::NoDaemon => Err(Fail::NoAnswer("no core daemon answers".to_owned())),
-        kith_core::Reached::Mismatch(w) | kith_core::Reached::Lost(w) => Err(Fail::NoAnswer(w)),
     };
     let get = |k: &str| env.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_owned());
     let args: Vec<String> = line.split_whitespace().map(str::to_owned).collect();
