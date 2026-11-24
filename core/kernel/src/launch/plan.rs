@@ -20,9 +20,10 @@ use serde_json::{Value, json};
 
 use super::assemble::{
     AGENT_ACCESS_TIMEOUT, Env, Sys, assignments, call_model, claude_version, cost_core,
-    cost_hook_bin, field, get, guest_mcp_arg, guest_tmp_ready, in_guest_sandbox, knows_readfence,
-    ledger_hook_bin, lists_module, parse_args, permit_hook_bin, pj_indent1, plain_number, pyrepr,
-    pystr, random_hex, s, sync_env, threads_hook_bin, truthy, usable_kith_bin, which_in,
+    cost_hook_bin, field, get, guest_mcp_arg, guest_tmp_ready, in_guest_sandbox, knows_module,
+    knows_readfence, ledger_hook_bin, lists_module, parse_args, permit_hook_bin, pj_indent1,
+    plain_number, pyrepr, pystr, random_hex, s, sync_env, threads_hook_bin, truthy,
+    usable_kith_bin, which_in,
 };
 use super::{mcp, prompt, settings};
 use crate::secrets::pyjson;
@@ -945,17 +946,32 @@ pub fn plan(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<Pl
     }
 
     // ---- the MCP servers
-    let sys = Sys { env: &env };
-    let granted: Option<Value> =
-        match sys.out(kernel.join("bin/kith-auth"), &["mcp-config", agent], true) {
-            Some(t) => serde_json::from_str(&t).ok(),
-            None => {
+    // The granted shared services, in process (P1-15). Only the owner's run gets them (`mcp::merged`), so a guest's launch
+    // neither reads the keys nor needs the core for them.
+    let granted: Option<Value> = if p_owner {
+        let mut sctx = secrets::Ctx::from_process(kernel);
+        sctx.person = Some(person.clone()).filter(|p| !p.is_empty());
+        let starter = secrets::exec_program(
+            kith_bin.as_deref(),
+            env.get("KITH_SECRETS_EXEC").map(String::as_str),
+            |b| knows_module(b, "secrets-exec"),
+        );
+        match secrets::mcp_config(&sctx, &env, agent, &starter) {
+            Ok(made) => {
+                made.notes.iter().for_each(|n| say(n));
+                Some(made.config)
+            }
+            Err(d) => {
                 say(&format!(
-                    "kith: {agent}: no shared services this run (kith-auth failed)"
+                    "kith: {agent}: no shared services this run (kith-auth: {})",
+                    d.msg
                 ));
                 None
             }
-        };
+        }
+    } else {
+        None
+    };
     let merged = mcp::merged(
         p_owner,
         permit_bin.as_deref(),
