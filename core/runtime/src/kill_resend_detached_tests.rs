@@ -183,3 +183,24 @@ fn a_running_run_with_an_empty_group_is_left_to_end_gone_with_no_signal() {
     assert_eq!(turn_state(&d, turn), "failed");
     d.stop();
 }
+
+#[cfg(unix)]
+#[test]
+fn a_running_run_of_another_holder_instance_is_not_signalled() {
+    let (_t, m) = machine();
+    let d = serving(&paths(&m), quiet());
+    let (id, _turn, member) = detached(&d, "wake", None, true);
+    d.shared
+        .with_core(|c| {
+            c.conn().execute(
+                "UPDATE claims SET holder_instance = 'stranger' WHERE claim_id = ?1",
+                [id],
+            )?;
+            Ok(())
+        })
+        .expect("instance");
+    assert_eq!(resend(&d), Vec::<u32>::new());
+    assert!(alive(member));
+    signal(member, "KILL");
+    d.stop();
+}

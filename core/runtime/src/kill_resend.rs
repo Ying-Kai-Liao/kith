@@ -146,10 +146,14 @@ pub(crate) fn pass(shared: &Shared, holder: Option<&str>, grace: Duration) -> Ve
         let recorded = started.unwrap_or_default();
         let key = (pid, recorded.clone());
         let running = reason == RUNNING;
-        let victims = match procstart::probe(pid) {
-            // R3b: a running run whose leader still lives is working; only a dead leader with a live group of this boot is
-            // signalled (its report was lost to a host restart), and `end_gone` then ends the claim as `failed`.
-            _ if running && !matches!(procstart::probe(pid), procstart::Probe::Gone) => continue,
+        // R3b: a running run whose leader still lives is working; only a dead leader with a live group of this boot is
+        // signalled (its report was lost to a host restart), and `end_gone` then ends the claim as `failed`. One probe, so a
+        // leader that dies between two never falls into the Alive arm.
+        let probed = procstart::probe(pid);
+        if running && !matches!(probed, procstart::Probe::Gone) {
+            continue;
+        }
+        let victims = match probed {
             procstart::Probe::Gone => match procstart::orphan_group(pid, &recorded) {
                 Some(group) => procstart::Victims {
                     pids: Vec::new(),
