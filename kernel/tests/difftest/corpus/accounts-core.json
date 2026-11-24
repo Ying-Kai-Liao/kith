@@ -2706,5 +2706,587 @@
         "codex:b"
       ]
     ]
+  },
+  {
+    "name": "accounts-accounts-json",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"codex:c\", \"claude\", \"bad id\"], \"agents\": {\"cdx\": {\"accounts\": [\"codex:c\", \"codex:b\"], \"pin\": {\"id\": \"claude:work\", \"only\": false}}}}"
+      }
+    ],
+    "run": [
+      [
+        "accounts-json",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md"
+      ],
+      [
+        "accounts-json",
+        "cdx",
+        "{KITH_HOME}/agents/cdx/role/agent.md"
+      ],
+      [
+        "accounts-json",
+        "ghost",
+        "{KITH_HOME}/nowhere/agent.md"
+      ]
+    ],
+    "sort_lines": true
+  },
+  {
+    "name": "accounts-accounts-json-state",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"codex:c\", \"claude\", \"bad id\"], \"agents\": {\"cdx\": {\"accounts\": [\"codex:c\", \"codex:b\"], \"pin\": {\"id\": \"claude:work\", \"only\": false}}}}"
+      },
+      {
+        "write": "home/.kith/accounts/state.json",
+        "text": "{\"version\": 1, \"accounts\": {\"claude:work\": {\"out_until\": 4102444800, \"reason\": \"rate_limit\", \"since\": 1}, \"codex:b\": {\"last_started\": 5, \"usage\": {\"read_at\": 4102444000, \"windows\": [{\"name\": \"5h\", \"percent\": 40.5, \"resets_at\": 4102447000}]}}, \"claude:other\": {\"out_until\": 1, \"reason\": \"rate_limit\"}}}"
+      }
+    ],
+    "run": [
+      [
+        "accounts-json",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md"
+      ],
+      [
+        "accounts-json",
+        "cdx",
+        "{KITH_HOME}/agents/cdx/role/agent.md"
+      ]
+    ],
+    "sort_lines": true
+  },
+  {
+    "name": "accounts-accounts-json-empty",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{}"
+      }
+    ],
+    "run": [
+      [
+        "accounts-json",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md"
+      ],
+      [
+        "accounts-json",
+        "cdx",
+        "{KITH_HOME}/agents/cdx/role/agent.md"
+      ]
+    ],
+    "sort_lines": true
+  },
+  {
+    "name": "accounts-accounts-json-spread-agent-set",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"account_policy\": \"spread\", \"accounts\": [\"claude:work\", \"claude:other\", \"claude\"], \"agents\": {\"echo\": {\"accounts\": [\"claude:other\", \"claude:work\", \"codex:b\"]}}}"
+      },
+      {
+        "write": "home/.kith/accounts/state.json",
+        "text": "{\"version\": 1, \"accounts\": {\"claude:work\": {\"out_until\": 4102444800, \"reason\": \"rate_limit\", \"since\": 1}, \"codex:b\": {\"last_started\": 5, \"usage\": {\"read_at\": 4102444000, \"windows\": [{\"name\": \"5h\", \"percent\": 40.5, \"resets_at\": 4102447000}]}}, \"claude:other\": {\"out_until\": 1, \"reason\": \"rate_limit\"}}}"
+      }
+    ],
+    "run": [
+      [
+        "accounts-json",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md"
+      ],
+      [
+        "accounts-json",
+        "cdx",
+        "{KITH_HOME}/agents/cdx/role/agent.md"
+      ]
+    ],
+    "sort_lines": true
+  },
+  {
+    "name": "accounts-accounts-json-state-corrupt",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"codex:c\", \"claude\", \"bad id\"], \"agents\": {\"cdx\": {\"accounts\": [\"codex:c\", \"codex:b\"], \"pin\": {\"id\": \"claude:work\", \"only\": false}}}}"
+      },
+      {
+        "write": "home/.kith/accounts/state.json",
+        "text": "{not json"
+      }
+    ],
+    "run": [
+      [
+        "accounts-json",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md"
+      ]
+    ],
+    "sort_lines": true
+  },
+  {
+    "name": "accounts-main-id",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"codex:c\", \"claude\", \"bad id\"], \"agents\": {\"cdx\": {\"accounts\": [\"codex:c\", \"codex:b\"], \"pin\": {\"id\": \"claude:work\", \"only\": false}}}}"
+      }
+    ],
+    "run": [
+      [
+        "main-id",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md"
+      ],
+      [
+        "main-id",
+        "cdx",
+        "{KITH_HOME}/agents/cdx/role/agent.md"
+      ],
+      [
+        "main-id",
+        "ghost",
+        "{KITH_HOME}/nowhere/agent.md"
+      ]
+    ]
+  },
+  {
+    "name": "accounts-main-id-empty",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{}"
+      }
+    ],
+    "run": [
+      [
+        "main-id",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md"
+      ],
+      [
+        "main-id",
+        "cdx",
+        "{KITH_HOME}/agents/cdx/role/agent.md"
+      ]
+    ]
+  },
+  {
+    "name": "accounts-main-id-only-pin",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\"], \"agents\": {\"cdx\": {\"pin\": {\"id\": \"codex:b\", \"only\": true}}}}"
+      }
+    ],
+    "run": [
+      [
+        "main-id",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md"
+      ],
+      [
+        "main-id",
+        "cdx",
+        "{KITH_HOME}/agents/cdx/role/agent.md"
+      ]
+    ]
   }
 ]
