@@ -37,8 +37,9 @@ fn last_good(store: &Path, id: &str) -> Option<Value> {
 }
 
 /// Records `entry` as the one `id` last started from, if it changed. Temp file plus rename, since
-/// the host and a one-shot `engine-run` can both write it. Best effort: a failed write only costs
-/// a later fallback.
+/// the host and a one-shot `engine-run` can both write it. Best effort: the lock is per process,
+/// so two processes recording different agents at once can lose one row; it comes back on that
+/// agent's next registry start. A failed write likewise only costs a later fallback.
 fn record(store: &Path, id: &str, entry: &Value) {
     static WRITING: Mutex<()> = Mutex::new(());
     let _one = WRITING.locked();
@@ -134,7 +135,11 @@ pub(super) fn recent_failure(spec: &str) -> Option<String> {
     (at.elapsed() < FAILED_FOR).then(|| why.clone())
 }
 
+/// Remembers only failures that will repeat (npm has no such version), not a network blip.
 pub(super) fn remember_failure(spec: &str, why: &str) {
+    if !(why.contains("E404") || why.contains("ETARGET")) {
+        return;
+    }
     let mut failed = FAILED.locked();
     let failed = failed.get_or_insert_with(HashMap::new);
     failed.retain(|_, (at, _)| at.elapsed() < FAILED_FOR);
@@ -276,8 +281,10 @@ mod tests {
     fn failures_are_remembered_until_forgotten() {
         let spec = format!("@s/flaky@{}", uuid::Uuid::new_v4());
         assert_eq!(recent_failure(&spec), None);
-        remember_failure(&spec, "404");
-        assert_eq!(recent_failure(&spec).as_deref(), Some("404"));
+        remember_failure(&spec, "npm error code ETIMEDOUT");
+        assert_eq!(recent_failure(&spec), None, "a network error isn't remembered");
+        remember_failure(&spec, "npm error code E404");
+        assert_eq!(recent_failure(&spec).as_deref(), Some("npm error code E404"));
         forget_failure(&spec);
         assert_eq!(recent_failure(&spec), None);
     }
