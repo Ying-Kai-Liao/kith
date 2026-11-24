@@ -229,7 +229,7 @@ fn read_memory_file(dir: &Path, path: &str) -> Result<Value> {
     let meta = handle.metadata()?;
     #[cfg(windows)]
     if crate::hqmem::is_reparse_point(&meta) {
-        bail!("`{path}` isn't a file");
+        bail!("`{path}` is a link or a cloud or placeholder file (reparse point); kith won't open it");
     }
     if !meta.is_file() {
         bail!("`{path}` isn't a file");

@@ -132,8 +132,11 @@ pub fn append(
             .open(&path)
             .context("opening the upload")?;
         #[cfg(windows)]
-        if file.metadata().is_ok_and(|m| crate::hqmem::is_reparse_point(&m)) {
-            bail!("the upload can't go through a link");
+        // Fails closed: metadata that can't be read is refused like a reparse point.
+        if !file.metadata().is_ok_and(|m| !crate::hqmem::is_reparse_point(&m)) {
+            bail!(
+                "the upload is a link or a cloud or placeholder file (reparse point), or can't be inspected; kith won't write to it"
+            );
         }
         if let (true, Uploader::Guest(person)) = (created, who) {
             let _ = std::fs::write(dir.join(OWNER_MARK), person);

@@ -358,14 +358,26 @@ fn make_key(path: &Path) -> Result<()> {
     // Linked into place whole, so two processes making it at once keep one key and none reads half of one.
     let linked = std::fs::hard_link(&tmp, path);
     let _ = std::fs::remove_file(&tmp);
-    match linked {
-        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => return Err(e.into()),
-        _ => {}
-    }
     #[cfg(windows)]
-    if !owner_only(path) {
-        let _ = std::fs::remove_file(path);
-        bail!("the key is open to other accounts");
+    let made_here = linked.is_ok();
+    if let Err(e) = linked
+        && e.kind() != std::io::ErrorKind::AlreadyExists
+    {
+        return Err(e.into());
+    }
+    // Only a key this call made is removed when its list turns out open. Another host's key (the link shares its
+    // restricted descriptor) is refused and left alone: a failed check there is nearly always transient, and deleting
+    // it would void the approvals that host already signed.
+    #[cfg(windows)]
+    match kith_winsys::acl::check(path) {
+        Ok(kith_winsys::acl::Check::OwnerOnly) => {}
+        Ok(kith_winsys::acl::Check::Open(why)) => {
+            if made_here {
+                let _ = std::fs::remove_file(path);
+            }
+            bail!("the approvals key is open to other accounts: {why}");
+        }
+        Err(e) => bail!("can't read the approvals key's access list (the next call checks again): {e}"),
     }
     Ok(())
 }
