@@ -384,7 +384,8 @@ pub(crate) async fn settle_queue_at(hub: &Arc<Hub>, now: i64) {
     let (before, count) = (lock(&ENQUEUING).keys().cloned().collect::<HashSet<_>>(), enqueued(&state));
     let known = {
         let state = state.clone();
-        wake::blocking(move || wake::statuses(&state)).await.unwrap_or_default()
+        let ids: Vec<String> = cards.iter().map(request_id).chain(waiting.iter().map(|e| message_id(&e.id))).collect();
+        wake::blocking(move || wake::statuses_for(&state, &ids)).await.unwrap_or_default()
     };
     // An enqueue that began, ran or ended during the read may have written its item after the read saw the folder.
     let racing = count != enqueued(&state);
