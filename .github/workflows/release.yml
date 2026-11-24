@@ -15,6 +15,10 @@ on:
         description: "Dry run of the Linux client build only (skips the macOS build; nothing is published off a tag)"
         type: boolean
         default: false
+      windows_only:
+        description: "Dry run of the Windows zip only (skips every other job; nothing is published off a tag)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,7 +28,7 @@ env:
 
 jobs:
   build:
-    if: ${{ !inputs.guest_only }}
+    if: ${{ !inputs.guest_only && !inputs.windows_only }}
     runs-on: macos-latest
     timeout-minutes: 60
     strategy:
@@ -143,6 +147,7 @@ jobs:
   # run the real binary (docs/kith-bot-guests.md section 10). If aarch64-musl ever fails under zigbuild, build
   # aarch64-unknown-linux-gnu.2.17 instead (runs on any glibc since 2014).
   build-guest:
+    if: ${{ !inputs.windows_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -202,7 +207,7 @@ jobs:
   # exist and builds unsigned otherwise; only a tag publishes. Asset names carry no version so
   # releases/latest/download/<name> always resolves; electron-updater reads latest-mac.yml from the same release.
   desktop-mac:
-    if: ${{ !inputs.guest_only }}
+    if: ${{ !inputs.guest_only && !inputs.windows_only }}
     runs-on: macos-26
     timeout-minutes: 90
     defaults:
@@ -328,7 +333,7 @@ jobs:
 
   # Linux: the installed kith-serve is used (no bundled host), so there is nothing native to build first.
   desktop-linux:
-    if: ${{ !inputs.guest_only }}
+    if: ${{ !inputs.guest_only && !inputs.windows_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
