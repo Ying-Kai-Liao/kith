@@ -2221,6 +2221,7 @@ dependencies = [
  "fs2",
  "junction",
  "kith-procstart",
+ "kith-winsys",
  "libc",
  "regex",
  "rusqlite",
