@@ -156,11 +156,7 @@ fn expanduser(home: &Path, s: &str) -> PathBuf {
 
 /// The separators that follow a `~`: `/`, and on Windows `\` too (`~\agents`).
 fn seps(windows: bool) -> &'static [char] {
-    if windows {
-        &['/', '\\']
-    } else {
-        &['/']
-    }
+    if windows { &['/', '\\'] } else { &['/'] }
 }
 
 /// Whether what follows a `~` starts a path below the home (so `~name` stays another user's).
