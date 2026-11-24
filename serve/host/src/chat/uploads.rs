@@ -119,13 +119,22 @@ pub fn append(
             bail!("Upload limit reached: you can keep up to {} MB of files here", GUEST_QUOTA / 1024 / 1024);
         }
         let mut opts = std::fs::OpenOptions::new();
-        // Windows has no O_NOFOLLOW; its links need a privilege the host does not run with (windows-owner).
         #[cfg(unix)]
         opts.custom_flags(libc::O_NOFOLLOW);
+        // Windows has no O_NOFOLLOW: a link is opened itself and refused on the open handle (no check-then-open gap).
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt as _;
+            opts.custom_flags(crate::hqmem::FILE_FLAG_OPEN_REPARSE_POINT);
+        }
         let created = !exists;
         let mut file = if created { opts.write(true).create_new(true) } else { opts.append(true) }
             .open(&path)
             .context("opening the upload")?;
+        #[cfg(windows)]
+        if file.metadata().is_ok_and(|m| crate::hqmem::is_reparse_point(&m)) {
+            bail!("the upload can't go through a link");
+        }
         if let (true, Uploader::Guest(person)) = (created, who) {
             let _ = std::fs::write(dir.join(OWNER_MARK), person);
         }
