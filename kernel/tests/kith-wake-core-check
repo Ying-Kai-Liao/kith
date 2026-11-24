@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# kith-wake-core-check — once the wake queue is the Kith core's (the tombstone in sessions/queue/, retire-python S4 R9),
+# every kernel writer of the queue goes through the core and no caller writes a file under sessions/queue/: kith-wake's helpers
+# and verbs, kith-ask's hand-over and sweep, kith-sched's tick (a no-op). With the tombstone and no core answering, the helpers
+# refuse and write nothing (fail closed). Before the switch nothing changes and the core is not asked. The program here is a stub
+# that plays the core and logs each call; the real dispatch (the strict param check) is the host's wake_cmd test.
+#
+#   kernel/tests/kith-wake-core-check     a few seconds; exits 1 when a check fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-wake-core-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export PYTHONPYCACHEPREFIX=$T/pycache PYTHONDONTWRITEBYTECODE=1
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_LOGS=$T/logs KITH_WAKE_NO_KICK=1
+unset KITH_PERSON KITH_AGENT HQ_HOME HQ_STATE KITH_MACHINE KITH_VIA KITH_RESUME CLAUDE_CODE_SESSION_ID
+mkdir -p "$HOME" "$KITH_STATE/live/terminal" "$T/k/bin"
+ln -s "$KERNEL/lib" "$T/k/lib"
+cp "$KERNEL/bin/kith-ask" "$KERNEL/bin/kith-wake" "$KERNEL/bin/kith-sched" "$T/k/bin/"
+MACHINE=$(python3 -I -c "import sys; sys.path.insert(0, '$KERNEL/lib'); from kith_paths import paths; print(paths()['KITH_MACHINE'])")
+BOX=$MACHINE/live/ask
+Q=$KITH_STATE/sessions/queue
+W=$T/k/bin/kith-wake
+ASK=$T/k/bin/kith-ask
+
+# The stub program. `memory hook --help` says "phase" (kith_paths only takes a program that has the hook); `kernel core-call
+# METHOD --params-stdin` logs the call and answers like the core's wake rows; no daemon is exit 3 (the file $T/down).
+cat > "$T/prog" <<'EOF'
+#!/usr/bin/env python3
+import json, os, sys
+T = os.path.dirname(os.path.realpath(__file__))
+if sys.argv[1:3] == ['memory', 'hook']:
+    print('usage: kith memory hook --phase PHASE'); sys.exit(0)
+method = sys.argv[3]
+p = json.loads(sys.stdin.read() or '{}')
+open(T + '/calls', 'a').write(method + ' ' + json.dumps(p, sort_keys=True) + '\n')
+if os.path.exists(T + '/down'):
+    sys.stderr.write('no core daemon answers\n'); sys.exit(3)
+if method == 'claim.list': out = {'live': []}
+elif method == 'wake.enqueue':
+    if p['id'] == 'bad:1': sys.stderr.write('kith-core: wake: s1 belongs to another agent\n'); sys.exit(4)
+    out = {'result': 'duplicate' if p['id'] == 'dup:1' else 'queued'}
+elif method in ('wake.withdraw', 'wake.withdrawPerson'): out = {'count': 2}
+elif method == 'wake.queueStatus': out = {'id': p['id'], 'state': 'running', 'run': 'r1', 'lines': ['running r1']}
+elif method == 'wake.take': out = {'turn': {'run': 'r1', 'session': 's1'}, 'lines': ['{"run":"r1"}']}
+elif method in ('wake.done', 'wake.back'): out = {'done': True, 'lines': []}
+elif method == 'wake.wait': out = {'waiter': {}, 'lines': ['waiting w1: x']}
+elif method == 'wake.queueList': out = {'items': [{'session': 's1'}], 'waiters': [], 'lines': ['s1  designer  owner  run  owed  1 request(s)']}
+else: out = {}
+print(json.dumps(out))
+EOF
+chmod +x "$T/prog"
+export KITH_BIN=$T/prog
+
+fails=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fails=$((fails + 1)); }
+is() { [[ $2 == "$3" ]] && ok "$1" || bad "$1" "got '$2', wanted '$3'"; }
+calls() { cat "$T/calls" 2>/dev/null | grep -vc '^claim\.' | tr -d ' '; }
+called() { grep -c "^$1 " "$T/calls" 2>/dev/null; }
+files() { find "$Q" -type f ! -name .tombstone 2>/dev/null | wc -l | tr -d ' '; }
+
+# --- before the switch: the files, the core is not asked --------------------------------------------------------------
+is "unswitched: enqueue writes the queue file" "$(python3 "$W" enqueue s0 --id u:1 --agent designer -- hi)" queued
+is "the core was not asked" "$(calls)" 0
+[[ -n $(ls "$Q"/*.json 2>/dev/null) ]] && ok "a queue file is there" || bad "a queue file is there"
+rm -rf "$Q"
+mkdir -p "$MACHINE/core/cutover"
+printf 'state=stepping\n' > "$MACHINE/core/cutover/wake.switch"
+is "a step part-way is still the files" "$(python3 "$W" enqueue s0 --id u:2 --agent designer -- hi)" queued
+is "and the core is still not asked" "$(calls)" 0
+rm -rf "$KITH_STATE/sessions" "$MACHINE/core/cutover/wake.switch"
+
+# --- the tombstone and a core that answers -----------------------------------------------------------------------------
+mkdir -p "$Q"
+printf '{"kith_tombstone": 1, "module": "wake", "rollback": "kith rollback wake"}\n' > "$Q/.tombstone"
+is "enqueue goes to the core" "$(python3 "$W" enqueue s1 --id card:1 --agent designer --why answered -- yes, go)" queued
+is "its params are the row's" "$(grep '^wake.enqueue ' "$T/calls" | head -1)" \
+  'wake.enqueue {"agent": "designer", "door": "run", "id": "card:1", "session": "s1", "text": ["yes, go"], "why": "answered"}'
+is "a duplicate is the core's word" "$(python3 "$W" enqueue s1 --id dup:1 --agent designer -- again)" duplicate
+python3 "$W" enqueue s1 --id bad:1 --agent coder -- x >/dev/null 2>"$T/err"; rc=$?
+is "the core's refusal is exit 1" "$rc" 1
+grep -q '^kith-wake: wake: s1 belongs to another agent' "$T/err" && ok "said in the core's words" || bad "said in the core's words" "$(cat "$T/err")"
+python3 "$W" enqueue s2 --id x:1 --agent designer --person anna -- x >/dev/null 2>&1; rc=$?
+is "a person's run-door wake is refused before the core is asked" "$rc:$(called wake.enqueue)" "1:3"
+is "withdraw" "$(python3 "$W" withdraw s1 --id card:1)" "withdrew 2"
+is "withdraw names the id" "$(grep '^wake.withdraw ' "$T/calls" | head -1)" 'wake.withdraw {"id": "card:1", "session": "s1"}'
+is "withdraw-person" "$(python3 "$W" withdraw-person anna bob)" "withdrew 2"
+is "status" "$(python3 "$W" status r:1)" "running r1"
+is "status --json" "$(python3 "$W" status r:1 --json)" '{"id": "r:1", "state": "running", "run": "r1"}'
+python3 "$W" take --holder 7 --session s1 | grep -q '"run": "r1"' && ok "take prints the turn" || bad "take prints the turn"
+python3 "$W" done r1 --how answered; is "done" "$?" 0
+python3 "$W" back r1 --held; is "back" "$?" 0
+is "wait" "$(CLAUDE_CODE_SESSION_ID=s5 KITH_AGENT=designer python3 "$W" wait --on at:+30m -- ping)" "waiting w1: x"
+is "ls" "$(python3 "$W" ls)" "s1  designer  owner  run  owed  1 request(s)"
+is "drain does nothing" "$(python3 "$W" drain; echo "rc=$?")" "rc=0"
+is "deliver does nothing" "$(python3 "$W" deliver s1; echo "rc=$?")" "rc=0"
+is "(a) no file under sessions/queue/ was written" "$(files)" 0
+is "and no lock, no waiters, no log" "$(ls -A "$Q" | tr '\n' ' ')" ".tombstone "
+[[ ! -e $KITH_STATE/sessions/waits && ! -e $KITH_STATE/sessions/log.jsonl ]] && ok "no waits folder, no sessions log" || bad "no waits folder, no sessions log"
+
+# kith-ask: its hand-over to a session that ended is the same call, and the sweep makes it
+mkdir -p "$BOX"
+python3 - "$BOX" <<'PY'
+import json, sys, time
+box = sys.argv[1]
+json.dump({'session': 'sess-z', 'agent': 'architect', 'state': 'open', 'at': time.time(), 'via': 'terminal'}, open(box + '/ask-1.reg', 'w'))
+open(box + '/ask-1.jsonl', 'w').write(json.dumps({'as': 'echo', 'text': 'yes from Kai', 'kind': 'answer'}) + '\n')
+PY
+: > "$T/calls"
+"$ASK" --sweep >/dev/null 2>"$T/err"
+is "kith-ask's sweep hands the answer over through the core" "$(called wake.enqueue)" 1
+grep -q '"session": "sess-z"' "$T/calls" && grep -q 'yes from Kai' "$T/calls" && ok "for the asker's session, with the answer" || bad "for the asker's session, with the answer" "$(cat "$T/calls" "$T/err")"
+is "kith-ask wrote no queue file either" "$(files)" 0
+"$ASK" --sweep >/dev/null 2>&1
+is "a second sweep hands nothing over" "$(called wake.enqueue)" 1
+
+# kith-sched's tick leaves the queue alone once switched: no sweep, no drain
+: > "$T/calls"
+python3 "$T/k/bin/kith-sched" tick >/dev/null 2>&1
+is "the sched tick asks the core nothing and writes no queue file" "$(calls):$(files)" "0:0"
+
+# --- the tombstone and no core: refuse, write nothing (b) --------------------------------------------------------------
+touch "$T/down"
+python3 "$W" enqueue s1 --id late:1 --agent designer -- x >/dev/null 2>"$T/err"; rc=$?
+is "(b) enqueue with no core answering is refused" "$rc" 1
+grep -q 'did not answer' "$T/err" && grep -q 'nothing was done' "$T/err" && ok "and says nothing was done" || bad "and says nothing was done" "$(cat "$T/err")"
+python3 "$W" withdraw s1 >/dev/null 2>&1; is "withdraw is refused too" "$?" 1
+python3 "$W" withdraw-person anna >/dev/null 2>&1; is "withdraw-person is refused too" "$?" 1
+python3 "$W" status r:1 >/dev/null 2>&1; is "status is refused too" "$?" 1
+is "(b) still no file under sessions/queue/" "$(files)" 0
+rm -f "$T/down"
+
+# --- the switch record alone (no tombstone) is the core's too ------------------------------------------------------------
+rm -f "$Q/.tombstone"
+printf 'state=switched\nat=1\n' > "$MACHINE/core/cutover/wake.switch"
+is "a switch record past stepping is the core's" "$(python3 "$W" enqueue s1 --id card:9 --agent designer -- yes)" queued
+is "with no queue file" "$(files)" 0
+
+[[ $fails == 0 ]] && echo "all checks passed" || { echo "$fails check(s) failed"; exit 1; }

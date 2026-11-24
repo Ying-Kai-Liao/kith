@@ -788,7 +788,7 @@ def follow_ups(mid, end, code):
 def kick_wakes(sid):
     """The run's turn ended: a wake its session is owed (a --to message) is delivered now, not at the next tick."""
     wake = wake_queue()
-    if sid and wake.item_path(sid).exists():
+    if sid and not wake.switched() and wake.item_path(sid).exists():   # switched: the host ticks, and no queue file is read
         wake.spawn_drain()
 
 
