@@ -434,6 +434,60 @@ pub fn from_process(kernel: &Path) -> Paths {
     paths(&process_home(), kernel, &process_env)
 }
 
+/// A program on a PATH string, the way the shell finds it. Unix: a file with an execute bit. Windows: a name with no
+/// extension tries each PATHEXT extension in order (`.COM;.EXE;.BAT;.CMD` when PATHEXT is unset), a name with one is tried
+/// as is, and there are no mode bits; a bare extensionless file (an npm sh shim) is never taken, as `CreateProcess` can't run it.
+pub fn which_on(program: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
+    let pathext = std::env::var("PATHEXT").ok();
+    which_with(program, path, pathext.as_deref(), cfg!(windows))
+}
+
+fn which_with(
+    program: &str,
+    path: &std::ffi::OsStr,
+    pathext: Option<&str>,
+    windows: bool,
+) -> Option<PathBuf> {
+    let names: Vec<String> = if !windows || Path::new(program).extension().is_some() {
+        vec![program.to_owned()]
+    } else {
+        let exts = pathext
+            .filter(|e| !e.trim().is_empty())
+            .unwrap_or(".COM;.EXE;.BAT;.CMD");
+        exts.split(';')
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .map(|e| format!("{program}{e}"))
+            .collect()
+    };
+    std::env::split_paths(path)
+        // Windows PATH entries may be quoted; an empty one means nothing, not the current folder.
+        .map(|d| PathBuf::from(d.to_string_lossy().trim_matches('"')))
+        .filter(|d| !d.as_os_str().is_empty())
+        .find_map(|d| {
+            names
+                .iter()
+                .map(|n| d.join(n))
+                .find(|p| is_runnable(p, windows))
+        })
+}
+
+fn is_runnable(p: &Path, windows: bool) -> bool {
+    let Ok(m) = std::fs::metadata(p) else {
+        return false;
+    };
+    if !m.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    if !windows {
+        use std::os::unix::fs::PermissionsExt as _;
+        return m.permissions().mode() & 0o111 != 0;
+    }
+    let _ = windows;
+    true
+}
+
 // The tests build POSIX layouts and symlinks; the Windows job runs the rest of the crate.
 #[cfg(all(test, unix))]
 mod tests;
