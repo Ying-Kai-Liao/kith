@@ -3,6 +3,7 @@
 //! golden-tested (design 2026-11-21-harness-oneshots, section 3.3). One-shots do not come here: they run over ACP.
 
 use serde_json::{Map, Value};
+use std::fmt::Write as _;
 
 /// What bin/kith hands a run (`KITH_RUN_*`, `KITH_MODEL`, `KITH_EFFORT`, the permission mode).
 #[derive(Debug, Default, Clone)]
@@ -60,7 +61,7 @@ fn toml(v: &Value) -> String {
                 } else {
                     let mut units = [0u16; 2];
                     for u in c.encode_utf16(&mut units) {
-                        out.push_str(&format!("\\u{u:04x}"));
+                        let _ = write!(out, "\\u{u:04x}");
                     }
                 }
             }

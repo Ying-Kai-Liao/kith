@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use super::*;
 use serde_json::json;
 
@@ -172,7 +174,7 @@ fn hermes_plain_and_with_everything() {
             PROMPT.to_owned()
         )]
     );
-    assert!(t.notes.is_empty());
+    assert_eq!(t.notes, Vec::<String>::new());
 
     let mcp = json!({"a": {"command": "x"}});
     let t = tui_argv(
