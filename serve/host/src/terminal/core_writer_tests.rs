@@ -1386,12 +1386,12 @@ async fn a_stub_killed_alone_has_its_engine_group_killed_before_the_claim_ends()
         assert!(engine.iter().all(|p| runs(*p)), "macOS: the engine outlives its stub");
     }
     // Watches the core: whether any engine pid still ran when the end report arrived.
-    let (world, watched) = (r.world.clone(), engine.clone());
+    let (world, pids) = (r.world.clone(), engine.clone());
     let watcher = std::thread::spawn(move || {
         let until = std::time::Instant::now() + Duration::from_secs(20);
         while std::time::Instant::now() < until {
             if !world.lock().unwrap().reports.is_empty() {
-                return Some(watched.iter().any(|p| runs(*p)));
+                return Some(pids.iter().any(|p| runs(*p)));
             }
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -1416,6 +1416,18 @@ async fn a_stub_whose_group_is_already_empty_is_reported_as_before() {
     assert!(at.elapsed() < ORPHAN_GRACE, "nothing to wait for");
     assert_eq!(r.w().reports[0].1["pid"], run.pid);
     assert_eq!(r.claim_state(run.claim), "ended");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_group_that_outlives_the_kill_gets_a_report_with_no_pid_and_the_claim_stays() {
+    let r = Rig::new();
+    let mut stub = r.stub("main");
+    let run = running(r.writer.begin(&r.turn("s1", None), &mut stub));
+    let before = r.claim_state(run.claim);
+    assert_eq!(r.writer.send_end(&run, End::Died, false), Finished::Reported);
+    assert_eq!(r.w().reports[0].0, "exit");
+    assert!(r.w().reports[0].1["pid"].is_null(), "no process named: {:?}", r.w().reports[0].1);
+    assert_eq!(r.claim_state(run.claim), before, "the core keeps the claim for end_gone");
 }
 
 // --- the gate is read at every begin -----------------------------------------------------------------------------------

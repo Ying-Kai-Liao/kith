@@ -869,6 +869,11 @@ impl CoreWriter {
     pub fn retry_end(&self, run: &Running, end: End) -> Finished {
         // An abandon kills and waits for the group itself.
         let reaped = end == End::Abandoned || reap_orphan(run.pid, &run.started);
+        self.send_end(run, end, reaped)
+    }
+
+    /// [`Self::retry_end`] once the stub's group is known gone (`reaped`) or not.
+    fn send_end(&self, run: &Running, end: End, reaped: bool) -> Finished {
         let pid = reaped.then_some(run.pid);
         let sent = match end {
             End::Done => self.report(run.claim, "done", pid, &json!({})),
