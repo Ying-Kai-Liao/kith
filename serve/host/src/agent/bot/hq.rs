@@ -337,7 +337,7 @@ impl Actor {
         }
         let caps = self.conn.as_ref().map(|c| c.sessions);
         if caps.is_some_and(|c| c.additional_directories) && !launch.add_dirs.is_empty() {
-            params["additionalDirectories"] = json!(launch.add_dirs);
+            params["additionalDirectories"] = json!(launch.real_add_dirs());
         }
         if caps.is_some_and(|c| c.system_prompt)
             && !launch.system_prompt.is_empty()
