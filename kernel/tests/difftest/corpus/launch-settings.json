@@ -153,16 +153,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -352,16 +344,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -551,16 +535,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -747,16 +723,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -946,16 +914,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -1145,16 +1105,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -1345,16 +1297,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -1548,16 +1492,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -1748,16 +1684,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -1948,16 +1876,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -2148,16 +2068,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -2348,16 +2260,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -2548,16 +2452,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -2748,16 +2644,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -2948,16 +2836,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3148,16 +3028,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3344,16 +3216,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3540,16 +3404,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3732,16 +3588,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -3928,16 +3776,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -4138,16 +3978,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -4348,16 +4180,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -4544,16 +4368,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -4740,16 +4556,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -4940,16 +4748,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -5137,16 +4937,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -5334,16 +5126,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -5531,16 +5315,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -5736,16 +5512,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -5941,16 +5709,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -6146,16 +5906,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -6351,16 +6103,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -6559,16 +6303,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -6764,16 +6500,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -6969,16 +6697,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -7174,16 +6894,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -7390,16 +7102,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -7599,16 +7303,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -7808,16 +7504,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -8014,16 +7702,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -8220,16 +7900,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -8425,16 +8097,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -8630,16 +8294,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -8835,16 +8491,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -9044,16 +8692,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -9373,16 +9013,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -9702,16 +9334,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -9910,16 +9534,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -10111,16 +9727,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -10319,16 +9927,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -10520,16 +10120,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -10728,16 +10320,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -10929,16 +10513,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -11134,16 +10710,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -11338,16 +10906,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -11534,16 +11094,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -11733,16 +11285,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -11933,16 +11477,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -12137,16 +11673,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -12341,16 +11869,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -12546,16 +12066,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -12747,16 +12259,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -12955,16 +12459,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -13167,16 +12663,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -13379,16 +12867,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -13587,16 +13067,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",
@@ -13796,16 +13268,8 @@
     "<PERMITHOOK-RUST> \\1 --dir"
    ],
    [
-    "\"command\": \"\\\\\"[^\"]*kith-cost\\\\\" tag\"",
-    "\"command\": \"<COSTTAG-STUB>\""
-   ],
-   [
     "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
     "\"command\": \"<COSTTAG-RUST>\""
-   ],
-   [
-    "^\"[^\"]*kith-cost\" tag$",
-    "<COSTTAG-STUB>"
    ],
    [
     "^[^\"]*kernel cost --kernel [^\"]* tag$",

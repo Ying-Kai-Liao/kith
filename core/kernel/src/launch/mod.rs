@@ -8,16 +8,20 @@
     clippy::implicit_hasher
 )]
 
+pub mod args;
 pub mod assemble;
 pub mod facets;
 pub mod guard;
+pub mod json;
 pub mod judge;
 pub mod machine;
 pub mod mcp;
+pub mod plan;
 pub mod prompt;
 #[allow(clippy::many_single_char_names)]
 pub mod pyport;
 pub mod room;
+pub mod runenv;
 pub mod settings;
 
 #[cfg(test)]

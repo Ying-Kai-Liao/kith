@@ -6,7 +6,11 @@
 //! auth.json is a file the host and `kith-auth` write too, so this module implements its protocol exactly: the same lock
 //! (`auth.json.lock`, `flock` exclusive, held from the read of a read-modify-write until the transaction ends), the same
 //! atomic write (a `0600` temp file in the same folder, fsynced, renamed over, the folder fsynced), the same tables and
-//! the same filtering on save. It reads no secret value and never touches the Keychain: this is the access decision only.
+//! the same filtering on save. The access decision (`may`, `resolve`) reads no secret value and never touches the Keychain.
+//! The two verbs that start servers do (retire-python P1-15): `mcp-config` writes the `--mcp-config` of an agent's granted
+//! shared services and `exec` starts one with its keys in its environment only, reading a value where its profile says
+//! (`/usr/bin/security` for the Keychain, a variable, a file). Every verb reads the tables through [`Authority`]: the file,
+//! or on the authority tombstone the core, asked in process.
 //!
 //! The file is read as loosely as Python reads it: a table or row of the wrong type counts as missing, where Python would
 //! stop with a traceback.
@@ -23,13 +27,29 @@ use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+mod authority;
+#[cfg(test)]
+mod authority_tests;
+mod exec;
+#[cfg(test)]
+mod exec_tests;
+mod grants;
+mod guest;
 mod jobs;
+#[cfg(test)]
+mod kit;
+mod mcp;
+#[cfg(test)]
+mod mcp_tests;
 mod packages;
 pub mod pyjson;
+mod session;
 #[cfg(test)]
 mod tests;
 
+pub use authority::{Authority, install_core};
 pub use jobs::{Job, PIECES, effective};
+pub use mcp::{McpConfig, Starter, exec_program, mcp_config};
 pub use packages::{
     AgentFacts, Found, PackageSource, Packages, note_disk_read, on_disk_read, read_names,
 };
@@ -254,26 +274,27 @@ fn strings(items: &[String]) -> Vec<Value> {
     items.iter().cloned().map(Value::String).collect()
 }
 
-/// `kith-auth`'s `load_auth`: auth.json with every table present. A missing file is empty; a damaged one is a `die`
-/// with Python's own words for what is wrong with the JSON.
-pub fn read_auth(path: &Path) -> R<Value> {
-    let mut data = match std::fs::read(path) {
+/// auth.json as it is on disk: a missing file is empty; a damaged one is a `die` with Python's own words for what is wrong
+/// with the JSON. Nothing is filled in and a tombstone is not looked for.
+fn read_json(path: &Path) -> R<Value> {
+    match std::fs::read(path) {
         Ok(bytes) => {
             let text = String::from_utf8_lossy(&bytes);
             match serde_json::from_str::<Value>(&text) {
-                Ok(v) => v,
+                Ok(v) => Ok(v),
                 Err(e) => {
                     let why = pyjson::error_of(&text).unwrap_or_else(|| e.to_string());
-                    return die(format!("{}: invalid JSON ({why})", path.display()));
+                    die(format!("{}: invalid JSON ({why})", path.display()))
                 }
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Object(Map::new()),
-        Err(e) => return die(format!("{}: {e}", path.display())),
-    };
-    if let Some(d) = tombstone_die(path, &data) {
-        return Err(d);
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Value::Object(Map::new())),
+        Err(e) => die(format!("{}: {e}", path.display())),
     }
+}
+
+/// `data` with every table present (`load_auth`'s `setdefault`s); it must be an object.
+fn fill_tables(path: &Path, mut data: Value) -> R<Value> {
     let Some(obj) = data.as_object_mut() else {
         return die(format!("{}: not a JSON object", path.display()));
     };
@@ -281,6 +302,15 @@ pub fn read_auth(path: &Path) -> R<Value> {
         obj.entry(t).or_insert_with(|| Value::Object(Map::new()));
     }
     Ok(data)
+}
+
+/// `kith-auth`'s `load_auth`: auth.json with every table present, or the tombstone's refusal.
+pub fn read_auth(path: &Path) -> R<Value> {
+    let data = read_json(path)?;
+    if let Some(d) = tombstone_die(path, &data) {
+        return Err(d);
+    }
+    fill_tables(path, data)
 }
 
 /// `kith_tombstone.Tombstoned`: auth.json is a cutover note (`kith kernel cutover step authority`), the authority moved
@@ -1284,6 +1314,12 @@ fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
             code: 0,
         });
     }
+    // The two that start servers (retire-python P1-15): the config of the granted shared services, and the start of one.
+    match verb {
+        "mcp-config" => return mcp::run(c, args),
+        "exec" => return exec::run(c, args),
+        _ => {}
+    }
     if !matches!(verb, "may" | "resolve") {
         return Err(Die {
             msg: format!("unknown command: {verb} (kith-auth --help)"),
@@ -1327,12 +1363,30 @@ fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
             rest.push(a);
         }
     }
-    let auth = load_auth(c)?;
-    let rules = Rules::new(c, &auth);
+    let authority = Authority::open(c)?;
     let via = opts
         .get("--via")
         .map(String::as_str)
         .filter(|v| !v.is_empty());
+    if authority.is_core() {
+        // The tombstone: the core answers, with the params `kith-auth` routes. Never the replaced file.
+        if !resolve && rest.len() == 2 {
+            return authority.may(rest[0], rest[1], via, once);
+        }
+        if resolve && rest.len() == 1 {
+            let person = opts
+                .get("--person")
+                .filter(|p| !p.is_empty())
+                .or(c.person.as_ref());
+            return authority.resolve(rest[0], person.map(String::as_str), via, once);
+        }
+        return Err(Die {
+            msg: format!("{verb}: see kith-auth --help"),
+            code: 2,
+        });
+    }
+    let auth = authority.tables()?;
+    let rules = Rules::new(c, &auth);
     if !resolve && rest.len() == 2 {
         // --once: a "just this once" counts (kith-permit's ask_helper, so a yes answered late isn't asked again)
         let (ok, why) = rules.may(rest[0], rest[1], via, once)?;

@@ -6,7 +6,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -129,7 +133,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -177,7 +185,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -290,7 +302,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -418,7 +434,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -475,7 +495,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -589,7 +613,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -702,7 +730,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -811,7 +843,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -915,7 +951,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -1033,7 +1073,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -1146,7 +1190,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -1259,7 +1307,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -1373,7 +1425,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -1481,7 +1537,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -1589,7 +1649,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -1697,7 +1761,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -1805,7 +1873,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -1913,7 +1985,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -2021,7 +2097,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -2129,7 +2209,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -2237,7 +2321,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -2345,7 +2433,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -2453,7 +2545,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -2561,7 +2657,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -2669,7 +2769,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -2777,7 +2881,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -2885,7 +2993,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -2993,7 +3105,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -3101,7 +3217,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -3228,7 +3348,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -3337,7 +3461,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -3385,7 +3513,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -3490,7 +3622,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -3589,7 +3725,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -3717,7 +3857,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -3764,7 +3908,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -3859,7 +4007,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -3972,7 +4124,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -4113,7 +4269,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -4222,7 +4382,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -4265,7 +4429,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -4375,7 +4543,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -4490,7 +4662,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -4589,7 +4765,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -4696,7 +4876,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -4799,7 +4983,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -4902,7 +5090,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5009,7 +5201,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5116,7 +5312,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5219,7 +5419,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5322,7 +5526,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5425,7 +5633,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5536,7 +5748,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5585,7 +5801,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5688,7 +5908,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5739,7 +5963,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5858,7 +6086,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -5902,7 +6134,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -6008,7 +6244,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -6194,7 +6434,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -6312,7 +6556,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -6393,7 +6641,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -6509,7 +6761,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -6600,7 +6856,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -6667,7 +6927,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -6805,7 +7069,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -6900,7 +7168,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -6958,7 +7230,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7011,7 +7287,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7055,7 +7335,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7098,7 +7382,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7142,7 +7430,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7195,7 +7487,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7248,7 +7544,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7301,7 +7601,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7354,7 +7658,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7407,7 +7715,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7460,7 +7772,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7513,7 +7829,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7566,7 +7886,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7619,7 +7943,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7672,7 +8000,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7730,7 +8062,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7779,7 +8115,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7832,7 +8172,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7886,7 +8230,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7940,7 +8288,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -7994,7 +8346,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8052,7 +8408,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8105,7 +8465,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8158,7 +8522,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8211,7 +8579,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8264,7 +8636,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8317,7 +8693,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8370,7 +8750,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8423,7 +8807,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8476,7 +8864,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8529,7 +8921,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8585,7 +8981,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8658,7 +9058,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8711,7 +9115,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8764,7 +9172,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8807,7 +9219,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8851,7 +9267,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8904,7 +9324,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -8957,7 +9381,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9010,7 +9438,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9063,7 +9495,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9116,7 +9552,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9169,7 +9609,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9222,7 +9666,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9275,7 +9723,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9328,7 +9780,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9381,7 +9837,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9435,7 +9895,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9482,7 +9946,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9540,7 +10008,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9598,7 +10070,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9651,7 +10127,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9704,7 +10184,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9757,7 +10241,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9810,7 +10298,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9853,7 +10345,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9906,7 +10402,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -9962,7 +10462,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -10031,7 +10535,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -10099,7 +10607,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",
@@ -10162,7 +10674,11 @@
   "bin_both": true,
   "program": {
    "old": [
-    "{KERNEL}/bin/kith-cost"
+    "{BIN}",
+    "kernel",
+    "cost",
+    "--kernel",
+    "{KERNEL}"
    ],
    "new": [
     "{BIN}",

@@ -142,7 +142,7 @@ kith_core_exec() {
 
 # kith_cost_bin   prints the kith program that has the cost ledger's writers (`cost-ledger` in `kith kernel version`) and returns 0, or
 # returns 1 when this Mac has none. KITH_CORE does not matter: there is no Python cost to go back to. The SessionStart hook of
-# `kith AGENT` names the program when there is one, else the stub (`bin/kith-cost tag`, which does nothing without a program).
+# `kith AGENT` names the program when there is one, else the launch writes no cost hook.
 kith_cost_bin() {
   local bin ver
   if [[ -n ${_kith_core_primed:-} ]]; then
@@ -186,12 +186,13 @@ kith_threads() {
   fi
 }
 
-# kith_cost ARGS...   `kith-cost ARGS`: the stub, which runs `kith kernel cost ARGS` on a program that has `cost-ledger` and
-# otherwise says so on stderr and fails (exit 3). Given the program the launch already looked up (KITH_BIN), the stub only asks it for its modules once.
-# A subshell, so `KITH_PERSON_WAS=.. kith_cost ..` reaches it.
+# kith_cost ARGS...   `kith kernel cost ARGS` on the program that has `cost-ledger` (see kith_cost_bin); with none it says so on
+# stderr and returns 3 (the code of "this moved"), which callers read as "cost unknown". A subshell, so
+# `KITH_PERSON_WAS=.. kith_cost ..` reaches it.
 kith_cost() {
-  ( [[ -z ${_kith_core_bin:-} || ${_kith_core_ver:-} != *'"cost-ledger"'* ]] || export KITH_BIN=$_kith_core_bin
-    exec "$KITH/bin/kith-cost" "$@" )
+  local cbin
+  cbin=$(kith_cost_bin) || { echo "kith-cost: the kith program with the cost ledger (module cost-ledger) was not found; kith update" >&2; return 3; }
+  ( KITH_BIN=$cbin exec "$cbin" kernel cost --kernel "$KITH" "$@" )
 }
 
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag

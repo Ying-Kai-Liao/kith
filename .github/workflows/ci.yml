@@ -238,6 +238,7 @@ jobs:
               - 'serve/host/src/run_outbox.rs'
               - 'core/runtime/src/revoke_order.rs'
               - 'core/runtime/src/import/authority.rs'
+              - 'core/kernel/src/secrets/authority.rs'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
             # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).
@@ -346,13 +347,13 @@ jobs:
             host_core:
               # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
               # memory and summary), and the libs those programs load on every call.
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/lib/kith_lifecycle.py,kernel/tests/kith-lifecycle-check,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/kith-cost,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-cost-bots-check,kernel/tests/kith-limit-check,kernel/tests/kith-scratch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check,kernel/tests/kith-agent-set-check,kernel/lib/kith_facets.py,kernel/bin/kith-room-ledger,kernel/tests/kith-load-check,kernel/tests/kith-summary-check,kernel/tests/kith-json-misc-check,.github/kith-protected-paths,kernel/tests/fixtures/launch-*.json,kernel/tests/kith-launch-engines-check}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/lib/kith_lifecycle.py,kernel/tests/kith-lifecycle-check,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-cost-bots-check,kernel/tests/kith-cost-launch-check,kernel/tests/kith-limit-check,kernel/tests/kith-scratch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check,kernel/tests/kith-agent-set-check,kernel/lib/kith_facets.py,kernel/bin/kith-room-ledger,kernel/tests/kith-load-check,kernel/tests/kith-summary-check,kernel/tests/kith-json-misc-check,.github/kith-protected-paths,kernel/tests/fixtures/launch-*.json,kernel/tests/kith-launch-engines-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
             # The Windows job builds and tests the holder (and kith-core when the branch has it) and what they stand on.
             windows:
-              - '{core/holder/**,core/stub/**,core/attach/**,core/runtime/**,core/api/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
+              - '{core/holder/**,core/stub/**,core/attach/**,core/winsys/**,core/runtime/**,core/api/**,serve/host/tests/support/fakemodel/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
               - '!**/*.md'
             cloud:
               - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
@@ -448,7 +449,6 @@ jobs:
               Terminal flags check|kernel/tests/kith-terminal-flags-check
               Recall check|kernel/tests/kith-recall-check
               Guest helper check|kernel/tests/kith-guest-helper-check
-              Cost stub check (bin/kith-cost is sh and Python in one file; forwards to a program that has cost-ledger, with none says so and exits 3, tag exits 0)|kernel/tests/kith-cost-stub-check
               Room ledger stub check (no kith program: silent exit 0, a room note's pre is denied, nothing else)|kernel/tests/kith-room-ledger-stub-check
               Wake check|kernel/tests/kith-wake-check
               Sessions core check (the kernel claim takers in Files and Writer mode, a fake core)|kernel/tests/kith-sessions-core-check
@@ -814,6 +814,9 @@ jobs:
         run: |
           cargo clippy --manifest-path host/Cargo.toml -p kith-attach --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-attach --locked
+      # The fake Anthropic API the Windows e2e runs real Claude Code against (tests/support/fakemodel); its HTTP test runs too.
+      - name: Fake model server
+        run: cargo test --manifest-path host/Cargo.toml -p kith-fakemodel --locked
 
   # kith-procstart reads the process table with `sysctl(KERN_PROCARGS2)` on macOS and `/proc` on Linux; only this job runs
   # its tests (the Rust/Python stamp parity and the launcher-form arguments) on a Mac. Free: the repo is public.
@@ -964,6 +967,7 @@ jobs:
             checks: |
               Core parity (difftest --rust --core)|kernel/tests/difftest/kith-difftest --rust --core --bin "$PWD/serve/host/target/debug/kith"
               Run-once cost and kernel notes|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-once-cost-check
+              Engine-run one-shots (kith AGENT -- task, resume, TERM, 78)|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-engine-run-check
               Guest door check with the built kith (kill -9 of the server)|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-guest-door-check
               Thread writers, Python and Rust as two actors|kernel/tests/kith-threads-race --bin "$PWD/serve/host/target/debug/kith" --iterations 60
               Core dependency rules|kernel/tests/kith-core-deps-check
@@ -979,7 +983,7 @@ jobs:
               kith-json-misc-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-json-misc-check
               kith-requires-switched-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-requires-switched-check
               kith-pkg-pid-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-pkg-pid-switch-check
-              kith-cost-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-switch-check
+              kith-cost-launch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-launch-check
               kith-cost-bots-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-cost-bots-check
               kith-limit-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-limit-check
               kith-scratch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-scratch-check
@@ -1192,7 +1196,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-2025]
     defaults:
       run:
         shell: bash
