@@ -2374,6 +2374,10 @@ fn stubborn_leader() -> (u32, String) {
     (pid, started.expect("start time"))
 }
 
+#[cfg(test)]
+#[path = "kill_resend_detached_tests.rs"]
+mod kill_resend_detached;
+
 #[cfg(unix)]
 fn set_reason(d: &Daemon, id: i64, reason: &str) {
     d.shared

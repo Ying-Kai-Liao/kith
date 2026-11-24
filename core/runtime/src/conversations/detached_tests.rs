@@ -151,8 +151,12 @@ fn a_wake_turn_is_claimed_and_attached_like_a_schedules_and_no_other_source_is()
         NOW,
     )
     .unwrap();
+    assert_eq!(refused["refused"], "notWaiting", "{refused}");
     assert!(
-        refused["refused"].is_string() || refused.get("claimId").is_none(),
+        refused["why"]
+            .as_str()
+            .unwrap()
+            .contains("as a detached run's"),
         "{refused}"
     );
 }
@@ -160,7 +164,6 @@ fn a_wake_turn_is_claimed_and_attached_like_a_schedules_and_no_other_source_is()
 #[test]
 fn attach_is_a_check_and_set_on_the_claim_the_conversation_and_the_process() {
     let (_t, mut core) = world();
-    let live = Sys::default();
     let attach = |core: &mut Core, claim: i64, conversation: &str, pid: u32, started: &str| {
         owner(
             core,
@@ -189,6 +192,19 @@ fn attach_is_a_check_and_set_on_the_claim_the_conversation_and_the_process() {
     // The same process again is told so; another one loses.
     assert_eq!(attach(&mut core, claim, "w1", 700, "e7")["again"], true);
     assert_eq!(attach(&mut core, claim, "w1", 701, "e8")["refused"], "gone");
+    // Only a schedule's turn may attach without naming its conversation.
+    let (_t2, nameless) = claim_of(&mut core, "w5");
+    let said = owner(
+        &mut core,
+        &Sys::default(),
+        "claim.attach",
+        &json!({"claimId": nameless, "pid": 704, "started": "eb"}),
+    );
+    assert_eq!(said["refused"], "gone");
+    assert_eq!(
+        attach(&mut core, nameless, "w5", 704, "eb"),
+        json!({"attached": true})
+    );
     // A cancelled wake turn's claim (the rollback, a revoke) is never attached afterwards.
     let (turn, claim) = claim_of(&mut core, "w3");
     let tx = core.claim_tx().unwrap();
@@ -204,7 +220,6 @@ fn attach_is_a_check_and_set_on_the_claim_the_conversation_and_the_process() {
     );
     assert_eq!(turn_state(&core, turn), "queued");
     assert_eq!(attach(&mut core, claim, "w4", 703, "ea")["refused"], "gone");
-    let _ = live;
 }
 
 fn killed_launcher_keeps_the_conversation_held(source: &str) {

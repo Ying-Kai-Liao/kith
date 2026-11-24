@@ -121,13 +121,15 @@ pub(crate) fn attach(
         ));
     }
     let tx = core.claim_tx()?;
-    // A run names its own conversation: a claim whose turn is another conversation's is refused, not attached.
+    // A run names its own conversation: a claim whose turn is another conversation's is refused, not attached. Only a
+    // schedule's turn may omit it (the Python `kith-sched run-turn` still does).
     let n = tx.execute(
         &format!(
             "UPDATE claims SET kind = 'external', state = 'running', running_at = ?2, pid = ?3, pid_started = ?4
              WHERE claim_id = ?1 AND kind = 'turn' AND state = 'claimed' AND pid IS NULL AND account IS NULL
                AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = ?1 AND t.source IN {} AND t.state = 'claimed'
-                           AND (?5 IS NULL OR t.conversation = ?5))",
+                           AND (?5 IS NULL OR t.conversation = ?5)
+                           AND (?5 IS NOT NULL OR t.source = 'schedule'))",
             super::detached::sources_sql()
         ),
         params![claim_id, now, pid, started, conversation],
