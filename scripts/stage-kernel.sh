@@ -7,9 +7,13 @@
 # tarball) and the Mac app's build (apps/desktop/tools/native-host.mjs) both call it, so they cannot drift.
 # It stamps kernel/VERSION (one line, the release version: [version], else serve/host/Cargo.toml's): the installer
 # files a release under cli/<version>/, and the host reads the CLI's version from it. A checkout has no VERSION file.
+# With `windows` as the third argument (the Windows zip, package-windows.sh) only the data is staged: no kernel/bin and no
+# kernel/lib (the Python and shell programs) and no POSIX install.sh.
 set -eu
-[ $# -ge 1 ] && [ $# -le 2 ] || { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] && [ $# -le 3 ] || { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 S=$1
+WINDOWS=
+[ "${3:-}" = windows ] && WINDOWS=1
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 VERSION=${2:-$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$ROOT/serve/host/Cargo.toml" | head -1)}
 VERSION=${VERSION#v}
@@ -17,10 +21,12 @@ VERSION=${VERSION#v}
 mkdir -p "$S"
 cp -R "$ROOT/kernel" "$S/kernel"
 cp -R "$ROOT/.claude-plugin" "$S/.claude-plugin"
-cp "$ROOT/install.sh" "$ROOT/LICENSE" "$ROOT/README.md" "$S/"
+cp "$ROOT/LICENSE" "$ROOT/README.md" "$S/"
+[ -n "$WINDOWS" ] || cp "$ROOT/install.sh" "$S/"
 # The NOTICE has to travel with every redistribution of the host binary.
 cp "$ROOT/NOTICE" "$ROOT/THIRD_PARTY_NOTICES.md" "$S/"
 # Tests and caches are for the repo, not the install.
 rm -rf "$S/kernel/tests"
+[ -z "$WINDOWS" ] || rm -rf "$S/kernel/bin" "$S/kernel/lib"
 printf '%s\n' "$VERSION" > "$S/kernel/VERSION"
 find "$S" \( -name __pycache__ -o -name .DS_Store \) -prune -exec rm -rf {} +
