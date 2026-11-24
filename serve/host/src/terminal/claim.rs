@@ -336,13 +336,13 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
             }
         }
     }
-    signal(&victims, libc::SIGTERM);
+    signal(&victims, SIGTERM);
     let deadline = std::time::Instant::now() + grace;
     while std::time::Instant::now() < deadline && victims.iter().any(|p| pid_runs(*p)) {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     let left: Vec<u32> = victims.iter().copied().filter(|p| pid_runs(*p)).collect();
-    signal(&left, libc::SIGKILL);
+    signal(&left, SIGKILL);
     let mut ended = Vec::new();
     for (path, claim) in holders {
         if claim.pid == me {
@@ -404,8 +404,8 @@ pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -
         }
     }
     let pids: Vec<u32> = victims.iter().map(|(p, _)| *p).collect();
-    signal(&pids, libc::SIGTERM);
-    signal_groups(&groups, libc::SIGTERM);
+    signal(&pids, SIGTERM);
+    signal_groups(&groups, SIGTERM);
     let deadline = std::time::Instant::now() + grace;
     while std::time::Instant::now() < deadline && pids.iter().any(|p| pid_runs(*p)) {
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -420,11 +420,11 @@ pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -
             }
     };
     let left: Vec<u32> = victims.iter().filter(|(p, s)| same(*p, s)).map(|(p, _)| *p).collect();
-    signal(&left, libc::SIGKILL);
+    signal(&left, SIGKILL);
     // Whether or not the leader is still alive: POSIX does not reuse a pid as a process or group id while a group with
     // that id exists, and a group that is gone answers ESRCH, which is ignored. A nohup'd or double-forked child of the
     // claimer stays in the group and goes with it.
-    signal_groups(&groups, libc::SIGKILL);
+    signal_groups(&groups, SIGKILL);
     pids
 }
 
@@ -442,6 +442,16 @@ fn leads_group(_pid: u32) -> bool {
 }
 
 #[cfg(unix)]
+const SIGTERM: libc::c_int = libc::SIGTERM;
+#[cfg(unix)]
+const SIGKILL: libc::c_int = libc::SIGKILL;
+// Windows ends a claimer's tree with a job object (windows-owner W12); until then the signals below only say so.
+#[cfg(not(unix))]
+const SIGTERM: i32 = 15;
+#[cfg(not(unix))]
+const SIGKILL: i32 = 9;
+
+#[cfg(unix)]
 fn signal_groups(groups: &[u32], sig: libc::c_int) {
     for g in groups {
         if let Ok(p) = libc::pid_t::try_from(*g) {
@@ -452,7 +462,9 @@ fn signal_groups(groups: &[u32], sig: libc::c_int) {
 }
 
 #[cfg(not(unix))]
-fn signal_groups(_groups: &[u32], _sig: i32) {}
+fn signal_groups(_groups: &[u32], _sig: i32) {
+    tracing::warn!("process groups can't be signalled: not on Windows yet (windows-owner W12)");
+}
 
 #[cfg(unix)]
 fn signal(pids: &[u32], sig: libc::c_int) {
@@ -465,7 +477,9 @@ fn signal(pids: &[u32], sig: libc::c_int) {
 }
 
 #[cfg(not(unix))]
-fn signal(_pids: &[u32], _sig: i32) {}
+fn signal(pids: &[u32], _sig: i32) {
+    tracing::warn!(?pids, "processes can't be signalled: not on Windows yet (windows-owner W12)");
+}
 
 /// Every process below `root`, from one `ps` listing.
 fn descendants(root: u32) -> Vec<u32> {
@@ -575,14 +589,14 @@ pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Dura
     victims.push(claim.pid);
     // Recorded before the signal lands (F12 rule 8): a session gone with no intent reads as a crash.
     super::intent::write(state, sid, "stopped from the app", claim.pid);
-    signal(&victims, libc::SIGTERM);
+    signal(&victims, SIGTERM);
     let deadline = std::time::Instant::now() + grace;
     while std::time::Instant::now() < deadline && victims.iter().any(|p| pid_runs(*p)) {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     // Still the claimer we judged? (The pid can only have gone, but a rest of the tree is signalled by pid alone.)
     let left: Vec<u32> = victims.iter().copied().filter(|p| pid_runs(*p)).collect();
-    signal(&left, libc::SIGKILL);
+    signal(&left, SIGKILL);
     // Wait (bounded) for them to be gone before the claim is given back: a take-over started at once would otherwise
     // find the stub's lock still held and come back busy (75).
     let reaped = std::time::Instant::now() + STOP_REAP;

@@ -2278,6 +2278,7 @@ dependencies = [
  "kith-guest",
  "kith-kernel",
  "kith-mem",
+ "kith-winsys",
  "kith-wire",
  "libc",
  "portable-pty",
