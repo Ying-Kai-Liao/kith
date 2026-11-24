@@ -8,7 +8,8 @@ use std::io;
 
 use windows_sys::Win32::Foundation::{ERROR_NOT_FOUND, FILETIME};
 use windows_sys::Win32::Security::Credentials::{
-    CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW, CredFree, CredReadW, CredWriteW,
+    CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW, CredFree, CredReadW,
+    CredWriteW,
 };
 use zeroize::Zeroizing;
 

@@ -6,8 +6,9 @@ use std::io;
 use windows_sys::Win32::Foundation::{HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows_sys::Win32::Security::{
-    CreateWellKnownSid, EqualSid, GetLengthSid, GetTokenInformation, IsValidSid, SECURITY_MAX_SID_SIZE, TOKEN_QUERY,
-    TOKEN_USER, TokenUser, WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid, WinCreatorOwnerSid, WinLocalSystemSid,
+    CreateWellKnownSid, EqualSid, GetLengthSid, GetTokenInformation, IsValidSid,
+    SECURITY_MAX_SID_SIZE, TOKEN_QUERY, TOKEN_USER, TokenUser, WELL_KNOWN_SID_TYPE,
+    WinBuiltinAdministratorsSid, WinCreatorOwnerSid, WinLocalSystemSid,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -28,7 +29,9 @@ impl Sid {
         let len = unsafe { GetLengthSid(p) } as usize;
         let mut words = vec![0u32; len.div_ceil(4)];
         // SAFETY: `p` holds `len` readable bytes and `words` has room for them; the buffers do not overlap.
-        unsafe { std::ptr::copy_nonoverlapping(p.cast::<u8>(), words.as_mut_ptr().cast::<u8>(), len) };
+        unsafe {
+            std::ptr::copy_nonoverlapping(p.cast::<u8>(), words.as_mut_ptr().cast::<u8>(), len)
+        };
         Ok(Self(words))
     }
 
@@ -86,7 +89,16 @@ pub(crate) fn current_user() -> io::Result<Sid> {
     // u64 words: TOKEN_USER holds a pointer, so the buffer must be aligned for one.
     let mut buf = vec![0u64; (need as usize).div_ceil(8)];
     // SAFETY: `buf` is at least `need` bytes.
-    if unsafe { GetTokenInformation(token.0, TokenUser, buf.as_mut_ptr().cast(), need, &raw mut need) } == 0 {
+    if unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenUser,
+            buf.as_mut_ptr().cast(),
+            need,
+            &raw mut need,
+        )
+    } == 0
+    {
         return Err(last_err());
     }
     // SAFETY: success wrote a TOKEN_USER at the start of `buf`; its SID points into the same buffer.
@@ -98,7 +110,15 @@ fn well_known(kind: WELL_KNOWN_SID_TYPE) -> io::Result<Sid> {
     let mut words = vec![0u32; (SECURITY_MAX_SID_SIZE as usize).div_ceil(4)];
     let mut len = SECURITY_MAX_SID_SIZE;
     // SAFETY: `words` has SECURITY_MAX_SID_SIZE bytes, the most a SID needs; no domain SID is wanted for these.
-    if unsafe { CreateWellKnownSid(kind, std::ptr::null_mut(), words.as_mut_ptr().cast(), &raw mut len) } == 0 {
+    if unsafe {
+        CreateWellKnownSid(
+            kind,
+            std::ptr::null_mut(),
+            words.as_mut_ptr().cast(),
+            &raw mut len,
+        )
+    } == 0
+    {
         return Err(last_err());
     }
     Ok(Sid(words))

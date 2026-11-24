@@ -22,9 +22,10 @@ use windows_sys::Win32::Security::Authorization::{
     GetNamedSecurityInfoW, SE_FILE_OBJECT, SetNamedSecurityInfoW,
 };
 use windows_sys::Win32::Security::{
-    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, AclSizeInformation, AddAccessAllowedAceEx,
-    CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, GetAce, GetAclInformation, InitializeAcl, OBJECT_INHERIT_ACE,
-    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, AclSizeInformation,
+    AddAccessAllowedAceEx, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, GetAce,
+    GetAclInformation, InitializeAcl, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
 };
 use windows_sys::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
 
@@ -59,17 +60,34 @@ pub fn current_user_text() -> io::Result<String> {
 pub fn restrict(path: &Path, inherit: bool) -> io::Result<()> {
     let sids = [sid::current_user()?, sid::system()?, sid::administrators()?];
     let ace_fixed = size_of::<ACCESS_ALLOWED_ACE>() - size_of::<u32>();
-    let size = size_of::<ACL>() + sids.iter().map(|s| ace_fixed + s.len() as usize).sum::<usize>();
+    let size = size_of::<ACL>()
+        + sids
+            .iter()
+            .map(|s| ace_fixed + s.len() as usize)
+            .sum::<usize>();
     let mut words = vec![0u32; size.div_ceil(4)];
     let acl = words.as_mut_ptr().cast::<ACL>();
     // SAFETY: `words` is `size` bytes (rounded up), enough for the header and the three entries sized above.
-    if unsafe { InitializeAcl(acl, u32::try_from(words.len() * 4).unwrap_or(u32::MAX), ACL_REVISION) } == 0 {
+    if unsafe {
+        InitializeAcl(
+            acl,
+            u32::try_from(words.len() * 4).unwrap_or(u32::MAX),
+            ACL_REVISION,
+        )
+    } == 0
+    {
         return Err(last_err());
     }
-    let flags = if inherit { OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE } else { 0 };
+    let flags = if inherit {
+        OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE
+    } else {
+        0
+    };
     for s in &sids {
         // SAFETY: `acl` was initialised above with room for this entry; `s` is a valid SID the call copies.
-        if unsafe { AddAccessAllowedAceEx(acl, ACL_REVISION, flags, FILE_ALL_ACCESS, s.as_ptr()) } == 0 {
+        if unsafe { AddAccessAllowedAceEx(acl, ACL_REVISION, flags, FILE_ALL_ACCESS, s.as_ptr()) }
+            == 0
+        {
             return Err(last_err());
         }
     }
@@ -87,14 +105,22 @@ pub fn restrict(path: &Path, inherit: bool) -> io::Result<()> {
             std::ptr::null(),
         )
     };
-    if code == 0 { Ok(()) } else { Err(win_err(code)) }
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(win_err(code))
+    }
 }
 
 /// Reads the access list and owner of `path` and judges them. An `Err` means they could not be read (the file is gone,
 /// access denied, a sharing violation): the caller decides whether to try again.
 pub fn check(path: &Path) -> io::Result<Check> {
     let me = sid::current_user()?;
-    let (system, admins, creator) = (sid::system()?, sid::administrators()?, sid::creator_owner()?);
+    let (system, admins, creator) = (
+        sid::system()?,
+        sid::administrators()?,
+        sid::creator_owner()?,
+    );
     let name = wide(path.as_os_str());
     let mut owner: *mut c_void = std::ptr::null_mut();
     let mut dacl: *mut ACL = std::ptr::null_mut();
@@ -122,7 +148,14 @@ pub fn check(path: &Path) -> io::Result<Check> {
     Ok(verdict)
 }
 
-fn judge(owner: *mut c_void, dacl: *mut ACL, me: &Sid, system: &Sid, admins: &Sid, creator: &Sid) -> Check {
+fn judge(
+    owner: *mut c_void,
+    dacl: *mut ACL,
+    me: &Sid,
+    system: &Sid,
+    admins: &Sid,
+    creator: &Sid,
+) -> Check {
     if !(me.is(owner) || system.is(owner) || admins.is(owner)) {
         return Check::Open(format!("it is owned by {}", Sid::text(owner)));
     }
@@ -156,15 +189,24 @@ fn judge(owner: *mut c_void, dacl: *mut ACL, me: &Sid, system: &Sid, admins: &Si
         // SAFETY: GetAce returned a pointer to a whole entry, which starts with its header.
         let kind = unsafe { (*header).AceType };
         match kind {
-            ACCESS_DENIED | ACCESS_DENIED_OBJECT | ACCESS_DENIED_CALLBACK | ACCESS_DENIED_CALLBACK_OBJECT => {}
+            ACCESS_DENIED
+            | ACCESS_DENIED_OBJECT
+            | ACCESS_DENIED_CALLBACK
+            | ACCESS_DENIED_CALLBACK_OBJECT => {}
             ACCESS_ALLOWED | ACCESS_ALLOWED_CALLBACK => {
                 // SAFETY: both kinds are an ACCESS_ALLOWED_ACE (header, mask, SID); the SID starts at `SidStart`.
-                let who = unsafe { (&raw mut (*ace.cast::<ACCESS_ALLOWED_ACE>()).SidStart).cast::<c_void>() };
+                let who = unsafe {
+                    (&raw mut (*ace.cast::<ACCESS_ALLOWED_ACE>()).SidStart).cast::<c_void>()
+                };
                 if !(me.is(who) || system.is(who) || admins.is(who) || creator.is(who)) {
                     return Check::Open(format!("it lets {} in", Sid::text(who)));
                 }
             }
-            other => return Check::Open(format!("its access list has an entry of a kind kith does not read ({other})")),
+            other => {
+                return Check::Open(format!(
+                    "its access list has an entry of a kind kith does not read ({other})"
+                ));
+            }
         }
     }
     Check::OwnerOnly
@@ -183,7 +225,11 @@ mod tests {
             .args(["/grant", &format!("*{sid}:(R)")])
             .output()
             .unwrap();
-        assert!(out.status.success(), "icacls: {}", String::from_utf8_lossy(&out.stdout));
+        assert!(
+            out.status.success(),
+            "icacls: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
     }
 
     #[test]
@@ -195,7 +241,11 @@ mod tests {
         assert_eq!(check(&dir).unwrap(), Check::OwnerOnly);
         let file = dir.join("data.db");
         std::fs::write(&file, b"x").unwrap();
-        assert_eq!(check(&file).unwrap(), Check::OwnerOnly, "a file takes the folder's list");
+        assert_eq!(
+            check(&file).unwrap(),
+            Check::OwnerOnly,
+            "a file takes the folder's list"
+        );
     }
 
     #[test]

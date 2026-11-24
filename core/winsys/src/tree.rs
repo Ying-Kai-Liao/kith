@@ -11,7 +11,9 @@ use windows_sys::Win32::Foundation::{FILETIME, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
-use windows_sys::Win32::System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows_sys::Win32::System::Threading::{
+    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 
 use crate::{Handle, last_err};
 
@@ -63,7 +65,15 @@ pub fn creation_time(pid: u32) -> Option<u64> {
     };
     let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
     // SAFETY: `h` is an open process handle and the four out-pointers outlive the call.
-    let ok = unsafe { GetProcessTimes(h.0, &raw mut created, &raw mut exited, &raw mut kernel, &raw mut user) };
+    let ok = unsafe {
+        GetProcessTimes(
+            h.0,
+            &raw mut created,
+            &raw mut exited,
+            &raw mut kernel,
+            &raw mut user,
+        )
+    };
     (ok != 0).then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
 }
 
@@ -85,7 +95,8 @@ pub fn descends(pid: u32, ancestor: u32) -> bool {
             return false;
         }
         // The parent must have begun before the child, or its pid now belongs to another process.
-        let (Some(child_began), Some(parent_began)) = (creation_time(cur), creation_time(parent)) else {
+        let (Some(child_began), Some(parent_began)) = (creation_time(cur), creation_time(parent))
+        else {
             return false;
         };
         if parent_began > child_began {

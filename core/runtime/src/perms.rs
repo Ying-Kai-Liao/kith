@@ -182,7 +182,10 @@ fn check_acl(path: &Path) -> Result<()> {
                     |_| String::new(),
                     |sid| {
                         let inherit = if path.is_dir() { "(OI)(CI)" } else { "" };
-                        format!(": icacls \"{}\" /inheritance:r /grant:r \"*{sid}:{inherit}F\"", path.display())
+                        format!(
+                            ": icacls \"{}\" /inheritance:r /grant:r \"*{sid}:{inherit}F\"",
+                            path.display()
+                        )
                     },
                 );
                 return Err(Error::Permissions(format!(

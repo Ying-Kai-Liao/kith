@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows_sys::Win32::System::Threading::{
-    CreateEventW, EVENT_MODIFY_STATE, OpenEventW, SYNCHRONIZATION_SYNCHRONIZE, SetEvent, WaitForSingleObject,
+    CreateEventW, EVENT_MODIFY_STATE, OpenEventW, SYNCHRONIZATION_SYNCHRONIZE, SetEvent,
+    WaitForSingleObject,
 };
 
 use crate::{Handle, last_err, wide};
@@ -41,11 +42,21 @@ impl StopEvent {
     pub fn open(name: &str) -> io::Result<Option<Self>> {
         let n = wide(OsStr::new(&full_name(name)));
         // SAFETY: `n` is NUL-ended.
-        let h = unsafe { OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZATION_SYNCHRONIZE, 0, n.as_ptr()) };
+        let h = unsafe {
+            OpenEventW(
+                EVENT_MODIFY_STATE | SYNCHRONIZATION_SYNCHRONIZE,
+                0,
+                n.as_ptr(),
+            )
+        };
         if h.is_null() {
             let e = last_err();
             // ERROR_FILE_NOT_FOUND
-            return if e.kind() == io::ErrorKind::NotFound { Ok(None) } else { Err(e) };
+            return if e.kind() == io::ErrorKind::NotFound {
+                Ok(None)
+            } else {
+                Err(e)
+            };
         }
         Ok(Some(Self(Handle(h))))
     }
@@ -53,7 +64,11 @@ impl StopEvent {
     /// Signals the event; every waiter wakes and it stays signalled.
     pub fn signal(&self) -> io::Result<()> {
         // SAFETY: the handle is an open event with modify access.
-        if unsafe { SetEvent(self.0.0) } == 0 { Err(last_err()) } else { Ok(()) }
+        if unsafe { SetEvent(self.0.0) } == 0 {
+            Err(last_err())
+        } else {
+            Ok(())
+        }
     }
 
     /// Waits up to `timeout` for the signal. `true` when it came.
@@ -64,7 +79,9 @@ impl StopEvent {
             WAIT_OBJECT_0 => Ok(true),
             WAIT_TIMEOUT => Ok(false),
             WAIT_FAILED => Err(last_err()),
-            other => Err(io::Error::other(format!("kith-winsys: unexpected wait result {other}"))),
+            other => Err(io::Error::other(format!(
+                "kith-winsys: unexpected wait result {other}"
+            ))),
         }
     }
 }
