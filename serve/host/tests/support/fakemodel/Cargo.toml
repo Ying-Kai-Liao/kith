@@ -1,0 +1,15 @@
+[package]
+name = "kith-fakemodel"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A fake Anthropic Messages API server, so real Claude Code can run in tests with no API key"
+license = "Apache-2.0"
+publish = false
+
+# Plain std networking and threads, so it builds on Windows and needs nothing the lockfile lacks.
+[dependencies]
+serde_json = "1.0.151"
+
+[lints.rust]
+unsafe_code = "forbid"

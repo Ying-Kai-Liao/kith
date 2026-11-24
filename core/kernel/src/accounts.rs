@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 #[cfg(unix)]
 mod backups;
+pub mod chain;
 mod change;
 #[cfg(test)]
 mod change_tests;
@@ -55,7 +56,7 @@ pub use state::{
     FileState, Fixed, Snapshot, StateHold, StateSource, hold, out_marks_from, record_started,
     replace, snapshot, state_file, tombstoned,
 };
-pub use verbs::{VERBS, Verb, pick_value, run_verb};
+pub use verbs::{VERBS, Verb, accounts_json, pick_value, run_verb};
 
 type Map = serde_json::Map<String, Value>;
 
