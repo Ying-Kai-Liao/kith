@@ -1257,10 +1257,11 @@ mod tests {
     #[tokio::test]
     async fn threads_stay_out_of_the_main_chat_and_summarize_on_their_root() {
         let room = Room::new();
+        // Each time `a` answers and `b` then passes: two member turns.
         let first = room.send("@a start here", None).await;
-        room.settle().await;
+        room.settle_after(2).await;
         room.send("@a in the thread", Some(&first.id)).await;
-        room.settle().await;
+        room.settle_after(4).await;
         let thread = Lane::in_thread(&room.group, &first.id);
         assert_eq!(room.replies(&thread).len(), 1);
         assert_eq!(room.replies(&Lane::main(&room.group)).len(), 1, "the thread's reply isn't in the main chat");
@@ -1298,7 +1299,7 @@ mod tests {
         let dm = crate::api::dispatch(&room.hub, &Caller::Local, "send", json!({"botId": "b", "text": "main"}))
             .await
             .unwrap();
-        room.settle().await;
+        room.settle_after(5).await;
         let dm_root = dm["entry"]["id"].as_str().unwrap().to_owned();
         crate::api::dispatch(
             &room.hub,
@@ -1308,7 +1309,7 @@ mod tests {
         )
         .await
         .unwrap();
-        room.settle().await;
+        room.settle_after(6).await;
         let prompts = std::fs::read_to_string(room.dir.join("b/prompts.jsonl")).unwrap();
         assert!(prompts.lines().last().unwrap().contains("[Thread]"), "{prompts}");
         let replies = room.hub.store.thread("b", &dm_root, 10).unwrap();
@@ -1359,6 +1360,19 @@ mod tests {
                     std::fs::read_to_string(self.dir.join(id).join("prompts.jsonl")).map_or(0, |p| p.lines().count())
                 })
                 .sum()
+        }
+
+        /// `settle`, once the members have started `turns` turns in all: a turn that hasn't started yet leaves every
+        /// bot idle, so `settle` alone can return before it runs.
+        async fn settle_after(&self, turns: usize) {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while self.member_turns() < turns {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("the turns start");
+            self.settle().await;
         }
 
         fn conversations(&self) -> Vec<Conversation> {
