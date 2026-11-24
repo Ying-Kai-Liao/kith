@@ -2157,6 +2157,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kith-fakemodel"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "kith-guest"
 version = "0.1.0"
 dependencies = [
