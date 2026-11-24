@@ -27,8 +27,8 @@ pub mod pkg;
 #[cfg(unix)]
 pub mod permit;
 pub mod procstart;
-// Unix only in the module list below: the hook is written into a unix launch's settings.
 pub mod project;
+// Unix only in the module list below: the hook is written into a unix launch's settings.
 pub mod readfence;
 pub mod room_ledger;
 pub mod schedule;
@@ -71,6 +71,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "project-guest",
         "readfence",
         "room-ledger",
+        // `kernel secrets exec` (start a shared MCP server with its keys) and `kernel secrets mcp-config`: `mcp-config` names
+        // this program as the server's command only when it lists the token, else `bin/kith-auth exec` (P1-15).
+        "secrets-exec",
         "settings",
         "threads",
         // `kernel threads run AGENT -- CMD...`: the wrapper an interactive `kith AGENT` ends in (`kith-sessions run`); the router
@@ -111,7 +114,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engines","launch","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","settings","threads","threads-run","threads-writer"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engines","launch","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer"]}"#
         );
     }
 }

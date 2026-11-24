@@ -236,6 +236,7 @@ jobs:
               - 'serve/host/src/run_outbox.rs'
               - 'core/runtime/src/revoke_order.rs'
               - 'core/runtime/src/import/authority.rs'
+              - 'core/kernel/src/secrets/authority.rs'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
             # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).

@@ -106,13 +106,28 @@ printf '{"kind": "mcp", "secrets": [], "mcp": {"command": "env"}}\n' > "$KITH_HO
 python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); a["profiles"]["envsvc/t"]={}; json.dump(a,open(sys.argv[1],"w"))' "$KITH_AUTH"
 "$AUTH" grant echo@guest envsvc envsvc/t >/dev/null 2>&1; "$AUTH" grant echo envsvc envsvc/t >/dev/null 2>&1
 GW=$KITH_HOME/agents/echo/files/people/guest/.work
+EXEC=("$AUTH" exec)
 exec_env() { (cd "$KITH_HOME/agents/echo/files/people/guest/proj" && env "$@" TMPDIR="$GW/tmp" XDG_CACHE_HOME="$GW/cache" UV_CACHE_DIR="$GW/cache/uv" \
   npm_config_cache="$GW/cache/npm" PUPPETEER_CACHE_DIR="$GW/cache/puppeteer" KEEP_ME=/usr/lib LIST_VAR="/usr/bin:$GW/bin" \
-  "$AUTH" exec --for echo envsvc -- env) | python3 -c '
+  "${EXEC[@]}" --for echo envsvc -- env) | python3 -c '
 import sys; e = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l)
 print([k for k in ("TMPDIR", "XDG_CACHE_HOME", "UV_CACHE_DIR", "npm_config_cache", "PUPPETEER_CACHE_DIR", "LIST_VAR") if k in e], e.get("KEEP_ME"), "/people/" in e.get("PWD", ""))'; }
 expect "guest: kith-auth exec passes no path into their folders and leaves them as its working folder" "$(exec_env KITH_PERSON=guest)" "[] /usr/lib False"
 expect "owner: kith-auth exec passes its environment on as before" "$(exec_env -u KITH_PERSON)" "['TMPDIR', 'XDG_CACHE_HOME', 'UV_CACHE_DIR', 'npm_config_cache', 'PUPPETEER_CACHE_DIR', 'LIST_VAR'] /usr/lib True"
+# The same two rows on the Rust verb the shared servers start through now (`kith kernel secrets exec`, retire-python P1-15), on a
+# program that lists `secrets-exec` (the kernel shards have the built one on PATH; a machine without it skips them).
+RUST_KITH=
+for c in "${KITH_DIFFTEST_BIN:-}" $(type -ap kith 2>/dev/null); do
+  [ -n "$c" ] && [ -x "$c" ] && "$c" kernel version 2>/dev/null | grep -q '"secrets-exec"' && { RUST_KITH=$c; break; }
+done
+if [ -n "$RUST_KITH" ]; then
+  EXEC=("$RUST_KITH" kernel secrets --kernel "$KERNEL" exec)
+  expect "guest: kith kernel secrets exec passes no path into their folders and leaves them as its working folder" "$(exec_env KITH_PERSON=guest)" "[] /usr/lib False"
+  expect "owner: kith kernel secrets exec passes its environment on as before" "$(exec_env -u KITH_PERSON)" "['TMPDIR', 'XDG_CACHE_HOME', 'UV_CACHE_DIR', 'npm_config_cache', 'PUPPETEER_CACHE_DIR', 'LIST_VAR'] /usr/lib True"
+  EXEC=("$AUTH" exec)
+else
+  echo "skip kith kernel secrets exec rows: no kith program that lists secrets-exec on PATH (KITH_DIFFTEST_BIN)"
+fi
 expect "guest: told its limits at launch" "$(KITH_PERSON=guest lj "all(x in j['system_prompt'] for x in ('<limits>', 'request_access', 'ask_helper', '/people/guest'))")" True
 # Claude Code keeps its own temp folder only when <dir>/claude-<uid> fits in 44 bytes; this test's folders are longer, so
 # the run gets none (never /tmp) and its limits note says why.
