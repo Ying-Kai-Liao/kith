@@ -131,8 +131,8 @@ pub(crate) fn call_with(
             // The run's turn in the conversations lane is written in the same transaction as the queue rows.
             let turn = write_tx(core, now, |tx, st| {
                 turns::fail_foreign_in(tx, st, now)?;
-                st.linked = turns::linked_runs_in(tx)?;
-                let turn = queue::take(st, out, tr, now, holder, session, sid);
+                let linked = turns::linked_runs_in(tx)?;
+                let turn = queue::take(st, out, tr, &linked, now, holder, session, sid);
                 if let Some(t) = &turn {
                     turns::start_in(tx, out, t, sid, now)?;
                 }
@@ -204,10 +204,11 @@ pub(crate) fn call_with(
 /// not call this until the switch; a test does. Returns how many waiters fired.
 pub(crate) fn tick(core: &mut Core, out: &dyn Outside, tr: &dyn Transcripts) -> Result<usize> {
     let now = out.now();
+    let linked = turns::linked_runs_in(core.conn())?;
     // gh, ps and kill run on a copy outside the write lock; the result is written only if the rows did not move meanwhile.
     write_after(core, now, |st| {
         let fired = waiters::poll(st, out, now);
-        queue::recover_all(st, out, tr, now);
+        queue::recover_all(st, out, tr, &linked, now);
         fired
     })
 }

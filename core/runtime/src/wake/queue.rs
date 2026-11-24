@@ -12,6 +12,7 @@
 //! The run door's delivery (`deliver`, the drain's process starts) is not here: in the core a turn starts through the
 //! conversations lane (M3-2), and a message for a session a terminal holds parks as `terminal_live` there (q217).
 
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use serde_json::{Value, json};
@@ -351,12 +352,13 @@ pub(crate) fn probe(out: &dyn Outside, tr: &dyn Transcripts, t: &Turn) -> Probe 
 
 /// Restart / `HostBack`: a turn whose holder is gone either reached the session (its marker is in the transcript: answered,
 /// so it is not delivered twice) or did not (owed again). A session whose writer is still live is left alone: the turn may
-/// still be running in a claude the dead holder started. A run with a turn and no holder pid is a tick's run (listed in
-/// `st.linked`): its turn in the conversations lane is the holder, and `tick` settles it (R4).
+/// still be running in a claude the dead holder started. A run with a turn and no holder pid is a tick's run (named in
+/// `linked`, the runs that have a turn): its turn in the conversations lane is the holder, and `tick` settles it (R4).
 pub(crate) fn recover(
     st: &mut State,
     out: &dyn Outside,
     tr: &dyn Transcripts,
+    linked: &BTreeSet<String>,
     session: &str,
     now: f64,
 ) {
@@ -364,7 +366,7 @@ pub(crate) fn recover(
         return;
     };
     // A tick's run has no holder pid and a turn; `tick` settles it (R4). An unlinked run with no pid is a dead holder.
-    if t.pid.is_none() && st.linked.contains(&t.run) {
+    if t.pid.is_none() && linked.contains(&t.run) {
         return;
     }
     let p = probe(out, tr, &t);
@@ -392,25 +394,36 @@ pub(crate) fn recover_probed(st: &mut State, session: &str, run: &str, p: &Probe
 }
 
 /// Recovers every item's dead turn.
-pub(crate) fn recover_all(st: &mut State, out: &dyn Outside, tr: &dyn Transcripts, now: f64) {
+pub(crate) fn recover_all(
+    st: &mut State,
+    out: &dyn Outside,
+    tr: &dyn Transcripts,
+    linked: &BTreeSet<String>,
+    now: f64,
+) {
     for s in st.order() {
-        recover(st, out, tr, &s, now);
+        recover(st, out, tr, linked, &s, now);
     }
 }
 
 /// The host starts a host-door turn for `holder` (its own pid): the first owed session, or `session`. A session a live
 /// writer holds is still offered, as the Python does: the host asks the terminal's claim next and answers `back --held`.
 /// `call.rs` also creates the run's turn through the conversations lane, and that hold is a parked `terminal_live` turn (q217).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the world, the state and the caller's three optional words"
+)]
 pub(crate) fn take(
     st: &mut State,
     out: &dyn Outside,
     tr: &dyn Transcripts,
+    linked: &BTreeSet<String>,
     now: f64,
     holder: i64,
     session: Option<&str>,
     sid: Option<&str>,
 ) -> Option<Value> {
-    recover_all(st, out, tr, now);
+    recover_all(st, out, tr, linked, now);
     for s in st.order() {
         let it = &st.items[&s];
         if it.door != "host"

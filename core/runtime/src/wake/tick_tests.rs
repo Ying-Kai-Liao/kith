@@ -773,6 +773,28 @@ fn a_run_with_no_link_and_no_holder_pid_is_a_dead_holder_and_a_link_without_a_tu
     assert_eq!(r.state_of("r1"), "recovered");
 }
 
+#[test]
+fn a_tick_run_with_no_pid_is_still_carried_after_a_separate_wake_take() {
+    // The same holds across a restart: the link, not the process's memory, says the run is the tick's.
+    let r = rig();
+    r.enqueue("s1", "r1", "host");
+    r.tick();
+    let (run, turn) = r.run_of("s1");
+    assert_eq!(
+        r.sql::<Option<i64>>(
+            "SELECT turn_pid FROM wake_sessions WHERE session = ?1",
+            "s1"
+        ),
+        None
+    );
+    r.enqueue("s2", "r2", "host");
+    let taken = r.owner("wake.take", &json!({"holder": 424_242, "session": "s2"}));
+    assert!(taken["turn"].is_object(), "{taken}");
+    assert_eq!(r.run_of("s1"), (run, turn));
+    assert_eq!(r.state_of("r1"), "running");
+    assert_eq!(r.turn_state(turn), "queued");
+}
+
 // ---- (b) the marker is read only for a turn that was final in the snapshot ----
 
 #[test]
