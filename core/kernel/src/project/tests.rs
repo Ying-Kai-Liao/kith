@@ -3,7 +3,9 @@
 
 use std::path::Path;
 
-use super::{Ctx, Out, is_guest, normalize, repr, run};
+#[cfg(unix)]
+use super::is_guest;
+use super::{Ctx, Out, normalize, repr, run};
 
 fn ctx(root: &Path) -> Ctx {
     let state = root.join("state");
@@ -25,7 +27,10 @@ fn scratch(tag: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("home")).unwrap();
     // realpath, so a tmp that is itself a link (macOS /var) does not change what the paths compare to
-    std::fs::canonicalize(&d).unwrap()
+    // and without the `\\?\` prefix Windows puts on it, which `realpath` does not keep
+    std::path::PathBuf::from(crate::paths::strip_verbatim(
+        &std::fs::canonicalize(&d).unwrap().to_string_lossy(),
+    ))
 }
 
 #[test]
@@ -51,6 +56,7 @@ fn repr_picks_quotes_like_python() {
 }
 
 /// A host that answers one connection per reply in `replies` with exactly those bytes, and records the request lines.
+#[cfg(unix)]
 fn fake_host(sock: &Path, replies: Vec<Vec<u8>>) -> std::thread::JoinHandle<Vec<String>> {
     use std::io::{Read, Write};
     let listener = std::os::unix::net::UnixListener::bind(sock).unwrap();
@@ -87,6 +93,7 @@ fn sock_in(root: &Path) -> std::path::PathBuf {
     root.join("s")
 }
 
+#[cfg(unix)]
 #[test]
 fn a_guest_run_asks_the_host_and_relays_the_answer() {
     let root = scratch("g1");
@@ -150,9 +157,15 @@ fn a_guest_never_reads_the_registry() {
     std::fs::write(c.state.join("projects.json"), "not json").unwrap();
     let out = go(&c, &[]);
     assert_eq!(out.code, 1);
+    // a guest is refused on a Windows host, and says so
+    let windows = if cfg!(unix) {
+        ""
+    } else {
+        "project-id: not on Windows yet: guest runs (a guest is refused on a Windows host)\n"
+    };
     assert_eq!(
         out.stderr,
-        "project-id: the Kith core could not be reached from this run\n"
+        format!("project-id: the Kith core could not be reached from this run\n{windows}")
     );
     let mut c = guest_ctx(&root, "t", &sock_in(&root));
     c.state = root.join("no-such-state");
@@ -161,6 +174,7 @@ fn a_guest_never_reads_the_registry() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_host_that_misbehaves_is_unreachable() {
     let root = scratch("g3");
@@ -239,7 +253,10 @@ fn the_file_is_written_as_python_dumps_it() {
     let text = std::fs::read_to_string(c.state.join("projects.json")).unwrap();
     let want = format!(
         "{{\n  \"projects\": {{\n    \"\\u00e9\": {{\n      \"remotes\": [],\n      \"paths\": []\n    }},\n    \"p1\": {{\n      \"remotes\": [],\n      \"paths\": [\n        \"{}\"\n      ]\n    }}\n  }},\n  \"note\": \"\\u00e9\"\n}}\n",
-        dir.to_str().unwrap().replace('é', "\\u00e9")
+        dir.to_str()
+            .unwrap()
+            .replace('\\', "\\\\")
+            .replace('é', "\\u00e9")
     );
     assert_eq!(text, want);
     let _ = std::fs::remove_dir_all(root);
@@ -362,4 +379,43 @@ fn a_held_lock_makes_a_register_wait_until_it_is_released() {
     drop(held);
     assert_eq!(t.join().unwrap().code, 0);
     assert!(c.state.join("projects.json").exists());
+}
+
+#[test]
+fn two_handles_on_the_registry_lock_take_turns() {
+    use fs2::FileExt as _;
+    let root = scratch("lock");
+    let c = ctx(&root);
+    let first = super::lock(&c.state).unwrap();
+    let other = std::fs::OpenOptions::new()
+        .write(true)
+        .open(c.state.join("projects.json.lock"))
+        .unwrap();
+    assert!(other.try_lock_exclusive().is_err());
+    drop(first);
+    // the lock goes with the handle: a new one gets in at once
+    drop(other);
+    drop(super::lock(&c.state).unwrap());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn the_registry_is_replaced_over_the_file_that_is_there() {
+    let root = scratch("swap");
+    let c = ctx(&root);
+    let file = c.state.join("projects.json");
+    std::fs::write(&file, "{\"projects\": {}}").unwrap();
+    super::write_atomic(&file, b"{\"projects\": {\"a\": {}}}", false).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "{\"projects\": {\"a\": {}}}"
+    );
+    // a crash before the swap leaves the old file whole and no temp file behind
+    let _ = super::write_atomic(&file, b"x", true);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "{\"projects\": {\"a\": {}}}"
+    );
+    assert_eq!(std::fs::read_dir(&c.state).unwrap().count(), 1);
+    let _ = std::fs::remove_dir_all(root);
 }
