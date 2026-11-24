@@ -1,7 +1,7 @@
 //! Owner-only folders, one way on every system. On Unix the folder is made 0700; on Windows it gets an access list with no
 //! entry for anyone but the owner, SYSTEM and Administrators, set and read natively by SID through `kith-winsys`
-//! (docs/plans/windows-owner.md WI4). A folder that cannot be made private is not made: nothing is left with the default
-//! list.
+//! (docs/plans/windows-owner.md WI4). A folder that cannot be made private is not made: it is created with the list, never
+//! given it afterwards.
 
 use std::io;
 use std::path::Path;
@@ -16,16 +16,18 @@ pub fn create_dir(dir: &Path) -> io::Result<()> {
     }
     #[cfg(not(unix))]
     {
-        std::fs::create_dir(dir)?;
-        if let Err(e) = kith_winsys::acl::restrict(dir, true) {
-            // Fail closed: a folder with the inherited list is not left behind for the next caller to trust.
-            let _ = std::fs::remove_dir(dir);
-            return Err(io::Error::other(format!(
-                "can't make {} private: {e}",
-                dir.display()
-            )));
-        }
-        Ok(())
+        // Made with its owner-only list in the same call: no moment where the folder holds the inherited one and someone
+        // else could open it or plant something in it. An existing folder stays `AlreadyExists`.
+        kith_winsys::acl::create_dir_private(dir, true).map_err(|e| {
+            if e.kind() == io::ErrorKind::AlreadyExists {
+                e
+            } else {
+                io::Error::new(
+                    e.kind(),
+                    format!("can't make {} private: {e}", dir.display()),
+                )
+            }
+        })
     }
 }
 
