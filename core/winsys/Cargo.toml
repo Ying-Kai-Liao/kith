@@ -1,0 +1,54 @@
+[package]
+name = "kith-winsys"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Every unsafe Win32 call the core and kernel need: owner-only access lists, Credential Manager, the process tree, a named stop event"
+license = "Apache-2.0"
+publish = false
+# An out-of-tree member of the host workspace (shares its Cargo.lock and target/), like kith-procstart.
+workspace = "../../serve/host"
+
+# docs/plans/windows-owner.md D5. kith-core keeps `forbid(unsafe_code)`: it calls the safe functions here. Links no
+# other crate of ours, and the holder does not link this one (scripts/check-holder-deps.sh): it keeps its own copy.
+# Off Windows the crate is empty.
+[lib]
+name = "kith_winsys"
+path = "src/lib.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Credentials",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Threading",
+] }
+
+zeroize = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+# `deny`, not `forbid`: the Win32 modules allow it, each unsafe block with a SAFETY note.
+unsafe_code = "deny"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+too_many_lines = "allow"
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
