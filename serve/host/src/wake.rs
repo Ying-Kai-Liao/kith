@@ -15,9 +15,9 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-mod via_core;
 #[cfg(test)]
 mod tests;
+mod via_core;
 
 /// How the calls for `state` go: `Ok(None)` the kernel's files (not switched), `Ok(Some)` the core at those folders, `Err` the
 /// module is switched and the core cannot be named (a state folder that is not this host's): nothing is asked of the files.
@@ -25,7 +25,9 @@ fn via(state: &Path) -> Result<Option<kith_kernel::paths::Paths>, String> {
     let tombstone = state.join("sessions/queue/.tombstone").exists();
     match crate::terminal::core_holders::folders_of(state) {
         Some(f) if tombstone || crate::core_front::switch_file_exists(&f, "wake") => Ok(Some(f)),
-        None if tombstone => Err(format!("the wake queue at {} is the core's, and no core is known for it", state.display())),
+        None if tombstone => {
+            Err(format!("the wake queue at {} is the core's, and no core is known for it", state.display()))
+        }
         _ => Ok(None),
     }
 }

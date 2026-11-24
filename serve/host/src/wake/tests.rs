@@ -14,8 +14,9 @@ struct Core {
 impl Core {
     /// A core of its own, its state folder known to the host, and (when `switched`) the `wake` switch record in place.
     fn start(switched: bool) -> Self {
-        let home = std::env::temp_dir().join(format!("kwc-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
-        std::fs::create_dir_all(&home).expect("home");
+        // Short, for the core's socket; and with a `.kith` in it, or every home's state is the kernel checkout's.
+        let home = PathBuf::from("/tmp").join(format!("kwc-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
+        std::fs::create_dir_all(home.join(".kith")).expect("home");
         let folders = crate::kernel::folders(&home);
         let daemon = serve_for_test(&folders);
         crate::terminal::core_claims::enable(&folders.state, folders.clone());
@@ -63,23 +64,37 @@ fn a_switched_queue_is_the_cores_and_starts_no_process() {
     let core = Core::start(true);
     let st = core.state();
     assert_eq!(enqueue(st, &ask("acp:c1:t", "card:1", Some("sam"))).unwrap(), Queued::New);
-    assert_eq!(enqueue(st, &ask("acp:c1:t", "card:1", Some("sam"))).unwrap(), Queued::Duplicate, "rule 13 is the core's");
+    assert_eq!(
+        enqueue(st, &ask("acp:c1:t", "card:1", Some("sam"))).unwrap(),
+        Queued::Duplicate,
+        "rule 13 is the core's"
+    );
     assert_eq!(status(st, "card:1").as_deref(), Some("queued"));
     assert!(has_items(st));
     assert_eq!(ls(st).len(), 1);
     assert_eq!(statuses(st).get("card:1").map(String::as_str), Some("queued"));
 
     let turn = take_session(st, "acp:c1:t").unwrap().expect("a turn is owed");
-    assert_eq!((turn.session.as_str(), turn.person.as_deref(), turn.ids.as_slice()), ("acp:c1:t", Some("sam"), ["card:1".to_owned()].as_slice()));
+    assert_eq!(
+        (turn.session.as_str(), turn.person.as_deref(), turn.ids.as_slice()),
+        ("acp:c1:t", Some("sam"), ["card:1".to_owned()].as_slice())
+    );
     assert_eq!(statuses(st).get("card:1").map(String::as_str), Some("running"));
     back(st, &turn.run, true);
-    let again = take(st).unwrap().expect("given back, owed again");
-    done(st, &again.run, "answered");
+    assert_eq!(status(st, "card:1").as_deref(), Some("queued"), "given back, owed again");
+    assert!(take(st).unwrap().is_none(), "a held session waits before it is offered again");
+    enqueue(st, &ask("acp:c9:t", "card:9", None)).unwrap();
+    let other = take(st).unwrap().expect("another session is owed");
+    done(st, &other.run, "answered");
+    assert_eq!(status(st, "card:9").as_deref(), Some("answered"));
+    withdraw(st, "acp:c1:t", Some("card:1"));
+    assert_eq!(status(st, "card:1").as_deref(), Some("withdrawn"));
 
     // The list holds no answered ids: they are asked for by name, and an id the queue never saw is not there.
-    let asked = vec!["card:1".to_owned(), "card:nobody".to_owned()];
+    let asked = vec!["card:1".to_owned(), "card:9".to_owned(), "card:nobody".to_owned()];
     let known = statuses_for(st, &asked);
-    assert_eq!(known.get("card:1").map(String::as_str), Some("answered"));
+    assert_eq!(known.get("card:1").map(String::as_str), Some("withdrawn"));
+    assert_eq!(known.get("card:9").map(String::as_str), Some("answered"));
     assert!(!known.contains_key("card:nobody"), "{known:?}");
     assert!(!has_items(st));
     assert!(take(st).unwrap().is_none());
