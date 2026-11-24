@@ -65,6 +65,9 @@ FILES=(
   core/runtime/src/terminal.rs        # terminal.open: the --held claim and the stub's lock
   kernel/lib/kith_claims.py           # the kernel takers' route to the core claims
   kernel/lib/kith-core.sh             # kith_held_launch
+  core/kernel/src/launch/exec.rs      # P1-12 R3a: a one-shot run in this process (`kernel launch-exec`): the order I1 epoch, plan (--resume's resolve takes the claim), proc (I5), then claim, permit, engine
+  core/kernel/src/launch/start.rs     # R3a: the claim for this pid (claim_start, oneshot) before the engine, the guest's grants after it (I3), execve keeps the pid (I2); Windows spawns and waits
+  core/kernel/src/launch/session.rs   # R3a: the session id (--session-id / --resume / a new uuid), the stub's lock key and --lock-alone
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

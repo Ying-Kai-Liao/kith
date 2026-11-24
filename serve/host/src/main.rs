@@ -574,6 +574,13 @@ enum KernelCmd {
         #[command(subcommand)]
         what: LaunchCmd,
     },
+    /// `AGENT [--kernel DIR] ARGS...`: a one-shot run in this process (`kith AGENT "task"`), the claims and the engine of
+    /// `kernel/bin/kith`'s one-shot branch. `kernel/bin/kith` routes to it while `launch-exec` is in `lib/core-switched.txt`.
+    #[command(name = "launch-exec", hide = true, disable_help_flag = true)]
+    LaunchExec {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
     /// kith's own settings, the command line of `kernel/lib/kith_settings.py`: `KEY [AGENT]`, `call_model`, `accounts`, `pin`,
     /// `limit AGENT`, `delegation.chain_cost_cap_usd`, `cap MODE CAPS_FILE`, `reads-others CAPS_FILE` and the writes `set permission_mode|
     /// call_model|at_limit [AGENT] VALUE`, `set limit AGENT N|none`, `set delegation.chain_cost_cap_usd N|none|default`. Prints what
@@ -1692,6 +1699,9 @@ async fn main() -> Result<()> {
             }
             // The launch asks the core itself (who the run is for, once authority is the core's), so it must not run inside an
             // embedded core held here: that call would find the lock taken by its own process.
+            if let KernelCmd::LaunchExec { args } = cmd {
+                std::process::exit(launch_cmd::run_exec(&args));
+            }
             if let KernelCmd::Launch { what: LaunchCmd::Whole(args) } = cmd {
                 std::process::exit(launch_cmd::print_whole(&args));
             }
@@ -1777,6 +1787,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::AccountState { .. }
                     | KernelCmd::Account { .. }
                     | KernelCmd::Secrets { .. }
+                    | KernelCmd::LaunchExec { .. }
                     | KernelCmd::Launch { what: LaunchCmd::Whole(_) | LaunchCmd::Mcp { .. } }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }

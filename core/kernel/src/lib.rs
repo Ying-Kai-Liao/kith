@@ -63,6 +63,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "delegation",
         "engines",
         "launch",
+        // `kernel launch-exec`: a one-shot run in this process (the entry's one-shot branch). A token of its own: an older
+        // program that lists `launch` must not be sent `--exec`.
+        "launch-exec",
         "lifecycle",
         "paths",
         "permit",
@@ -109,7 +112,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engines","launch","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer"]}"#
         );
     }
 }

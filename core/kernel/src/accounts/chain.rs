@@ -68,6 +68,23 @@ pub fn run(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
+    let base = [kith.to_string_lossy().into_owned()];
+    run_with(ctx, agent, agent_md, &base, &[], args, out, err)
+}
+
+/// [`run`] with the child's own command line: each attempt is `BASE... AGENT TAIL... [--account ID] ARGS...` (a run here
+/// starts its attempts as `kith kernel launch-exec AGENT --kernel DIR ...`).
+#[allow(clippy::too_many_arguments)]
+pub fn run_with(
+    ctx: &Ctx<'_>,
+    agent: &str,
+    agent_md: &Path,
+    base: &[String],
+    tail: &[String],
+    args: &[String],
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
     let state = match change::read_state(&ctx.machine) {
         Ok(s) => s,
         Err(e) => {
@@ -90,7 +107,9 @@ pub fn run(
     for (n, entry) in todo.iter().enumerate() {
         // The first attempt of its own harness's family is the plain run (it picks the same account); any other is named.
         let plain = n == 0 && in_family(entry, &p.harness);
-        let mut cmd = vec![kith.to_string_lossy().into_owned(), agent.to_owned()];
+        let mut cmd = base.to_vec();
+        cmd.push(agent.to_owned());
+        cmd.extend(tail.iter().cloned());
         if !plain {
             cmd.extend(["--account".to_owned(), entry.clone()]);
         }

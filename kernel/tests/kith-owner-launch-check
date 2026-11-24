@@ -10,14 +10,14 @@ set -uo pipefail
 
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 BASE=${1:-}
-T0=$(mktemp -d "${TMPDIR:-/tmp}/kith-owner-launch-check.XXXXXX")
+T0=$(mktemp -d "${TMPDIR:-/tmp}/kith-owner-launch-check.XXXXXX"); T0=$(cd "$T0" && pwd -P)
 trap 'rm -rf "$T0"' EXIT
 fails=0
 expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (got $2, want $3)"; fails=$((fails + 1)); fi; }
 
-# launch KERNEL OUT: one owner run, normalised log in OUT.
+# launch KERNEL OUT [PROGRAM]: one owner run, normalised log in OUT; with a kith program, the one-shot is the program's.
 launch() {
-  local kernel=$1 out=$2 T
+  local kernel=$1 out=$2 ON_BIN=${3:-} T
   T=$(mktemp -d "$T0/run.XXXXXX"); T=$(cd "$T" && pwd -P)
   mkdir -p "$T/home" "$T/bin"
   (
@@ -35,6 +35,8 @@ EOF
     chmod +x "$T/bin/claude"
     printf '#!/bin/sh\nexit 0\n' > "$T/bin/kith-stub"; chmod +x "$T/bin/kith-stub"
     export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH ARGS_LOG=$T/args
+    # With a program (the second launch below): it runs the one-shot, with no stub to lock the session under.
+    [[ -z $ON_BIN ]] || export KITH_BIN=$ON_BIN KITH_STUB_BIN=$T/none
     cd "$KITH_HOME/agents/echo" && "$kernel/bin/kith" echo hi >/dev/null 2>"$T/err"
   )
   # Also drop what differs per run: the pid, session id, package hash, and the shell-escaped kernel path.
@@ -51,5 +53,30 @@ if [ -n "$BASE" ]; then
   launch "$BASE" "$T0/before"
   if diff "$T0/before" "$T0/after" >/dev/null; then expect "owner: args and settings identical to the baseline" same same
   else expect "owner: args and settings identical to the baseline" different same; diff "$T0/before" "$T0/after" | head -20; fi
+fi
+
+# The one-shot run by the program (a copy of the kernel folder with the `launch-exec` line switched on) is the same run: the same
+# arguments and the same settings file as the script's.
+BIN=${KITH_DIFFTEST_BIN:-}
+if [ -z "$BIN" ]; then
+  for t in "${CARGO_TARGET_DIR:-}" "$KERNEL/../serve/host/target"; do
+    for k in debug release; do [ -n "$t" ] && [ -x "$t/$k/kith" ] && { BIN=$t/$k/kith; break 2; }; done
+  done
+fi
+if [ -n "$BIN" ]; then
+  # Both from copies of the kernel folder (a checkout's own files are protected in the settings; a copy's are not).
+  cp -R "$KERNEL" "$T0/kernel-off"; cp -R "$KERNEL" "$T0/kernel-on"
+  launch "$T0/kernel-off" "$T0/off"
+  printf 'launch-exec\tlaunch-exec\n' >> "$T0/kernel-on/lib/core-switched.txt"
+  launch "$T0/kernel-on" "$T0/on" "$BIN"
+  expect "launch-exec on: the stub claude was launched with its settings" "$(grep -c '^SETTINGS' "$T0/on")" 1
+  expect "launch-exec on: no sandbox, no denyWrite, no kith-permit server" "$(grep -c '"sandbox"\|denyWrite\|kithpermit' "$T0/on")" 0
+  # The hook commands name the kith program that runs them (the script finds one on PATH, the program is the one given) and a
+  # once folder made per run: they are left out; everything else, the arguments and the rest of the settings file, must be equal.
+  same() { grep -v '"command":' "$1"; }
+  if diff <(same "$T0/off") <(same "$T0/on") >/dev/null; then expect "launch-exec on: args and settings identical to the script's" same same
+  else expect "launch-exec on: args and settings identical to the script's" different same; diff <(same "$T0/off") <(same "$T0/on") | head -20; fi
+else
+  echo "skip launch-exec on (no kith program: KITH_DIFFTEST_BIN)"
 fi
 exit $((fails > 0))
