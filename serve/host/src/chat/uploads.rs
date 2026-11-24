@@ -97,6 +97,7 @@ pub fn append(
     done: bool,
     who: Uploader,
 ) -> Result<Option<Value>> {
+    #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt as _;
     let dir = dir(root, upload)?;
     let path = dir.join(clean_name(name)?);
@@ -118,6 +119,8 @@ pub fn append(
             bail!("Upload limit reached: you can keep up to {} MB of files here", GUEST_QUOTA / 1024 / 1024);
         }
         let mut opts = std::fs::OpenOptions::new();
+        // Windows has no O_NOFOLLOW; its links need a privilege the host does not run with (windows-owner).
+        #[cfg(unix)]
         opts.custom_flags(libc::O_NOFOLLOW);
         let created = !exists;
         let mut file = if created { opts.write(true).create_new(true) } else { opts.append(true) }
@@ -232,6 +235,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[cfg(unix)]
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_file_or_folder_is_refused() {
         let root = tmp();

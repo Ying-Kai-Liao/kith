@@ -856,6 +856,7 @@ fn print_account_state(kernel: Option<std::path::PathBuf>, mut args: Vec<String>
 }
 
 /// `kith kernel account <verb> ...`: `kernel/bin/kith-account`'s words and exit codes.
+#[cfg(unix)]
 fn print_account(kernel: Option<std::path::PathBuf>, args: Vec<String>) -> i32 {
     use kith_kernel::accounts::{self, Ctx, System};
     let home = kith_kernel::paths::process_home();
@@ -1089,6 +1090,7 @@ fn print_settings(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
 fn unix_only_verb(cmd: &KernelCmd) -> Option<&'static str> {
     Some(match cmd {
         KernelCmd::Secrets { .. } => "kernel secrets (windows-owner W5a)",
+        KernelCmd::Account { .. } => "kernel account (windows-owner W5a)",
         KernelCmd::Cost { .. } => "kernel cost (windows-owner W5a)",
         KernelCmd::People { .. } => "kernel people (windows-owner W5a)",
         KernelCmd::Settings { .. } => "kernel settings (windows-owner W5a)",
@@ -1646,6 +1648,7 @@ async fn main() -> Result<()> {
             if let KernelCmd::AccountState { kernel, args } = cmd {
                 std::process::exit(print_account_state(kernel, args));
             }
+            #[cfg(unix)]
             if let KernelCmd::Account { kernel, args } = cmd {
                 std::process::exit(print_account(kernel, args));
             }

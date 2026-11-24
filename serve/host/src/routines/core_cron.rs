@@ -240,7 +240,9 @@ fn over(writer: &CoreWriter, mut child: Child, claim: i64, turn: i64, pace: &Pac
     until_told("report", turn, pace, || writer.run_over(claim, pid, clean, &why));
 }
 
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 #[path = "core_cron_tests.rs"]
 mod tests;
 

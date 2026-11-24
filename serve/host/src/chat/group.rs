@@ -1008,7 +1008,9 @@ pub fn is_pass(text: &str) -> bool {
     t.is_empty() || t == PASS || t == "pass"
 }
 
+// Fake `kith` shell scripts and chmod: Unix-only until windows-owner W2b.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use serde_json::json;

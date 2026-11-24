@@ -438,6 +438,8 @@ pub(super) fn take_over(f: &Paths, id: i64, wait: std::time::Duration) -> std::i
     }
 }
 
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 #[path = "core_claims_tests.rs"]
 pub(crate) mod tests;

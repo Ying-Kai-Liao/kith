@@ -318,13 +318,21 @@ fn approval_key(conn: &Connection, create: bool) -> Option<Vec<u8>> {
 
 fn make_key(path: &Path) -> Result<()> {
     use std::io::Write as _;
-    use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
     let dir = path.parent().ok_or_else(|| anyhow!("no folder for the key"))?;
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    // Owner-only modes on Unix; Windows files take the folder's access list, which is the user's own profile.
+    let mut folder = std::fs::DirBuilder::new();
+    folder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut folder, 0o700);
+    folder.create(dir)?;
     let mut key = [0u8; 32];
     getrandom::fill(&mut key).map_err(|_| anyhow!("random key unavailable"))?;
     let tmp = dir.join(format!(".memory-approvals.{}.tmp", uuid::Uuid::new_v4()));
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    let mut f = opts.open(&tmp)?;
     f.write_all(&key)?;
     f.sync_all()?;
     // Linked into place whole, so two processes making it at once keep one key and none reads half of one.

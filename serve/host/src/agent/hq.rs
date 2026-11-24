@@ -1390,6 +1390,7 @@ mod tests {
         assert_eq!(room_of("echo", Some("sam"), Some("grp1")), "grp1");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn the_first_message_gets_recalled_notes_as_data_and_a_failure_is_silent() {
         let dir = std::env::temp_dir().join(format!("kith-recall-{}", uuid::Uuid::new_v4()));

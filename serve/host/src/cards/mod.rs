@@ -942,7 +942,9 @@ fn auth_stamp() -> Vec<Option<std::time::SystemTime>> {
     files.iter().map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok()).collect()
 }
 
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod access_tests;
 #[cfg(test)]
 mod autoallow_tests;
@@ -957,7 +959,11 @@ mod session_tests;
 #[cfg(test)]
 mod tests;
 
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod resume_tests;
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 pub(crate) mod room_secret_tests;
