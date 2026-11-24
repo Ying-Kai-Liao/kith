@@ -164,7 +164,9 @@ fn live_line(hub: &Hub, bot: &str, thread: Option<&str>) -> Value {
     line.unwrap_or(Value::Null)
 }
 
+// Fake `kith` shell scripts and chmod: Unix-only until windows-owner W2b.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use kith_wire::kernel::{Caller, ReplyTo};
