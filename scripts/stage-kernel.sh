@@ -19,7 +19,15 @@ VERSION=${2:-$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$ROOT/serve/host/Carg
 VERSION=${VERSION#v}
 [ -n "$VERSION" ] || { echo "stage-kernel: no version (pass one, or serve/host/Cargo.toml has none)" >&2; exit 1; }
 mkdir -p "$S"
-cp -R "$ROOT/kernel" "$S/kernel"
+if [ -n "$WINDOWS" ]; then
+  # Never copy kernel/bin: it holds symlinks (hq -> kith-*) that Git Bash on Windows cannot create.
+  mkdir -p "$S/kernel"
+  for d in "$ROOT"/kernel/*; do
+    case $(basename "$d") in bin | lib | tests) ;; *) cp -R "$d" "$S/kernel/" ;; esac
+  done
+else
+  cp -R "$ROOT/kernel" "$S/kernel"
+fi
 cp -R "$ROOT/.claude-plugin" "$S/.claude-plugin"
 cp "$ROOT/LICENSE" "$ROOT/README.md" "$S/"
 [ -n "$WINDOWS" ] || cp "$ROOT/install.sh" "$S/"
