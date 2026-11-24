@@ -3,7 +3,7 @@
 //! reaches the asker once: `--wait` ([`read_in`]) or the wake's take ([`mark_read_by_wake_in`]) marks it read, in the
 //! transaction that delivers it (R5, invariant `AnswerOnce`).
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension as _, params};
 use serde_json::{Value, json};
 
 use crate::error::Result;
@@ -75,7 +75,7 @@ pub(super) fn add_in(
             [ask],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
-        .ok();
+        .optional()?;
     if let Some((_, w, k, t)) = &last
         && w.as_deref() == who
         && k == kind.word()
@@ -141,11 +141,25 @@ pub(crate) fn mark_read_by_wake_in(tx: &Connection, ids: &[String]) -> Result<()
     Ok(())
 }
 
+/// Whether this is the first time the cost of `turn` of ask `ask` is counted (0: the run of an ask with no turn). The run's
+/// cost joins the chain once per turn, so a report, the tick and a retry add it once.
+pub(super) fn count_cost_in(tx: &Connection, ask: &str, turn: i64) -> Result<bool> {
+    Ok(tx.execute(
+        "INSERT OR IGNORE INTO ask_costs (ask, turn) VALUES (?1, ?2)",
+        params![ask, turn],
+    )? == 1)
+}
+
 /// Forgets what is settled and older than [`KEEP_MS`], with its rows. Answers how many asks went.
 pub(super) fn forget_old_in(tx: &Connection, now: i64) -> Result<usize> {
     let before = now - KEEP_MS;
     tx.execute(
         "DELETE FROM ask_rows WHERE ask IN
+            (SELECT id FROM asks WHERE state <> 'open' AND COALESCE(answered_ms, ended_ms, at_ms, 0) < ?1)",
+        [before],
+    )?;
+    tx.execute(
+        "DELETE FROM ask_costs WHERE ask IN
             (SELECT id FROM asks WHERE state <> 'open' AND COALESCE(answered_ms, ended_ms, at_ms, 0) < ?1)",
         [before],
     )?;

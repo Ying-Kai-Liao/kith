@@ -141,6 +141,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                     out: word(params, "out"),
                     callee,
                     session: word(params, "session"),
+                    turn: params.get("turn").and_then(Value::as_i64),
                 },
                 now,
             )
@@ -158,7 +159,17 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
         }
         "ask.read" => ledger::read(core, need(params, "id")?, now),
         "ask.park" => ledger::park(core, need(params, "id")?, Some(need(params, "card")?), now),
-        "ask.unpark" => ledger::park(core, need(params, "id")?, None, now),
+        "ask.unpark" => {
+            let (folders, _) = core.folders_for(params)?;
+            ledger::unpark(
+                core,
+                &folders.machine,
+                need(params, "id")?,
+                word(params, "note"),
+                word(params, "session"),
+                now,
+            )
+        }
         "ask.capTold" => {
             let n = cap_told(core, need(params, "chain")?, now)?;
             Ok(json!({ "marked": n }))

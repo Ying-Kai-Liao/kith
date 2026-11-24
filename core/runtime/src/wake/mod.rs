@@ -45,7 +45,7 @@ pub(crate) use store::{load, save};
 // What the ask ledger needs of the queue (P2-3): it owes a wake in its own transaction and takes one back, on the state the
 // caller loaded (`write_tx`, or the tick's).
 pub(crate) use outside::Outside;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use outside::{Check, Civil, PrView, Transcripts};
 pub(crate) use queue::{New, enqueue};
 pub(crate) use turns::withdraw_in;

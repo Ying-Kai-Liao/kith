@@ -103,6 +103,7 @@ pub(crate) struct Ask {
     pub session: Option<String>,
 }
 
+// TODO(A4): `lost` (migration 102) is not here: the import reads files that never held it; add it with the cutover.
 const STATES: [&str; 4] = ["open", "answered", "capped", "stopped"];
 
 fn take_str(rest: &mut Reg, key: &str) -> Option<String> {

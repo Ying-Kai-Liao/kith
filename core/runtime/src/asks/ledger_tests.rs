@@ -798,3 +798,143 @@ fn every_ledger_row_checks_its_params() {
         );
     }
 }
+
+// ---- the card's resume is the ask's turn (R7 amended) ----
+
+fn cost_of(r: &Rig, id: &str) -> f64 {
+    r.sql("SELECT cost FROM asks WHERE id = ?1", id)
+}
+
+#[test]
+fn a_parked_ask_is_not_settled_by_its_runs_end_even_with_words() {
+    let r = Rig::new();
+    let turn = turn_of(&r.open_bg("a1"));
+    let parked = r.owner("ask.park", &json!({"id": "a1", "card": "c1"}));
+    assert_eq!(parked["parked"], json!(true));
+    // The parked run ends its turn with words ("waiting on a card"): that is not the answer.
+    let said = r.owner(
+        "ask.finish",
+        &json!({"id": "a1", "turn": turn, "out": answer("I am waiting on a card").to_string()}),
+    );
+    assert_eq!(
+        (&said["settled"], &said["parked"]),
+        (&json!(false), &json!(true))
+    );
+    assert_eq!(r.ask_state("a1"), "open");
+    assert_eq!(r.rows("a1"), []);
+    assert_eq!(r.wake_state("a1", 1), "unknown");
+    // Its cost joined the chain all the same.
+    assert!((cost_of(&r, "a1") - 0.25).abs() < 1e-9);
+    // The tick leaves a parked ask alone too, even with its turn ended.
+    let claim = r.start("a1", turn);
+    r.report(claim, "exit");
+    assert_eq!(r.tick()["asks"], json!([]));
+    assert_eq!(r.ask_state("a1"), "open");
+}
+
+#[test]
+fn the_cards_answer_makes_the_resume_the_asks_turn_and_every_settle_goes_by_it() {
+    let r = Rig::new();
+    let first = turn_of(&r.open_bg("a1"));
+    r.owner("ask.park", &json!({"id": "a1", "card": "c1"}));
+    let un = r.owner(
+        "ask.unpark",
+        &json!({"id": "a1", "note": "yes, go on", "session": "sid-7"}),
+    );
+    let second = un["turn"].as_i64().unwrap_or_else(|| panic!("{un}"));
+    assert_ne!(first, second);
+    assert_ne!(un["out"], json!(null));
+    let (source, conv, prompt): (String, String, String) =
+        r.d.shared()
+            .with_core(|c| {
+                Ok(c.conn().query_row(
+                    "SELECT source, conversation, prompt FROM turns WHERE id = ?1",
+                    [second],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?)
+            })
+            .unwrap();
+    assert_eq!(
+        (source.as_str(), conv.as_str(), prompt.as_str()),
+        ("ask", "ask:a1", "yes, go on")
+    );
+    let cur: i64 = r.sql("SELECT turn FROM asks WHERE id = ?1", "a1");
+    assert_eq!(cur, second);
+    // The first run's late report settles nothing, but its cost counts; the resume's report settles.
+    let stale = r.owner(
+        "ask.finish",
+        &json!({"id": "a1", "turn": first, "out": answer("old").to_string()}),
+    );
+    assert_eq!(stale["settled"], json!(false));
+    assert_eq!(r.ask_state("a1"), "open");
+    let done = r.owner(
+        "ask.finish",
+        &json!({"id": "a1", "turn": second, "out": answer("the real answer").to_string()}),
+    );
+    assert_eq!(done["state"], json!("answered"));
+    assert_eq!(r.rows("a1"), [("answer".to_owned(), false)]);
+    assert_eq!(r.wake_state("a1", 1), "queued");
+    assert!((cost_of(&r, "a1") - 0.5).abs() < 1e-9, "one cost per turn");
+    // A stopped ask gets no turn from a card's answer.
+    r.open_bg("a2");
+    r.owner("ask.park", &json!({"id": "a2", "card": "c2"}));
+    r.owner("ask.end", &json!({"roots": ["a2"]}));
+    let none = r.owner("ask.unpark", &json!({"id": "a2", "note": "late"}));
+    assert_eq!(none["turn"], json!(null));
+}
+
+#[test]
+fn a_fg_ask_resumed_after_its_card_is_settled_by_its_turn_not_its_dead_cli() {
+    let r = Rig::new();
+    // The CLI exited with 3 (parked): its process is gone.
+    r.open(
+        "f1",
+        "fg",
+        &json!({"cliPid": 4242, "cliStart": "gone"}),
+        &[],
+    );
+    r.owner("ask.park", &json!({"id": "f1", "card": "c1"}));
+    let held = r.owner("ask.finish", &json!({"id": "f1", "result": "waiting"}));
+    assert_eq!(held["parked"], json!(true));
+    let un = r.owner("ask.unpark", &json!({"id": "f1", "note": "approved"}));
+    let turn = un["turn"].as_i64().unwrap();
+    // The tick does not settle it lost by the CLI pid: it has a turn.
+    assert_eq!(r.tick()["asks"], json!([]));
+    assert_eq!(r.ask_state("f1"), "open");
+    // Its run's end settles it, and (no caller left to print) the asker gets the row and the wake.
+    let done = r.owner(
+        "ask.finish",
+        &json!({"id": "f1", "turn": turn, "out": answer("done").to_string()}),
+    );
+    assert_eq!(done["state"], json!("answered"));
+    assert_eq!(r.rows("f1"), [("answer".to_owned(), false)]);
+    assert_eq!(r.wake_state("f1", 1), "queued");
+}
+
+#[test]
+fn a_runs_cost_joins_the_chain_once_per_turn_also_after_a_stop() {
+    let r = Rig::new();
+    r.open_bg("a1");
+    r.finish("a1", Some(&answer("x")));
+    r.finish("a1", Some(&answer("x")));
+    assert!((cost_of(&r, "a1") - 0.25).abs() < 1e-9);
+    r.open_bg("a2");
+    r.owner("ask.end", &json!({"roots": ["a2"]}));
+    let said = r.finish("a2", Some(&answer("late")));
+    assert_eq!(said["settled"], json!(false));
+    assert!((cost_of(&r, "a2") - 0.25).abs() < 1e-9);
+    r.finish("a2", Some(&answer("late")));
+    assert!((cost_of(&r, "a2") - 0.25).abs() < 1e-9);
+    assert_eq!(r.rows("a2"), []);
+}
+
+#[test]
+fn only_an_open_ask_parks() {
+    let r = Rig::new();
+    r.open_bg("a1");
+    r.owner("ask.end", &json!({"roots": ["a1"]}));
+    let said = r.owner("ask.park", &json!({"id": "a1", "card": "c"}));
+    assert_eq!(said["parked"], json!(false));
+    let parked: Option<String> = r.sql("SELECT parked_card FROM asks WHERE id = ?1", "a1");
+    assert_eq!(parked, None);
+}

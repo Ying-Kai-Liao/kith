@@ -81,6 +81,25 @@ pub(super) fn with_turn_in(
             "kith-core: asks: a --bg ask needs its task".into(),
         ));
     };
+    let (turn, out, conversation) = new_turn_in(tx, machine, &ask, task, l.engine, false, now)?;
+    ask.conversation = Some(conversation);
+    ask.turn = Some(turn);
+    ask.out_path = Some(out);
+    Ok(ask)
+}
+
+/// A turn of source `ask` for the ask's callee, with the prompt `prompt`: the first one of a `bg` open, or the resume a card's
+/// answer makes (`again`, with an out file of its own, so the earlier run's answer is not read as this one's). Answers
+/// (turn, out file, conversation).
+fn new_turn_in(
+    tx: &rusqlite::Transaction<'_>,
+    machine: &Path,
+    ask: &Ask,
+    task: &str,
+    engine: Option<&str>,
+    again: bool,
+    now: i64,
+) -> Result<(i64, String, String)> {
     let Some(agent) = ask.asked.clone().filter(|a| !a.is_empty()) else {
         return Err(Error::BadParams(
             "kith-core: asks: a --bg ask needs the agent asked".into(),
@@ -101,8 +120,7 @@ pub(super) fn with_turn_in(
         [&conversation],
         |r| r.get(0),
     ))?;
-    let engine = l
-        .engine
+    let engine = engine
         .map(str::to_owned)
         .or(kept)
         .unwrap_or_else(|| DEFAULT_ENGINE.to_owned());
@@ -120,17 +138,18 @@ pub(super) fn with_turn_in(
         },
         now,
     )?;
-    ask.conversation = Some(conversation);
-    ask.turn = Some(turn);
-    ask.out_path = Some(
-        machine
-            .join("core")
-            .join("asks")
-            .join(format!("{}.out", ask.id))
-            .to_string_lossy()
-            .into_owned(),
-    );
-    Ok(ask)
+    let name = if again {
+        format!("{}-{turn}.out", ask.id)
+    } else {
+        format!("{}.out", ask.id)
+    };
+    let out = machine
+        .join("core")
+        .join("asks")
+        .join(name)
+        .to_string_lossy()
+        .into_owned();
+    Ok((turn, out, conversation))
 }
 
 /// How a run ended, for [`settle_ask_in`].
@@ -204,24 +223,47 @@ pub(crate) fn settle_ask_in(
     id: &str,
     ended: &Ended,
     session: Option<&str>,
-    notify: bool,
+    turn: Option<i64>,
     now: i64,
 ) -> Result<Settled> {
     let Some(a) = get(tx, id)? else {
         return Ok(Settled::Nothing);
     };
-    if a.state != "open" || a.ended_ms.is_some() {
-        return Ok(Settled::Nothing);
-    }
-    if a.parked_card.is_some() && matches!(ended, Ended::Lost) {
-        return Ok(Settled::Parked);
-    }
-    let (state, cost) = match ended {
-        Ended::Answered(c) if c.is_error => ("stopped", c.cost),
-        Ended::Answered(c) => ("answered", c.cost),
-        Ended::Lost => ("lost", 0.0),
+    // The run's cost joins the chain once per turn, whatever became of the ask (parked, stopped, settled already).
+    let spent = match ended {
+        Ended::Answered(c) => c.cost,
+        Ended::Lost => 0.0,
     };
-    settle_in(tx, machine, id, cost, Some(state), now)?;
+    let fresh = spent > 0.0 && rows::count_cost_in(tx, id, turn.or(a.turn).unwrap_or(0))?;
+    // Every settle goes by the ask's current turn: a run of an earlier turn (before a card's resume) settles nothing.
+    let current = turn.is_none_or(|t| a.turn == Some(t));
+    let live = a.state == "open" && a.ended_ms.is_none() && current;
+    // A parked ask is waiting for its card: its run's end, with words or without, is not its answer (kith-ask lets park win).
+    if !live || a.parked_card.is_some() {
+        if fresh {
+            settle_in(tx, machine, id, spent, None, now)?;
+        }
+        return Ok(if live {
+            Settled::Parked
+        } else {
+            Settled::Nothing
+        });
+    }
+    // Only the `fg` CLI's own report, on its first run, was answered on its stdout; a resumed run has no caller to print it.
+    let notify = a.turn.is_some() || a.mode.as_deref() != Some("fg");
+    let state = match ended {
+        Ended::Answered(c) if c.is_error => "stopped",
+        Ended::Answered(_) => "answered",
+        Ended::Lost => "lost",
+    };
+    settle_in(
+        tx,
+        machine,
+        id,
+        if fresh { spent } else { 0.0 },
+        Some(state),
+        now,
+    )?;
     let sid = session
         .map(str::to_owned)
         .or_else(|| match ended {
@@ -276,6 +318,8 @@ pub(crate) struct Finish<'a> {
     /// The callee's answer as the caller has it already (a `fg` CLI).
     pub callee: Option<Callee>,
     pub session: Option<&'a str>,
+    /// The turn whose run ended; the ask is settled only if it is the ask's current turn (default: the current one).
+    pub turn: Option<i64>,
 }
 
 /// `ask.finish` (R3): the run behind ask `id` ended.
@@ -293,9 +337,7 @@ pub(crate) fn finish(
         let Some(a) = get(tx, f.id)? else {
             return Err(Error::Refused(format!("kith-core: asks: no ask {}", f.id)));
         };
-        // A `fg` call reports its own end and prints the answer itself; a run the host started has no caller to print it.
-        let notify = a.mode.as_deref() != Some("fg");
-        let said = settle_ask_in(tx, st, machine, f.id, &ended, f.session, notify, now)?;
+        let said = settle_ask_in(tx, st, machine, f.id, &ended, f.session, f.turn, now)?;
         Ok((said, a.state))
     })?;
     Ok(match done {
@@ -371,19 +413,52 @@ pub(crate) fn park(
     now: i64,
 ) -> Result<Value> {
     let tx = core.claim_tx()?;
-    let n = match card {
-        Some(card) => tx.execute(
-            "UPDATE asks SET parked_card = ?2, parked_ms = ?3 WHERE id = ?1",
-            rusqlite::params![id, card, now],
-        )?,
-        None => tx.execute(
-            "UPDATE asks SET parked_card = NULL, parked_ms = NULL WHERE id = ?1",
-            [id],
-        )?,
-    };
-    tx.commit()?;
-    if n == 0 {
+    if get(&tx, id)?.is_none() {
         return Err(Error::Refused(format!("kith-core: asks: no ask {id}")));
     }
-    Ok(json!({"id": id, "parked": card.is_some()}))
+    // Only an open ask that Stop did not end waits on a card (as the permit's park does today).
+    let n = tx.execute(
+        "UPDATE asks SET parked_card = ?2, parked_ms = ?3 WHERE id = ?1 AND state = 'open' AND ended_ms IS NULL",
+        rusqlite::params![id, card, now],
+    )?;
+    tx.commit()?;
+    Ok(json!({"id": id, "parked": n == 1}))
+}
+
+/// `ask.unpark` (R7, amended): the card was answered. The ask no longer waits on it, and the callee's resume, with `note` as
+/// its prompt, becomes the ask's new turn (source `ask`, an out file of its own) in the same transaction, so every later
+/// settle goes by that turn. An ask Stop ended gets no turn. Answers `{id, parked: false, turn, out}` (`turn` null when none).
+pub(crate) fn unpark(
+    core: &mut crate::db::Core,
+    machine: &Path,
+    id: &str,
+    note: Option<&str>,
+    session: Option<&str>,
+    now: i64,
+) -> Result<Value> {
+    let tx = core.claim_tx()?;
+    let Some(mut a) = get(&tx, id)? else {
+        return Err(Error::Refused(format!("kith-core: asks: no ask {id}")));
+    };
+    a.parked_card = None;
+    a.parked_ms = None;
+    if let Some(s) = session.filter(|s| !s.is_empty()) {
+        a.session = Some(s.to_owned());
+    }
+    let mut made = None;
+    if let Some(note) = note.filter(|n| !n.is_empty())
+        && a.state == "open"
+        && a.ended_ms.is_none()
+    {
+        let (turn, out, conversation) = new_turn_in(&tx, machine, &a, note, None, true, now)?;
+        a.conversation = Some(conversation);
+        a.turn = Some(turn);
+        a.out_path = Some(out.clone());
+        made = Some((turn, out));
+    }
+    a.put(&tx)?;
+    tx.commit()?;
+    Ok(
+        json!({"id": id, "parked": false, "turn": made.as_ref().map(|m| m.0), "out": made.map(|m| m.1)}),
+    )
 }

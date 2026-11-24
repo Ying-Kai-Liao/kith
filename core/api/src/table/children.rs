@@ -115,7 +115,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     ask(
         "ask.finish",
-        "The run behind an ask ended (the host's report, or a `fg` caller's own). An `open` ask that Stop did not end is settled in one transaction: with the callee's JSON answer it is `answered` (`stopped` when the callee failed, `capped` when its cost tipped the chain), without one `lost`; the cost joins the chain; and for a `bg` ask the answer (or the lost notice) becomes a mailbox row and the asker is owed the wake `ask:ID/N`, whether or not a writer holds its session. A `fg` ask prints its answer itself, so it gets no row and no wake. Anything settled already, or ended by `ask.end`, is left alone (the host's report and the tick settle once). An ask parked on a card stays open when its run ended with no answer. Answers `{id, settled, state, row}`.",
+        "The run behind an ask ended (the host's report, or a `fg` caller's own). An `open` ask that Stop did not end is settled in one transaction: with the callee's JSON answer it is `answered` (`stopped` when the callee failed, `capped` when its cost tipped the chain), without one `lost`; the cost joins the chain; and for a `bg` ask the answer (or the lost notice) becomes a mailbox row and the asker is owed the wake `ask:ID/N`, whether or not a writer holds its session. A `fg` ask prints its answer itself, so it gets no row and no wake. Anything settled already, or ended by `ask.end`, is left alone (the host's report and the tick settle once). An ask parked on a card stays open when its run ends, with an answer or without (answers `parked: true`; the cost still joins the chain, once per turn). A `turn` that is not the ask's current one settles nothing. Only a `fg` ask's own first report skips the row and wake. Answers `{id, settled, state, row}`.",
         &[
             pos("id", "string", true, "The ask."),
             flag(
@@ -137,6 +137,12 @@ pub(super) const ROWS: &[Method] = &[
                 "string",
                 &["--session"],
                 "The callee's session, kept on the record so `-c` resumes it.",
+            ),
+            flag(
+                "turn",
+                "int",
+                &["--turn"],
+                "The turn whose run ended: the ask is settled only if it is the ask's current turn (default: the current one).",
             ),
             KERNEL,
             HOME,
@@ -174,7 +180,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     ask(
         "ask.park",
-        "The ask waits on an approval card (replaces the `.parked` file): `ask.delegations` shows a waiting ask and every ask above it as `waiting {on: card}`. A parked ask whose run ended with no answer stays open. Answers `{id, parked}`.",
+        "The ask waits on an approval card (replaces the `.parked` file): `ask.delegations` shows a waiting ask and every ask above it as `waiting {on: card}`. A parked ask is not settled by its run's end, with or without words (the run's cost still counts). Does nothing unless the ask is open and not ended. Answers `{id, parked}`.",
         &[
             pos("id", "string", true, "The ask."),
             pos("card", "string", true, "The card."),
@@ -184,8 +190,25 @@ pub(super) const ROWS: &[Method] = &[
     .principals(OWNER_HOST),
     ask(
         "ask.unpark",
-        "The card's answer: the ask no longer waits on it. Answers `{id, parked: false}`.",
-        &[pos("id", "string", true, "The ask.")],
+        "The card's answer: the ask no longer waits on it, and the callee's resume becomes the ask's new turn (source `ask`, prompt the note, an out file of its own) in the same transaction, unless Stop ended the ask. Every later settle goes by that turn. Answers `{id, parked: false, turn, out}` (`turn` null when none was made).",
+        &[
+            pos("id", "string", true, "The ask."),
+            flag(
+                "note",
+                "string",
+                &["--note"],
+                "What the card's answer says: the prompt of the resume turn.",
+            ),
+            flag(
+                "session",
+                "string",
+                &["--session"],
+                "The callee's session to resume.",
+            ),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
         &["asks", "unpark"],
     )
     .principals(OWNER_HOST),

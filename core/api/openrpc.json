@@ -13236,7 +13236,7 @@
     },
     {
       "name": "ask.finish",
-      "summary": "The run behind an ask ended (the host's report, or a `fg` caller's own). An `open` ask that Stop did not end is settled in one transaction: with the callee's JSON answer it is `answered` (`stopped` when the callee failed, `capped` when its cost tipped the chain), without one `lost`; the cost joins the chain; and for a `bg` ask the answer (or the lost notice) becomes a mailbox row and the asker is owed the wake `ask:ID/N`, whether or not a writer holds its session. A `fg` ask prints its answer itself, so it gets no row and no wake. Anything settled already, or ended by `ask.end`, is left alone (the host's report and the tick settle once). An ask parked on a card stays open when its run ended with no answer. Answers `{id, settled, state, row}`.",
+      "summary": "The run behind an ask ended (the host's report, or a `fg` caller's own). An `open` ask that Stop did not end is settled in one transaction: with the callee's JSON answer it is `answered` (`stopped` when the callee failed, `capped` when its cost tipped the chain), without one `lost`; the cost joins the chain; and for a `bg` ask the answer (or the lost notice) becomes a mailbox row and the asker is owed the wake `ask:ID/N`, whether or not a writer holds its session. A `fg` ask prints its answer itself, so it gets no row and no wake. Anything settled already, or ended by `ask.end`, is left alone (the host's report and the tick settle once). An ask parked on a card stays open when its run ends, with an answer or without (answers `parked: true`; the cost still joins the chain, once per turn). A `turn` that is not the ask's current one settles nothing. Only a `fg` ask's own first report skips the row and wake. Answers `{id, settled, state, row}`.",
       "params": [
         {
           "name": "id",
@@ -13282,6 +13282,14 @@
           "required": false,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "turn",
+          "summary": "The turn whose run ended: the ask is settled only if it is the ask's current turn (default: the current one).",
+          "required": false,
+          "schema": {
+            "type": "integer"
           }
         },
         {
@@ -13364,6 +13372,12 @@
             "kind": "flag",
             "spellings": [
               "--session"
+            ]
+          },
+          "turn": {
+            "kind": "flag",
+            "spellings": [
+              "--turn"
             ]
           },
           "kernel": {
@@ -13500,7 +13514,7 @@
     },
     {
       "name": "ask.park",
-      "summary": "The ask waits on an approval card (replaces the `.parked` file): `ask.delegations` shows a waiting ask and every ask above it as `waiting {on: card}`. A parked ask whose run ended with no answer stays open. Answers `{id, parked}`.",
+      "summary": "The ask waits on an approval card (replaces the `.parked` file): `ask.delegations` shows a waiting ask and every ask above it as `waiting {on: card}`. A parked ask is not settled by its run's end, with or without words (the run's cost still counts). Does nothing unless the ask is open and not ended. Answers `{id, parked}`.",
       "params": [
         {
           "name": "id",
@@ -13551,7 +13565,7 @@
     },
     {
       "name": "ask.unpark",
-      "summary": "The card's answer: the ask no longer waits on it. Answers `{id, parked: false}`.",
+      "summary": "The card's answer: the ask no longer waits on it, and the callee's resume becomes the ask's new turn (source `ask`, prompt the note, an out file of its own) in the same transaction, unless Stop ended the ask. Every later settle goes by that turn. Answers `{id, parked: false, turn, out}` (`turn` null when none was made).",
       "params": [
         {
           "name": "id",
@@ -13559,6 +13573,49 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "note",
+          "summary": "What the card's answer says: the prompt of the resume turn.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "session",
+          "summary": "The callee's session to resume.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (`KITH_ASK_ID`, `KITH_ASK_CHAIN`/`HOP`/`CROSS`/`COST`/`FROM`, `KITH_AGENT`, `KITH_PERSON`, `KITH_VIA`, `CLAUDE_CODE_SESSION_ID`); a daemon has its own.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       ],
@@ -13585,6 +13642,30 @@
         "args": {
           "id": {
             "kind": "positional"
+          },
+          "note": {
+            "kind": "flag",
+            "spellings": [
+              "--note"
+            ]
+          },
+          "session": {
+            "kind": "flag",
+            "spellings": [
+              "--session"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
           }
         }
       }

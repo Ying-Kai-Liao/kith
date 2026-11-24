@@ -81,5 +81,12 @@ pub(super) const MIGRATION: Migration = Migration {
             read INTEGER NOT NULL DEFAULT 0 CHECK (read IN (0, 1)),
             PRIMARY KEY (ask, n)
         ) WITHOUT ROWID;
+
+        -- The turns whose run's cost joined the chain (0: the run of an ask with no turn): a cost is counted once per turn.
+        CREATE TABLE ask_costs (
+            ask TEXT NOT NULL,
+            turn INTEGER NOT NULL,
+            PRIMARY KEY (ask, turn)
+        ) WITHOUT ROWID;
     "#,
 };

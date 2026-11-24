@@ -58,7 +58,7 @@ pub(crate) struct Looked {
 pub(crate) fn seen_in(tx: &Connection) -> Result<Seen> {
     let mut st = tx.prepare(&format!(
         "SELECT a.id, a.turn, a.out_path FROM asks a JOIN turns t ON t.id = a.turn
-         WHERE a.state = 'open' AND a.ended_ms IS NULL AND a.mode = 'bg' AND t.state IN {FINAL} ORDER BY a.id"
+         WHERE a.state = 'open' AND a.ended_ms IS NULL AND a.parked_card IS NULL AND t.state IN {FINAL} ORDER BY a.id"
     ))?;
     let bg = st
         .query_map([], |r| {
@@ -71,7 +71,7 @@ pub(crate) fn seen_in(tx: &Connection) -> Result<Seen> {
         .collect::<std::result::Result<_, _>>()?;
     let mut st = tx.prepare(
         "SELECT id, cli_pid, cli_start FROM asks
-         WHERE state = 'open' AND ended_ms IS NULL AND mode = 'fg' AND cli_pid IS NOT NULL ORDER BY id",
+         WHERE state = 'open' AND ended_ms IS NULL AND mode = 'fg' AND turn IS NULL AND cli_pid IS NOT NULL ORDER BY id",
     )?;
     let fg = st
         .query_map([], |r| {
@@ -130,7 +130,7 @@ pub(crate) fn settle_in(
         };
         let ended = answer.clone().map_or(Ended::Lost, Ended::Answered);
         if let Settled::Now(..) =
-            ledger::settle_ask_in(tx, st, machine, &b.id, &ended, None, true, now)?
+            ledger::settle_ask_in(tx, st, machine, &b.id, &ended, None, Some(b.turn), now)?
         {
             settled.push(b.id.clone());
         }
@@ -140,7 +140,7 @@ pub(crate) fn settle_in(
             continue;
         }
         let same: bool = tx.query_row(
-            "SELECT EXISTS (SELECT 1 FROM asks WHERE id = ?1 AND cli_pid = ?2 AND cli_start IS ?3)",
+            "SELECT EXISTS (SELECT 1 FROM asks WHERE id = ?1 AND turn IS NULL AND cli_pid = ?2 AND cli_start IS ?3)",
             rusqlite::params![f.id, f.pid, f.start],
             |r| r.get(0),
         )?;
@@ -148,7 +148,7 @@ pub(crate) fn settle_in(
             continue;
         }
         if let Settled::Now(..) =
-            ledger::settle_ask_in(tx, st, machine, &f.id, &Ended::Lost, None, true, now)?
+            ledger::settle_ask_in(tx, st, machine, &f.id, &Ended::Lost, None, None, now)?
         {
             settled.push(f.id.clone());
         }
