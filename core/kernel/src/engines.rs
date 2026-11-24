@@ -8,7 +8,7 @@
 
 use serde_json::{Value, json};
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One engine.
 pub struct Engine {
@@ -240,7 +240,24 @@ pub fn detect(
     e: &Engine,
     which: &dyn Fn(&str) -> Option<PathBuf>,
 ) -> Option<(&'static str, PathBuf)> {
-    e.bins.iter().find_map(|b| which(b).map(|p| (*b, p)))
+    e.bins
+        .iter()
+        .find_map(|b| which(b).map(|p| (*b, p)))
+        .or_else(|| native_claude(e))
+}
+
+/// Windows: the native installer puts `claude.exe` in `%USERPROFILE%\.local\bin` and leaves that folder off PATH.
+fn native_claude(e: &Engine) -> Option<(&'static str, PathBuf)> {
+    if !cfg!(windows) || e.id != "claude" {
+        return None;
+    }
+    let home = std::env::var_os("USERPROFILE")?;
+    native_claude_in(Path::new(&home))
+}
+
+fn native_claude_in(home: &Path) -> Option<(&'static str, PathBuf)> {
+    let exe = home.join(".local").join("bin").join("claude.exe");
+    exe.is_file().then_some(("claude", exe))
 }
 
 /// One engine as `kith engines --json` lists it. `signed_in` is `null`: the probes run programs, which the host does
@@ -935,6 +952,17 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn the_native_claude_install_is_found_off_path() {
+        let home = std::env::temp_dir().join(format!("kith-eng-{}", std::process::id()));
+        let bin = home.join(".local").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        assert!(native_claude_in(&home).is_none());
+        std::fs::write(bin.join("claude.exe"), b"").unwrap();
+        assert_eq!(native_claude_in(&home).unwrap().1, bin.join("claude.exe"));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 
     fn nothing(_: &str) -> Option<PathBuf> {
         None
