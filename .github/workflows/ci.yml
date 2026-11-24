@@ -763,7 +763,7 @@ jobs:
   windows:
     needs: changes
     if: needs.changes.outputs.windows == 'true' || needs.changes.outputs.host_core == 'true'
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 40
     defaults:
       run:
@@ -798,6 +798,13 @@ jobs:
             cargo clippy --manifest-path host/Cargo.toml -p kith-stub --all-targets --locked -- -D warnings
             cargo test --manifest-path host/Cargo.toml -p kith-stub --locked
           fi
+      # The host itself (W2a): its Unix-only parts (host.sock, the screen helper, the kernel's launch/threads/pkg/lifecycle verbs,
+      # ps/pgrep) are cfg-gated and refuse by name here. Both bins and kith-servew; the tests are W2b.
+      - name: Host (kith-serve)
+        run: |
+          cargo clippy --manifest-path host/Cargo.toml -p kith-serve --all-targets --locked -- -D warnings
+          cargo build --manifest-path host/Cargo.toml -p kith-serve --locked
+          test -f host/target/debug/kith.exe && test -f host/target/debug/kith-serve.exe && test -f host/target/debug/kith-servew.exe
       # The two programs the Windows app bundles (apps/desktop/tools/native-host.mjs builds exactly these .exe names).
       - name: Bundled programs build
         run: |

@@ -866,6 +866,7 @@ pub(crate) async fn guest_identity(
 
 // ---- the socket
 
+#[cfg(unix)]
 async fn serve_one(table: Arc<TokenTable>, stream: tokio::net::UnixStream) {
     let peer = PeerInfo { pid: stream.peer_cred().ok().and_then(|c| c.pid()).and_then(|p| u32::try_from(p).ok()) };
     let (read, mut write) = stream.into_split();
@@ -889,6 +890,7 @@ async fn serve_one(table: Arc<TokenTable>, stream: tokio::net::UnixStream) {
 
 /// Binds the socket (`dir` 0700, the socket 0600, a stale file from an earlier host removed) and answers requests in
 /// the background. A failure leaves the host running and runs without tokens (see [`grant_for`]).
+#[cfg(unix)]
 pub fn start() {
     let path = socket_path();
     match bind(&path) {
@@ -916,6 +918,7 @@ pub fn start() {
     }
 }
 
+#[cfg(unix)]
 fn bind(path: &Path) -> Result<tokio::net::UnixListener> {
     use std::os::unix::fs::PermissionsExt as _;
     let dir = path.parent().context("socket path has no folder")?;
@@ -926,6 +929,13 @@ fn bind(path: &Path) -> Result<tokio::net::UnixListener> {
     let listener = tokio::net::UnixListener::bind(path).with_context(|| format!("binding {}", path.display()))?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     Ok(listener)
+}
+
+/// host.sock is a Unix socket, and guests are refused on a Windows host (windows-owner WI6), so there is no run socket
+/// to bind: the host says so by name and runs without tokens, which is what [`grant_for`] already does with no socket.
+#[cfg(not(unix))]
+pub fn start() {
+    tracing::warn!("run socket not started: not on Windows (guests are refused there; windows-owner WI6)");
 }
 
 // ---- process ancestry
@@ -1367,6 +1377,8 @@ mod tests {
         assert!(!guest.iter().any(|(k, _)| k == TOKEN_ENV));
     }
 
+    // host.sock is a Unix socket; Windows has no run socket (WI6).
+    #[cfg(unix)]
     #[tokio::test]
     async fn socket_round_trip_refuses_a_forged_token() {
         let dir = std::env::temp_dir().join(format!("kr-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
