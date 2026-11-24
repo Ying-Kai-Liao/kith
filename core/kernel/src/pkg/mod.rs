@@ -176,6 +176,12 @@ pub fn package_files(home: &Path) -> Vec<PathBuf> {
 
 /// `fingerprint(home)`: ten hex digits over the format, where the agent's life is, and each file's name, size and mtime.
 pub fn fingerprint(ctx: &Ctx, home: &Path) -> R<String> {
+    let (at, entries) = fingerprint_inputs(ctx, home)?;
+    Ok(fingerprint_of(&at, &entries))
+}
+
+/// What `fingerprint` hashes: where the agent's life is, and `(label, size, mtime ns)` of each file.
+pub(crate) fn fingerprint_inputs(ctx: &Ctx, home: &Path) -> R<(String, Vec<(Vec<u8>, u64, i128)>)> {
     let at = if name_of(home) == "role" {
         home.parent().unwrap_or(home).to_path_buf()
     } else {
@@ -195,7 +201,7 @@ pub fn fingerprint(ctx: &Ctx, home: &Path) -> R<String> {
         let st = fs::metadata(p).map_err(|e| os_err(&e, p))?;
         entries.push((label_bytes(label), st.len(), mtime_ns(&st)));
     }
-    Ok(fingerprint_of(&at.display().to_string(), &entries))
+    Ok((at.display().to_string(), entries))
 }
 
 /// A file's label in the fingerprint: its path in the package, the bytes the system spells it with (on Windows, `/` between
