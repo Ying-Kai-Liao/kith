@@ -52,10 +52,7 @@ pub fn switched(state: Option<&Path>, machine: Option<&Path>) -> bool {
     std::fs::read_to_string(&f).map_or(true, |t| {
         t.lines()
             .filter_map(|l| l.split_once('='))
-            .filter(|(k, v)| {
-                *k == "state" && matches!(*v, "stepping" | "switched" | "rolling-back")
-            })
-            .next_back()
+            .rfind(|(k, v)| *k == "state" && matches!(*v, "stepping" | "switched" | "rolling-back"))
             .is_none_or(|(_, v)| v != "stepping")
     })
 }
