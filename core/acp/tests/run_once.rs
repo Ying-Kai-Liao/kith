@@ -16,11 +16,13 @@ fn spec(env: &[(&str, &str)]) -> RunSpec {
     RunSpec {
         command: fake(),
         cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+        dirs: Vec::new(),
         env: env
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect(),
         model: None,
+        modes: Vec::new(),
         mcp_servers: json!([]),
         task: "say hi".into(),
         timeout: Duration::from_secs(20),
@@ -57,6 +59,122 @@ async fn the_model_and_mcp_servers_reach_the_session() {
     let _ = std::fs::remove_file(&log);
     assert!(text.contains(r#""modelId": "fast-1""#), "{text}");
     assert!(text.contains(r#""name": "m""#), "{text}");
+}
+
+/// What an agent listing `listed` got for a run asking `modes`: the run's answer or error, the `session/set_mode` ids,
+/// and whether the task was sent.
+async fn mode_run(
+    name: &str,
+    listed: &str,
+    modes: &[&str],
+    approve: bool,
+) -> (Result<String, String>, Vec<String>, bool) {
+    let log = std::env::temp_dir().join(format!("kith-acp-{name}-{}", std::process::id()));
+    let mut s = spec(&[
+        ("FAKE_ACP_LOG", log.to_str().unwrap()),
+        ("FAKE_ACP_MODES", listed),
+    ]);
+    s.modes = modes.iter().map(|m| (*m).to_owned()).collect();
+    s.approve = approve;
+    let out = run_once(s)
+        .await
+        .map(|o| o.text)
+        .map_err(|e| format!("{e:#}"));
+    let text = std::fs::read_to_string(&log).unwrap();
+    let _ = std::fs::remove_file(&log);
+    let sent: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let set = sent
+        .iter()
+        .filter(|m| m["method"] == "session/set_mode")
+        .map(|m| m["params"]["modeId"].as_str().unwrap().to_owned())
+        .collect();
+    let prompted = sent.iter().any(|m| m["method"] == "session/prompt");
+    (out, set, prompted)
+}
+
+/// The `session/set_mode` ids of a run that answered.
+async fn modes_set(name: &str, listed: &str, modes: &[&str]) -> Vec<String> {
+    let (out, set, _) = mode_run(name, listed, modes, false).await;
+    assert_eq!(out.unwrap(), "echo: say hi");
+    set
+}
+
+#[tokio::test]
+async fn the_session_is_set_to_the_first_asked_mode_the_agent_lists() {
+    let listed = "agent,read-only,workspace-write,agent-full-access";
+    assert_eq!(
+        modes_set("mode-full", listed, &["agent-full-access", "full-access"]).await,
+        ["agent-full-access"]
+    );
+    assert_eq!(
+        modes_set(
+            "mode-older",
+            "auto,full-access",
+            &["agent-full-access", "full-access"]
+        )
+        .await,
+        ["full-access"]
+    );
+}
+
+#[tokio::test]
+async fn a_run_whose_agent_lists_none_of_the_modes_is_not_sent() {
+    for (name, listed) in [("mode-none", "agent"), ("mode-unlisted", "")] {
+        let (out, set, prompted) = mode_run(name, listed, &["workspace-write"], false).await;
+        assert!(
+            out.as_ref()
+                .is_err_and(|e| e.contains("none of the session modes workspace-write")),
+            "{out:?}"
+        );
+        assert!(set.is_empty() && !prompted, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn an_approved_run_whose_agent_lists_none_of_the_modes_runs_as_it_started() {
+    let (out, set, prompted) =
+        mode_run("mode-none-ok", "agent", &["agent-full-access"], true).await;
+    assert_eq!(out.unwrap(), "echo: say hi");
+    assert!(set.is_empty() && prompted);
+    assert!(
+        modes_set("mode-unasked", "agent,workspace-write", &[])
+            .await
+            .is_empty()
+    );
+}
+
+/// The params the agent got in `session/new` for a run with these extra folders.
+async fn session_new_params(name: &str, takes_dirs: bool) -> serde_json::Value {
+    let log = std::env::temp_dir().join(format!("kith-acp-{name}-{}", std::process::id()));
+    let mut env = vec![("FAKE_ACP_LOG", log.to_str().unwrap())];
+    if takes_dirs {
+        env.push(("FAKE_ACP_DIRS", "1"));
+    }
+    let mut s = spec(&env);
+    s.dirs = vec!["/work/notes".to_owned()];
+    run_once(s).await.unwrap();
+    let text = std::fs::read_to_string(&log).unwrap();
+    let _ = std::fs::remove_file(&log);
+    text.lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .find(|m| m["method"] == "session/new")
+        .unwrap()["params"]
+        .clone()
+}
+
+#[tokio::test]
+async fn extra_folders_reach_an_agent_that_takes_them() {
+    let p = session_new_params("dirs-yes", true).await;
+    assert_eq!(p["additionalDirectories"], json!(["/work/notes"]));
+}
+
+#[tokio::test]
+async fn extra_folders_are_left_out_for_an_agent_that_does_not_say_it_takes_them() {
+    let p = session_new_params("dirs-no", false).await;
+    assert!(p.get("additionalDirectories").is_none(), "{p}");
 }
 
 #[tokio::test]
