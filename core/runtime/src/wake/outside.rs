@@ -94,10 +94,7 @@ pub(super) fn gh_in(
             .flat_map(|d| names.iter().map(move |n| d.join(n)))
             .find(|p| p.is_file())
     });
-    let mut known: Vec<PathBuf> = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
-        .into_iter()
-        .map(PathBuf::from)
-        .collect();
+    let mut known: Vec<PathBuf> = fixed.iter().map(PathBuf::from).collect();
     if let Some(pf) = program_files {
         known.push(PathBuf::from(pf).join("GitHub CLI").join("gh.exe"));
     }
@@ -105,6 +102,9 @@ pub(super) fn gh_in(
         .or_else(|| known.into_iter().find(|p| p.exists()))
         .unwrap_or_else(|| PathBuf::from("gh"))
 }
+
+/// Where Homebrew puts `gh` (Apple silicon, Intel).
+const HOMEBREW_GH: &[&str] = &["/opt/homebrew/bin/gh", "/usr/local/bin/gh"];
 
 /// The real world.
 pub(crate) struct System {
@@ -122,6 +122,7 @@ impl System {
         gh_in(
             std::env::var_os("PATH").as_deref(),
             std::env::var_os("ProgramFiles").as_deref(),
+            HOMEBREW_GH,
         )
     }
 
