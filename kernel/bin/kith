@@ -366,8 +366,15 @@ fi
 # resolves, so a user's own agent of the same name is an ordinary one.
 builtin=0; [[ $src_pkg == "$KITH"/agents/* ]] && builtin=1
 if [[ $builtin == 1 && ${1:-} =~ ^(keep|thread)$ ]]; then exec "$KITH/bin/kith-scratch" "$agent" "$@"; fi
-[[ ${1:-} == --backups-json ]] && exec python3 "$KITH/lib/kith_accounts.py" backups-json "$agent" "$src_pkg/agent.md"
-[[ ${1:-} == --accounts-json ]] && exec python3 "$KITH/lib/kith_accounts.py" accounts-json "$agent" "$src_pkg/agent.md"
+# The program answers both when it lists the module (lib/core-switched.txt); else the Python does.
+if [[ ${1:-} == --backups-json ]]; then
+  . "$KITH/lib/kith-core.sh"; kith_core_exec "accounts backups-json" "$agent" "$src_pkg/agent.md" --kernel "$KITH" || true
+  exec python3 "$KITH/lib/kith_accounts.py" backups-json "$agent" "$src_pkg/agent.md"
+fi
+if [[ ${1:-} == --accounts-json ]]; then
+  . "$KITH/lib/kith-core.sh"; kith_core_exec "accounts accounts-json" "$agent" "$src_pkg/agent.md" --kernel "$KITH" || true
+  exec python3 "$KITH/lib/kith_accounts.py" accounts-json "$agent" "$src_pkg/agent.md"
+fi
 # kith AGENT --launch-json: the Rust core assembles the launch when `launch` is switched (lib/core-switched.txt) and a
 # program is here, else the script below does. Before anything is asked of kith-auth, so a "just this once" grant is taken
 # by one side only. The agent exists and is no name of a `kith kernel launch` piece (prompt, settings, mcp).
