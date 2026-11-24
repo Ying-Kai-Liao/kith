@@ -207,9 +207,37 @@ pub fn now() -> f64 {
 }
 
 /// `st_mtime` as a float.
+#[allow(clippy::cast_precision_loss)]
 pub fn mtime(m: &fs::Metadata) -> f64 {
-    use std::os::unix::fs::MetadataExt;
-    m.mtime() as f64 + m.mtime_nsec() as f64 / 1e9
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        m.mtime() as f64 + m.mtime_nsec() as f64 / 1e9
+    }
+    #[cfg(not(unix))]
+    {
+        mtime_ns(m) as f64 / 1e9
+    }
+}
+
+/// `st_mtime_ns`: the modification time as nanoseconds since the epoch (negative before it).
+pub fn mtime_ns(m: &fs::Metadata) -> i128 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        i128::from(m.mtime()) * 1_000_000_000 + i128::from(m.mtime_nsec())
+    }
+    #[cfg(not(unix))]
+    {
+        use std::time::UNIX_EPOCH;
+        match m.modified() {
+            Ok(t) => match t.duration_since(UNIX_EPOCH) {
+                Ok(d) => i128::try_from(d.as_nanos()).unwrap_or(i128::MAX),
+                Err(e) => -i128::try_from(e.duration().as_nanos()).unwrap_or(i128::MAX),
+            },
+            Err(_) => 0,
+        }
+    }
 }
 
 /// A character of Python's `\w` (a letter, a digit or `_`).

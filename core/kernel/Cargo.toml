@@ -35,6 +35,10 @@ serde = { version = "1.0.229", features = ["derive"] }
 # The must-ask judge (launch/judge.rs) ports the guard's regexes; the host links regex 1.x already.
 regex = "1"
 
+# Windows only: the native owner-only access list (the only unsafe Win32 calls live in winsys; this crate stays free of them).
+[target.'cfg(windows)'.dependencies]
+kith-winsys = { path = "../winsys" }
+
 [lints.rust]
 # `deny`, not `forbid`: threads/os.rs allows its kill(2) calls (a process check has no safe std spelling).
 unsafe_code = "deny"

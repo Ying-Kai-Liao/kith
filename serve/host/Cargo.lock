@@ -2203,6 +2203,7 @@ dependencies = [
  "croner",
  "fs2",
  "kith-procstart",
+ "kith-winsys",
  "libc",
  "regex",
  "rusqlite",

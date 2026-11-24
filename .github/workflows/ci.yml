@@ -790,6 +790,7 @@ jobs:
           cargo test --manifest-path host/Cargo.toml -p kith-core --locked
           cargo clippy --manifest-path host/Cargo.toml -p kith-api --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-api --locked
+          cargo clippy --manifest-path host/Cargo.toml -p kith-kernel --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-kernel --locked --no-fail-fast
       # kith-stub (core/stub) joins the same proof once it exists on the branch.
       - name: Stub tests

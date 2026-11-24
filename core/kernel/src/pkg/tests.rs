@@ -204,6 +204,7 @@ fn fingerprint_walks_the_package_the_python_way() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_fetch_folder_is_private() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -212,6 +213,17 @@ fn a_fetch_folder_is_private() {
     assert_eq!(mode, 0o700);
 }
 
+#[cfg(windows)]
+#[test]
+fn a_fetch_folder_is_owner_only() {
+    let d = super::fetch::TempDir::new().unwrap();
+    assert_eq!(
+        kith_winsys::acl::check(&d.0).unwrap(),
+        kith_winsys::acl::Check::OwnerOnly
+    );
+}
+
+#[cfg(unix)]
 #[test]
 fn rmtree_leaves_a_link_alone() {
     let t = Tmp::new();
@@ -234,10 +246,11 @@ fn pids_read_as_python_ints_and_probe_like_os_kill() {
     }
     let t = Tmp::new();
     let me = std::process::id();
+    // a pid of zero names a process group where `kill(2)` has them; Windows has none, so it is nobody's
     let cases = [
         (format!("{me}.a"), true),
-        (" +1.b".to_owned(), true),
-        ("0.c".to_owned(), true),
+        (" +1.b".to_owned(), cfg!(unix)),
+        ("0.c".to_owned(), cfg!(unix)),
         ("999999.d".to_owned(), false),
         ("junk.e".to_owned(), false),
     ];
@@ -349,7 +362,7 @@ fn resolve_snapshots_once_and_follows_edits() {
     assert!(!dir.join("memory").exists());
     assert_eq!(
         fs::read_to_string(dir.join(".home")).unwrap(),
-        format!("{}\n", t.0.join("agents/echo").display())
+        format!("{}\n", t.0.join("agents").join("echo").display())
     );
     let meta: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(dir.join(".meta.json")).unwrap()).unwrap();
@@ -536,7 +549,7 @@ fn the_cli_prints_what_the_python_printed() {
     let dirs: Vec<&str> = out.stdout.lines().collect();
     assert_eq!(dirs.len(), 2);
     assert!(
-        dirs[0].contains("/alpha@") && dirs[1].contains("/echo@"),
+        dirs[0].contains("alpha@") && dirs[1].contains("echo@"),
         "{dirs:?}"
     );
     let out = cli::run(&ctx, &args(&["resolve", "echo", "--json"]));
@@ -554,6 +567,7 @@ fn the_cli_prints_what_the_python_printed() {
     assert_eq!(out.code, 2);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_snapshot_that_throws_runs_the_live_folder() {
     let t = Tmp::new();
@@ -575,4 +589,59 @@ fn a_snapshot_that_throws_runs_the_live_folder() {
             live.join("gone.md").display()
         )
     );
+}
+
+/// The copy `cp -R -p` makes where there is no `cp`: folders, files and their times.
+#[test]
+fn copy_all_copies_a_tree_with_its_times() {
+    let t = Tmp::new();
+    t.put("src/a.txt", "a");
+    t.put("src/sub/deep/b.txt", "b");
+    fs::create_dir_all(t.0.join("src/empty")).unwrap();
+    set_mtime(&t.0.join("src/a.txt"), 1_577_836_800, 0);
+    super::store::copy_all(&t.0.join("src"), &t.0.join("dst")).unwrap();
+    assert_eq!(fs::read_to_string(t.0.join("dst/a.txt")).unwrap(), "a");
+    assert_eq!(
+        fs::read_to_string(t.0.join("dst/sub/deep/b.txt")).unwrap(),
+        "b"
+    );
+    assert!(t.0.join("dst/empty").is_dir());
+    let at = fs::metadata(t.0.join("dst/a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(at, UNIX_EPOCH + Duration::new(1_577_836_800, 0));
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_all_refuses_a_link() {
+    let t = Tmp::new();
+    t.put("src/a.txt", "a");
+    std::os::unix::fs::symlink("a.txt", t.0.join("src/l")).unwrap();
+    assert!(super::store::copy_all(&t.0.join("src"), &t.0.join("dst")).is_err());
+}
+
+/// Locked snapshot files can still be removed, whatever the system calls read-only.
+#[test]
+fn a_locked_snapshot_can_be_removed() {
+    let t = Tmp::new();
+    t.put("snap/x.txt", "x");
+    t.put("snap/sub/y.txt", "y");
+    super::store::lock_files(&t.0.join("snap")).unwrap();
+    assert!(
+        fs::metadata(t.0.join("snap/sub/y.txt"))
+            .unwrap()
+            .permissions()
+            .readonly()
+    );
+    super::py::rmtree(&t.0.join("snap"));
+    assert!(!t.0.join("snap").exists());
+}
+
+/// Package files are labelled with `/` between names on every system, so one package has one fingerprint.
+#[test]
+fn fingerprint_labels_use_slashes() {
+    let label = super::label_bytes(&Path::new("sub").join("memory").join("keep.md"));
+    assert_eq!(label, b"sub/memory/keep.md");
 }

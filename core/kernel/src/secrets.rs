@@ -19,16 +19,18 @@ use std::fs::{File, OpenOptions};
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::rc::Rc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod cmd;
 mod jobs;
 mod packages;
 pub mod pyjson;
 #[cfg(test)]
 mod tests;
 
+pub use cmd::run_command_with_timeout;
 pub use jobs::{Job, PIECES, effective};
 pub use packages::{
     AgentFacts, Found, PackageSource, Packages, note_disk_read, on_disk_read, read_names,
@@ -173,37 +175,6 @@ pub(crate) fn run_with_timeout(program: &Path, args: &[&str], limit: Duration) -
     let mut cmd = Command::new(program);
     cmd.args(args);
     run_command_with_timeout(cmd, limit)
-}
-
-/// [`run_with_timeout`] for a command the caller has set up (its environment, say): stdin, stdout and stderr are set
-/// here. `None` when it can't start, outlives `limit` (it is killed), or fails.
-pub fn run_command_with_timeout(mut cmd: Command, limit: Duration) -> Option<String> {
-    let mut child = cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
-        let mut s = String::new();
-        let _ = std::io::Read::read_to_string(&mut stdout, &mut s);
-        s
-    });
-    let start = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) if start.elapsed() < limit => std::thread::sleep(Duration::from_millis(5)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    };
-    let out = reader.join().ok()?;
-    status.success().then_some(out)
 }
 
 // --- auth.json: the file protocol -------------------------------------------------------------------------------------
