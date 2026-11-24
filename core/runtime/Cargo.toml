@@ -39,6 +39,11 @@ hmac = "0.12"
 chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc", "zeroize"] }
 zeroize = "1"
 
+# Windows only: the native owner-only access list and the Credential Manager master key (the only unsafe Win32 calls the
+# core needs; kith-core itself stays forbid(unsafe_code)).
+[target.'cfg(windows)'.dependencies]
+kith-winsys = { path = "../winsys" }
+
 [dev-dependencies]
 tempfile = "3"
 # Generated checks of the run socket's rules (the port of the host's runauth_props.rs). Pinned like the host's.
