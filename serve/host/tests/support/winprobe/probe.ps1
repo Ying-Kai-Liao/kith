@@ -55,6 +55,8 @@ $forms = [ordered]@{
   single = "'$ps5' -NoProfile -File 'C:/probe/rec.ps1' 'single'"
   spaced = "`"C:/Program Files/PowerShell/7/pwsh.exe`" -NoProfile -File `"C:/probe/rec.ps1`" `"spaced`""
   bare   = "powershell -NoProfile -File `"C:/probe/rec.ps1`" `"bare`""
+  unqfwd = "$ps5 -NoProfile -File C:/probe/rec.ps1 unqfwd"
+  unqback = "$ps5b -NoProfile -File C:\probe\rec.ps1 unqback"
 }
 # One command that reads differently in bash ($0 -> bash), cmd (%ComSpec% expands) and PowerShell (neither $0 nor
 # %ComSpec% survive the same way), so the file it writes names the shell that ran it.
@@ -182,7 +184,7 @@ function Probe-Install($Install, $Claude, $PathAdd) {
     }
     foreach ($t in $targets) {
       Log "grep failIfUnavailable in $t :"
-      Log ((& 'C:\Program Files\Git\usr\bin\grep.exe' -a -o -m5 -E 'failIfUnavailable.{0,80}' $t 2>&1 | Select-Object -First 5) -join "`n")
+      Log ((& 'C:\Program Files\Git\usr\bin\grep.exe' -a -o -m5 'failIfUnavailable' $t 2>&1 | Select-Object -First 5) -join "`n")
     }
   }
 
@@ -236,3 +238,4 @@ Try-Do 'native locations' {
 Try-Do 'native probe' { Probe-Install 'native' "$localBin\claude.exe" @($localBin) }
 
 Section 'done'
+exit 0
