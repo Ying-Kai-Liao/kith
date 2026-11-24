@@ -22,6 +22,7 @@ mod compat;
 mod core_front;
 mod delegation;
 mod doors;
+mod engine_run;
 mod environment;
 mod hqmem;
 mod hub;
@@ -636,6 +637,21 @@ enum KernelCmd {
         /// Read the params (a JSON object) from stdin; the only way to give them.
         #[arg(long)]
         params_stdin: bool,
+    },
+    /// A non-Claude agent's one-shot over ACP, as `kernel/bin/kith` runs it: the run's prompt, folders and MCP servers come
+    /// in `KITH_RUN_PROMPT`, `KITH_RUN_DIRS` and `KITH_RUN_MCP`; `--output json` prints what `claude -p --output-format json`
+    /// does; one cost row is written. Exit 78 before anything starts: this engine has no ACP one-shot here.
+    EngineRun {
+        engine: String,
+        #[arg(long)]
+        output: Option<String>,
+        /// A session this engine gave out before (`<engine>:<id>`); another engine's starts a new one.
+        #[arg(long)]
+        resume: Option<String>,
+        #[arg(long)]
+        permission_mode: Option<String>,
+        #[arg(last = true)]
+        task: Vec<String>,
     },
     /// One task on one engine over ACP: the answer on stdout (the task after `--`, or on stdin).
     RunOnce {
@@ -1633,6 +1649,11 @@ async fn main() -> Result<()> {
                     runonce::Args { engine, model, cwd, dirs, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
+            if let KernelCmd::EngineRun { engine, output, resume, permission_mode, task } = cmd {
+                let args =
+                    engine_run::Args { engine, json: output.as_deref() == Some("json"), resume, permission_mode, task };
+                std::process::exit(engine_run::run(args).await?);
+            }
             if let KernelCmd::CoreCall { method, params_stdin } = cmd {
                 std::process::exit(core_front::core_call(&method, params_stdin));
             }
@@ -1834,6 +1855,7 @@ async fn main() -> Result<()> {
                     KernelCmd::Launch { what: LaunchCmd::Prompt { .. } | LaunchCmd::Settings { .. } }
                     | KernelCmd::Settings { .. } => unreachable!("refused above"),
                     KernelCmd::RunOnce { .. }
+                    | KernelCmd::EngineRun { .. }
                     | KernelCmd::Attach { .. }
                     | KernelCmd::CoreCall { .. }
                     | KernelCmd::Accounts { .. }

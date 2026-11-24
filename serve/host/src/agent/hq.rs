@@ -1374,11 +1374,18 @@ mod tests {
     #[test]
     fn an_agent_is_runnable_on_claude_and_every_acp_engine_of_the_table() {
         let on = |harness: Option<Harness>| HqAgent { harness, ..Default::default() };
-        for h in [None, Some(Harness::Claude), Some(Harness::Codex), Some(Harness::Gemini), Some(Harness::Agy)] {
+        for h in [
+            None,
+            Some(Harness::Claude),
+            Some(Harness::Codex),
+            Some(Harness::Gemini),
+            Some(Harness::Agy),
+            Some(Harness::Hermes),
+        ] {
             assert!(on(h).runnable(), "{h:?}");
         }
         // No ACP mode, or a word this version doesn't know.
-        for h in [Harness::Hermes, Harness::Dsh, Harness::Unknown] {
+        for h in [Harness::Dsh, Harness::Unknown] {
             assert!(!on(Some(h)).runnable(), "{h:?}");
         }
     }
