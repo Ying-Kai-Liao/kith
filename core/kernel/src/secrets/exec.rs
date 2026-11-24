@@ -54,7 +54,15 @@ fn usage() -> Die {
 /// `kith kernel secrets exec ...`: on Unix it does not return when CMD starts; any `Outcome` is a refusal (or, on Windows,
 /// CMD's end).
 pub(super) fn run(c: &Ctx, args: &[String]) -> R<Outcome> {
-    let env: Env = std::env::vars().collect();
+    // vars() panics on a non-UTF-8 value; the launch itself converts lossily.
+    let env: Env = std::env::vars_os()
+        .map(|(k, v)| {
+            (
+                k.to_string_lossy().into_owned(),
+                v.to_string_lossy().into_owned(),
+            )
+        })
+        .collect();
     let (agent, rest) = take_for(&env, args)?;
     if rest.first().map(String::as_str) == Some("--secret") {
         return Err(Die {

@@ -217,7 +217,14 @@ pub(super) fn run(c: &Ctx, args: &[String]) -> R<super::Outcome> {
             code: 2,
         });
     };
-    let env: Env = std::env::vars().collect();
+    let env: Env = std::env::vars_os()
+        .map(|(k, v)| {
+            (
+                k.to_string_lossy().into_owned(),
+                v.to_string_lossy().into_owned(),
+            )
+        })
+        .collect();
     let made = mcp_config(c, &env, agent, &starter_of(&env))?;
     Ok(super::Outcome {
         stdout: pyjson::dumps(&made.config) + "\n",

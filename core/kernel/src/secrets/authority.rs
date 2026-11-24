@@ -11,7 +11,6 @@
 //! text: it fails closed and never answers from the file.
 
 #[cfg(test)]
-#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
