@@ -246,6 +246,8 @@ fn over(writer: &CoreWriter, mut child: Child, claim: i64, turn: i64, pace: &Pac
 #[path = "core_cron_tests.rs"]
 mod tests;
 
+// Unix-only until windows-owner W2b: built on the Unix-only core_claims fixture.
 #[cfg(test)]
+#[cfg(unix)]
 #[path = "core_cron_retry_tests.rs"]
 mod retry_tests;

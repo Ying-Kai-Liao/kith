@@ -149,7 +149,7 @@ fn failed(what: impl std::fmt::Display) -> std::io::Error {
 
 /// One host row, as the core answered it (or did not). The tests' scripted core stands in here.
 pub(super) fn row_answer(f: &Paths, method: &str, params: &Value) -> Answer {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     if let Some(fake) = tests::fake_for(f) {
         return fake(method, params);
     }

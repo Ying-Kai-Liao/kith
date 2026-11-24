@@ -25,7 +25,9 @@ mod calls;
 mod cards;
 #[cfg(test)]
 mod contract_tests;
+// Unix-only until windows-owner W2b: built on a Unix-only fixture module (see its gate).
 #[cfg(test)]
+#[cfg(unix)]
 mod core_revokes_tests;
 mod delegations;
 pub mod devices;
@@ -81,11 +83,17 @@ mod room_people;
 mod room_people_tests;
 #[cfg(test)]
 mod room_pointer_tests;
+// Unix-only until windows-owner W2b: built on a Unix-only fixture module (see its gate).
 #[cfg(test)]
+#[cfg(unix)]
 mod room_points_props;
+// Unix-only until windows-owner W2b: built on a Unix-only fixture module (see its gate).
 #[cfg(test)]
+#[cfg(unix)]
 mod room_rename_tests;
+// Unix-only until windows-owner W2b: built on a Unix-only fixture module (see its gate).
 #[cfg(test)]
+#[cfg(unix)]
 mod room_secrets_props;
 #[cfg(test)]
 mod room_turn_tests;

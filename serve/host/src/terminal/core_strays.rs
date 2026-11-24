@@ -140,6 +140,8 @@ impl CoreWriter {
 #[cfg(not(test))]
 pub(crate) const EVERY: Duration = Duration::from_secs(60);
 
+// Unix-only until windows-owner W2b: built on the Unix-only core_claims fixture.
 #[cfg(test)]
+#[cfg(unix)]
 #[path = "core_strays_tests.rs"]
 mod tests;
