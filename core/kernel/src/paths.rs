@@ -1,6 +1,12 @@
 //! Where Kith's folders are: a port of `state_dir()` and `paths()` in `kernel/lib/kith_paths.py`, which stays the
 //! source of truth for its own layout rules (read its docstring for the layouts). Pure: the home folder, the
 //! environment and the kernel's folder are arguments, so every layout can be tested in a tempdir.
+//!
+//! Windows layout (decision D1 of `docs/plans/windows-owner.md`): per user, no admin. Programs live in
+//! `%LOCALAPPDATA%\Kith\cli\<version>\` (D2: there is no `cli\current` symlink there, `current` is a one-line text file
+//! naming the version); state is `%USERPROFILE%\.kith` and agents `%USERPROFILE%\kith\agents`, the Mac layout under the
+//! user's profile, so every rule and package placeholder reads the same. Nothing goes in `%APPDATA%`: that would be a second
+//! layout. The home is `$HOME` when set (Git Bash, tests), else `%USERPROFILE%` ([`process_home`]).
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -141,8 +147,36 @@ fn norm(p: &Path) -> PathBuf {
 fn expanduser(home: &Path, s: &str) -> PathBuf {
     match s.strip_prefix('~') {
         Some("") => norm(home),
-        Some(rest) if rest.starts_with('/') => norm(&home.join(rest.trim_start_matches('/'))),
+        Some(rest) if tilde_rest(rest, cfg!(windows)) => {
+            norm(&home.join(rest.trim_start_matches(seps(cfg!(windows)))))
+        }
         _ => norm(Path::new(s)),
+    }
+}
+
+/// The separators that follow a `~`: `/`, and on Windows `\` too (`~\agents`).
+fn seps(windows: bool) -> &'static [char] {
+    if windows { &['/', '\\'] } else { &['/'] }
+}
+
+/// Whether what follows a `~` starts a path below the home (so `~name` stays another user's).
+fn tilde_rest(rest: &str, windows: bool) -> bool {
+    rest.starts_with(seps(windows))
+}
+
+/// A path as `std::fs::canonicalize` returns it on Windows, without its `\\?\` verbatim prefix: `\\?\C:\x` is `C:\x`
+/// and `\\?\UNC\srv\share` is `\\srv\share`. Anything else is returned as it came.
+pub fn strip_verbatim(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        let mut chars = rest.chars();
+        match (chars.next(), chars.next()) {
+            (Some(d), Some(':')) if d.is_ascii_alphabetic() => rest.to_owned(),
+            _ => s.to_owned(),
+        }
+    } else {
+        s.to_owned()
     }
 }
 
@@ -157,20 +191,53 @@ pub fn realpath_strict(p: &Path) -> Option<PathBuf> {
     resolve(p, true)
 }
 
+/// One step of a path being resolved: a drive or share prefix, the root, or a name.
+enum Piece {
+    Prefix(OsString),
+    Root,
+    Name(OsString),
+}
+
+fn pieces(p: &Path) -> impl DoubleEndedIterator<Item = Piece> + '_ {
+    p.components().map(|c| match c {
+        Component::Prefix(x) => Piece::Prefix(x.as_os_str().to_owned()),
+        Component::RootDir => Piece::Root,
+        other => Piece::Name(other.as_os_str().to_owned()),
+    })
+}
+
+/// The root of a path being built: its prefix (a drive, on Windows) and the root slash.
+fn root_of(out: &Path) -> PathBuf {
+    let mut root: PathBuf = out
+        .components()
+        .take_while(|c| matches!(c, Component::Prefix(_)))
+        .collect();
+    root.push(Component::RootDir);
+    root
+}
+
 fn resolve(p: &Path, strict: bool) -> Option<PathBuf> {
     let abs = if p.is_absolute() {
         p.to_path_buf()
     } else {
         std::env::current_dir().unwrap_or_default().join(p)
     };
-    let mut pending: VecDeque<OsString> =
-        abs.components().map(|c| c.as_os_str().to_owned()).collect();
+    let mut pending: VecDeque<Piece> = pieces(&abs).collect();
     let mut out = PathBuf::new();
     let mut hops = 0;
     while let Some(c) = pending.pop_front() {
-        if c == "/" {
-            out = PathBuf::from("/");
-        } else if c == "." {
+        let c = match c {
+            Piece::Prefix(x) => {
+                out = PathBuf::from(x);
+                continue;
+            }
+            Piece::Root => {
+                out = root_of(&out);
+                continue;
+            }
+            Piece::Name(c) => c,
+        };
+        if c == "." {
             // stays where it is
         } else if c == ".." {
             out.pop();
@@ -181,19 +248,19 @@ fn resolve(p: &Path, strict: bool) -> Option<PathBuf> {
                 Ok(target) if hops < 40 => {
                     hops += 1;
                     if target.is_absolute() {
-                        out = PathBuf::from("/");
+                        out = PathBuf::new();
                     }
-                    for part in target
-                        .components()
-                        .rev()
-                        .filter(|p| *p != Component::RootDir)
-                    {
-                        pending.push_front(part.as_os_str().to_owned());
+                    for part in pieces(&target).rev() {
+                        pending.push_front(part);
                     }
                 }
                 _ => out = next,
             }
         }
+    }
+    if cfg!(windows) {
+        // read_link hands back `\\?\C:\...`; the rest of Kith compares and shows plain `C:\...`.
+        return Some(PathBuf::from(strip_verbatim(&out.to_string_lossy())));
     }
     Some(out)
 }
@@ -320,16 +387,37 @@ pub fn process_env(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-/// `$HOME` (Python's `Path.home()`); empty when it is not set.
-pub fn process_home() -> PathBuf {
-    std::env::var_os("HOME")
-        .filter(|h| !h.is_empty())
+/// The home folder from the two variables, `HOME` first: Git Bash and the tests set it, and it must win there. Windows
+/// falls back to `USERPROFILE` (a cmd or service process has no `HOME`); a OneDrive-redirected profile is just another
+/// `USERPROFILE` (only an absolute one: never a relative folder). Empty when neither says, which callers that build folders must refuse ([`known_home`]).
+fn home_from(home: Option<OsString>, profile: Option<OsString>, windows: bool) -> PathBuf {
+    home.filter(|h| !h.is_empty())
+        .or_else(|| profile.filter(|h| windows && win_absolute(&h.to_string_lossy())))
         .map(PathBuf::from)
         .unwrap_or_default()
 }
 
-/// The process's home when it can be known: `$HOME`, else the password database's home (`$HOME` is unset under some
-/// launchers). `None` when neither says: a caller that needs a folder under it must refuse, never use a relative path.
+/// A Windows absolute path by its spelling (`C:\x`, `C:/x`, `\\srv\share`), so it can be told apart on every platform.
+fn win_absolute(s: &str) -> bool {
+    let b = s.as_bytes();
+    s.starts_with(r"\\")
+        || (b.len() >= 3
+            && b[0].is_ascii_alphabetic()
+            && b[1] == b':'
+            && matches!(b[2], b'\\' | b'/'))
+}
+
+/// `$HOME` (Python's `Path.home()`), on Windows else `%USERPROFILE%`; empty when neither is set.
+pub fn process_home() -> PathBuf {
+    home_from(
+        std::env::var_os("HOME"),
+        std::env::var_os("USERPROFILE"),
+        cfg!(windows),
+    )
+}
+
+/// The process's home when it can be known: [`process_home`], else the password database's home (`$HOME` is unset under
+/// some launchers). `None` when neither says: a caller that needs a folder under it must refuse, never use a relative path.
 pub fn known_home() -> Option<PathBuf> {
     let home = process_home();
     if !home.as_os_str().is_empty() {
@@ -338,9 +426,7 @@ pub fn known_home() -> Option<PathBuf> {
     #[cfg(unix)]
     return crate::threads::os::passwd_home().filter(|h| h.is_absolute());
     #[cfg(not(unix))]
-    std::env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .filter(|h| h.is_absolute())
+    None
 }
 
 /// `paths` for this process: its `$HOME` and environment, and the given kernel folder.
@@ -351,3 +437,5 @@ pub fn from_process(kernel: &Path) -> Paths {
 // The tests build POSIX layouts and symlinks; the Windows job runs the rest of the crate.
 #[cfg(all(test, unix))]
 mod tests;
+#[cfg(test)]
+mod win_tests;
