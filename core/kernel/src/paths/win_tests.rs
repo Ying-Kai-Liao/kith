@@ -16,6 +16,8 @@ fn home_prefers_home_then_userprofile_on_windows_only() {
     assert_eq!(home_from(os(""), os("C:\\Users\\k"), true), PathBuf::from("C:\\Users\\k"));
     assert_eq!(home_from(None, os("C:\\Users\\k"), false), PathBuf::new());
     assert_eq!(home_from(None, None, true), PathBuf::new());
+    assert_eq!(home_from(None, os("Users\\k"), true), PathBuf::new(), "a relative profile is refused");
+    assert_eq!(home_from(None, os("C:/Users/k"), true), PathBuf::from("C:/Users/k"));
 }
 
 #[test]

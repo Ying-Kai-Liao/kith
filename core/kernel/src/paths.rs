@@ -393,12 +393,18 @@ pub fn process_env(name: &str) -> Option<String> {
 
 /// The home folder from the two variables, `HOME` first: Git Bash and the tests set it, and it must win there. Windows
 /// falls back to `USERPROFILE` (a cmd or service process has no `HOME`); a OneDrive-redirected profile is just another
-/// `USERPROFILE`. Empty when neither says, which callers that build folders must refuse ([`known_home`]).
+/// `USERPROFILE` (only an absolute one: never a relative folder). Empty when neither says, which callers that build folders must refuse ([`known_home`]).
 fn home_from(home: Option<OsString>, profile: Option<OsString>, windows: bool) -> PathBuf {
     home.filter(|h| !h.is_empty())
-        .or_else(|| profile.filter(|h| windows && !h.is_empty()))
+        .or_else(|| profile.filter(|h| windows && win_absolute(&h.to_string_lossy())))
         .map(PathBuf::from)
         .unwrap_or_default()
+}
+
+/// A Windows absolute path by its spelling (`C:\x`, `C:/x`, `\\srv\share`), so it can be told apart on every platform.
+fn win_absolute(s: &str) -> bool {
+    let b = s.as_bytes();
+    s.starts_with(r"\\") || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/'))
 }
 
 /// `$HOME` (Python's `Path.home()`), on Windows else `%USERPROFILE%`; empty when neither is set.
