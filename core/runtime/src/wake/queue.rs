@@ -351,8 +351,8 @@ pub(crate) fn probe(out: &dyn Outside, tr: &dyn Transcripts, t: &Turn) -> Probe 
 
 /// Restart / `HostBack`: a turn whose holder is gone either reached the session (its marker is in the transcript: answered,
 /// so it is not delivered twice) or did not (owed again). A session whose writer is still live is left alone: the turn may
-/// still be running in a claude the dead holder started. A turn with no holder pid is a tick's run: its turn in the
-/// conversations lane is the holder, and `tick` settles it (R4).
+/// still be running in a claude the dead holder started. A run with a turn and no holder pid is a tick's run (listed in
+/// `st.linked`): its turn in the conversations lane is the holder, and `tick` settles it (R4).
 pub(crate) fn recover(
     st: &mut State,
     out: &dyn Outside,
@@ -363,7 +363,8 @@ pub(crate) fn recover(
     let Some(t) = st.items.get(session).and_then(|it| it.turn.clone()) else {
         return;
     };
-    if t.pid.is_none() {
+    // A tick's run has no holder pid and a turn; `tick` settles it (R4). An unlinked run with no pid is a dead holder.
+    if t.pid.is_none() && st.linked.contains(&t.run) {
         return;
     }
     let p = probe(out, tr, &t);
@@ -375,7 +376,7 @@ pub(crate) fn recover_probed(st: &mut State, session: &str, run: &str, p: &Probe
     let Some(t) = st.items.get(session).and_then(|it| it.turn.clone()) else {
         return;
     };
-    if t.run != run || t.pid.is_none() || p.alive {
+    if t.run != run || p.alive {
         return;
     }
     if t.sid.is_some() {

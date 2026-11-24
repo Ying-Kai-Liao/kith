@@ -148,8 +148,8 @@ fn start_with_in(
         )?,
     };
     tx.execute(
-        "INSERT OR IGNORE INTO wake_turns (run, session, turn_id) VALUES (?1, ?2, ?3)",
-        rusqlite::params![run, session, id],
+        "INSERT OR IGNORE INTO wake_turns (run, session, turn_id, revoke_seen) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![run, session, id, claims::revoke_epoch_in(tx, person)?],
     )?;
     // The claim files are the writers until the switch (the Python's `writer_live`); the claim rows are what the core knows.
     let writer = sid.filter(|s| !s.is_empty()).unwrap_or(session);
@@ -238,11 +238,36 @@ pub(crate) fn stop_unstarted_in(
     let Some(turn) = linked_turn_in(tx, &run)? else {
         return Ok(());
     };
-    if claims::cancel_waiting_in(tx, &[turn], "stopped", ms(now))?.is_empty() {
+    // A turn that is already cancelled and never ran (a revoke cancelled it, or the claim was refused) is as unstarted as a
+    // waiting one: the run goes back all the same.
+    if claims::cancel_waiting_in(tx, &[turn], "stopped", ms(now))?.is_empty()
+        && !cancelled_unran_in(tx, turn)?
+    {
         return Ok(());
     }
     super::queue::unrun(st, session);
     Ok(())
+}
+
+/// The turn is `cancelled` or `expired`, and no claim of it ever ran or still holds the conversation.
+fn cancelled_unran_in(tx: &rusqlite::Connection, turn: i64) -> Result<bool> {
+    Ok(tx.query_row(
+        "SELECT state IN ('cancelled', 'expired') AND NOT EXISTS
+                (SELECT 1 FROM claims k WHERE k.turn = turns.id
+                   AND (k.running_at IS NOT NULL OR k.state IN ('claimed', 'running', 'ending')))
+         FROM turns WHERE id = ?1",
+        [turn],
+        |r| r.get(0),
+    )?)
+}
+
+/// The runs that have a turn.
+pub(crate) fn linked_runs_in(
+    tx: &rusqlite::Connection,
+) -> Result<std::collections::BTreeSet<String>> {
+    let mut st = tx.prepare("SELECT run FROM wake_turns")?;
+    let rows = st.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<std::result::Result<_, _>>()?)
 }
 
 /// A Stop of `session` (`wake.withdraw`): [`stop_unstarted_in`], then the withdrawal. Answers how many went.

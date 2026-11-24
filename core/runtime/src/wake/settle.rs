@@ -7,11 +7,11 @@
 //! the fence), and a run that never reached its session is given back, whatever fenced it, only when nothing was sent.
 //!
 //! 1. the turn is `done`: answered.
-//! 2. redeemed (its claim ran) and the session has no transcript to read (a channel thread, another engine): answered (the
+//! 2. redeemed (any claim of the turn ever ran: the rule of `redeemedBefore`) and the session has no transcript to read (a channel thread, another engine): answered (the
 //!    prompt may have gone; it is never sent twice).
 //! 3. redeemed, a Claude session, and the run's `[kith wake RUN]` marker is in the transcript read when the turn was seen
 //!    final: answered (`recovered`).
-//! 4. the conversation is fenced (a stopped or ended ask) or the claim was revoked: withdrawn.
+//! 4. the conversation is fenced (a stopped or ended ask) or the person was revoked since the turn was queued (their revoke epoch moved): withdrawn.
 //! 5. redeemed, no marker: given back, a failed try.
 //! 6. never redeemed: given back; not a failed try when a terminal or another writer holds the conversation (the claim was
 //!    refused as held), a failed try otherwise. After five failed tries the requests end `failed`.
@@ -33,21 +33,26 @@ pub(crate) struct Linked {
     pub turn: i64,
     pub state: String,
     pub conversation: String,
-    /// The turn's claim ran (it was redeemed or attached): the prompt may have reached the engine.
+    /// Any claim of the turn ran (it was redeemed or attached), as `redeemedBefore` says; `turns.claim_id` is cleared by a requeue: the prompt may have reached the engine.
     pub redeemed: bool,
-    /// Why the turn's claim ended, when it did.
-    pub end_reason: Option<String>,
+    /// The state of the turn's claim, when it still has one: a turn cancelled by a stop or a revoke keeps a claim that is
+    /// `ending` while its engine runs on.
+    pub claim_state: Option<String>,
+    /// The turn's person, and their revoke epoch when the turn was queued (none for a link older than the column).
+    pub person: String,
+    pub revoke_seen: Option<i64>,
     /// The Claude session whose transcript holds the marker; none for a conversation with no transcript to read.
     pub sid: Option<String>,
 }
 
 impl Linked {
-    /// The turn is over and will not change: its claim's group is gone.
+    /// The turn is over and will not change: its state is final and its claim, if it has one, is `ended` (its group is
+    /// gone, so the transcript will not grow). A cancelled turn whose claim is `ending` is still being delivered.
     pub(crate) fn is_final(&self) -> bool {
         matches!(
             self.state.as_str(),
             "done" | "failed" | "cancelled" | "expired"
-        )
+        ) && self.claim_state.as_deref().is_none_or(|s| s == "ended")
     }
 
     /// Whether the marker is worth reading: the prompt may have gone, the turn did not end `done`, and there is a transcript.
@@ -61,29 +66,42 @@ pub(crate) fn linked_in(tx: &Connection, session: &str, t: &Turn) -> Result<Opti
     let Some(turn) = turns::linked_turn_in(tx, &t.run)? else {
         return Ok(None);
     };
+    // A link whose turn row is gone is a broken record, not an unlinked run (which would take the old rule).
     let row = tx
         .query_row(
-            "SELECT t.state, t.conversation, COALESCE(c.running_at IS NOT NULL, 0), c.end_reason
-             FROM turns t LEFT JOIN claims c ON c.claim_id = t.claim_id WHERE t.id = ?1",
-            [turn],
+            "SELECT t.state, t.conversation, t.person, c.state, w.revoke_seen,
+                    EXISTS (SELECT 1 FROM claims k WHERE k.turn = t.id AND k.running_at IS NOT NULL)
+             FROM wake_turns w JOIN turns t ON t.id = w.turn_id
+             LEFT JOIN claims c ON c.claim_id = t.claim_id WHERE w.run = ?1",
+            [&t.run],
             |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
-                    r.get::<_, bool>(2)?,
+                    r.get::<_, String>(2)?,
                     r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<i64>>(4)?,
+                    r.get::<_, bool>(5)?,
                 ))
             },
         )
         .optional()?;
-    Ok(row.map(|(state, conversation, redeemed, end_reason)| Linked {
+    let Some((state, conversation, person, claim_state, revoke_seen, redeemed)) = row else {
+        return Err(crate::error::Error::Refused(format!(
+            "wake: run {} is linked to turn {turn}, which is not in the conversations lane",
+            t.run
+        )));
+    };
+    Ok(Some(Linked {
         run: t.run.clone(),
         session: session.to_owned(),
         turn,
         state,
         conversation,
         redeemed,
-        end_reason,
+        claim_state,
+        person,
+        revoke_seen,
         sid: t.sid.clone(),
     }))
 }
@@ -108,7 +126,9 @@ pub(crate) enum Verdict {
     Recovered,
     Withdrawn,
     /// Owed again; `try_` says whether it counts as a failed try.
-    Back { try_: bool },
+    Back {
+        try_: bool,
+    },
 }
 
 /// The facts R4 decides from.
@@ -153,8 +173,12 @@ pub(crate) fn settle_in(
         redeemed: run.redeemed,
         transcript: run.sid.is_some(),
         marker,
+        // The person was revoked since the turn was queued: `revoke_person` cancels their waiting turns with no claim, so the
+        // claim cannot say it.
         fenced: claims::stopped_in(tx, run.turn)?.is_some()
-            || run.end_reason.as_deref() == Some("revoked"),
+            || run.revoke_seen.is_some_and(|seen| {
+                claims::revoke_epoch_in(tx, &run.person).is_ok_and(|now| now != seen)
+            }),
         held: claims::person_writer_live_in(tx, &run.conversation)?,
     };
     let verdict = decide(&facts);

@@ -80,7 +80,10 @@ pub(crate) fn random_id() -> String {
 /// Where `gh` is: on `path` (as `gh`, or `gh.exe` on Windows), else where the installers put it (Homebrew's two folders, and
 /// `%ProgramFiles%\GitHub CLI` on Windows; the host's PATH is launchd's or a service's, which is short). `gh` itself when
 /// it is nowhere, so the spawn fails and the waiter waits.
-pub(super) fn gh_in(path:Option<&std::ffi::OsStr>, program_files: Option<&std::ffi::OsStr>) -> PathBuf {
+pub(super) fn gh_in(
+    path: Option<&std::ffi::OsStr>,
+    program_files: Option<&std::ffi::OsStr>,
+) -> PathBuf {
     let names: &[&str] = if cfg!(windows) {
         &["gh.exe", "gh"]
     } else {

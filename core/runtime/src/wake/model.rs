@@ -109,6 +109,9 @@ pub(crate) struct State {
     pub items: BTreeMap<String, Item>,
     pub answered: BTreeMap<String, Answered>,
     pub waiters: BTreeMap<String, Waiter>,
+    /// The runs that have a turn in the conversations lane (`wake_turns`). Not stored here: a caller that recovers dead holders
+    /// fills it first, so a run with no holder pid is told from a tick's run (its turn is its holder) and from an imported one.
+    pub linked: std::collections::BTreeSet<String>,
 }
 
 /// The Python names an item's file after the hash of its session and lists them in file-name order.

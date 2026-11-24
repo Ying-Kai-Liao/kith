@@ -103,7 +103,10 @@ impl Outside for Out {
         *self.0.now.lock().unwrap()
     }
     fn new_id(&self) -> String {
-        format!("{:012x}", 0xabc0_0000_0000_u64 + self.0.seq.fetch_add(1, Ordering::SeqCst))
+        format!(
+            "{:012x}",
+            0xabc0_0000_0000_u64 + self.0.seq.fetch_add(1, Ordering::SeqCst)
+        )
     }
     fn alive(&self, pid: i64, started: Option<&str>) -> bool {
         self.0.probe();
@@ -228,7 +231,11 @@ impl Rig {
     /// One tick, and the check that none of its probes ran under the core lock.
     fn tick(&self) -> Value {
         let v = self.host("wake.tick", &json!({}));
-        assert_eq!(self.f.under_lock.load(Ordering::SeqCst), 0, "a probe ran under the core lock");
+        assert_eq!(
+            self.f.under_lock.load(Ordering::SeqCst),
+            0,
+            "a probe ran under the core lock"
+        );
         v
     }
 
@@ -237,7 +244,8 @@ impl Rig {
     }
 
     fn enqueue_for(&self, session: &str, id: &str, door: &str, person: Option<&str>) {
-        let mut p = json!({"session": session, "id": id, "agent": "echo", "door": door, "text": ["hi"]});
+        let mut p =
+            json!({"session": session, "id": id, "agent": "echo", "door": door, "text": ["hi"]});
         if let Some(who) = person {
             p["person"] = json!(who);
         }
@@ -270,7 +278,10 @@ impl Rig {
 
     /// The run in flight for `session` and the turn that carries it.
     fn run_of(&self, session: &str) -> (String, i64) {
-        let run: String = self.sql("SELECT turn_run FROM wake_sessions WHERE session = ?1", session);
+        let run: String = self.sql(
+            "SELECT turn_run FROM wake_sessions WHERE session = ?1",
+            session,
+        );
         let turn: i64 = self.sql("SELECT turn_id FROM wake_turns WHERE run = ?1", &run);
         (run, turn)
     }
@@ -280,7 +291,10 @@ impl Rig {
     }
 
     fn tries(&self, session: &str) -> i64 {
-        self.sql("SELECT tries FROM wake_sessions WHERE session = ?1", session)
+        self.sql(
+            "SELECT tries FROM wake_sessions WHERE session = ?1",
+            session,
+        )
     }
 
     fn turns_of(&self, session: &str) -> i64 {
@@ -297,9 +311,12 @@ impl Rig {
             &json!({"conversation": session, "kind": "wakeRun", "turn": turn, "person": person,
                     "revokeSeen": 0, "holderInstance": HOST}),
         );
-        let claim = claimed["claimId"].as_i64().unwrap_or_else(|| panic!("{claimed}"));
+        let claim = claimed["claimId"]
+            .as_i64()
+            .unwrap_or_else(|| panic!("{claimed}"));
         let pid = std::process::id();
-        let started = kith_kernel::procstart::start_stamp(pid).expect("the test process has a start stamp");
+        let started =
+            kith_kernel::procstart::start_stamp(pid).expect("the test process has a start stamp");
         let said = self
             .d
             .shared()
@@ -378,7 +395,11 @@ fn the_tick_is_the_hosts_and_released_the_owners_and_both_check_their_params() {
         Err(Error::BadParams(_))
     ));
     assert!(matches!(
-        r.call(Principal::Owner, "wake.released", &json!({"session": "s", "x": 1})),
+        r.call(
+            Principal::Owner,
+            "wake.released",
+            &json!({"session": "s", "x": 1})
+        ),
         Err(Error::BadParams(_))
     ));
     // The wake rows served inside one `with_core` keep working.
@@ -400,7 +421,10 @@ fn a_tick_takes_what_is_owed_as_one_run_and_one_turn_and_a_second_tick_adds_none
     assert_eq!(r.turn_state(turn), "queued");
     assert_eq!(r.state_of("r1"), "running");
     assert_eq!(r.state_of("r2"), "running");
-    assert_eq!(r.owner("wake.queueStatus", &json!({"id": "r1"}))["run"], run);
+    assert_eq!(
+        r.owner("wake.queueStatus", &json!({"id": "r1"}))["run"],
+        run
+    );
     // Nothing a repeat could make: the run is its own holder, with no pid.
     let again = r.tick();
     assert_eq!(again["taken"], json!([]), "{again}");
@@ -433,7 +457,10 @@ fn a_session_a_terminal_holds_gets_its_turn_parked_without_reading_a_claim_file(
     let (_, turn) = r.run_of("s1");
     assert_eq!(r.turn_state(turn), "parked");
     assert_eq!(
-        r.sql::<String>("SELECT parked_reason FROM turns WHERE id = ?1", &turn.to_string()),
+        r.sql::<String>(
+            "SELECT parked_reason FROM turns WHERE id = ?1",
+            &turn.to_string()
+        ),
         "terminal_live"
     );
     // The terminal lets go and the next tick wakes it (the backstop of `wake.released`).
@@ -451,14 +478,21 @@ fn r4_a_done_turn_answers_the_run() {
     let (run, turn) = r.ran("s1", "r1", "run", "done");
     assert_eq!(r.turn_state(turn), "done");
     let v = r.tick();
-    assert_eq!(v["settled"], json!([{"run": run, "how": "answered"}]), "{v}");
+    assert_eq!(
+        v["settled"],
+        json!([{"run": run, "how": "answered"}]),
+        "{v}"
+    );
     assert_eq!(r.state_of("r1"), "answered");
     // The run is gone from the queue, and its link with it.
     assert_eq!(
         r.sql::<i64>("SELECT count(*) FROM wake_turns WHERE run = ?1", &run),
         0
     );
-    assert!(r.f.marker_reads.lock().unwrap().is_empty(), "a done turn needs no transcript");
+    assert!(
+        r.f.marker_reads.lock().unwrap().is_empty(),
+        "a done turn needs no transcript"
+    );
 }
 
 #[test]
@@ -468,7 +502,11 @@ fn r4_redeemed_with_no_transcript_to_read_is_answered_and_never_sent_twice() {
     let (run, turn) = r.ran("acp:chat:thread", "r1", "host", "exit");
     assert_eq!(r.turn_state(turn), "failed");
     let v = r.tick();
-    assert_eq!(v["settled"], json!([{"run": run, "how": "answered"}]), "{v}");
+    assert_eq!(
+        v["settled"],
+        json!([{"run": run, "how": "answered"}]),
+        "{v}"
+    );
     assert_eq!(r.state_of("r1"), "answered");
     assert!(r.f.marker_reads.lock().unwrap().is_empty());
 }
@@ -479,7 +517,11 @@ fn r4_redeemed_with_its_marker_in_the_transcript_is_recovered() {
     let (run, _) = r.ran("s1", "r1", "run", "exit");
     r.f.see_marker("s1", &run);
     let v = r.tick();
-    assert_eq!(v["settled"], json!([{"run": run, "how": "recovered"}]), "{v}");
+    assert_eq!(
+        v["settled"],
+        json!([{"run": run, "how": "recovered"}]),
+        "{v}"
+    );
     assert_eq!(r.state_of("r1"), "recovered");
 }
 
@@ -502,7 +544,11 @@ fn r4_a_fenced_conversation_is_withdrawn_not_failed_and_not_tried() {
     assert_eq!(refused["refused"], "stopped", "{refused}");
     assert_eq!(r.turn_state(turn), "cancelled");
     let v = r.tick();
-    assert_eq!(v["settled"], json!([{"run": run, "how": "withdrawn"}]), "{v}");
+    assert_eq!(
+        v["settled"],
+        json!([{"run": run, "how": "withdrawn"}]),
+        "{v}"
+    );
     assert_eq!(r.state_of("r1"), "withdrawn");
 }
 
@@ -516,7 +562,11 @@ fn r4_the_marker_is_looked_at_before_the_fence_so_a_delivered_request_is_never_w
     );
     r.f.see_marker("s1", &run);
     let v = r.tick();
-    assert_eq!(v["settled"], json!([{"run": run, "how": "recovered"}]), "{v}");
+    assert_eq!(
+        v["settled"],
+        json!([{"run": run, "how": "recovered"}]),
+        "{v}"
+    );
 }
 
 #[test]
@@ -550,7 +600,11 @@ fn r4_a_revoked_claim_with_no_marker_is_withdrawn_not_given_back() {
     assert_eq!(r.turn_state(turn), "cancelled");
     let _ = claim;
     let v = r.tick();
-    assert_eq!(v["settled"], json!([{"run": run, "how": "withdrawn"}]), "{v}");
+    assert_eq!(
+        v["settled"],
+        json!([{"run": run, "how": "withdrawn"}]),
+        "{v}"
+    );
     assert_eq!(r.state_of("r1"), "withdrawn");
 }
 
@@ -561,13 +615,19 @@ fn r4_never_redeemed_and_held_is_given_back_without_a_try() {
     r.tick();
     let (run, turn) = r.run_of("s1");
     // The turn was refused as held and cancelled; a terminal has the conversation.
-    r.exec("UPDATE turns SET state = 'cancelled', finished_at = 1 WHERE id = ?1", &turn.to_string());
+    r.exec(
+        "UPDATE turns SET state = 'cancelled', finished_at = 1 WHERE id = ?1",
+        &turn.to_string(),
+    );
     r.terminal("s1");
     let v = r.tick();
     assert_eq!(v["settled"], json!([{"run": run, "how": "back"}]), "{v}");
     assert_eq!(r.tries("s1"), 0);
     assert_eq!(r.state_of("r1"), "queued");
-    assert!(r.f.marker_reads.lock().unwrap().is_empty(), "never redeemed: nothing to look for");
+    assert!(
+        r.f.marker_reads.lock().unwrap().is_empty(),
+        "never redeemed: nothing to look for"
+    );
 }
 
 #[test]
@@ -578,10 +638,17 @@ fn r4_never_redeemed_and_not_held_is_a_failed_try_and_five_end_failed() {
         let v = r.tick();
         assert_eq!(v["taken"].as_array().unwrap().len(), 1, "try {n}: {v}");
         let (run, turn) = r.run_of("s1");
-        r.exec("UPDATE turns SET state = 'cancelled', finished_at = 1 WHERE id = ?1", &turn.to_string());
+        r.exec(
+            "UPDATE turns SET state = 'cancelled', finished_at = 1 WHERE id = ?1",
+            &turn.to_string(),
+        );
         let v = r.tick();
         if n < 5 {
-            assert_eq!(v["settled"], json!([{"run": run, "how": "tried"}]), "try {n}: {v}");
+            assert_eq!(
+                v["settled"],
+                json!([{"run": run, "how": "tried"}]),
+                "try {n}: {v}"
+            );
             assert_eq!(r.tries("s1"), n);
             assert_eq!(r.state_of("r1"), "queued");
             // Not offered again before its pause.
@@ -610,6 +677,102 @@ fn r4_a_run_with_no_turn_link_keeps_the_old_rule() {
     assert_eq!(r.state_of("r1"), "recovered");
 }
 
+#[test]
+fn r4_a_revoke_that_cancelled_a_turn_with_no_claim_ends_withdrawn_with_one_turn() {
+    for stop_first in [true, false] {
+        let r = rig();
+        r.enqueue_for("s1", "r1", "host", Some("ann"));
+        r.tick();
+        let (_, turn) = r.run_of("s1");
+        // `revoke_person` cancels the waiting turn and writes no end reason; the host's withdrawPerson comes after.
+        r.d.shared()
+            .with_core(|c| claims::revoke_person(c, "ann", ms()))
+            .unwrap();
+        assert_eq!(r.turn_state(turn), "cancelled");
+        if stop_first {
+            let said = r.owner("wake.withdrawPerson", &json!({"persons": ["ann"]}));
+            assert_eq!(said["count"], 1, "{said}");
+        }
+        let v = r.tick();
+        assert_eq!(v["taken"], json!([]), "{v}");
+        assert_eq!(
+            r.state_of("r1"),
+            "withdrawn",
+            "stop first: {stop_first}: {v}"
+        );
+        assert_eq!(r.turns_of("s1"), 1);
+        assert_eq!(r.tries("s1"), 0);
+    }
+}
+
+#[test]
+fn a_turn_cancelled_with_its_claim_still_ending_is_settled_only_once_the_claim_ended() {
+    let r = rig();
+    r.enqueue_for("s1", "r1", "host", Some("ann"));
+    r.tick();
+    let (run, turn) = r.run_of("s1");
+    r.start("s1", turn, "ann");
+    r.d.shared()
+        .with_core(|c| claims::revoke_person(c, "ann", ms()))
+        .unwrap();
+    assert_eq!(r.turn_state(turn), "cancelled");
+    r.f.see_marker("s1", &run);
+    // The engine still runs: nothing is read and nothing settled.
+    let v = r.tick();
+    assert_eq!(v["settled"], json!([]), "{v}");
+    assert!(r.f.marker_reads.lock().unwrap().is_empty());
+    assert_eq!(r.state_of("r1"), "running");
+    r.d.shared()
+        .with_core(|c| claims::end_gone(c, &Gone, ms()))
+        .unwrap();
+    let v = r.tick();
+    assert_eq!(
+        v["settled"],
+        json!([{"run": run, "how": "recovered"}]),
+        "{v}"
+    );
+}
+
+#[test]
+fn a_turn_that_ran_before_its_claim_was_cleared_still_counts_as_redeemed() {
+    let r = rig();
+    let (run, turn) = r.ran("s1", "r1", "run", "exit");
+    // A requeue or a busy park clears `turns.claim_id`; a later cancel leaves a turn with no claim that once ran.
+    r.exec(
+        "UPDATE turns SET state = 'cancelled', claim_id = NULL WHERE id = ?1",
+        &turn.to_string(),
+    );
+    r.f.see_marker("s1", &run);
+    let v = r.tick();
+    assert_eq!(
+        v["settled"],
+        json!([{"run": run, "how": "recovered"}]),
+        "{v}"
+    );
+}
+
+#[test]
+fn a_run_with_no_link_and_no_holder_pid_is_a_dead_holder_and_a_link_without_a_turn_is_an_error() {
+    let r = rig();
+    r.enqueue("s1", "r1", "host");
+    let taken = r.owner("wake.take", &json!({"holder": 424_242, "session": "s1"}));
+    let run = taken["turn"]["run"].as_str().unwrap().to_owned();
+    r.exec(
+        "UPDATE wake_sessions SET turn_pid = NULL WHERE session = ?1",
+        "s1",
+    );
+    // The link points at a turn that is not there: refused, not read as an unlinked run.
+    r.exec("DELETE FROM turns WHERE conversation = ?1", "s1");
+    assert!(matches!(
+        r.call(Principal::Host, "wake.tick", &json!({})),
+        Err(Error::Refused(_))
+    ));
+    r.exec("DELETE FROM wake_turns WHERE run = ?1", &run);
+    r.f.see_marker("s1", &run);
+    r.tick();
+    assert_eq!(r.state_of("r1"), "recovered");
+}
+
 // ---- (b) the marker is read only for a turn that was final in the snapshot ----
 
 #[test]
@@ -634,13 +797,24 @@ fn a_turn_that_goes_final_between_the_phases_is_settled_on_the_next_tick() {
         r.finish(claim, "exit");
         go.send(()).unwrap();
         let v = tick.join().unwrap();
-        assert_eq!(v["settled"], json!([]), "settled with a marker read before the turn was seen final: {v}");
+        assert_eq!(
+            v["settled"],
+            json!([]),
+            "settled with a marker read before the turn was seen final: {v}"
+        );
     });
-    assert!(r.f.marker_reads.lock().unwrap().is_empty(), "the marker was read for a turn that was not final");
+    assert!(
+        r.f.marker_reads.lock().unwrap().is_empty(),
+        "the marker was read for a turn that was not final"
+    );
     assert_eq!(r.state_of("r1"), "running");
     // The next tick has seen it final, reads the transcript after that, and settles.
     let v = r.tick();
-    assert_eq!(v["settled"], json!([{"run": run, "how": "recovered"}]), "{v}");
+    assert_eq!(
+        v["settled"],
+        json!([{"run": run, "how": "recovered"}]),
+        "{v}"
+    );
     assert_eq!(r.f.marker_reads.lock().unwrap().len(), 1);
 }
 
@@ -649,7 +823,10 @@ fn a_turn_that_goes_final_between_the_phases_is_settled_on_the_next_tick() {
 #[test]
 fn a_waiter_that_a_stop_removed_between_the_phases_does_not_fire() {
     let r = rig();
-    r.owner("wake.wait", &json!({"on": "at:+30s", "session": "s1", "agent": "echo", "note": ["x"]}));
+    r.owner(
+        "wake.wait",
+        &json!({"on": "at:+30s", "session": "s1", "agent": "echo", "note": ["x"]}),
+    );
     r.f.advance(3600.0);
     // The Stop lands after the tick has read the waiter and before it writes.
     let rig_ref = &r;
@@ -677,7 +854,10 @@ fn a_waiter_that_a_stop_removed_between_the_phases_does_not_fire() {
 #[test]
 fn a_waiter_whose_thing_happened_fires_and_its_request_is_taken_in_the_same_tick() {
     let r = rig();
-    r.owner("wake.wait", &json!({"on": "at:+30s", "session": "s1", "agent": "echo", "note": ["x"]}));
+    r.owner(
+        "wake.wait",
+        &json!({"on": "at:+30s", "session": "s1", "agent": "echo", "note": ["x"]}),
+    );
     r.f.advance(3600.0);
     let v = r.tick();
     assert_eq!(v["fired"], 1, "{v}");
@@ -705,7 +885,10 @@ fn r5_a_stop_of_a_queued_run_cancels_its_turn_withdraws_the_named_id_and_gives_t
     assert_eq!(r.state_of("r1"), "withdrawn");
     assert_eq!(r.state_of("r2"), "queued");
     assert_eq!(r.tries("s1"), 0, "given back, not a failed try");
-    assert_eq!(r.sql::<i64>("SELECT count(*) FROM wake_turns WHERE session = ?1", "s1"), 0);
+    assert_eq!(
+        r.sql::<i64>("SELECT count(*) FROM wake_turns WHERE session = ?1", "s1"),
+        0
+    );
     // It is owed again and the next tick makes a new run and turn for it.
     let v = r.tick();
     assert_eq!(v["taken"].as_array().unwrap().len(), 1, "{v}");
@@ -742,7 +925,10 @@ fn r5_a_stop_of_a_claimed_run_with_no_process_ends_the_claim_and_cancels_the_tur
     r.owner("wake.withdraw", &json!({"session": "s1", "id": "r2"}));
     assert_eq!(r.turn_state(turn), "cancelled");
     assert_eq!(
-        r.sql::<String>("SELECT state FROM claims WHERE claim_id = ?1", &claim.to_string()),
+        r.sql::<String>(
+            "SELECT state FROM claims WHERE claim_id = ?1",
+            &claim.to_string()
+        ),
         "ended"
     );
     assert_eq!(r.state_of("r2"), "withdrawn");
@@ -750,11 +936,10 @@ fn r5_a_stop_of_a_claimed_run_with_no_process_ends_the_claim_and_cancels_the_tur
     // The launcher that would have attached is refused.
     let pid = std::process::id();
     let started = kith_kernel::procstart::start_stamp(pid).unwrap();
-    let late = r
-        .d
-        .shared()
-        .with_core(|c| sched_run::attach(c, claim, Some("s1"), pid, &started, ms()))
-        .unwrap();
+    let late =
+        r.d.shared()
+            .with_core(|c| sched_run::attach(c, claim, Some("s1"), pid, &started, ms()))
+            .unwrap();
     assert_eq!(late["refused"], "gone", "{late}");
 }
 
@@ -824,21 +1009,33 @@ fn a_gh_that_hangs_leaves_every_other_call_answered() {
     // The lock would answer `busy` after 400 ms; `gh` takes 2 s.
     let r = rig_with(Duration::from_millis(400));
     *r.f.gh_delay.lock().unwrap() = Duration::from_secs(2);
-    r.owner("wake.wait", &json!({"on": "ci:o/r#5", "session": "s1", "agent": "echo"}));
+    r.owner(
+        "wake.wait",
+        &json!({"on": "ci:o/r#5", "session": "s1", "agent": "echo"}),
+    );
     r.enqueue("s2", "r2", "run");
     std::thread::scope(|s| {
         let tick = s.spawn(|| r.tick());
         let begun = Instant::now();
         while r.f.in_gh.load(Ordering::SeqCst) == 0 {
-            assert!(begun.elapsed() < Duration::from_secs(5), "the tick never reached gh");
+            assert!(
+                begun.elapsed() < Duration::from_secs(5),
+                "the tick never reached gh"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
         for _ in 0..5 {
             let at = Instant::now();
             let list = r.owner("wake.queueList", &json!({}));
-            assert!(at.elapsed() < Duration::from_millis(300), "a call waited for the tick's gh");
+            assert!(
+                at.elapsed() < Duration::from_millis(300),
+                "a call waited for the tick's gh"
+            );
             assert!(list["waiters"].as_array().unwrap().len() == 1);
-            r.owner("wake.enqueue", &json!({"session": "s3", "id": "r3", "agent": "echo", "text": ["hi"]}));
+            r.owner(
+                "wake.enqueue",
+                &json!({"session": "s3", "id": "r3", "agent": "echo", "text": ["hi"]}),
+            );
         }
         let v = tick.join().unwrap();
         // Its phase 2 still ran: the owed session was taken after the slow part.
@@ -903,7 +1100,10 @@ fn the_core_lock_trait_is_what_the_daemon_gives_the_tick() {
     // `tick` runs over any `CoreLock`: the lock is the caller's, taken once per phase.
     struct Counting(Arc<crate::daemon::Shared>, AtomicUsize);
     impl CoreLock for Counting {
-        fn with_core<R>(&self, f: impl FnOnce(&mut crate::db::Core) -> Result<R, Error>) -> Result<R, Error> {
+        fn with_core<R>(
+            &self,
+            f: impl FnOnce(&mut crate::db::Core) -> Result<R, Error>,
+        ) -> Result<R, Error> {
             self.1.fetch_add(1, Ordering::SeqCst);
             self.0.with_core(f)
         }
@@ -911,5 +1111,9 @@ fn the_core_lock_trait_is_what_the_daemon_gives_the_tick() {
     let r = rig();
     let counting = Counting(r.d.shared().clone(), AtomicUsize::new(0));
     super::tick(&counting, &json!({}), &r.f.world()).unwrap();
-    assert_eq!(counting.1.load(Ordering::SeqCst), 2, "one lock for each phase");
+    assert_eq!(
+        counting.1.load(Ordering::SeqCst),
+        2,
+        "one lock for each phase"
+    );
 }

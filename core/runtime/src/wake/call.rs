@@ -131,6 +131,7 @@ pub(crate) fn call_with(
             // The run's turn in the conversations lane is written in the same transaction as the queue rows.
             let turn = write_tx(core, now, |tx, st| {
                 turns::fail_foreign_in(tx, st, now)?;
+                st.linked = turns::linked_runs_in(tx)?;
                 let turn = queue::take(st, out, tr, now, holder, session, sid);
                 if let Some(t) = &turn {
                     turns::start_in(tx, out, t, sid, now)?;

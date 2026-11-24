@@ -44,7 +44,8 @@ pub(crate) trait CoreLock {
 }
 
 /// The world the tick asks, made from the caller's view of the folders. A test gives its own.
-pub(crate) type World = Arc<dyn Fn(&Paths) -> (Box<dyn Outside>, Box<dyn Transcripts>) + Send + Sync>;
+pub(crate) type World =
+    Arc<dyn Fn(&Paths) -> (Box<dyn Outside>, Box<dyn Transcripts>) + Send + Sync>;
 
 /// The real world: the system's clock, processes and `gh`, and the Claude transcripts under the caller's home.
 pub(crate) fn system() -> World {
