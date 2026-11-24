@@ -1,5 +1,10 @@
 //! `kith-serve`: runs coding-agent bots over ACP and serves the Kith apps.
 
+// The Windows host is mid-port (docs/plans/windows-owner.md): host.sock, the kernel verbs and the claim signals are
+// Unix-only, so what only they call is unused here, and the stubs that stand in for them have no awaits or returns to
+// use. Each package that ports one removes its part of this; the Unix build keeps every one of these lints.
+#![cfg_attr(not(unix), allow(dead_code, unused_imports, clippy::unused_async, clippy::unnecessary_wraps))]
+
 mod access;
 mod account_store;
 mod agent;
