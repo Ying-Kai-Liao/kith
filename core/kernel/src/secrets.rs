@@ -30,11 +30,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod authority;
 #[cfg(test)]
 mod authority_tests;
+mod cmd;
 mod exec;
 #[cfg(test)]
 mod exec_tests;
 mod grants;
-mod cmd;
 mod guest;
 mod jobs;
 #[cfg(test)]
