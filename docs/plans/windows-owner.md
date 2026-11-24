@@ -10,14 +10,14 @@ the rest come from three read-only sweeps run in the same hour against the same 
 Read with: `docs/plans/retire-python.md` (P-items), `docs/plans/runtime-design.md` section 8, `docs/plans/one-bot-model.md` M5,
 app plan v5 Phase 6h (K14, the GPU box OS).
 
-Target: Windows 11 x64, owner path only. Guests on a Windows host stay refused (WI6; Kai, Q1). Kai's answers to Q1-Q5 are
-in section 7 (2026-11-24).
+Target: Windows 11 x64, owner path only. Guests on a Windows host stay refused (WI6; default for Q1, pending Kai's confirmation). Defaults for Q1-Q5 are pending Kai's confirmation;
+see section 7 (2026-11-24).
 
 ## 0. Corrections to the brief
 
 - **The desktop app is Electron, not Tauri.** `apps/desktop/package.json:44` (`electron ^44.5.1`), `:32` (`dist:win`),
   `apps/desktop/electron-builder.yml:1,109-129` (NSIS, x64, per-user). The plan keeps Electron.
-- **CI runner: `windows-2025`, not Server 2022** (Kai agreed 2026-11-24, Q4). Reason: Windows 11 24H2 and Server 2025 share one base
+- **CI runner: `windows-2025`, not Server 2022** (default for Q4, pending Kai's confirmation). Reason: Windows 11 24H2 and Server 2025 share one base
   (build 26100), so ConPTY, job objects and named pipes behave as they do on Kai's target. Today's job says
   `windows-latest` (`.github/workflows/ci.yml:766`). As far as I know (from memory, not checked this call) that label
   already resolves to 2025; the first run's "Runner Image" log line confirms it. Pin `windows-2025` and keep one
@@ -128,7 +128,7 @@ flowchart LR
   - The transcript reader must accept a torn last line, since a hard kill can cut one.
 - **D7. Bash and PowerShell in owner runs.** Claude Code's Bash tool on Windows runs in Git Bash (my understanding; W1 confirms
   it), so the bash judge stays the guard.
-  - Owner settings deny Claude Code's PowerShell tool (Kai, Q5). Allowed, it would be an unguarded path around must-ask.
+  - Owner settings deny Claude Code's PowerShell tool (default for Q5, pending Kai's confirmation). Allowed, it would be an unguarded path around must-ask.
     No PowerShell judge is planned.
 - **D8. Staging.** Kai asked for full functionality. It ships in three milestones so each one can be used:
   - **α: an owner runs agents on Windows.** App and channel chats, terminal runs, cards and permits, cost.
@@ -356,7 +356,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - Files: `release.yml` (a job building `kith-<ver>-windows-x64.zip`: `kith.exe`, `kith-holder.exe`, `kith-stub.exe`,
     `kith-servew.exe`, `kith-shim.exe`, `project-id.exe`, `share\kith\…`), `scripts/stage-kernel.sh` (Windows data only:
     no `kernel/bin`, no `kernel/lib`), `serve/host/src/update/release.rs:21-26`.
-  - Unsigned (Kai, Q2). Signing is a gate before the first public Windows release.
+  - Unsigned (default for Q2, pending Kai's confirmation). Signing is a gate before the first public Windows release.
   - **Start after W2a.**
 - [ ] **W8. The launch builds on Windows, and the host launches in process.** Owner: unowned. Status: not started. L.
   - **WAITS P1-12 R0 and R1** (the plan/emit split and the accounts chain in Rust) and **P1-15 M1** (`assemble.rs` runs
@@ -373,7 +373,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
 - [ ] **W10. Guard and cards for Windows owner runs.** Owner: unowned. Status: not started. M. Depends: W1, W5b.
   - Files: `core/kernel/src/launch/judge.rs` (Windows absolute paths, `/c/` mapping), `guard.rs` (Windows rows),
     `kernel/tests/difftest/golden-lib/guard-must-ask.json` (Windows rows added, frozen), and owner settings that deny the
-    PowerShell tool (D7, Kai Q5). W1 records the tool's exact name for the deny rule.
+    PowerShell tool (D7, default for Q5, pending Kai's confirmation). W1 records the tool's exact name for the deny rule.
 - [ ] **W11. Service verbs and host timers.** Owner: unowned. Status: not started. M. Depends: W2a; the cost timer on W5a and W13; the backup timer on P4-14; the wake
   and ask timer on P2-2 and P2-3.
   - Files: `serve/host/src/kernel.rs:22` (on Windows, `serve start|stop|restart|status` are answered by the host);
@@ -466,7 +466,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     - antivirus holding a file during the update rename
     - Windows Terminal attach and resize
     - Ctrl-C in the trampoline
-  - It runs on a free UTM VM on the Mac with Windows 11 ARM, the x64 build under emulation (Kai, Q3). A check that can't be
+  - It runs on a free UTM VM on the Mac with Windows 11 ARM, the x64 build under emulation (default for Q3, pending Kai's confirmation). A check that can't be
     judged under emulation is marked as needing x64 hardware. It runs before any public Windows release, together with
     signing (Q2).
 
@@ -475,7 +475,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   variant) and W15 (update versus runs versus prune versus supervisor).
 - **Model status (2026-11-24):** both owed by the architect, not started. They are queued after the P2 designs (p2-wake,
   p2-ask-sched). W12 and W15 get no worker until their model passes and this line says so.
-- **REDESIGN:** none of this milestone's own (the PowerShell judge was dropped, Kai Q5). Already REDESIGN in retire-python and
+- **REDESIGN:** none of this milestone's own (the PowerShell judge was dropped, default for Q5, pending Kai's confirmation). Already REDESIGN in retire-python and
   inherited here: P1-12, P1-15, P1-16, P2-1 to P2-4, P3-5, P3-10, P4-15, P5-1.
 - **WAITS:**
   - W8 waits P1-12 R0, R1 and P1-15 M1.
@@ -531,7 +531,7 @@ W16, W15, W19 (run).
 W18 skeleton. None of them touches the bash launch or the Python, and none waits on a P item. The only overlap is cfg lines in
 serve/host (W2a) and the `kith-kernel` module list (W5a); retire-python managers should rebase over them, not rework them.
 
-## 7. Kai's answers (settled 2026-11-24, relayed by flow manager windows-owner-plan)
+## 7. Defaults pending Kai's confirmation (2026-11-24)
 - **Q1. Invited people on a Windows-hosted agent: refused for now.** WI6 stands. No Windows guest sandbox is planned in this
   milestone. A Windows sandbox for guest runs (AppContainer or a restricted token plus a job object, with a TLA+
   revoke-versus-start model like the doors') would be a later L-sized REDESIGN, opened only if Kai asks. W18 scenario (j)
