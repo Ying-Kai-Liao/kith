@@ -28,22 +28,22 @@ use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod authority;
+#[cfg(test)]
+mod authority_tests;
 mod exec;
+#[cfg(test)]
+mod exec_tests;
 mod grants;
 mod guest;
 mod jobs;
+#[cfg(test)]
+mod kit;
 mod mcp;
+#[cfg(test)]
+mod mcp_tests;
 mod packages;
 pub mod pyjson;
 mod session;
-#[cfg(test)]
-mod authority_tests;
-#[cfg(test)]
-mod exec_tests;
-#[cfg(test)]
-mod kit;
-#[cfg(test)]
-mod mcp_tests;
 #[cfg(test)]
 mod tests;
 
@@ -1374,7 +1374,10 @@ fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
             return authority.may(rest[0], rest[1], via, once);
         }
         if resolve && rest.len() == 1 {
-            let person = opts.get("--person").filter(|p| !p.is_empty()).or(c.person.as_ref());
+            let person = opts
+                .get("--person")
+                .filter(|p| !p.is_empty())
+                .or(c.person.as_ref());
             return authority.resolve(rest[0], person.map(String::as_str), via, once);
         }
         return Err(Die {
