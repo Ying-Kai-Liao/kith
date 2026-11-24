@@ -48,7 +48,16 @@ pub fn switched(state: Option<&Path>, machine: Option<&Path>) -> bool {
     if !lexists(&f) {
         return false;
     }
-    std::fs::read_to_string(&f).map_or(true, |t| !t.lines().any(|l| l == "state=stepping"))
+    // The last recognised `state=` line, split exactly (core/runtime/src/cutover/state.rs); none at all is damaged: switched.
+    std::fs::read_to_string(&f).map_or(true, |t| {
+        t.lines()
+            .filter_map(|l| l.split_once('='))
+            .filter(|(k, v)| {
+                *k == "state" && matches!(*v, "stepping" | "switched" | "rolling-back")
+            })
+            .next_back()
+            .is_none_or(|(_, v)| v != "stepping")
+    })
 }
 
 /// R8: a terminal let go of `session`; the core unparks what waited for it. Lost is fine, the core's next tick does it.
@@ -159,7 +168,7 @@ pub fn run(
         Err(Stop::Core(Fail::NoAnswer(why))) => {
             let _ = writeln!(
                 err,
-                "kith-wake: the wake queue is the Kith core's on this Mac and it did not answer ({why}); nothing was done"
+                "kith-wake: the wake queue is the Kith core's on this Mac and it did not answer ({why}); the call may not have been made, and nothing was written here"
             );
             1
         }

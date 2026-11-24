@@ -29,6 +29,16 @@ import kith_claims
 TOMBSTONE = ('sessions', 'queue', '.tombstone')
 
 
+def _phase(text):
+    """The LAST recognised `state=` line, split exactly and not trimmed (core/runtime/src/cutover/state.rs), else None."""
+    phase = None
+    for line in text.splitlines():
+        key, eq, val = line.partition('=')
+        if eq and key == 'state' and val in ('stepping', 'switched', 'rolling-back'):
+            phase = val
+    return phase
+
+
 def switched(state):
     """Whether the wake queue is the core's on this Mac: the tombstone, or the module's switch record past `stepping`."""
     t = Path(state).joinpath(*TOMBSTONE) if state else None
@@ -40,21 +50,21 @@ def switched(state):
     f = kith_claims.switch_file('wake')
     try:
         if f and os.path.lexists(f):
-            return 'state=stepping' not in f.read_text().splitlines()
+            return _phase(f.read_text()) != 'stepping'   # no state= line at all is damaged: switched
     except OSError:
         return True
     return False
 
 
-def call(method, params):
+def call(method, params, timeout=None):
     """One owner call of the core, as the answer object. Exits (SystemExit, as kith-wake refuses everything) when the core
     rejects it or does not answer: nothing was written."""
     try:
-        return kith_claims.call(method, params)
+        return kith_claims.call(method, params, timeout)
     except kith_claims.Refused as e:
         raise SystemExit('kith-wake: %s' % re.sub(r'^kith-core: ', '', str(e)))
     except kith_claims.NoAnswer as e:
-        raise SystemExit('kith-wake: the wake queue is the Kith core\'s on this Mac and it did not answer (%s); nothing was done'
+        raise SystemExit('kith-wake: the wake queue is the Kith core\'s on this Mac and it did not answer (%s); the call may not have been made, and nothing was written here'
                          % e)
 
 

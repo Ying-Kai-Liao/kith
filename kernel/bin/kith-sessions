@@ -1088,7 +1088,7 @@ def wake_owed(pid):
         e = entry_of(pid)
         if e:
             try:
-                kith_wake_core.call('wake.released', {'session': e['sessionId']})
+                kith_wake_core.call('wake.released', {'session': e['sessionId']}, timeout=5)
             except SystemExit:
                 pass
         return

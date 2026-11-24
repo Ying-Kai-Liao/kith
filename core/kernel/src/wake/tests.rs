@@ -95,6 +95,21 @@ fn the_tombstone_or_a_switch_record_past_stepping_makes_the_queue_the_cores() {
     );
     std::fs::write(cutover.join("wake.switch"), "state=switched\n").unwrap();
     assert!(switched(Some(&state), Some(&machine)));
+    std::fs::write(
+        cutover.join("wake.switch"),
+        "state=switched\nstate=stepping\n",
+    )
+    .unwrap();
+    assert!(
+        !switched(Some(&state), Some(&machine)),
+        "the last state= line wins"
+    );
+    std::fs::write(cutover.join("wake.switch"), "at=1\n").unwrap();
+    assert!(
+        switched(Some(&state), Some(&machine)),
+        "no state= line is damaged: switched"
+    );
+    std::fs::write(cutover.join("wake.switch"), "state=switched\n").unwrap();
     std::fs::remove_file(cutover.join("wake.switch")).unwrap();
     let queue = state.join("sessions").join("queue");
     std::fs::create_dir_all(&queue).unwrap();
@@ -128,7 +143,7 @@ fn a_core_that_does_not_answer_is_a_refusal_and_a_rejection_says_why() {
     let down = Fake::fails(Fail::NoAnswer("no core daemon answers".into()));
     let (code, out, err) = kith("withdraw s1", &[], &down);
     assert_eq!((code, out.as_str()), (1, ""));
-    assert!(err.contains("did not answer") && err.contains("nothing was done"));
+    assert!(err.contains("did not answer") && err.contains("may not have been made"));
     let no = Fake::fails(Fail::Refused(
         "kith-core: s1 belongs to another agent".into(),
     ));

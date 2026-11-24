@@ -125,11 +125,26 @@ is "the sched tick asks the core nothing and writes no queue file" "$(calls):$(f
 touch "$T/down"
 python3 "$W" enqueue s1 --id late:1 --agent designer -- x >/dev/null 2>"$T/err"; rc=$?
 is "(b) enqueue with no core answering is refused" "$rc" 1
-grep -q 'did not answer' "$T/err" && grep -q 'nothing was done' "$T/err" && ok "and says nothing was done" || bad "and says nothing was done" "$(cat "$T/err")"
+grep -q 'did not answer' "$T/err" && grep -q 'may not have been made' "$T/err" && ok "and says the call may not have been made" || bad "and says the call may not have been made" "$(cat "$T/err")"
 python3 "$W" withdraw s1 >/dev/null 2>&1; is "withdraw is refused too" "$?" 1
 python3 "$W" withdraw-person anna >/dev/null 2>&1; is "withdraw-person is refused too" "$?" 1
 python3 "$W" status r:1 >/dev/null 2>&1; is "status is refused too" "$?" 1
 is "(b) still no file under sessions/queue/" "$(files)" 0
+# A revoke made with kith serve down ends the person's asks: the run is stopped though the withdraw is refused, and the exit says so.
+sleep 300 & SLEEPER=$!
+python3 - "$BOX" "$SLEEPER" <<'PY'
+import json, sys, time
+box, pid = sys.argv[1], int(sys.argv[2])
+json.dump({'asked': 'echo', 'agent': 'architect', 'person': 'bob', 'via': 'terminal', 'at': time.time(), 'state': 'open',
+           'pid': pid, 'pid_at': time.time()}, open(box + '/ask-bob.reg', 'w'))
+PY
+"$ASK" --end --person bob >"$T/out" 2>"$T/err"; rc=$?
+is "an end with the core down exits non-zero" "$([ $rc != 0 ] && echo nonzero)" nonzero
+grep -q 'person bob' "$T/err" && ok "and names the person whose wakes were not withdrawn" || bad "and names the person" "$(cat "$T/err")"
+is "the record is ended" "$(python3 -c 'import json,sys; print(bool(json.load(open(sys.argv[1])).get("ended_at")))' "$BOX/ask-bob.reg")" True
+for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$SLEEPER" 2>/dev/null || break; sleep 1; done
+kill -0 "$SLEEPER" 2>/dev/null && { bad "the run was stopped"; kill "$SLEEPER"; } || ok "the run was stopped"
+wait "$SLEEPER" 2>/dev/null
 rm -f "$T/down"
 
 # --- the switch record alone (no tombstone) is the core's too ------------------------------------------------------------

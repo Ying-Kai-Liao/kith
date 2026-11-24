@@ -300,7 +300,7 @@ fn record_quit(c: &Ctx, pid: i64) {
 /// A terminal held its session while wakes for it queued (a reply, a card, a waiter): now that it let go, the kernel's wake
 /// queue may deliver them without waiting for the next tick. With the queue the core's that is one call, `wake.released`
 /// (R8), and no shell: the core unparks the conversation's wake turns, a lost call is caught by its next tick, and the host
-/// runs the ask hand-over (`kith-ask --sweep`) on that same event. Until the cutover the queue is the files: a kith ask this
+/// runs the ask hand-over (`kith-ask --sweep`) on its next tick. Until the cutover the queue is the files: a kith ask this
 /// session made and didn't read the answer of becomes one of them first (kith-ask --sweep, M8), then `kith-wake drain`.
 fn wake_owed(c: &Ctx, core: Option<&dyn Core>, kernel: &Path, pid: i64) {
     let Some(state) = c.state.as_deref() else {

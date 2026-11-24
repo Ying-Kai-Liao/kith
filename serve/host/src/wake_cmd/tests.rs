@@ -78,7 +78,7 @@ fn every_verb_goes_through_the_real_dispatch_and_a_missing_core_refuses_and_writ
     // The tombstone with no core answering: refused, nothing written.
     let (code, out, err) = kith(&f, "enqueue s1 --id late:1 --agent designer -- x", &[]);
     assert_eq!((code, out.as_str()), (1, ""));
-    assert!(err.contains("did not answer") && err.contains("nothing was done"), "{err}");
+    assert!(err.contains("did not answer") && err.contains("may not have been made"), "{err}");
     assert!(!f.state.join("sessions").join("queue").exists(), "no queue file or folder was made");
     let _ = std::fs::remove_dir_all(&f.home);
 }
