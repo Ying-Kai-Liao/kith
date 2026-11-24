@@ -54,6 +54,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "account",
         "account-state",
         "accounts",
+        "accounts-json",
+        "accounts-main-id",
+        "accounts-run-chain",
         "acp",
         "cost",
         "cost-ledger",
@@ -83,6 +86,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
     &[
         "account-state",
         "accounts",
+        "accounts-json",
+        "accounts-main-id",
+        "accounts-run-chain",
         "acp",
         "delegation",
         "engines",
@@ -103,7 +109,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","acp","cost","cost-ledger","delegation","engines","launch","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engines","launch","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer"]}"#
         );
     }
 }
