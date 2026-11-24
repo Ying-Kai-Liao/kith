@@ -180,8 +180,11 @@ pub fn fingerprint(ctx: &Ctx, home: &Path) -> R<String> {
     Ok(fingerprint_of(&at, &entries))
 }
 
+/// `(label, size, mtime ns)` of each file in a fingerprint.
+pub type Entries = Vec<(Vec<u8>, u64, i128)>;
+
 /// What `fingerprint` hashes: where the agent's life is, and `(label, size, mtime ns)` of each file.
-pub(crate) fn fingerprint_inputs(ctx: &Ctx, home: &Path) -> R<(String, Vec<(Vec<u8>, u64, i128)>)> {
+pub(crate) fn fingerprint_inputs(ctx: &Ctx, home: &Path) -> R<(String, Entries)> {
     let at = if name_of(home) == "role" {
         home.parent().unwrap_or(home).to_path_buf()
     } else {
