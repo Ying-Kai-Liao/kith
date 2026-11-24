@@ -150,7 +150,16 @@ impl Cmd {
 
 /// Downloads the agent first if needed.
 /// `progress` receives short status lines ("Downloading Cursor…").
+///
+/// The registry can name a release before its package host has it (codex-acp 2.12.0 while npm
+/// had 2.10.0). Then the last entry of the same agent that was prepared on this computer is used
+/// instead; an entry that never ran here never is.
 pub async fn command(agent: &Value, progress: impl Fn(&str)) -> Result<Cmd> {
+    with_last_good(&last_good_file(), agent, async |a: &Value| build(a, &progress).await).await
+}
+
+/// The command for `agent`, and whether it was prepared (downloaded or installed) here.
+async fn build(agent: &Value, progress: &impl Fn(&str)) -> Result<(Cmd, bool)> {
     let name = agent["name"].as_str().unwrap_or("agent");
     let d = &agent["distribution"];
     match launch_kind(agent) {
@@ -159,26 +168,83 @@ pub async fn command(agent: &Value, progress: impl Fn(&str)) -> Result<Cmd> {
             let target = &d["binary"][platform];
             let cmd =
                 target["cmd"].as_str().and_then(contained).ok_or_else(|| anyhow!("registry entry has a bad cmd"))?;
-            let dir = install_binary(agent, target, cmd, &progress).await?;
-            Ok(Cmd {
+            let dir = install_binary(agent, target, cmd, progress).await?;
+            let cmd = Cmd {
                 program: format!("{}{}", env_prefix(&target["env"]), shell::quote(&dir.join(cmd).to_string_lossy())),
                 args: args_of(target),
-            })
+            };
+            Ok((cmd, true))
         }
         Some(Launch::Npx) => {
-            prepare_npx(d["npx"]["package"].as_str().unwrap_or_default(), name, &progress).await?;
-            Ok(npx_cmd(&d["npx"]))
+            prepare_npx(d["npx"]["package"].as_str().unwrap_or_default(), name, progress).await?;
+            Ok((npx_cmd(&d["npx"]), true))
         }
-        Some(Launch::Uvx) => Ok(Cmd {
-            program: format!(
-                "{}uvx {}",
-                env_prefix(&d["uvx"]["env"]),
-                shell::quote(d["uvx"]["package"].as_str().unwrap_or_default())
-            ),
-            args: args_of(&d["uvx"]),
-        }),
+        Some(Launch::Uvx) => {
+            let cmd = Cmd {
+                program: format!(
+                    "{}uvx {}",
+                    env_prefix(&d["uvx"]["env"]),
+                    shell::quote(d["uvx"]["package"].as_str().unwrap_or_default())
+                ),
+                args: args_of(&d["uvx"]),
+            };
+            Ok((cmd, false))
+        }
         None if needs_node(agent) => bail!("{name} needs Node.js on this computer: add it in Extensions"),
         None => bail!("{name} has no build for this computer (needs uv)"),
+    }
+}
+
+/// Registry entries, by agent id, whose build was last prepared here.
+fn last_good_file() -> PathBuf {
+    crate::service::data_dir().join("registry-last-good.json")
+}
+
+async fn with_last_good(file: &Path, agent: &Value, build: impl AsyncFn(&Value) -> Result<(Cmd, bool)>) -> Result<Cmd> {
+    let id = agent["id"].as_str().unwrap_or_default();
+    let error = match build(agent).await {
+        Ok((cmd, prepared)) => {
+            if prepared {
+                record_last_good(file, id, agent);
+            }
+            return Ok(cmd);
+        }
+        Err(error) => error,
+    };
+    let Some(last) = last_good(file, id).filter(|last| last != agent) else { return Err(error) };
+    let Ok((cmd, _)) = build(&last).await else { return Err(error) };
+    tracing::info!(
+        agent = id,
+        wanted = agent["version"].as_str().unwrap_or_default(),
+        using = last["version"].as_str().unwrap_or_default(),
+        error = format!("{error:#}"),
+        "registry build unavailable; using the last one that ran here"
+    );
+    Ok(cmd)
+}
+
+fn last_good(file: &Path, id: &str) -> Option<Value> {
+    let all: Value = serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()?;
+    all.get(id).filter(|v| v.is_object()).cloned()
+}
+
+fn record_last_good(file: &Path, id: &str, agent: &Value) {
+    static WRITING: Mutex<()> = Mutex::new(());
+    if id.is_empty() {
+        return;
+    }
+    let _one_at_a_time = WRITING.locked();
+    let mut all: serde_json::Map<String, Value> =
+        std::fs::read_to_string(file).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    if all.get(id) == Some(agent) {
+        return;
+    }
+    all.insert(id.to_owned(), agent.clone());
+    let tmp = file.with_extension(format!("json.tmp{}", std::process::id()));
+    let written = std::fs::write(&tmp, Value::Object(all).to_string()).and_then(|()| std::fs::rename(&tmp, file));
+    if let Err(error) = written {
+        let _ = std::fs::remove_file(&tmp);
+        tracing::warn!(%error, agent = id, "couldn't record the registry build that ran");
     }
 }
 
@@ -381,6 +447,59 @@ mod tests {
         let expected =
             if cfg!(windows) { "K=v npx -y @s/x@1.0.0 --acp \"a b\"" } else { "env K=v npx -y @s/x@1.0.0 --acp 'a b'" };
         assert_eq!(npx_cmd(&npx).acp(), expected);
+    }
+
+    fn codex(version: &str) -> Value {
+        json!({
+            "id": "codex-acp", "name": "Codex", "version": version,
+            "distribution": {"npx": {"package": format!("@agentclientprotocol/codex-acp@{version}")}},
+        })
+    }
+
+    /// A build where npm has every codex-acp release but 2.12.0.
+    async fn npm_without_2_12(agent: &Value) -> Result<(Cmd, bool)> {
+        if agent["version"] == "2.12.0" {
+            bail!("couldn't download Codex with npm: npm error 404 No match found for version 2.12.0");
+        }
+        Ok((npx_cmd(&agent["distribution"]["npx"]), true))
+    }
+
+    fn scratch_file() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("kith-lastgood-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("registry-last-good.json")
+    }
+
+    #[tokio::test]
+    async fn an_unfetchable_build_falls_back_to_the_last_one_prepared_here() {
+        let file = scratch_file();
+        with_last_good(&file, &codex("2.10.0"), npm_without_2_12).await.unwrap();
+        let cmd = with_last_good(&file, &codex("2.12.0"), npm_without_2_12).await.unwrap();
+        assert_eq!(cmd.acp(), npx_cmd(&codex("2.10.0")["distribution"]["npx"]).acp());
+        assert_eq!(last_good(&file, "codex-acp"), Some(codex("2.10.0")));
+    }
+
+    #[tokio::test]
+    async fn with_nothing_prepared_here_the_error_is_unchanged() {
+        let file = scratch_file();
+        let error = with_last_good(&file, &codex("2.12.0"), npm_without_2_12).await.err().unwrap();
+        assert_eq!(
+            format!("{error:#}"),
+            "couldn't download Codex with npm: npm error 404 No match found for version 2.12.0"
+        );
+        assert!(!file.exists());
+    }
+
+    #[tokio::test]
+    async fn only_a_prepared_build_is_recorded() {
+        let file = scratch_file();
+        with_last_good(&file, &codex("2.9.0"), npm_without_2_12).await.unwrap();
+        with_last_good(&file, &codex("2.10.0"), npm_without_2_12).await.unwrap();
+        assert_eq!(last_good(&file, "codex-acp"), Some(codex("2.10.0")));
+        // A uvx entry runs without a prepare step here, so it never becomes the fallback.
+        let unprepared = async |a: &Value| -> Result<(Cmd, bool)> { Ok((npx_cmd(&a["distribution"]["npx"]), false)) };
+        with_last_good(&file, &codex("2.11.0"), unprepared).await.unwrap();
+        assert_eq!(last_good(&file, "codex-acp"), Some(codex("2.10.0")));
     }
 
     #[test]
