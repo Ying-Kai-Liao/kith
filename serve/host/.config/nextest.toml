@@ -4,3 +4,8 @@
 retries = 0
 fail-fast = false
 slow-timeout = { period = "60s", terminate-after = 5 }
+
+# The Windows job (W2b): the same, with a short kill so a test that hangs there (a Unix-only wait) cannot eat the job's budget.
+[profile.ci-windows]
+inherits = "ci"
+slow-timeout = { period = "30s", terminate-after = 2 }

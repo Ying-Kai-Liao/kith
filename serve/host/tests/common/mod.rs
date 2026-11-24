@@ -3,7 +3,9 @@
 pub mod host;
 
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 /// The host's machine state for `home`. The core's owner socket lives under it, and a Unix socket path holds about a
