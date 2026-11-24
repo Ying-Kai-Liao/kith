@@ -39,11 +39,9 @@ mod tests;
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::unix::ffi::OsStrExt as _;
-use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 
-use py::{PyErr, R, is_dir, is_file, os_err};
+use py::{PyErr, R, is_dir, is_file, mtime_ns, os_err};
 
 /// Folders `kith-pkg` leaves out of a package: live state, never snapshotted (`STATE`, at the top only) and noise (`SKIP`).
 const STATE: [&str; 2] = ["memory", "data"];
@@ -178,6 +176,15 @@ pub fn package_files(home: &Path) -> Vec<PathBuf> {
 
 /// `fingerprint(home)`: ten hex digits over the format, where the agent's life is, and each file's name, size and mtime.
 pub fn fingerprint(ctx: &Ctx, home: &Path) -> R<String> {
+    let (at, entries) = fingerprint_inputs(ctx, home)?;
+    Ok(fingerprint_of(&at, &entries))
+}
+
+/// `(label, size, mtime ns)` of each file in a fingerprint.
+pub type Entries = Vec<(Vec<u8>, u64, i128)>;
+
+/// What `fingerprint` hashes: where the agent's life is, and `(label, size, mtime ns)` of each file.
+pub(crate) fn fingerprint_inputs(ctx: &Ctx, home: &Path) -> R<(String, Entries)> {
     let at = if name_of(home) == "role" {
         home.parent().unwrap_or(home).to_path_buf()
     } else {
@@ -195,10 +202,23 @@ pub fn fingerprint(ctx: &Ctx, home: &Path) -> R<String> {
     let mut entries = vec![];
     for (p, label) in labelled {
         let st = fs::metadata(p).map_err(|e| os_err(&e, p))?;
-        let ns = i128::from(st.mtime()) * 1_000_000_000 + i128::from(st.mtime_nsec());
-        entries.push((label.as_os_str().as_bytes().to_vec(), st.size(), ns));
+        entries.push((label_bytes(label), st.len(), mtime_ns(&st)));
     }
-    Ok(fingerprint_of(&at.display().to_string(), &entries))
+    Ok((at.display().to_string(), entries))
+}
+
+/// A file's label in the fingerprint: its path in the package, the bytes the system spells it with (on Windows, `/` between
+/// the names, so one package has one fingerprint on every system).
+pub(crate) fn label_bytes(label: &Path) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        label.as_os_str().as_bytes().to_vec()
+    }
+    #[cfg(not(unix))]
+    {
+        label.to_string_lossy().replace('\\', "/").into_bytes()
+    }
 }
 
 /// The hash itself: `(name, size, mtime in ns)` of each file, after the format and where the life is.

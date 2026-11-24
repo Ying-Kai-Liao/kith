@@ -50,7 +50,8 @@ pub fn executable(p: &Path) -> bool {
     }
 }
 
-#[cfg(test)]
+// every test here is Unix-only (modes, links), so the module is
+#[cfg(all(test, unix))]
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;

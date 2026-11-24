@@ -3,20 +3,21 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::Command;
+#[cfg(unix)]
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
+#[cfg(unix)]
 use super::git::run;
 use super::problems::{needs, read};
 use super::py::{R, is_dir, mtime, now, os_err, py_int, read_text, rmtree, strip, write_text};
 use super::text::frontmatter;
 use super::{Ctx, KEEP, SKIP, STATE, life, name_of, package_files};
 use crate::secrets::pyjson;
-use crate::threads::os::pid_probe;
 
 /// `pointers(agent)`: `(good, pin)`, the files that name an agent's good and pinned version.
 pub fn pointers(ctx: &Ctx, agent: &str) -> R<(PathBuf, PathBuf)> {
@@ -73,6 +74,20 @@ pub fn all_versions(ctx: &Ctx, agent: &str) -> Vec<PathBuf> {
     keyed.into_iter().map(|(_, d)| d).collect()
 }
 
+/// `os.kill(int(pid), 0)`: a pid of zero or below names a process group; EPERM still means alive.
+#[cfg(unix)]
+fn pid_alive(pid: i64) -> bool {
+    crate::threads::os::pid_probe(pid)
+}
+
+/// Whether the system has a process with this pid. There are no process groups to name, so a pid of zero or below is no one's;
+/// a process that cannot be asked about counts as alive, as an `EPERM` does, so its snapshot is kept.
+#[cfg(not(unix))]
+fn pid_alive(pid: i64) -> bool {
+    use crate::procstart::{Probe, probe};
+    u32::try_from(pid).is_ok_and(|p| p > 0 && !matches!(probe(p), Probe::Gone))
+}
+
 /// `running(pkg)`: true while a run started from this snapshot is alive; clears records of finished runs.
 pub fn running(pkg: &Path) -> bool {
     let runs = pkg.join(".runs");
@@ -83,8 +98,7 @@ pub fn running(pkg: &Path) -> bool {
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         let pid = name.split('.').next().unwrap_or("");
-        // `os.kill(int(pid), 0)`: a pid of zero or below names a process group; EPERM still means alive
-        match py_int(pid).map(pid_probe) {
+        match py_int(pid).map(pid_alive) {
             Some(true) => alive = true,
             _ => {
                 let _ = fs::remove_file(e.path());
@@ -162,7 +176,7 @@ fn drop_skipped(dir: &Path) {
 }
 
 /// `os.chmod` of every file to read-only (executables keep their execute bit, so `tools/<x>` still runs).
-fn lock_files(dir: &Path) -> R<()> {
+pub(super) fn lock_files(dir: &Path) -> R<()> {
     let Ok(rd) = fs::read_dir(dir) else {
         return Ok(());
     };
@@ -173,13 +187,69 @@ fn lock_files(dir: &Path) -> R<()> {
                 lock_files(&p)?;
             }
         } else {
-            let mode = fs::metadata(&p)
-                .map_err(|e| os_err(&e, &p))?
-                .permissions()
-                .mode();
-            let to = if mode & 0o111 != 0 { 0o555 } else { 0o444 };
-            fs::set_permissions(&p, fs::Permissions::from_mode(to)).map_err(|e| os_err(&e, &p))?;
+            let mut perms = fs::metadata(&p).map_err(|e| os_err(&e, &p))?.permissions();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                let to = if perms.mode() & 0o111 != 0 {
+                    0o555
+                } else {
+                    0o444
+                };
+                perms.set_mode(to);
+            }
+            // Windows has no execute bit: the read-only flag is all there is to lock
+            #[cfg(not(unix))]
+            perms.set_readonly(true);
+            fs::set_permissions(&p, perms).map_err(|e| os_err(&e, &p))?;
         }
+    }
+    Ok(())
+}
+
+/// `cp -c -R -p ENTRIES... DEST` on a Mac: clones, so a snapshot is instant and never changes when the working copy does. Where
+/// `cp` has no such flag (Linux) it fails and the caller copies file by file.
+#[cfg(unix)]
+fn clone_entries(entries: &[PathBuf], dest: &Path) -> bool {
+    let mut cp = Command::new("cp");
+    cp.args(["-c", "-R", "-p"]).args(entries).arg(dest);
+    run(cp, Duration::from_secs(3600)).is_ok_and(|r| r.code == 0)
+}
+
+/// Windows has no `cp` (and no clones): the same recursive copy in Rust, with the times kept.
+#[cfg(not(unix))]
+fn clone_entries(entries: &[PathBuf], dest: &Path) -> bool {
+    entries.iter().all(|e| {
+        let to = dest.join(e.file_name().unwrap_or_default());
+        copy_all(e, &to).is_ok()
+    })
+}
+
+/// `cp -R -p`: a folder is made and filled, a file copied with its time. A link fails the copy, as it cannot be recreated here
+/// (Windows makes links only with a privilege most accounts do not have): the caller then copies file by file, as it does
+/// where `cp` cannot clone.
+#[cfg_attr(unix, allow(dead_code))]
+pub(super) fn copy_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(src)?;
+    if meta.file_type().is_symlink() {
+        return Err(std::io::Error::other(format!(
+            "a link inside a package ({})",
+            src.display()
+        )));
+    }
+    if meta.is_dir() {
+        fs::create_dir_all(dst)?;
+        for e in fs::read_dir(src)? {
+            let e = e?;
+            copy_all(&e.path(), &dst.join(e.file_name()))?;
+        }
+        return Ok(());
+    }
+    fs::copy(src, dst)?;
+    if let Ok(t) = meta.modified()
+        && let Ok(f) = fs::File::options().write(true).open(dst)
+    {
+        let _ = f.set_modified(t);
     }
     Ok(())
 }
@@ -207,9 +277,7 @@ pub fn snapshot(ctx: &Ctx, agent: &str, home: &Path, version: &str) -> R<PathBuf
         })
         .collect();
     entries.sort();
-    let mut cp = Command::new("cp");
-    cp.args(["-c", "-R", "-p"]).args(&entries).arg(&tmp);
-    let cloned = run(cp, Duration::from_secs(3600)).is_ok_and(|r| r.code == 0);
+    let cloned = clone_entries(&entries, &tmp);
     if !cloned {
         // another disk: no clones, so share what didn't change instead
         rmtree(&tmp);
