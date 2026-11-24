@@ -266,20 +266,44 @@ pub fn print_settings(a: &Args) -> Result<()> {
     }
 }
 
+/// The core's door for the secrets module: a switched Mac's tombstone of auth.json is answered by the core, in process
+/// (`kith_kernel::secrets::Authority`).
+pub(crate) fn install_core() {
+    kith_kernel::secrets::install_core(std::sync::Arc::new(crate::threads_cmd::Loopback {
+        kernel: PathBuf::new(),
+        home: PathBuf::new(),
+    }));
+}
+
 /// `kith kernel launch mcp`.
 pub fn print_mcp(a: &Args) -> Result<()> {
+    install_core();
     let c = context(a)?;
+    let kith_bin = a.kith_bin.clone().or_else(|| kith_kernel::paths::process_env("KITH_BIN").filter(|b| !b.is_empty()));
+    let process_env: kith_kernel::launch::assemble::Env = std::env::vars_os()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+        .collect();
     let granted: Option<Value> = if c.member.owner {
         if let Some(f) = &a.granted {
             Some(serde_json::from_str(&std::fs::read_to_string(f)?)?)
         } else {
-            {
-                // The shared services this agent is granted (secrets resolve in kith-auth, not here).
-                let o = Command::new(c.kernel.join("bin/kith-auth")).args(["mcp-config", &a.agent]).output()?;
-                if o.status.success() {
-                    serde_json::from_slice(&o.stdout).ok()
-                } else {
-                    eprintln!("kith: {}: no shared services this run (kith-auth failed)", a.agent);
+            // The shared services this agent is granted, in process: the same code the launch runs.
+            let mut sctx = kith_kernel::secrets::Ctx::from_process(&c.kernel);
+            sctx.person = Some(c.person.clone()).filter(|p| !p.is_empty());
+            let program =
+                kith_bin.clone().or_else(|| std::env::current_exe().ok().map(|e| e.to_string_lossy().into_owned()));
+            let starter = kith_kernel::secrets::exec_program(
+                program.as_deref(),
+                process_env.get("KITH_SECRETS_EXEC").map(String::as_str),
+                |b| kith_kernel::launch::assemble::knows_module(b, "secrets-exec"),
+            );
+            match kith_kernel::secrets::mcp_config(&sctx, &process_env, &a.agent, &starter) {
+                Ok(made) => {
+                    made.notes.iter().for_each(|n| eprintln!("{n}"));
+                    Some(made.config)
+                }
+                Err(d) => {
+                    eprintln!("kith: {}: no shared services this run (kith-auth: {})", a.agent, d.msg);
                     None
                 }
             }
@@ -287,10 +311,6 @@ pub fn print_mcp(a: &Args) -> Result<()> {
     } else {
         None
     };
-    let kith_bin = a.kith_bin.clone().or_else(|| kith_kernel::paths::process_env("KITH_BIN").filter(|b| !b.is_empty()));
-    let process_env: kith_kernel::launch::assemble::Env = std::env::vars_os()
-        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
-        .collect();
     let permit_bin = kith_kernel::launch::assemble::permit_hook_bin(&c.kernel, &process_env, kith_bin.as_deref());
     let merged = mcp::merged(c.member.owner, permit_bin.as_deref(), &c.kernel, granted.as_ref(), &c.pkg)
         .map_err(|e| anyhow!(e))?;
@@ -302,6 +322,7 @@ pub fn print_mcp(a: &Args) -> Result<()> {
 /// exit code `kith AGENT --launch-json` gives. `--kernel DIR` names the kernel folder (the router passes it).
 pub fn print_whole(args: &[String]) -> i32 {
     use std::io::Write as _;
+    install_core();
     let mut rest: Vec<String> = args.to_vec();
     let mut kernel_dir: Option<PathBuf> = None;
     if let Some(i) = rest.iter().position(|a| a == "--kernel")
