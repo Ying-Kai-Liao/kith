@@ -4,20 +4,21 @@
 
 use anyhow::{Result, anyhow, bail};
 use kith_acp::{Failure, FailureKind, RunSpec, depleted, needs_sign_in};
-use kith_kernel::engines::{self, Oneshot};
+use kith_kernel::engines::{self, Oneshot, Reach};
 use serde_json::{Value, json};
 use std::io::Read as _;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Exit code for "this engine has no ACP one-shot here" (a registry adapter only, or a native one-shot): the caller
-/// runs the engine its own way. Nothing was started. (BSD `EX_CONFIG`.)
+/// Exit code for "this engine has no ACP one-shot here" (a native one-shot, or neither an ACP mode nor a registry
+/// adapter Kith may start): the caller runs the engine its own way. Nothing was started. (BSD `EX_CONFIG`.)
 pub const NOT_AVAILABLE: i32 = 78;
 
 pub struct Args {
     pub engine: String,
     pub model: Option<String>,
     pub cwd: Option<PathBuf>,
+    pub dirs: Vec<PathBuf>,
     pub mcp_config: Option<String>,
     pub json: bool,
     pub approve: bool,
@@ -32,15 +33,30 @@ pub async fn run(a: Args) -> Result<i32> {
         engines::find(&a.engine).ok_or_else(|| anyhow!("no engine called {} (kith engines lists them)", a.engine))?;
     let command = match a.acp_command.clone().or_else(|| std::env::var("KITH_RUN_ONCE_ACP_COMMAND").ok()) {
         Some(c) if !c.is_empty() => c,
+        // A registry adapter only for an engine whose session modes Kith sets (codex): any other would run in the
+        // adapter's own default mode.
+        _ if !matches!(engine.oneshot, Oneshot::Acp)
+            || (engine.local.is_none() && engines::session_modes(engine.id, Reach::Workspace).is_empty()) =>
+        {
+            eprintln!("kith: {} has no ACP one-shot on this computer; run it its own way", engine.name);
+            return Ok(NOT_AVAILABLE);
+        }
         _ => {
-            let Some(local) = engine.local.filter(|_| matches!(engine.oneshot, Oneshot::Acp)) else {
-                eprintln!("kith: {} has no ACP one-shot on this computer; run it its own way", engine.name);
-                return Ok(NOT_AVAILABLE);
-            };
             let Some((_, path)) = engines::detect(engine, &|b| crate::agent::backends::which(b)) else {
                 bail!("{} is not installed ({})", engine.bins[0], engine.setup);
             };
-            local.replace("{bin}", &crate::shell::quote(&path.to_string_lossy()))
+            match engine.local {
+                Some(local) => local.replace("{bin}", &crate::shell::quote(&path.to_string_lossy())),
+                // No ACP mode in the CLI itself (codex): its registry adapter, as the app's chats start it.
+                None => match crate::agent::backends::launch_candidates(engine.id, |_| {}).await {
+                    Ok(cmds) if !cmds.is_empty() => cmds[0].acp(),
+                    other => {
+                        let why = other.err().map(|e| format!(" ({e:#})")).unwrap_or_default();
+                        eprintln!("kith: {} has no ACP adapter to start here{why}; run it its own way", engine.name);
+                        return Ok(NOT_AVAILABLE);
+                    }
+                },
+            }
         }
     };
     let task = if a.task.is_empty() {
@@ -67,8 +83,15 @@ pub async fn run(a: Args) -> Result<i32> {
     let spec = RunSpec {
         command,
         cwd: cwd.to_string_lossy().into_owned(),
+        dirs: a.dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect(),
         env: Vec::new(),
         model: a.model,
+        // Native codex one-shots were workspace-write, or bypass with `--approve`; asks reach `handle`, which refuses
+        // them without it.
+        modes: engines::session_modes(engine.id, if a.approve { Reach::Full } else { Reach::Workspace })
+            .iter()
+            .map(|m| (*m).to_owned())
+            .collect(),
         mcp_servers,
         task,
         timeout: Duration::from_secs(a.timeout),
@@ -115,5 +138,35 @@ fn classify(e: &anyhow::Error) -> (&'static str, Option<i64>) {
         Some(FailureKind::Timeout) => ("timeout", None),
         Some(FailureKind::Exited) => ("exited", None),
         _ => ("error", None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(engine: &str) -> Args {
+        Args {
+            engine: engine.into(),
+            model: None,
+            cwd: None,
+            dirs: Vec::new(),
+            mcp_config: None,
+            json: true,
+            approve: false,
+            timeout: 5,
+            // Empty: not given, and KITH_RUN_ONCE_ACP_COMMAND is not read either.
+            acp_command: Some(String::new()),
+            task: vec!["hello".into()],
+        }
+    }
+
+    #[tokio::test]
+    async fn registry_only_engines_but_codex_stay_native() {
+        for engine in ["pi", "amp", "vibe", "antigravity"] {
+            let e = engines::find(engine).unwrap();
+            assert!(e.local.is_none() && matches!(e.oneshot, Oneshot::Acp), "{engine} changed in the table");
+            assert_eq!(run(args(engine)).await.unwrap(), NOT_AVAILABLE, "{engine}");
+        }
     }
 }

@@ -630,6 +630,9 @@ enum KernelCmd {
         /// The folder the engine works in (default: here).
         #[arg(long)]
         cwd: Option<std::path::PathBuf>,
+        /// More folders the engine may work in (repeat it); only an engine that takes them gets them.
+        #[arg(long = "add-dir")]
+        dirs: Vec<std::path::PathBuf>,
         /// MCP servers for the run: `{"mcpServers": {...}}` as JSON or a file holding it.
         #[arg(long)]
         mcp_config: Option<String>,
@@ -718,6 +721,19 @@ enum DelegationAction {
 enum AccountsAction {
     /// The chain for `kith AGENT --backups-json`.
     BackupsJson { agent: String, agent_md: String },
+    /// The agent's accounts as one JSON object for `kith AGENT --accounts-json`: its set in order, status, usage, candidates.
+    AccountsJson { agent: String, agent_md: String },
+    /// The id of the agent's static main account (`kith AGENT`'s start when nothing is out).
+    MainId { agent: String, agent_md: String },
+    /// A one-shot over `pick`'s candidates: `kith kernel accounts run-chain AGENT AGENT.MD KITH -- ARGS...` runs
+    /// `KITH AGENT [--account ID] ARGS...`, moving on at exit 4 or a usage-limit message (which marks the account out).
+    RunChain {
+        agent: String,
+        agent_md: String,
+        kith: String,
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
     /// Shell assignments for a backup chain entry; exit 4 and one line on stderr when it can't run.
     LaunchEnv {
         agent: String,
@@ -778,6 +794,23 @@ fn print_accounts(kernel: Option<std::path::PathBuf>, action: AccountsAction) ->
     let result: Result<String, String> = match action {
         AccountsAction::BackupsJson { agent, agent_md } => {
             Ok(accounts::chain(&ctx, &agent, std::path::Path::new(&agent_md)).dumps())
+        }
+        AccountsAction::AccountsJson { agent, agent_md } => {
+            accounts::accounts_json(&ctx, &agent, std::path::Path::new(&agent_md))
+        }
+        AccountsAction::MainId { agent, agent_md } => {
+            Ok(accounts::main_id(&ctx, &agent, Some(std::path::Path::new(&agent_md)), None))
+        }
+        AccountsAction::RunChain { agent, agent_md, kith, args } => {
+            return accounts::chain::run(
+                &ctx,
+                &agent,
+                std::path::Path::new(&agent_md),
+                std::path::Path::new(&kith),
+                &args,
+                &mut std::io::stdout(),
+                &mut std::io::stderr(),
+            );
         }
         AccountsAction::LaunchEnv { agent, entry, record } => accounts::launch_env(&ctx, &agent, &entry, false, record),
         AccountsAction::MainEnv { agent, agent_md, state, record, prefer } => accounts::main_env(
@@ -1533,10 +1566,21 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Sub::Kernel { cmd } => {
-            if let KernelCmd::RunOnce { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task } =
-                cmd
+            if let KernelCmd::RunOnce {
+                engine,
+                model,
+                cwd,
+                dirs,
+                mcp_config,
+                json,
+                approve,
+                timeout,
+                acp_command,
+                task,
+            } = cmd
             {
-                let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
+                let args =
+                    runonce::Args { engine, model, cwd, dirs, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
             if let KernelCmd::CoreCall { method, params_stdin } = cmd {
