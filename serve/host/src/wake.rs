@@ -19,16 +19,30 @@ use std::process::{Command, Stdio};
 mod tests;
 mod via_core;
 
-/// How the calls for `state` go: `Ok(None)` the kernel's files (not switched), `Ok(Some)` the core at those folders, `Err` the
-/// module is switched and the core cannot be named (a state folder that is not this host's): nothing is asked of the files.
+/// How the calls for `state` go: `Ok(None)` the kernel's files (not switched), `Ok(Some)` the core at those folders, `Err`
+/// the module is switched and the core cannot be named (a state folder that is not this host's), or its switch record
+/// cannot be read: nothing is asked of the files.
 fn via(state: &Path) -> Result<Option<kith_kernel::paths::Paths>, String> {
     let tombstone = state.join("sessions/queue/.tombstone").exists();
-    match crate::terminal::core_holders::folders_of(state) {
-        Some(f) if tombstone || crate::core_front::switch_file_exists(&f, "wake") => Ok(Some(f)),
-        None if tombstone => {
+    let Some(f) = crate::terminal::core_holders::folders_of(state) else {
+        return if tombstone {
             Err(format!("the wake queue at {} is the core's, and no core is known for it", state.display()))
-        }
-        _ => Ok(None),
+        } else {
+            Ok(None)
+        };
+    };
+    if tombstone || switched(&f)? { Ok(Some(f)) } else { Ok(None) }
+}
+
+/// Whether the `wake` switch record says the core is the store. As the core reads it (`cutover/state.rs`): `stepping` is
+/// the import still running with Python the writer, so the files; `switched`, `rolling-back` and a record with no
+/// `state=` line are the core's. A record that cannot be read is not "unswitched".
+fn switched(f: &kith_kernel::paths::Paths) -> Result<bool, String> {
+    let record = f.machine.join("core/cutover/wake.switch");
+    match std::fs::read_to_string(&record) {
+        Ok(text) => Ok(!text.lines().any(|l| l.trim() == "state=stepping")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("the wake switch record {} cannot be read: {e}", record.display())),
     }
 }
 
@@ -171,19 +185,20 @@ pub fn status(state: &Path, id: &str) -> Option<String> {
 }
 
 /// Where every request the queue knows is: queued, running, or how it was answered. Read from the queue's files, so
-/// many cards cost no process; a request the queue has forgotten (its memory is a week) is missing.
-pub fn statuses(state: &Path) -> std::collections::HashMap<String, String> {
+/// many cards cost no process; a request the queue has forgotten (its memory is a week) is missing. None: the switched
+/// queue could not be read, so a missing request is not known to be forgotten.
+pub fn statuses(state: &Path) -> Option<std::collections::HashMap<String, String>> {
     statuses_for(state, &[])
 }
 
 /// [`statuses`], and each of `ids` the queue does not hold as queued or running is asked for by itself: the core's list has no
 /// answered ids, the files' `answered.json` is read whole anyway.
-pub fn statuses_for(state: &Path, ids: &[String]) -> std::collections::HashMap<String, String> {
+pub fn statuses_for(state: &Path, ids: &[String]) -> Option<std::collections::HashMap<String, String>> {
     match via(state) {
         Ok(Some(f)) => return via_core::statuses(&f, ids),
         Err(why) => {
             closed(&why, "statuses");
-            return std::collections::HashMap::new();
+            return None;
         }
         Ok(None) => {}
     }
@@ -208,7 +223,7 @@ pub fn statuses_for(state: &Path, ids: &[String]) -> std::collections::HashMap<S
             }
         }
     }
-    out
+    Some(out)
 }
 
 /// Whether the queue holds anything at all: a look at its folder, so an idle host starts no process.

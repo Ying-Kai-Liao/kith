@@ -134,9 +134,13 @@ fn request_id(card: &Card) -> String {
 }
 
 /// The cards whose request the queue holds right now (queued or in a turn), for a restart to keep their claims.
+/// A queue that cannot be read (the switched core is not up yet after a host start) keeps every claim: the next settle
+/// reads it and ends what it no longer holds.
 pub(crate) fn queued_cards(hub: &Hub) -> Vec<String> {
-    wake::statuses(&state_of(hub))
-        .into_iter()
+    let Some(held) = wake::statuses(&state_of(hub)) else {
+        return hub.store.cards_unapplied().into_iter().filter(|c| c.resumed_at.is_some()).map(|c| c.id).collect();
+    };
+    held.into_iter()
         .filter(|(_, how)| matches!(how.as_str(), "queued" | "running"))
         .filter_map(|(id, _)| id.strip_prefix("card:").map(str::to_owned))
         .collect()
@@ -385,8 +389,10 @@ pub(crate) async fn settle_queue_at(hub: &Arc<Hub>, now: i64) {
     let known = {
         let state = state.clone();
         let ids: Vec<String> = cards.iter().map(request_id).chain(waiting.iter().map(|e| message_id(&e.id))).collect();
-        wake::blocking(move || wake::statuses_for(&state, &ids)).await.unwrap_or_default()
+        wake::blocking(move || wake::statuses_for(&state, &ids)).await.flatten()
     };
+    // Not read is not "forgotten": nothing is judged this pass, and no miss is counted.
+    let Some(known) = known else { return };
     // An enqueue that began, ran or ended during the read may have written its item after the read saw the folder.
     let racing = count != enqueued(&state);
     for card in &cards {

@@ -23,7 +23,7 @@ impl Core {
         if switched {
             let dir = folders.machine.join("core/cutover");
             std::fs::create_dir_all(&dir).expect("cutover dir");
-            std::fs::write(dir.join("wake.switch"), "{}").expect("switch record");
+            std::fs::write(dir.join("wake.switch"), "state=switched\nat=1\n").expect("switch record");
         }
         Self { home, folders, daemon: Some(daemon) }
     }
@@ -72,14 +72,14 @@ fn a_switched_queue_is_the_cores_and_starts_no_process() {
     assert_eq!(status(st, "card:1").as_deref(), Some("queued"));
     assert!(has_items(st));
     assert_eq!(ls(st).len(), 1);
-    assert_eq!(statuses(st).get("card:1").map(String::as_str), Some("queued"));
+    assert_eq!(statuses(st).unwrap().get("card:1").map(String::as_str), Some("queued"));
 
     let turn = take_session(st, "acp:c1:t").unwrap().expect("a turn is owed");
     assert_eq!(
         (turn.session.as_str(), turn.person.as_deref(), turn.ids.as_slice()),
         ("acp:c1:t", Some("sam"), ["card:1".to_owned()].as_slice())
     );
-    assert_eq!(statuses(st).get("card:1").map(String::as_str), Some("running"));
+    assert_eq!(statuses(st).unwrap().get("card:1").map(String::as_str), Some("running"));
     back(st, &turn.run, true);
     assert_eq!(status(st, "card:1").as_deref(), Some("queued"), "given back, owed again");
     assert!(take(st).unwrap().is_none(), "a held session waits before it is offered again");
@@ -92,7 +92,7 @@ fn a_switched_queue_is_the_cores_and_starts_no_process() {
 
     // The list holds no answered ids: they are asked for by name, and an id the queue never saw is not there.
     let asked = vec!["card:1".to_owned(), "card:9".to_owned(), "card:nobody".to_owned()];
-    let known = statuses_for(st, &asked);
+    let known = statuses_for(st, &asked).unwrap();
     assert_eq!(known.get("card:1").map(String::as_str), Some("withdrawn"));
     assert_eq!(known.get("card:9").map(String::as_str), Some("answered"));
     assert!(!known.contains_key("card:nobody"), "{known:?}");
@@ -131,7 +131,8 @@ fn a_switched_queue_whose_core_is_down_fails_closed_and_never_reaches_the_files(
     assert!(take(&st).is_err());
     assert_eq!(status(&st, "card:1"), None);
     assert!(!has_items(&st));
-    assert!(statuses(&st).is_empty());
+    assert!(statuses(&st).is_none(), "an unread queue is not an empty one");
+    assert!(statuses_for(&st, &["card:1".to_owned()]).is_none());
     withdraw_person(&st, &["sam".to_owned()]);
     done(&st, "run-1", "answered");
     assert_eq!(spawns(&st), 0);
@@ -159,4 +160,23 @@ fn with_the_switch_off_the_files_are_still_the_store() {
     assert_eq!(status(st, "card:1").as_deref(), Some("queued"));
     // The core was never asked: it holds nothing.
     assert!(matches!(via_core::ls(&core.folders), Some(items) if items.is_empty()));
+}
+
+#[test]
+fn a_switch_still_stepping_is_the_files_and_a_damaged_one_is_the_cores() {
+    let core = Core::start(false);
+    let st = core.state();
+    let record = core.folders.machine.join("core/cutover/wake.switch");
+    std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+    std::fs::write(&record, "state=stepping\nat=1\n").unwrap();
+    assert_eq!(enqueue(st, &ask("acp:c1:t", "card:1", None)).unwrap(), Queued::New);
+    assert_eq!(spawns(st), 1, "Python is still the writer while stepping");
+    assert!(matches!(via_core::ls(&core.folders), Some(items) if items.is_empty()));
+    for (n, text) in ["state=rolling-back\n", "{}"].into_iter().enumerate() {
+        std::fs::write(&record, text).unwrap();
+        let before = spawns(st);
+        let (session, id) = (format!("acp:d{n}:t"), format!("card:d{n}"));
+        assert_eq!(enqueue(st, &ask(&session, &id, None)).unwrap(), Queued::New);
+        assert_eq!(spawns(st), before, "{text:?} is the core's");
+    }
 }

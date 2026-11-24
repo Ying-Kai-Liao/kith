@@ -50,27 +50,38 @@ pub fn enqueue(f: &Paths, r: &Request<'_>) -> anyhow::Result<Queued> {
 }
 
 pub fn status(f: &Paths, id: &str) -> Option<String> {
-    let said = read(f, "wake.queueStatus", &json!({"id": id})).inspect_err(|e| tracing::warn!("wake: {e:#}")).ok()?;
-    said["state"].as_str().map(str::to_owned)
+    asked_status(f, id).inspect_err(|e| tracing::warn!("wake: {e:#}")).ok()
+}
+
+fn asked_status(f: &Paths, id: &str) -> anyhow::Result<String> {
+    let said = read(f, "wake.queueStatus", &json!({"id": id}))?;
+    said["state"].as_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("wake.queueStatus: no state in the answer"))
 }
 
 /// Queued and running requests from `wake.queueList`; each of `ids` it does not hold is asked as `wake.queueStatus`
-/// (the list carries no answered ids), and an `unknown` one is left out, as the files' queue forgets them.
-pub fn statuses(f: &Paths, ids: &[String]) -> HashMap<String, String> {
+/// (the list carries no answered ids), and an `unknown` one is left out, as the files' queue forgets them. None: a read
+/// failed, which says nothing about any request (a caller must not take a missing id for a forgotten one).
+pub fn statuses(f: &Paths, ids: &[String]) -> Option<HashMap<String, String>> {
     let mut out = HashMap::new();
-    let Some(items) = ls(f) else { return out };
-    for r in items.iter().flat_map(|it| it["requests"].as_array().into_iter().flatten()) {
+    for r in ls(f)?.iter().flat_map(|it| it["requests"].as_array().into_iter().flatten()) {
         if let Some(id) = r["id"].as_str() {
             out.insert(id.to_owned(), if r["run"].is_null() { "queued" } else { "running" }.to_owned());
         }
     }
     let missing: Vec<&String> = ids.iter().filter(|id| !out.contains_key(*id)).collect();
     for id in missing {
-        if let Some(state) = status(f, id).filter(|s| s != "unknown") {
-            out.insert(id.clone(), state);
+        match asked_status(f, id) {
+            Ok(state) if state != "unknown" => {
+                out.insert(id.clone(), state);
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("wake: {e:#}");
+                return None;
+            }
         }
     }
-    out
+    Some(out)
 }
 
 pub fn has_items(f: &Paths) -> bool {
