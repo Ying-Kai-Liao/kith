@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below (see the skill's "Sync commit").
-SYNC=28a000f9aa7cc2b84a3b9fb01b5179586642e6b7
+SYNC=32226509ebc6d05757f4f90ec327dfcf181f23f0
 
 FILES=(
   kernel/bin/kith-auth                    # may(), bot_may, cmd_person (--revoke/--unrevoke, --local), who and resolve (revoked, held)
@@ -59,6 +59,8 @@ FILES=(
   core/kernel/src/permit/door.rs          # run_door (the job card, then kith_door.run: DoorStart)
   kernel/lib/kith-core.sh                 # kith_core_exec / kith_oneshot_flag: which launch (bash body or launch-exec) runs a one-shot
   kernel/lib/kith_people_access.py        # kith people suspend|undo on a switched Mac: the host's revokePerson (cloud first, R9), never a raw core call
+  core/kernel/src/launch/terminal.rs      # R3b: the terminal run: `proc` before the engine (exec.rs), the terminal claim for this pid, then `threads run` in process (the pid the revoke sweep finds)
+  core/kernel/src/launch/held.rs          # R3b: --held (the owner's own terminal only): release the resumed claim, then terminal.open
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

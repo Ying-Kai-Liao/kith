@@ -45,6 +45,11 @@ permissions:
 env:
   WRANGLER_SEND_METRICS: "false"
   CARGO_TERM_COLOR: always
+  # The model checks' pass markers (verification/model-keys.tsv): a key is salt, Java major and a hash of the model's
+  # inputs. ci.yml is not in the key, so a change to how a model job runs its full rows (flags, env, which table)
+  # must bump the salt, and a bump forces every model full once.
+  MODEL_PASS_SALT: model-pass-v1
+  MODEL_JAVA: "21"
 
 jobs:
   # Path filtering happens here, not in `on.paths`, so the `ci` job below always
@@ -78,6 +83,23 @@ jobs:
       lease: ${{ steps.f.outputs.lease }}
       registry: ${{ steps.f.outputs.registry }}
       schedule_fire: ${{ steps.f.outputs.schedule_fire }}
+      # <marker>_full: the model's filter matched and no pass is remembered for its inputs, so its job runs the full
+      # rows and saves <marker>_key when they pass (every model's inputs sit inside its own filter). revoke_shards: on a
+      # revoke match, the shards with no pass; else, or when all six have one, ["smoke"].
+      revoke_key: ${{ steps.keys.outputs.revoke_key }}
+      revoke_shards: ${{ steps.revoke_shards.outputs.shards }}
+      writer_lock_full: ${{ steps.f.outputs.writer_lock == 'true' && steps.pass_writer_lock.outputs.cache-hit != 'true' }}
+      writer_lock_key: ${{ steps.keys.outputs.writer_lock_key }}
+      threads_full: ${{ steps.f.outputs.threads == 'true' && steps.pass_threads.outputs.cache-hit != 'true' }}
+      threads_key: ${{ steps.keys.outputs.threads_key }}
+      threads_slow_full: ${{ steps.f.outputs.threads == 'true' && steps.pass_threads_slow.outputs.cache-hit != 'true' }}
+      threads_slow_key: ${{ steps.keys.outputs.threads_slow_key }}
+      schedule_fire_full: ${{ steps.f.outputs.schedule_fire == 'true' && steps.pass_schedule_fire.outputs.cache-hit != 'true' }}
+      schedule_fire_key: ${{ steps.keys.outputs.schedule_fire_key }}
+      lease_full: ${{ steps.f.outputs.lease == 'true' && steps.pass_lease.outputs.cache-hit != 'true' }}
+      lease_key: ${{ steps.keys.outputs.lease_key }}
+      secrets_full: ${{ steps.f.outputs.secrets == 'true' && steps.pass_secrets.outputs.cache-hit != 'true' }}
+      secrets_key: ${{ steps.keys.outputs.secrets_key }}
       procstart: ${{ steps.f.outputs.procstart }}
       ios: ${{ steps.h.outputs.ios }}
       desktop: ${{ steps.h.outputs.desktop }}
@@ -124,6 +146,11 @@ jobs:
               - '.github/kith-protected-paths'
               - '.claude/skills/**'
               - '.github/workflows/ci.yml'
+              # kith-model-keys-check reads the model keys and each model's run.sh, smoke.txt and checks.tsv.
+              - 'verification/model-keys.*'
+              - 'verification/*/run.sh'
+              - 'verification/*/smoke.txt'
+              - 'verification/*/checks.tsv'
             # The kernel files the host's own unit tests run for real (the list: scripts/ci/host-kernel-tests.txt). A
             # change here runs only those tests (host-kernel), not the whole host suite.
             kernel_host:
@@ -175,10 +202,10 @@ jobs:
               - 'serve/host/src/launch_cmd.rs'
               - 'serve/host/src/core_front.rs'
               - 'kernel/lib/core-switched.txt'
-              - '.github/workflows/ci.yml'
             # The TLA+ models of the writer lock and the holder's claim rules and the code they cover (the list in the writer-lock skill),
-            # plus the thread-writers code (the writer lock is what makes one thread have one writer). Not ci.yml: a workflow edit runs
-            # the smoke rows, not the full model (same for revoke and schedule_fire below).
+            # plus the thread-writers code (the writer lock is what makes one thread have one writer). A filter here runs the model's
+            # job and its drift report; whether the job runs the full rows is the model's pass key (Model pass keys below), so no
+            # model filter lists ci.yml: a workflow edit that changes how full rows run bumps MODEL_PASS_SALT instead.
             writer_lock:
               - 'verification/writer-lock/**'
               - 'verification/threads/run.sh'
@@ -273,7 +300,6 @@ jobs:
               - 'core/runtime/src/secrets/**'
               - 'core/runtime/src/authority/secret_writes.rs'
               - 'core/api/src/table/cards.rs'
-              - '.github/workflows/ci.yml'
             # The TLA+ models of rooms with people (what a room turn reads, stamps and is reused for; what a revoke ends) and
             # the code they cover (the room parts of the invitee-access and revoke-access skills).
             rooms:
@@ -305,7 +331,6 @@ jobs:
               - 'core/holder/src/client.rs'
               - 'core/holder/src/clock.rs'
               - 'core/runtime/src/holder_link.rs'
-              - '.github/workflows/ci.yml'
             # kith-procstart on macOS (the other jobs read the process table on Linux only).
             procstart:
               - 'core/procstart/**'
@@ -363,7 +388,7 @@ jobs:
             host_core:
               # Plus the kernel programs and checks host-build runs against the built kith (difftest, the switch checks,
               # memory and summary), and the libs those programs load on every call.
-              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/lib/kith_lifecycle.py,kernel/tests/kith-lifecycle-check,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/bin/kith-ask,kernel/bin/kith-remote,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-cost-bots-check,kernel/tests/kith-cost-launch-check,kernel/tests/kith-limit-check,kernel/tests/kith-scratch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check,kernel/tests/kith-agent-set-check,kernel/lib/kith_facets.py,kernel/bin/kith-room-ledger,kernel/tests/kith-load-check,kernel/tests/kith-summary-check,kernel/tests/kith-json-misc-check,.github/kith-protected-paths,kernel/tests/fixtures/launch-*.json,kernel/tests/kith-launch-engines-check,kernel/tests/kith-sched-turn-check}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml,kernel/lib/kith_accounts.py,kernel/lib/kith-core.sh,kernel/lib/core-switched.txt,kernel/lib/requires-switched.txt,scripts/stage-kernel.sh,kernel/bin/kith,kernel/lib/kith_lifecycle.py,kernel/tests/kith-lifecycle-check,kernel/bin/kith-sessions,kernel/lib/kith_registry.py,kernel/tests/kith-held-check,kernel/tests/kith-threads-race,kernel/bin/project-id,kernel/bin/kith-pkg,kernel/bin/kith-auth,kernel/bin/kith-memory,kernel/lib/kith_settings.py,kernel/lib/kith_paths.py,kernel/lib/kith_runsocket.py,kernel/lib/kith_tombstone.py,kernel/lib/kith-env.sh,kernel/bin/kith-sched,kernel/lib/kith_sched_core.py,kernel/bin/kith-ask,kernel/bin/kith-remote,kernel/lib/kith_claims.py,kernel/lib/kith_procstart.py,kernel/lib/kith_runenv.py,kernel/lib/kith_launchd.py,kernel/tests/difftest/**,kernel/tests/kith-*-switch-check,kernel/tests/kith-cost-bots-check,kernel/tests/kith-cost-launch-check,kernel/tests/kith-limit-check,kernel/tests/kith-scratch-check,kernel/tests/kith-*-race-check,kernel/tests/kith-auth-embedded-check,kernel/tests/kith-requires-switched-check,kernel/tests/kith-memory-check,kernel/tests/kith-summary-check,kernel/tests/kith-agent-set-check,kernel/lib/kith_facets.py,kernel/bin/kith-room-ledger,kernel/tests/kith-load-check,kernel/tests/kith-summary-check,kernel/tests/kith-json-misc-check,.github/kith-protected-paths,kernel/tests/fixtures/launch-*.json,kernel/tests/kith-launch-engines-check,kernel/tests/kith-sched-turn-check,kernel/tests/kith-terminal-flags-check,kernel/tests/kith-direct-lock-check}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -395,6 +420,98 @@ jobs:
             e2e:
               - '{apps/desktop/**,apps/packaging/**,apps/shared/**,apps/screen-macos/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,serve/cloud/**,.github/workflows/ci.yml}'
               - '!**/*.md'
+      # Model passes: a full run over the same inputs gives the same verdict, so a key that already has a marker (a
+      # full pass saved by an earlier run on this branch or on main) needs no full run. Look-up only, nothing is
+      # downloaded. The inputs per model: verification/model-keys.tsv.
+      - name: Model pass keys
+        id: keys
+        run: verification/model-keys.sh keys "$MODEL_PASS_SALT-j$MODEL_JAVA" >> "$GITHUB_OUTPUT"
+      - id: pass_threads
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.threads_key }}", lookup-only: true }
+      - id: pass_threads_slow
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.threads_slow_key }}", lookup-only: true }
+      - id: pass_writer_lock
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.writer_lock_key }}", lookup-only: true }
+      - id: pass_schedule_fire
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.schedule_fire_key }}", lookup-only: true }
+      - id: pass_lease
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.lease_key }}", lookup-only: true }
+      - id: pass_secrets
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.secrets_key }}", lookup-only: true }
+      # revoke has one marker per shard, so a cancelled or failed shard re-runs alone.
+      - id: pass_revoke_1
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.revoke_key }}-s1of6", lookup-only: true }
+      - id: pass_revoke_2
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.revoke_key }}-s2of6", lookup-only: true }
+      - id: pass_revoke_3
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.revoke_key }}-s3of6", lookup-only: true }
+      - id: pass_revoke_4
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.revoke_key }}-s4of6", lookup-only: true }
+      - id: pass_revoke_5
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.revoke_key }}-s5of6", lookup-only: true }
+      - id: pass_revoke_6
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.revoke_key }}-s6of6", lookup-only: true }
+      # The revoke matrix: on a revoke filter match, the shards with no pass; else, or when all six have one, one
+      # unsharded smoke leg.
+      - name: Revoke shards to run
+        id: revoke_shards
+        env:
+          MATCH: ${{ steps.f.outputs.revoke }}
+          H1: ${{ steps.pass_revoke_1.outputs.cache-hit }}
+          H2: ${{ steps.pass_revoke_2.outputs.cache-hit }}
+          H3: ${{ steps.pass_revoke_3.outputs.cache-hit }}
+          H4: ${{ steps.pass_revoke_4.outputs.cache-hit }}
+          H5: ${{ steps.pass_revoke_5.outputs.cache-hit }}
+          H6: ${{ steps.pass_revoke_6.outputs.cache-hit }}
+        run: |
+          miss=""
+          for i in 1 2 3 4 5 6; do
+            hit=H$i
+            [ "$MATCH" != true ] || [ "${!hit}" = true ] || miss="$miss${miss:+,}$i"
+          done
+          echo "shards=[${miss:-\"smoke\"}]" >> "$GITHUB_OUTPUT"
+          echo "revoke shards to run: [${miss:-smoke}]"
+  # Writes nothing, fails nothing: when a change touches code a model covers, says which model to re-read
+  # (verification/<m>/drift.sh: covered code changed since its SYNC). A drift.sh that cannot run is an error here.
+  model-drift:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.threads == 'true' || needs.changes.outputs.writer_lock == 'true' || needs.changes.outputs.revoke == 'true' || needs.changes.outputs.secrets == 'true' || needs.changes.outputs.lease == 'true' || needs.changes.outputs.schedule_fire == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Covered code changed since SYNC
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          THREADS: ${{ needs.changes.outputs.threads }}
+          WRITER_LOCK: ${{ needs.changes.outputs.writer_lock }}
+          REVOKE: ${{ needs.changes.outputs.revoke }}
+          SECRETS: ${{ needs.changes.outputs.secrets }}
+          LEASE: ${{ needs.changes.outputs.lease }}
+          SCHEDULE_FIRE: ${{ needs.changes.outputs.schedule_fire }}
+        run: |
+          models=()
+          [ "$THREADS" != true ] || models+=(threads)
+          [ "$WRITER_LOCK" != true ] || models+=(writer-lock)
+          [ "$REVOKE" != true ] || models+=(revoke)
+          [ "$SECRETS" != true ] || models+=(secrets)
+          [ "$LEASE" != true ] || models+=(lease)
+          [ "$SCHEDULE_FIRE" != true ] || models+=(schedule-fire)
+          verification/model-keys.sh drift "$BASE" "${models[@]}"
   # The kernel's own checks in three parallel shards, balanced by measured time (about 2.5 minutes each). Every check
   # runs exactly once; a shard runs all its checks even after one fails, then fails naming each failed check.
   kernel:
@@ -424,6 +541,8 @@ jobs:
               Footguns check|kernel/tests/kith-footguns-check
               CI names check (every kernel/tests/kith-*-check is run here or exempt with a reason)|kernel/tests/kith-ci-names-check
               CI names self-test (a check dropped from ci.yml fails it)|kernel/tests/kith-ci-names-check --selftest
+              Model pass keys (each model run.sh reads only its key's inputs; every model job saves a pass)|kernel/tests/kith-model-keys-check
+              Model pass keys self-test (a run.sh reading outside its key fails it)|kernel/tests/kith-model-keys-check --selftest
               Install drain check|kernel/tests/kith-install-drain-check
               Install gate check (install.sh asks the new release for cutover status --require before cli/current moves)|kernel/tests/kith-install-gate-check
               Agent dirs check|kernel/tests/kith-agent-dirs-check
@@ -537,9 +656,12 @@ jobs:
 
   # Exits 0 when every row of verification/threads/checks.tsv matches its expected pass/fail, so green means no
   # change from the recorded baseline (some rows are known findings on purpose).
+  # Every model job below runs its full rows only when its filter matched and its inputs have no remembered pass
+  # (needs.changes.outputs.<m>_full, the `Model pass keys` step), and saves the marker only after those full rows passed. thread-writers, thread-writers-slow,
+  # secret-cards and holder-lease have no smoke rows, so a remembered pass skips them; model-drift reports covered code.
   thread-writers:
     needs: changes
-    if: needs.changes.outputs.threads == 'true'
+    if: needs.changes.outputs.threads_full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40   # the core-writer rows are ~5M states each (about 90 s on a laptop), four at a time
     steps:
@@ -547,19 +669,26 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ env.MODEL_JAVA }}
       - uses: actions/cache@v4
         with:
           path: ~/.cache/kith-verify
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/threads/run.sh
+      - name: Remember the pass
+        run: mkdir -p .model-pass && echo "$GITHUB_SHA" > .model-pass/threads
+      - uses: actions/cache/save@v4
+        if: success() && needs.changes.outputs.threads_full == 'true'
+        with:
+          path: .model-pass
+          key: ${{ needs.changes.outputs.threads_key }}
 
   # The large passing rows of the same model (verification/threads/checks-slow.tsv, run.sh --slow): one at a time on every
   # core. core-held-cleared OneWriter is 61.5M states, 13 min on 8 laptop cores; it did not finish in 2 h on one worker.
   thread-writers-slow:
     needs: changes
-    if: needs.changes.outputs.threads == 'true'
+    if: needs.changes.outputs.threads_slow_full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -567,7 +696,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ env.MODEL_JAVA }}
       - uses: actions/cache@v4
         with:
           path: ~/.cache/kith-verify
@@ -576,12 +705,19 @@ jobs:
         env:
           KITH_TLC_HEAP: 10g
         run: verification/threads/run.sh --slow
+      - name: Remember the pass
+        run: mkdir -p .model-pass && echo "$GITHUB_SHA" > .model-pass/threads-slow
+      - uses: actions/cache/save@v4
+        if: success() && needs.changes.outputs.threads_slow_full == 'true'
+        with:
+          path: .model-pass
+          key: ${{ needs.changes.outputs.threads_slow_key }}
 
   # The same for the writer lock (WriterLock4.tla) and the holder's claim rules (Holder.tla): the fast rows of
   # verification/writer-lock/checks.tsv. The two slow rows (15-30 min each) run only with `run.sh --all`.
-  # The full fast rows run only when a file the model covers changed (filter writer_lock); every other run
-  # (including a ci.yml edit) runs the smoke rows listed in verification/writer-lock/smoke.txt. Skipped in check
-  # and model mode, where `changes` is skipped.
+  # The full fast rows run only when filter writer_lock matched and the model's inputs have no remembered pass
+  # (writer_lock_full); every other run runs the smoke rows listed in verification/writer-lock/smoke.txt. Skipped
+  # in check and model mode, where `changes` is skipped.
   writer-lock:
     needs: changes
     if: ${{ !cancelled() && needs.changes.result == 'success' }}
@@ -593,20 +729,30 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ env.MODEL_JAVA }}
       - uses: actions/cache@v4
         with:
           path: ~/.cache/kith-verify
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         env:
-          FULL: ${{ needs.changes.outputs.writer_lock }}
+          FULL: ${{ needs.changes.outputs.writer_lock_full }}
         run: verification/writer-lock/run.sh $([ "$FULL" = true ] || echo --smoke)
+      - name: Remember the pass
+        if: needs.changes.outputs.writer_lock_full == 'true'
+        run: mkdir -p .model-pass && echo "$GITHUB_SHA" > .model-pass/writer-lock
+      - uses: actions/cache/save@v4
+        if: success() && needs.changes.outputs.writer_lock_full == 'true'
+        with:
+          path: .model-pass
+          key: ${{ needs.changes.outputs.writer_lock_key }}
 
   # The same for revoking a person: verification/revoke/checks.tsv, every row as expected.
-  # Full rows when the filter matches, else the smoke rows (verification/revoke/smoke.txt).
+  # On a revoke filter match, one leg per shard with no remembered pass (revoke_shards); otherwise, or when all six
+  # have one, a single leg runs the smoke rows
+  # (verification/revoke/smoke.txt) unsharded, so every smoke row and the Reconcile tables run.
   revoke-access:
-    name: revoke-access (${{ matrix.shard }}/6)
+    name: revoke-access (${{ matrix.shard == 'smoke' && 'smoke' || format('{0}/6', matrix.shard) }})
     needs: changes
     if: ${{ !cancelled() && needs.changes.result == 'success' }}
     runs-on: ubuntu-latest
@@ -617,7 +763,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: ${{ fromJSON(needs.changes.outputs.revoke_shards) }}
     env:
       # The runner has 16 GB; the 512m default ran out of heap on switched-always-kill NoLiveProc. Heap changes no result.
       KITH_TLC_HEAP: 8g
@@ -626,25 +772,37 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ env.MODEL_JAVA }}
       - uses: actions/cache@v4
         with:
           path: ~/.cache/kith-verify
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+      # No TLC, a second each: every leg runs it, so it runs whichever shards miss.
       - name: Shards hold every row exactly once
-        if: matrix.shard == 1
         run: |
           verification/revoke/run.sh --shard-check 6
           verification/revoke/run.sh --smoke --shard-check 6
       - name: TLA+ model check
         env:
-          FULL: ${{ needs.changes.outputs.revoke }}
-        run: verification/revoke/run.sh --shard ${{ matrix.shard }}/6 $([ "$FULL" = true ] || echo --smoke)
+          SHARD: ${{ matrix.shard }}
+        run: |
+          if [ "$SHARD" = smoke ]; then verification/revoke/run.sh --smoke
+          else verification/revoke/run.sh --shard "$SHARD/6"; fi
+      # A smoke leg is never a full pass: the save is only for a shard leg, whose matrix entry exists because that
+      # shard's marker was missing (revoke_shards, the per-shard form of revoke_full).
+      - name: Remember the pass
+        if: matrix.shard != 'smoke'
+        run: mkdir -p .model-pass && echo "$GITHUB_SHA" > .model-pass/revoke
+      - uses: actions/cache/save@v4
+        if: success() && matrix.shard != 'smoke'
+        with:
+          path: .model-pass
+          key: ${{ needs.changes.outputs.revoke_key }}-s${{ matrix.shard }}of6
 
   # The same for a secret card (one writer per card, never after it closed): verification/secrets/checks.tsv.
   secret-cards:
     needs: changes
-    if: needs.changes.outputs.secrets == 'true'
+    if: needs.changes.outputs.secrets_full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -652,13 +810,20 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ env.MODEL_JAVA }}
       - uses: actions/cache@v4
         with:
           path: ~/.cache/kith-verify
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/secrets/run.sh
+      - name: Remember the pass
+        run: mkdir -p .model-pass && echo "$GITHUB_SHA" > .model-pass/secrets
+      - uses: actions/cache/save@v4
+        if: success() && needs.changes.outputs.secrets_full == 'true'
+        with:
+          path: .model-pass
+          key: ${{ needs.changes.outputs.secrets_key }}
 
   # The same for rooms with people (a room turn's input, stamps and reuse; a revoke ending its turns): verification/rooms/checks.tsv.
   rooms-with-people:
@@ -682,7 +847,7 @@ jobs:
   # The same for the holder lease (ping-anchored deadline, sleep-aware clock): verification/lease/checks.tsv.
   holder-lease:
     needs: changes
-    if: needs.changes.outputs.lease == 'true'
+    if: needs.changes.outputs.lease_full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -690,13 +855,20 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ env.MODEL_JAVA }}
       - uses: actions/cache@v4
         with:
           path: ~/.cache/kith-verify
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/lease/run.sh
+      - name: Remember the pass
+        run: mkdir -p .model-pass && echo "$GITHUB_SHA" > .model-pass/lease
+      - uses: actions/cache/save@v4
+        if: success() && needs.changes.outputs.lease_full == 'true'
+        with:
+          path: .model-pass
+          key: ${{ needs.changes.outputs.lease_key }}
 
   # The same for the transcripts registry cutover (write-ahead spool, file from the row, reconcile): verification/registry/checks.tsv.
   # mode=model runs it too:  gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=model
@@ -732,17 +904,26 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: ${{ env.MODEL_JAVA }}
       - uses: actions/cache@v4
         with:
           path: ~/.cache/kith-verify
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         env:
-          # mode=model is the by-hand full model run; otherwise full only when the filter matches, else smoke rows
-          # (verification/schedule-fire/smoke.txt).
-          FULL: ${{ (inputs.mode == 'model' || needs.changes.outputs.schedule_fire == 'true') && 'true' || '' }}
+          # mode=model is the by-hand full model run; otherwise full only when filter schedule_fire matched and the
+          # inputs have no remembered pass, else smoke rows (verification/schedule-fire/smoke.txt).
+          FULL: ${{ (inputs.mode == 'model' || needs.changes.outputs.schedule_fire_full == 'true') && 'true' || '' }}
         run: verification/schedule-fire/run.sh $([ "$FULL" = true ] || echo --smoke)
+      # mode=model skips `changes`, so there is no key and nothing is saved.
+      - name: Remember the pass
+        if: needs.changes.outputs.schedule_fire_full == 'true'
+        run: mkdir -p .model-pass && echo "$GITHUB_SHA" > .model-pass/schedule-fire
+      - uses: actions/cache/save@v4
+        if: success() && needs.changes.outputs.schedule_fire_full == 'true'
+        with:
+          path: .model-pass
+          key: ${{ needs.changes.outputs.schedule_fire_key }}
 
   # Format and clippy on the whole host workspace. The tests are in host-build, host-test and host-crates.
   host:
@@ -1004,6 +1185,7 @@ jobs:
               kith-launch-once-race-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
               Sched turn check (kernel launch --exec --turn --claim: refusals before the claim, core down exits 5, a claimed one-shot refused with 10, no engine)|KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-sched-turn-check
               Run kind check, launch-exec on (the one-shot in one process)|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-kind-check
+              Terminal flags check, launch-exec on (the terminal in one process)|KITH_LAUNCH_EXEC=on KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-terminal-flags-check
               kith-launch-engines-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-engines-check
               kith-auth-mixed-race-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
               kith-account-state-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check
@@ -1058,6 +1240,7 @@ jobs:
             archive: true
             checks: |
               Direct lock, stub and held checks|T="$PWD/serve/host/target/debug"; KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" kernel/tests/kith-direct-lock-check && KITH_LIFECYCLE_EXPECT=rust KITH_CORE=rust KITH_BIN="$T/kith" KITH_REAL_STUB_BIN="$T/kith-stub" kernel/tests/kith-lifecycle-check && KITH_DIFFTEST_BIN="$T/kith" kernel/tests/kith-stub-install-check && KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" KITH_HOLDER_BIN="$T/kith-holder" kernel/tests/kith-held-check
+              Direct lock and held checks, launch-exec on (the terminal and --held in one process)|T="$PWD/serve/host/target/debug"; KITH_LAUNCH_EXEC=on KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" kernel/tests/kith-direct-lock-check && KITH_LAUNCH_EXEC=on KITH_BIN="$T/kith" KITH_STUB_BIN="$T/kith-stub" KITH_HOLDER_BIN="$T/kith-holder" kernel/tests/kith-held-check
               Schedules cutover end to end (real processes)|cd serve/host && cargo nextest run --profile ci --no-tests=fail --archive-file "$RUNNER_TEMP/host-tests.tar.zst" --extract-to . --extract-overwrite --workspace-remap . -E 'binary(schedules_cutover_e2e)'
     steps:
       - uses: actions/checkout@v4
@@ -1565,7 +1748,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
-    needs: [changes, kernel, kernel-program, host, windows, host-build, host-checks, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, holder-lease, registry-step, schedule-fire, procstart-macos, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, kernel-program, host, windows, host-build, host-checks, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, model-drift, holder-lease, registry-step, schedule-fire, procstart-macos, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

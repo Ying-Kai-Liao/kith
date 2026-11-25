@@ -42,7 +42,7 @@ used. First run downloads about 60 MB.
 
 ## Sync commit
 
-**Last confirmed to describe the code: `28a000f9aa7cc2b84a3b9fb01b5179586642e6b7`** (origin/main `28a000f9a`; was after #1173, R3a `kith kernel launch-exec` shipped off,
+**Last confirmed to describe the code: `32226509ebc6d05757f4f90ec327dfcf181f23f0`** (origin/main `32226509e`; was after #1173, R3a `kith kernel launch-exec` shipped off,
 2026-11-26; what was read is in "Re-sync 2026-11-26" (and "Re-sync 2026-11-25 (R3a)") at the end: `Threads.tla`, `base.consts` and the rows are unchanged).
 
 The sync before it, `f9b5e509f476bb88f6203a125ae863369ba03aa9` (origin/rust-rebuild after #1015, #1016, #1017,
@@ -510,3 +510,5 @@ Every covered change since `a62aeb29a` was read against `Threads.tla`:
 - `core/stub/src/main.rs`: Windows pipe identification and owner check (the lock's second layer is stricter).
 - `bin/kith`, `kith-core.sh`, `core-switched.txt`: engine and wake routing, an `ask` line commented out. `launch_cmd.rs`, `core_front.rs` and `kernel/lib/core-switched.txt` are now in the `threads` CI filter.
 - No TLC row rerun (no model change); CI runs `thread-writers` and `thread-writers-slow`.
+
+Second read, same day (SYNC moved on to `32226509ebc6d05757f4f90ec327dfcf181f23f0`, after R3b #1196): `launch/terminal.rs` is the bash body's terminal steps in its order (session id and lock, `--held`, the terminal check, the ask token, the terminal's claim for this pid unless `resolve` took it, then `threads::run::run_in` with Claude as this process's child under the stub: I2, I3); a held session is refused at once (wait zero). `launch/held.rs` gives the resumed claim back (`Taker::release_for`, the claim's own pid) before `terminal.open` takes it (I7), one call and never repeated, and the direct fallback claims again. `exec.rs` sends a no-task run there only when the program lists `launch-exec-term`; `runproc::spawn` takes the run's environment, `core_front::core_call_open` and `HeldPort` are the clients. Same steps as the script, no new writer, nothing changed in `Threads.tla`.
