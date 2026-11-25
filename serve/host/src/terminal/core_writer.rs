@@ -499,6 +499,23 @@ impl CoreWriter {
         }
     }
 
+    /// The claim `claim` in whatever state it is (`hostclaim.show` by id): `{state, pid, ...}`, `None` when the core has none of
+    /// that id. `Err(why)`: the core did not answer. A run the host started reads it to know whether its launch attached.
+    pub fn claim_row(&self, claim: i64) -> Result<Option<Value>, String> {
+        let said = self.data("hostclaim.show", &json!({"claimId": claim}))?;
+        Ok(Some(said["claim"].clone()).filter(Value::is_object))
+    }
+
+    /// Gives a claim whose run never attached back and queues its turn again (`hostclaim.stop` with `requeue`): the turn is
+    /// pulled again, not a failed try. Asked again by the caller while this says [`Told::Down`].
+    pub fn stop_requeue(&self, claim: i64, why: &str) -> Told {
+        match self.call("hostclaim.stop", &json!({"claimId": claim, "reason": why, "requeue": true})) {
+            Answer::Done(_) => Told::Done,
+            Answer::Refused(said) => Told::Refused(said),
+            Answer::Down { why, .. } => Told::Down(why),
+        }
+    }
+
     fn report(&self, claim: i64, kind: &str, pid: u32, extra: &Value) -> Result<(), String> {
         let mut body = json!({"out_of_usage": false, "pid": pid});
         if let (Some(b), Some(e)) = (body.as_object_mut(), extra.as_object()) {

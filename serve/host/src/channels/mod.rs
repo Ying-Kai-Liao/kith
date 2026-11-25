@@ -85,6 +85,11 @@ pub fn wake(wk: &str, text: &str, claim: impl FnOnce() -> Vec<String>) -> Wake {
     CORE.get().map_or(Wake::Offline, |core| core.wake(wk, text, claim))
 }
 
+/// [`wake`] for a wake turn the core queued and the host claimed (`WK4c`): the note is a batch of its own, kept in memory only.
+pub fn wake_claimed(wk: &str, text: &str, claimed: Arc<crate::cards::resume::ChannelWake>) -> Wake {
+    CORE.get().map_or(Wake::Offline, |core| core.wake_claimed(wk, text, claimed))
+}
+
 /// Posts `text` from `agent` in `person`'s newest one-to-one chat-channel thread with it (`Core::tell`), in the
 /// background. A host without channels, or a person without such a thread, gets nothing.
 pub fn tell(person: Option<String>, agent: String, text: String) {

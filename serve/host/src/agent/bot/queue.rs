@@ -56,10 +56,13 @@ impl Actor {
                     self.next_in_queue(done_tx).await;
                 }
             }
-            Cmd::WakeBatch { lane, items } => {
+            Cmd::WakeBatch { lane, items, by_id } => {
                 // All of them before the first start, so an idle actor takes them as one turn. One accept for the batch: the
-                // first entry's key and epochs are the turn's.
-                let acc = self.accept(&[]).await;
+                // first entry's key and epochs are the turn's. A turn the core queued is begun by its id, as a routine's is.
+                let acc = match by_id {
+                    Some((turn, pulled)) => self.accept_pulled(turn, pulled).await,
+                    None => self.accept(&[]).await,
+                };
                 for (entry_id, text) in items {
                     self.queue.push_back(Queued::User {
                         lane: lane.clone(),
@@ -629,9 +632,12 @@ fn take_batch(queue: &mut std::collections::VecDeque<Queued>) -> Option<Batch> {
     // The batch is one turn: its key and epochs are the first message's.
     let (lane, acc) = (lane.clone(), acc.clone());
     let mut batch = Vec::new();
-    while let Some(Queued::User { lane: l, alone, .. }) = queue.front()
+    // A turn the core queued is begun by its id: only its own entries ride with it (another turn's would lose their accept), and
+    // it never rides on an earlier message's, which would drop its id.
+    let own = |a: &super::writer::Accept| a.pulled.is_none() || a.turn == acc.turn;
+    while let Some(Queued::User { lane: l, alone, acc: a, .. }) = queue.front()
         && *l == lane
-        && (batch.is_empty() || !*alone)
+        && (batch.is_empty() || (!*alone && own(a) && (acc.pulled.is_some() || a.pulled.is_none())))
     {
         let alone = *alone;
         if let Some(Queued::User { entry_id, text, .. }) = queue.pop_front() {
@@ -669,6 +675,31 @@ mod tests {
         assert_eq!(got, lane);
         assert_eq!(batch.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["notice", "m1", "m2"]);
         assert_eq!(queue.len(), 1, "another lane's message waits for its own turn");
+    }
+
+    #[test]
+    fn a_turn_the_core_queued_never_rides_on_an_earlier_messages_accept() {
+        use super::super::writer::{Accept, Pulled};
+        let lane = Lane::main("bot");
+        let pulled = |id: &str, turn: i64| Queued::User {
+            lane: lane.clone(),
+            entry_id: id.into(),
+            text: format!("t-{id}"),
+            alone: false,
+            acc: Accept::pulled(turn, Pulled { conversation: "acp:bot:".into(), person: String::new() }, None),
+        };
+        // A message that waited, then the wake: two turns, so the wake's turn id is not lost.
+        let mut queue: VecDeque<Queued> = VecDeque::from([user(&lane, "m", false), pulled("n", 7), pulled("n2", 7)]);
+        assert_eq!(take_batch(&mut queue).unwrap().1.len(), 1);
+        let (_, batch, acc) = take_batch(&mut queue).unwrap();
+        assert_eq!(batch.len(), 2, "the wake's own entries go together");
+        assert_eq!(acc.turn, Some(7));
+        // A message after the wake rides with it, and another wake turn does not.
+        let mut queue: VecDeque<Queued> = VecDeque::from([pulled("n", 7), user(&lane, "m", false), pulled("o", 8)]);
+        let (_, batch, acc) = take_batch(&mut queue).unwrap();
+        assert_eq!(batch.len(), 2);
+        assert_eq!(acc.turn, Some(7));
+        assert_eq!(take_batch(&mut queue).unwrap().2.turn, Some(8));
     }
 
     #[test]

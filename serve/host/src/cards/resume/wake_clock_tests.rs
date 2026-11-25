@@ -230,3 +230,26 @@ async fn a_parked_turn_is_left_for_the_ticks_unpark() {
     begin(&r.hub, &core, &r.hub.terminal.env().state, &parked).await;
     assert!(log.lock().unwrap().is_empty(), "a parked turn is not claimed: {:?}", log.lock().unwrap());
 }
+
+#[tokio::test]
+async fn a_bot_or_channel_turn_redeemed_before_a_restart_is_cancelled_interrupted_and_never_handed_to_its_door() {
+    let r = rig().await;
+    for conversation in ["acp:house:", "tg:7#house"] {
+        let (core, log) = scripted(|_, _| None);
+        let mut t = listed("claude");
+        t["conversation"] = conversation.into();
+        t["redeemedBefore"] = true.into();
+        begin(&r.hub, &core, &r.hub.terminal.env().state, &t).await;
+        until("the cancel", || !calls(&log, "hostclaim.cancel").is_empty()).await;
+        let cancels = calls(&log, "hostclaim.cancel");
+        assert!(
+            cancels[0]["reason"].as_str().is_some_and(|w| w.starts_with("interrupted")),
+            "{conversation}: {cancels:?}"
+        );
+        assert!(calls(&log, "hostclaim.claim").is_empty(), "{conversation}: not claimed again");
+    }
+    assert!(
+        crate::cards::resume::tests_seen::pulled_turns().iter().all(|(run, _)| run != "run-1"),
+        "the bot's actor was never handed it"
+    );
+}

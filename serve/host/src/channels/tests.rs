@@ -308,6 +308,54 @@ async fn an_approved_cards_wake_is_its_own_turn_and_a_refusal_leaves_nothing_beh
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_claimed_wake_is_a_batch_of_its_own_that_is_never_saved_and_no_message_joins() {
+    use super::Wake;
+    use crate::cards::resume::ChannelWake;
+    let r = Rig::new();
+    r.send(&Rig::msg("1", "@house hello")).await;
+    until("the answer", || !r.fake.posts().is_empty()).await;
+    r.idle().await;
+    r.core.resume(&r.ad);
+    let wk = "fake/x:room:1#house";
+    let note = "[kith wake run-9] the staging box is ready";
+    let w = ChannelWake::for_test("run-9", 7, 41, wk);
+    assert_eq!(r.core.wake_claimed(wk, note, w), Wake::Queued);
+    // A message sent while the wake batch waits starts a batch of its own (and runs, whatever becomes of the wake).
+    r.send(&Rig::in_thread(Rig::msg("2", "and the lights?"), "fake/x:room:1")).await;
+    // The saved state never has the wake: a batch on disk would replay the note after a restart and send the prompt twice.
+    let saved = std::fs::read_to_string(r.dir.join("data/state.json")).unwrap();
+    assert!(!saved.contains("staging box"), "the wake batch is memory only: {saved}");
+    assert!(saved.contains("and the lights?"), "an ordinary message still is saved: {saved}");
+    assert!(!r.core.with(|i| i.st.wakes.contains_key(wk)), "not among the card wake notes either");
+    until("both turns", || r.fake.posts().len() == 3).await;
+    assert_eq!(r.fake.posts()[1].1, echo(note), "the wake alone");
+    assert!(r.fake.posts()[2].1.contains("and the lights?") && !r.fake.posts()[2].1.contains("staging box"));
+    r.idle().await;
+    assert!(r.core.with(|i| i.claimed.is_empty()), "the claim is spent with its run");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stop_drops_a_claimed_wake_waiting_in_the_inbox() {
+    use crate::cards::resume::ChannelWake;
+    let r = Rig::new();
+    r.send(&Rig::msg("1", "@house hello")).await;
+    until("the answer", || !r.fake.posts().is_empty()).await;
+    r.idle().await;
+    r.core.resume(&r.ad);
+    let wk = "fake/x:room:1#house";
+    let w = ChannelWake::for_test("run-9", 7, 41, wk);
+    // The worker's debounce keeps the batch in the inbox for a moment: a Stop finds it there.
+    r.core.with(|i| i.busy.insert(wk.to_owned(), super::core::Busy::default()));
+    r.core.with(|i| {
+        i.claimed.insert("[kith wake run-9] x".to_owned(), w);
+        i.st.inbox.insert(wk.to_owned(), vec![vec!["[kith wake run-9] x".to_owned()]]);
+    });
+    r.core.drop_claimed(wk);
+    assert!(r.core.with(|i| i.claimed.is_empty()));
+    r.core.with(|i| i.busy.remove(wk));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_room_default_and_the_default_command() {
     let r = Rig::new();
     let mut chat = Rig::msg("1", "hi there");

@@ -114,6 +114,10 @@ set -euo pipefail
 # The host's claim for this turn (KITH_TURN_CLAIM): taken out of the environment here, so the engine and a nested kith never see
 # it. It goes only to the claim calls below, which attach it; every other branch of an agent's command line refuses it (exit 10).
 turn_claim=${KITH_TURN_CLAIM:-}; unset KITH_TURN_CLAIM; turn_attached=0
+# The conversation that claim is for when it is not the session this launch runs (a channel thread's wake: KITH_TURN_CONVERSATION). Read with the
+# claim, gone from the environment with it, and refused without one (exit 10, nothing started).
+turn_conv=${KITH_TURN_CONVERSATION:-}; unset KITH_TURN_CONVERSATION
+[[ -z $turn_conv || -n $turn_claim ]] || { echo "kith: KITH_TURN_CONVERSATION names no turn claim; nothing was started" >&2; exit 10; }
 no_turn_claim() { [[ -z $turn_claim ]] || { echo "kith: a turn claim is for a run, not $1; nothing was started" >&2; exit 10; }; }
 # Before an engine starts: a claimed turn that no claim call of this launch attached does not run.
 turn_claim_attached() { [[ -z $turn_claim || $turn_attached == 1 ]] || { echo "kith: the turn claim was not attached by this launch; nothing was started" >&2; exit 10; }; }
@@ -649,7 +653,7 @@ if [[ -n $resume_thread || -n $resume_pick ]]; then
   # Whatever named the session (--resume, -r ID, the picker, -c), it is claimed and checked here and nowhere else.
   # Not `eval "$(…)" || exit 1`: a refusal prints nothing, eval of nothing succeeds, and claude would start anyway.
   # A one-shot (a task is given) waits a few seconds for a held session; a terminal run refuses at once.
-  resolved=$(KITH_TURN_CLAIM=$turn_claim kith_threads resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit $?; turn_attached=1
+  resolved=$(KITH_TURN_CLAIM=$turn_claim KITH_TURN_CONVERSATION=$turn_conv kith_threads resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit $?; turn_attached=1
   eval "$resolved"
   [[ -z $r_cwd ]] || cd "$r_cwd" || exit 1
   # A built-in's engine and model are per thread: a resumed one keeps what it started with unless -H/-m say otherwise.
@@ -1674,7 +1678,7 @@ if [[ $# -gt 0 ]]; then
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
   if [[ -n $csid ]]; then
-    claimed=$(KITH_TURN_CLAIM=$turn_claim KITH_REVOKE_SEEN=$claim_seen kith_threads claim "$csid" "$$" "$claim_person" "$agent") || exit $?; turn_attached=1
+    claimed=$(KITH_TURN_CLAIM=$turn_claim KITH_TURN_CONVERSATION=$turn_conv KITH_REVOKE_SEEN=$claim_seen kith_threads claim "$csid" "$$" "$claim_person" "$agent") || exit $?; turn_attached=1
     [[ $claimed != lock-alone || -n $r_alone ]] || lock_alone
   fi
   [[ -z $csid || -z $sid_file ]] || printf '%s\n' "$csid" > "$sid_file"
@@ -1729,7 +1733,7 @@ fi
 # The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
 # claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
 if [[ -n $csid && $csid != "${r_sid:-}" ]]; then
-  claimed=$(KITH_TURN_CLAIM=$turn_claim KITH_REVOKE_SEEN=$claim_seen kith_threads terminal "$csid" "$$" "$claim_person" "$agent") || exit $?; turn_attached=1
+  claimed=$(KITH_TURN_CLAIM=$turn_claim KITH_TURN_CONVERSATION=$turn_conv KITH_REVOKE_SEEN=$claim_seen kith_threads terminal "$csid" "$$" "$claim_person" "$agent") || exit $?; turn_attached=1
   [[ $claimed != lock-alone || -n $r_alone ]] || lock_alone
 fi
 # An interactive owner run is listed in the apps (the SessionStart hook above) and may be taken over from there, which ends

@@ -39,7 +39,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+mod channel_wake;
 mod wake_clock;
+
+use channel_wake::Pull;
+pub use channel_wake::{
+    ChannelWake, Seen, attempt_over as channel_attempt_over, dropped as channel_dropped,
+    started as channel_wake_started, unattached as channel_unattached,
+};
 
 /// How long the kernel's one-shot waits for a held session before it exits 1 with "held by ..." (`KITH_CLAIM_WAIT`, #244,
 /// default 5). The spawn gets it explicitly so the rule below doesn't depend on the kernel's default.
@@ -68,6 +75,10 @@ static ENTRIES: LazyLock<Mutex<HashMap<String, Carried>>> = LazyLock::new(|| Mut
 static TAKEN: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// The runs a channel thread holds, until its turn starts or doesn't: a turn queued behind a long channel run is not lost.
 static CHANNEL_RUNS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+/// The runs a bot's actor was handed by the core's turn id -> the wake queue's session and request ids, until the actor says it
+/// began or did not.
+type PulledRuns = HashMap<String, (String, Vec<String>)>;
+static PULLED: LazyLock<Mutex<PulledRuns>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static KICK: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 struct Carried {
@@ -484,7 +495,7 @@ pub async fn drive(hub: &Arc<Hub>) {
                 break;
             }
         };
-        handle(hub, taken).await;
+        handle(hub, taken, None).await;
     }
 }
 
@@ -546,7 +557,7 @@ pub fn run_taker(hub: &Arc<Hub>) {
 }
 
 /// One taken turn goes through its door.
-async fn handle(hub: &Arc<Hub>, turn: Turn) {
+async fn handle(hub: &Arc<Hub>, turn: Turn, pull: Option<Pull<'_>>) {
     lock(&TAKEN).insert(turn.run.clone(), Instant::now());
     let carried: Vec<Card> =
         turn.ids.iter().filter_map(|i| i.strip_prefix("card:")).filter_map(|id| hub.store.card(id)).collect();
@@ -601,12 +612,18 @@ async fn handle(hub: &Arc<Hub>, turn: Turn) {
         };
         match door {
             Some(Door::Bot { bot, lane }) => {
-                bot_door(hub, &turn.run, &live, &bot, &lane, &note, &messages);
+                let by_id = pull.map(|p| {
+                    (p.turn, crate::agent::bot::Pulled { conversation: session.to_owned(), person: p.person })
+                });
+                bot_door(hub, &turn, &live, &bot, &lane, &note, &messages, by_id);
             }
             _ => unstarted(hub, &turn.run, true, false),
         }
     } else if session.contains('#') {
-        channel_door(hub, &turn.run, &live, &ids, session, &note);
+        match pull {
+            Some(pull) => channel_wake::door(hub, &pull, &turn, &live, session, &note).await,
+            None => channel_door(hub, &turn.run, &live, &ids, session, &note),
+        }
     } else {
         run_door(hub, &turn, &live, person.as_deref(), &note).await;
     }
@@ -655,6 +672,10 @@ fn settled(run: &str) {
 fn started(hub: &Hub, run: &str, cards: &[String]) {
     settled(run);
     applied(hub, cards);
+    // A turn the core queued is answered by the core (R4), from its own turn.
+    if lock(&PULLED).remove(run).is_some() {
+        return wake_clock::released(run);
+    }
     let (state, run) = (state_of(hub), run.to_owned());
     wake::spawn(move || wake::done(&state, &run, "answered"));
 }
@@ -664,6 +685,20 @@ fn started(hub: &Hub, run: &str, cards: &[String]) {
 /// dropped, ids kept: Stop wins over a yes already given (R8), and the closers of [`stopped`] end its cards.
 fn unstarted(hub: &Hub, run: &str, again: bool, held: bool) {
     settled(run);
+    // A turn the actor was to begin by its id is still queued (or the actor cancelled it): only the pause is the host's. A Stop
+    // withdraws its requests, which cancels the turn (R5).
+    if let Some((session, ids)) = lock(&PULLED).remove(run) {
+        if again {
+            return wake_clock::later(run);
+        }
+        let state = state_of(hub);
+        wake_clock::released(run);
+        return wake::spawn(move || {
+            for id in &ids {
+                wake::withdraw(&state, &session, Some(id));
+            }
+        });
+    }
     let (state, run_id) = (state_of(hub), run.to_owned());
     if again {
         wake::spawn(move || wake::back(&state, &run_id, held));
@@ -705,7 +740,19 @@ fn left_room(hub: &Hub, bot: &str, lane: &Lane) -> bool {
 
 /// The turn goes to the bot's actor: a notice for the cards (when the turn carries any), then the app messages that
 /// waited, each as the entry it is. The actor merges them into the one turn, in this order.
-fn bot_door(hub: &Arc<Hub>, run: &str, group: &[Card], bot: &str, lane: &Lane, note: &str, messages: &[Message]) {
+#[allow(clippy::too_many_arguments)] // the turn and everything the actor is told of it
+#[cfg_attr(test, allow(clippy::needless_pass_by_value))] // only the real door sends it
+fn bot_door(
+    hub: &Arc<Hub>,
+    turn: &Turn,
+    group: &[Card],
+    bot: &str,
+    lane: &Lane,
+    note: &str,
+    messages: &[Message],
+    by_id: Option<(i64, crate::agent::bot::Pulled)>,
+) {
+    let run = turn.run.as_str();
     let alive = hub.store.bot(bot).ok().flatten().is_some_and(|b| !b.deleted);
     if !alive || left_room(hub, bot, lane) {
         // The cards were re-claimed by `handle`: only a close ends a claimed card.
@@ -714,6 +761,9 @@ fn bot_door(hub: &Arc<Hub>, run: &str, group: &[Card], bot: &str, lane: &Lane, n
             end_message(hub, entry, MessageEnd::Cancelled);
         }
         return give_up(hub, run);
+    }
+    if by_id.is_some() {
+        lock(&PULLED).insert(run.to_owned(), (turn.session.clone(), turn.ids.clone()));
     }
     let mut sends: Vec<(String, String)> = Vec::new();
     if !note.is_empty() {
@@ -739,7 +789,9 @@ fn bot_door(hub: &Arc<Hub>, run: &str, group: &[Card], bot: &str, lane: &Lane, n
     #[cfg(not(test))]
     {
         let ids: Vec<String> = sends.iter().map(|(id, _)| id.clone()).collect();
-        if let Err(error) = hub.send_cmd(bot, crate::agent::bot::Cmd::WakeBatch { lane: lane.clone(), items: sends }) {
+        if let Err(error) =
+            hub.send_cmd(bot, crate::agent::bot::Cmd::WakeBatch { lane: lane.clone(), items: sends, by_id })
+        {
             tracing::warn!(error = format!("{error:#}"), "couldn't queue a wake turn");
             for id in &ids {
                 lock(&ENTRIES).remove(id);
@@ -749,7 +801,12 @@ fn bot_door(hub: &Arc<Hub>, run: &str, group: &[Card], bot: &str, lane: &Lane, n
         }
     }
     #[cfg(test)]
-    drop(sends);
+    {
+        if let Some((turn, _)) = &by_id {
+            tests_seen::pulled(run, *turn);
+        }
+        drop(sends);
+    }
 }
 
 /// Whether a wake's entry is with a bot's actor right now.
@@ -1427,6 +1484,17 @@ pub(crate) mod tests_seen {
     static SEEN: Mutex<Vec<Seen>> = Mutex::new(Vec::new());
     static SPAWNS: Mutex<Vec<(Spawn, String)>> = Mutex::new(Vec::new());
     static ASKED: Mutex<Vec<Vec<String>>> = Mutex::new(Vec::new());
+    static PULLED: Mutex<Vec<(String, i64)>> = Mutex::new(Vec::new());
+
+    /// A bot door handed its actor the core's turn `turn` for `run`, by its id.
+    pub fn pulled(run: &str, turn: i64) {
+        PULLED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((run.to_owned(), turn));
+    }
+
+    /// The core turns the bot door handed its actors, by id.
+    pub fn pulled_turns() -> Vec<(String, i64)> {
+        PULLED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
 
     /// A `kith ask --answer` the host would have run (`cards::tell_asker`).
     pub fn asked(args: Vec<String>) {

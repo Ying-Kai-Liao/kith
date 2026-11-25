@@ -99,11 +99,13 @@ impl Core {
             // can't leave without it while Jev answers; Jev is then only asked whether it says "stop".
             let (spawn, waiting, recent) = self.with(|i| {
                 let was_busy = i.busy.contains_key(&wk);
+                // A batch that carries a claimed wake is the wake's alone: the message starts its own.
+                let behind_wake = i.st.inbox.get(&wk).and_then(|q| q.last()).is_some_and(|b| i.carries_claim(b));
                 let q = i.st.inbox.entry(wk.clone()).or_default();
                 let queued = !q.is_empty();
                 match q.last_mut() {
-                    Some(last) => last.push(task.clone()),
-                    None => q.push(vec![task.clone()]),
+                    Some(last) if !behind_wake => last.push(task.clone()),
+                    _ => q.push(vec![task.clone()]),
                 }
                 let last = q.last().cloned().unwrap_or_default();
                 let before = if last.len() > 1 { merged(&last[..last.len() - 1]) } else { task.clone() };
@@ -145,8 +147,9 @@ impl Core {
                 let status = now.status.clone();
                 let mut redo = now.batch.clone();
                 let more_wanted = std::mem::take(&mut now.cont);
+                let first_is_wake = i.st.inbox.get(&wk).and_then(|q| q.first()).is_some_and(|b| i.carries_claim(b));
                 let q = i.st.inbox.entry(wk.clone()).or_default();
-                if more_wanted && !q.is_empty() {
+                if more_wanted && !q.is_empty() && !first_is_wake {
                     redo.extend(q.remove(0)); // extras for this same work that were waiting
                 }
                 redo.push(task.clone());
@@ -165,8 +168,9 @@ impl Core {
         }
         let separate = v.route == Route::Separate;
         let (status, queued, spawn) = self.with(|i| {
+            let behind_wake = i.st.inbox.get(&wk).and_then(|q| q.last()).is_some_and(|b| i.carries_claim(b));
             let q = i.st.inbox.entry(wk.clone()).or_default();
-            let new_batch = separate || q.is_empty();
+            let new_batch = separate || q.is_empty() || behind_wake;
             if new_batch {
                 q.push(vec![task.clone()]);
             } else if let Some(last) = q.last_mut() {
@@ -289,6 +293,7 @@ impl Core {
                     "{wk}: {person} is a guest; not starting the turn: {}",
                     kith_kernel::GUESTS_NOT_ON_WINDOWS
                 );
+                self.drop_claimed(wk);
                 self.with(|i| {
                     i.st.inbox.insert(wk.to_owned(), Vec::new());
                     i.save();
@@ -296,6 +301,7 @@ impl Core {
             }
             if let Some(access) = refused {
                 tracing::info!("{wk}: {person} may not use {agent} now ({}); not starting the turn", access.why);
+                self.drop_claimed(wk);
                 self.with(|i| {
                     i.st.inbox.insert(wk.to_owned(), Vec::new());
                     i.save();
@@ -317,12 +323,32 @@ impl Core {
                 let redo = std::mem::take(&mut b.redo);
                 let task = format!("{}{}", if redo { INTERRUPTED } else { "" }, merged(&batch));
                 b.task.clone_from(&task);
-                b.batch = batch;
+                let carried = batch.iter().find_map(|m| i.claimed.get(m).cloned());
+                i.busy.get_mut(wk)?.batch.clone_from(&batch);
                 i.save();
-                Some(task)
+                Some((task, carried, batch))
             });
             let ended = match (permit, taken) {
-                (Some(permit), Some(task)) => self.run(ad, key, agent, wk, &task, permit).await?,
+                (Some(permit), Some((task, wake, batch))) => {
+                    let ended = self.run(ad, key, agent, wk, &task, wake, permit).await;
+                    // The wake's claim is spent with its run; a correction that runs the same work again keeps it for that batch.
+                    self.with(|i| {
+                        for m in &batch {
+                            if !i.st.inbox.values().flatten().flatten().any(|n| n == m) {
+                                i.claimed.remove(m);
+                            }
+                        }
+                    });
+                    ended?
+                }
+                // Stopped while it waited for room: the batch was taken, so the wake is withdrawn here.
+                (None, Some((_, Some(w), batch))) => {
+                    if let Some(hub) = crate::runauth::hub() {
+                        crate::cards::resume::channel_unattached(&hub, &w, true).await;
+                    }
+                    self.with(|i| batch.iter().for_each(|m| drop(i.claimed.remove(m))));
+                    Ended::Stopped
+                }
                 _ => Ended::Stopped,
             };
             self.with(|i| i.busy.get_mut(wk).map(|b| b.status = Value::Null));
@@ -334,6 +360,7 @@ impl Core {
     pub(super) async fn stop(&self, ad: &Arc<dyn Adapter>, wk: &str, m: Option<&Incoming>) -> anyhow::Result<()> {
         // Stop wins over a yes already given (R8): a card's wake still in the inbox never runs, and what the thread is
         // owed in the kernel's wake queue is withdrawn.
+        self.drop_claimed(wk);
         let notes = self.with(|i| i.st.wakes.remove(wk).unwrap_or_default());
         for note in &notes {
             self.wake_not_run(note, false);
@@ -392,6 +419,7 @@ impl Core {
             if only_denied && hq::resolve(&self.paths, person, agent).await.allowed {
                 continue;
             }
+            self.drop_claimed(&wk);
             let ended = self.with(|i| {
                 i.st.inbox.insert(wk.clone(), Vec::new());
                 let now = i.busy.get_mut(&wk).filter(|b| b.stoppable())?;
@@ -418,6 +446,7 @@ impl Core {
         if !Self::owns(&th, &w) {
             return StopPress::NotYours;
         }
+        self.drop_claimed(&wk);
         let stopped = self.with(|i| {
             let now = i.busy.get_mut(&wk).filter(|b| b.waiting || !(b.pid.is_some() && b.exited))?;
             i.st.inbox.insert(wk.clone(), Vec::new());
@@ -474,6 +503,58 @@ impl Core {
                     self.spawn_worker(&ad, key, agent);
                 }
                 Wake::Queued
+            }
+        }
+    }
+
+    /// A wake turn the core queued and the host claimed (`WK4c`): `text` is a batch of its own and a worker starts if none runs. The
+    /// batch is memory only (`Inner::saved` leaves it out, and `st.wakes` does not hold it): the core's turn is the record of the
+    /// owed wake, so a restart cannot replay it. A thread holds one wake at a time (the claim holds its work key), and no message
+    /// joins this batch.
+    pub fn wake_claimed(
+        self: &Arc<Self>,
+        wk: &str,
+        text: &str,
+        claimed: Arc<crate::cards::resume::ChannelWake>,
+    ) -> Wake {
+        let (key, agent) = wk.rsplit_once('#').unwrap_or((wk, ""));
+        let ad =
+            self.ads.locked().iter().find(|(conn, _)| key.starts_with(&format!("{conn}:"))).map(|(_, ad)| ad.clone());
+        let Some(ad) = ad else { return Wake::Offline };
+        let spawn = self.with(|i| {
+            if !i.st.threads.contains_key(key) {
+                return None;
+            }
+            i.claimed.insert(text.to_owned(), claimed);
+            i.st.inbox.entry(wk.to_owned()).or_default().push(vec![text.to_owned()]);
+            let spawn = !i.busy.contains_key(wk);
+            if spawn {
+                i.busy.insert(wk.to_owned(), Busy::default());
+            }
+            i.save();
+            Some(spawn)
+        });
+        match spawn {
+            None => Wake::NoThread,
+            Some(spawn) => {
+                if spawn {
+                    self.spawn_worker(&ad, key, agent);
+                }
+                Wake::Queued
+            }
+        }
+    }
+
+    /// The claimed wakes of `wk` still waiting in its inbox are dropped (a Stop, a revoke): their requests are withdrawn, which
+    /// cancels the turns nobody ran. Call before the inbox is emptied.
+    pub(super) fn drop_claimed(&self, wk: &str) {
+        let dropped: Vec<_> = self.with(|i| {
+            let notes: Vec<String> = i.st.inbox.get(wk).into_iter().flatten().flatten().cloned().collect();
+            notes.iter().filter_map(|n| i.claimed.remove(n)).collect()
+        });
+        if let Some(hub) = crate::runauth::hub() {
+            for w in &dropped {
+                crate::cards::resume::channel_dropped(&hub, w);
             }
         }
     }
