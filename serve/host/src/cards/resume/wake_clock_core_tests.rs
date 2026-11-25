@@ -61,7 +61,7 @@ impl Real {
     fn call(&self, method: &str, params: &Value) -> Value {
         match call_owner(&self.folders, method, params, false) {
             crate::core_front::Answer::Done(v) => v,
-            other => panic!("{method}: {other:?}"),
+            _ => panic!("{method}: the core did not answer"),
         }
     }
 }
@@ -245,7 +245,7 @@ async fn a_bot_turn_redeemed_then_cut_by_a_restart_is_cancelled_and_the_core_ans
                 "sessionId": "bot-sess-1", "holderInstance": core.writer("host-1").instance()}),
     ) {
         crate::core_front::Answer::Done(v) => v,
-        other => panic!("{other:?}"),
+        _ => panic!("hostclaim.turn was not answered"),
     };
     let claim = began["claimId"].as_i64().unwrap_or_else(|| panic!("{began}"));
     let redeemed = call_host_claims(
@@ -253,7 +253,7 @@ async fn a_bot_turn_redeemed_then_cut_by_a_restart_is_cancelled_and_the_core_ans
         "hostclaim.redeem",
         &json!({"claimId": claim, "pid": child.id(), "started": started, "holderInstance": core.writer("host-1").instance()}),
     );
-    assert!(matches!(redeemed, crate::core_front::Answer::Done(_)), "{redeemed:?}");
+    assert!(matches!(redeemed, crate::core_front::Answer::Done(_)), "hostclaim.redeem was not answered");
     assert_eq!(core.turns(conversation).len(), 1, "no second turn row for the bot's wake");
 
     // The host restarts before the prompt went: the turn is listed with its earlier claim, and the door cancels it.

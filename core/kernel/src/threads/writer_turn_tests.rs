@@ -258,7 +258,12 @@ fn a_session_a_writer_holds_never_attaches_the_wake() {
         &String::new,
     );
     assert_ne!(o.code, 0, "{}", o.stderr);
-    assert_eq!(core.asked(), ["claim.external"], "the wake is not redeemed");
+    // A held session is asked again while the one-shot waits; the wake's claim is never attached.
+    assert!(
+        core.asked().iter().all(|m| m == "claim.external"),
+        "the wake is not redeemed: {:?}",
+        core.asked()
+    );
 }
 
 #[test]
