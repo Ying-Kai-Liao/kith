@@ -640,6 +640,15 @@ impl Shared {
             }
 =======
         if crate::asks::serves(method) {
+            // Only the asks another computer sends are the host's to open; an ask to another computer is the owner's.
+            if method == "ask.open"
+                && matches!(who, Principal::Host)
+                && params.get("mode").and_then(Value::as_str) == Some("peer")
+            {
+                return Err(Error::NotAllowed(
+                    "kith-core: ask.open mode peer is the owner's".into(),
+                ));
+            }
             let answer = self.with_core(|c| crate::asks::call(c, method, params))?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
