@@ -2,6 +2,7 @@
 //! two answer the same question the same way. The Python kernel keeps its own copies while it moves; the
 //! differential harness (`kernel/tests/difftest`) fails when they differ.
 
+pub mod access;
 pub mod accounts;
 // On Windows the ledger (tag, record, sync) and the reports of one agent run; the verbs that ask `kith-auth` for people
 // (`people`, `members`, `bots`) are refused by name until retire-python P3-1.

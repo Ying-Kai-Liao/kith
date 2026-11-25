@@ -8,3 +8,6 @@ mod cmd;
 pub mod pyjson;
 
 pub use cmd::run_command_with_timeout;
+
+// The access rules are portable (`kith_kernel::access`); the Unix build re-exports them from here too, so a caller names one path.
+pub use crate::access::*;

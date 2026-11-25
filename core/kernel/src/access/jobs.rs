@@ -433,7 +433,7 @@ fn door_digest(d: &Item, lock: &[u8]) -> String {
     let obj: serde_json::Map<String, Value> =
         kept.into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
     let mut hasher = Sha256::new();
-    hasher.update(super::pyjson::dumps(&Value::Object(obj)).as_bytes());
+    hasher.update(crate::secrets::pyjson::dumps(&Value::Object(obj)).as_bytes());
     hasher.update([0u8]);
     hasher.update(lock);
     let hex = hasher.finalize().iter().fold(String::new(), |mut s, b| {
