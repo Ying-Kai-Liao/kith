@@ -181,7 +181,7 @@ pub fn claude(g: Go<'_>, taker: &Taker<'_>, pid: i64, how: Engine) -> i32 {
 }
 
 /// `kith-permit VERB ...` in this process, with the run's environment.
-fn permit_run(env: &Env, kernel: &Path, args: &[&str]) -> permit::Out {
+pub(super) fn permit_run(env: &Env, kernel: &Path, args: &[&str]) -> permit::Out {
     let pairs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     let mut e = permit::Env::with(&pairs);
     e.home = PathBuf::from(get(env, "HOME"));

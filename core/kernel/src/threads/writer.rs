@@ -438,7 +438,12 @@ impl<'a> Taker<'a> {
     /// `release SID`: gives back SID's claim, only if it is the caller's parent's (a launcher shell that took it in
     /// `resolve`) and that process is the one that took it (same start time). True when it was given back.
     pub fn release_own(&self, sid: &str) -> bool {
-        let ppid = os::parent_pid();
+        self.release_for(sid, os::parent_pid())
+    }
+
+    /// [`Self::release_own`] for a claim named by its pid: the launch that runs in the process that took the claim (`--held`)
+    /// gives back its own, not its parent's.
+    pub fn release_for(&self, sid: &str, ppid: i64) -> bool {
         if self.writer() {
             return self.core_release(ppid, Some(sid));
         }
