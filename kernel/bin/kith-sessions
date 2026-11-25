@@ -253,8 +253,9 @@ def host_call(method, body):
     import kith_hostlocal
     try:
         status, payload = kith_hostlocal.request(f'/api/{method}', body, 4)
-    except kith_hostlocal.HostUnreachable:
-        return None
+    except kith_hostlocal.HostUnreachable as e:
+        # Down: the host is not running. Anything else (an older host, one we can't vouch for) may be running a turn.
+        return None if e.down else {'error': str(e), 'unreachable': True}
     if status == 404:
         return {'error': 'unknown method', 'unknownMethod': True}
     try:
@@ -841,6 +842,8 @@ def resolve(agent, thread, claimer=None, wait=0):
             return {}
 
     r = host_call('resolveThread', {'thread': thread})
+    if r and r.get('unreachable'):
+        die(f"{r['error']} (a running host's turns cannot be checked, so nothing was resumed)")
     if r and not r.get('error') and r.get('sessionId') and r.get('claims') != 1:
         r = {'error': 'no claims', 'unknownMethod': True}   # a host from before the claims cannot vouch for its threads either
     if r and not r.get('error') and r.get('sessionId'):

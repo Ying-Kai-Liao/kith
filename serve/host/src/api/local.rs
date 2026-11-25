@@ -245,8 +245,8 @@ fn handle(conn: &mut Conn, router: &Router, rt: &tokio::runtime::Handle) {
 
 /// An event stream: the head, then each event as the router makes it, until the client goes (a write fails) or the stream ends.
 async fn stream<W: Write>(conn: &mut W, router: Router, req: Request<Body>) {
+    use futures::StreamExt as _;
     let Ok(response) = router.oneshot(req).await;
-    let Ok(response) = router.oneshot(req).await else { return };
     let status = response.status();
     if !status.is_success() {
         let body = axum::body::to_bytes(response.into_body(), MAX_BODY).await.unwrap_or_default();

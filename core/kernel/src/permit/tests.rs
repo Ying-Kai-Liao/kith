@@ -255,8 +255,14 @@ fn issue_names_an_older_host_and_does_not_restart_it() {
         out.stderr
     );
     // Nothing was sent to the old host over TCP.
+    // The port was only knocked on: whatever connected sent no byte (no token).
     old.set_nonblocking(true).unwrap();
-    assert!(old.accept().is_err());
+    while let Ok((mut c, _)) = old.accept() {
+        let mut got = Vec::new();
+        c.set_nonblocking(true).unwrap();
+        let _ = c.read_to_end(&mut got);
+        assert!(got.is_empty(), "the old host was sent {got:?}");
+    }
     let _ = std::fs::remove_dir_all(root);
 }
 

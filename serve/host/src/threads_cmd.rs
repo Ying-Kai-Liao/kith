@@ -6,7 +6,7 @@
 //! (`terminal/claim.rs`) do not go through the crate: the host never switches ahead of the CLI.
 
 use std::io::{Read as _, Write as _};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use kith_kernel::hostlocal;
@@ -66,22 +66,33 @@ impl Core for Loopback {
 
 impl Host for Loopback {
     fn resolve_thread(&self, thread: &str) -> Option<Value> {
-        let (data, _) = self.endpoint();
+        let (data, port) = self.endpoint();
         let token = std::fs::read_to_string(data.join("token")).ok()?.trim().to_owned();
-        let (status, body) = post(&data, "resolveThread", &token, &json!({ "thread": thread }).to_string())?;
+        let body = json!({ "thread": thread }).to_string();
+        let reply = match hostlocal::post(&data, "/api/resolveThread", &token, &body, Duration::from_secs(4)) {
+            Ok(r) => r,
+            // Nothing listens and nothing answers on the port: the host is not running, and a raw session id will do.
+            Err(hostlocal::LocalErr::Down)
+                if hostlocal::status(&data, port.parse().unwrap_or(0)) == hostlocal::Status::Down =>
+            {
+                return None;
+            }
+            // Anything else may be a host that is running a turn (an older one without the endpoint, one this account cannot
+            // vouch for): it is never taken for a host that is off, because the host-busy check would be skipped.
+            Err(hostlocal::LocalErr::Down) => return Some(unreachable_host(hostlocal::OLDER_HOST)),
+            Err(e) => return Some(unreachable_host(&e.to_string())),
+        };
         // A refusal with a body is an answer ("unknown thread"); a 404 is an older host.
-        if status == 404 {
+        if reply.status == 404 {
             return Some(json!({"error": "unknown method", "unknownMethod": true}));
         }
-        serde_json::from_slice(&body).ok()
+        serde_json::from_slice(&reply.body).ok()
     }
 }
 
-/// One POST to `/api/<method>` on the host's local endpoint (never loopback TCP), with the owner token; `(status, body)`. Four
-/// seconds for each step of it. `None` when the host is down, is not this account's or is older than this command.
-fn post(data: &Path, method: &str, token: &str, body: &str) -> Option<(u16, Vec<u8>)> {
-    let reply = hostlocal::post(data, &format!("/api/{method}"), token, body, Duration::from_secs(4)).ok()?;
-    Some((reply.status, reply.body))
+/// The answer that says the host may be up but cannot be asked: `resolve` refuses on it, before any claim.
+fn unreachable_host(why: &str) -> Value {
+    json!({"error": why, "unreachable": true})
 }
 
 /// `kith kernel threads <verb> ...`; returns the exit code.

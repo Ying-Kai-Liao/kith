@@ -1246,3 +1246,36 @@ fn help_is_kith_sessions_own_usage_on_stderr() {
         assert!(o.stderr.starts_with("kith-sessions — terminal"), "{flag}");
     }
 }
+
+#[test]
+fn a_host_that_may_be_running_but_cannot_be_asked_refuses_before_any_claim() {
+    let t = Tmp::new();
+    let c = ctx(&t, &no_env);
+    let work = t.0.join("work");
+    fs::create_dir_all(&work).unwrap();
+    transcript(&t, "abc-1", &work);
+    let holder = Sleeper::new();
+    // An older host with no local endpoint: it may be running a turn, so a raw session id is not taken as free.
+    let older = fake(
+        Some(
+            serde_json::json!({"error": "the Kith host is older than this command", "unreachable": true}),
+        ),
+        None,
+    );
+    let err = resolve(
+        &c,
+        &older,
+        None,
+        "coder",
+        "abc-1",
+        holder.pid(),
+        Duration::ZERO,
+    )
+    .unwrap_err();
+    assert!(err.contains("older than this command"), "{err}");
+    assert!(err.contains("nothing was resumed"), "{err}");
+    assert!(
+        !claim_path(&t.reg(), "abc-1", false).exists(),
+        "no claim was left"
+    );
+}
