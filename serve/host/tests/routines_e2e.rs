@@ -147,7 +147,10 @@ impl Host {
     }
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn routines_execute_pause_deduplicate_and_reject_wrong_webhook_keys() {
     let mut host = Host::start().await;
@@ -216,7 +219,10 @@ async fn routines_execute_pause_deduplicate_and_reject_wrong_webhook_keys() {
     assert_eq!(host.call("routines", json!({"botId":bot})).await["routines"].as_array().unwrap().len(), 0);
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn interval_fires_without_a_client_and_invalid_schedules_fail() {
     let host = Host::start().await;
@@ -251,7 +257,10 @@ async fn interval_fires_without_a_client_and_invalid_schedules_fail() {
     assert!(!history["entries"].as_array().unwrap().iter().any(|e| e["kind"] == "agent" && e["data"]["final"] == true));
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn crash_resumes_the_same_session_and_publishes_one_result() {
     let mut host = Host::start().await;
@@ -295,7 +304,10 @@ async fn crash_resumes_the_same_session_and_publishes_one_result() {
     );
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn an_agent_started_for_a_run_stops_when_the_run_ends() {
     let host = Host::start().await;
@@ -312,7 +324,10 @@ async fn an_agent_started_for_a_run_stops_when_the_run_ends() {
     assert_eq!((count("initialize"), count("closed")), if cfg!(windows) { (1, 1) } else { (2, 0) });
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn a_finished_run_closes_its_session_and_the_main_one_stays() {
     let host = Host::start().await;
@@ -336,7 +351,10 @@ async fn a_finished_run_closes_its_session_and_the_main_one_stays() {
     assert_eq!(host.wait_event("spent", "loaded", "").await["session"], run["session"]);
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn busy_bot_keeps_work_pending_and_honors_pause_delete_and_edit_across_restart() {
     let mut host = Host::start().await;
@@ -370,7 +388,10 @@ async fn busy_bot_keeps_work_pending_and_honors_pause_delete_and_edit_across_res
     }));
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn a_hung_routine_times_out_and_the_next_task_still_runs() {
     let host = Host::start().await;
@@ -386,7 +407,10 @@ async fn a_hung_routine_times_out_and_the_next_task_still_runs() {
     host.wait_event("timeout", "finished", "AFTER_TIMEOUT").await;
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn unavailable_resume_never_replays_work_in_a_fresh_session() {
     let mut host = Host::start().await;
@@ -409,7 +433,10 @@ async fn unavailable_resume_never_replays_work_in_a_fresh_session() {
     );
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn recurring_work_continues_after_a_failed_run() {
     let host = Host::start().await;
@@ -451,7 +478,10 @@ async fn only_one_host_can_own_a_data_directory_even_on_another_port() {
     assert!(!status.expect("second host did not exit").success());
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn schedule_editor_preview_and_save_share_host_rules() {
     let host = Host::start().await;

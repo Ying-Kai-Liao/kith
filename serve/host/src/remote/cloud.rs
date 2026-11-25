@@ -2224,7 +2224,10 @@ mod tests {
         core_requests(local).await.unwrap().iter().map(|r| r["requestId"].as_str().unwrap().to_owned()).collect()
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn with_the_core_the_requests_and_the_device_are_the_cores() {
         let hub = temp_hub();
@@ -2308,7 +2311,10 @@ mod tests {
         assert_eq!(ids_in_core(true).await, Vec::<String>::new());
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn with_the_core_down_nothing_is_decided_and_nothing_falls_back() {
         let hub = temp_hub();
@@ -2330,7 +2336,10 @@ mod tests {
         assert!(fake.posts.lock().unwrap().is_empty(), "the cloud was not asked");
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn a_request_filed_with_the_gate_open_and_decided_with_it_closed_is_ended_in_the_core_too() {
         let hub = temp_hub();
@@ -2359,7 +2368,10 @@ mod tests {
         assert_eq!(again.to_string(), "unknown request");
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn a_request_taken_up_with_the_gate_closed_is_filed_when_it_opens_and_decided() {
         let hub = temp_hub();
@@ -2377,7 +2389,10 @@ mod tests {
         assert_eq!(ids_in_core(true).await, [] as [String; 0]);
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn a_person_with_no_membership_has_their_requests_denied_every_pass_in_the_core_too() {
         let hub = temp_hub();
@@ -2430,7 +2445,10 @@ mod tests {
         );
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn with_the_core_a_suspension_made_through_the_host_stops_the_approval() {
         let hub = temp_hub();
@@ -2455,7 +2473,10 @@ mod tests {
         assert_eq!(hub.cloud.requests_json(), Vec::<Value>::new());
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn with_the_core_a_row_filed_first_by_someone_else_is_never_stored_as_the_hosts_device() {
         let hub = temp_hub();
@@ -2504,7 +2525,10 @@ mod tests {
         assert_eq!(hub.cloud.requests_json(), Vec::<Value>::new());
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn with_the_core_the_hosts_own_checks_come_before_the_core_is_asked() {
         let hub = temp_hub();
@@ -2537,7 +2561,10 @@ mod tests {
         assert!(fake.posts.lock().unwrap().is_empty());
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn with_the_core_a_request_the_cloud_stops_listing_or_the_host_denies_ends_in_the_core_too() {
         let hub = temp_hub();
@@ -2559,7 +2586,10 @@ mod tests {
         assert_eq!(ids_in_core(true).await, Vec::<String>::new(), "the vanished one and the denied one are both gone");
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn with_the_core_an_end_the_core_missed_stays_queued_and_is_made_on_the_next_sync() {
         let hub = temp_hub();
@@ -2601,7 +2631,10 @@ mod tests {
         assert_eq!(take_deny_queue(&hub), Vec::<String>::new());
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn with_the_core_a_decision_past_its_budget_is_not_made() {
         let hub = temp_hub();
@@ -2639,7 +2672,10 @@ mod tests {
         assert_eq!(take_deny_queue(&hub), Vec::<String>::new());
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn a_deny_queued_while_the_pull_ends_the_queue_survives_its_write_back() {
         let hub = temp_hub();
@@ -2655,7 +2691,10 @@ mod tests {
         assert_eq!(take_deny_queue(&hub), ["req_new"], "req_old is ended, req_new was not lost");
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn the_gate_flipping_between_filing_and_deciding_decides_a_request_once() {
         let hub = temp_hub();
@@ -2690,7 +2729,10 @@ mod tests {
         assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[2; 32])).count(), 1);
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn a_request_the_core_already_approved_is_stored_once_by_the_hosts_decision() {
         let hub = temp_hub();
@@ -2715,7 +2757,10 @@ mod tests {
         assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[1; 32])).count(), 1);
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn with_the_core_a_pull_cut_off_after_it_dropped_a_request_has_already_queued_it() {
         let hub = temp_hub();
@@ -2738,7 +2783,10 @@ mod tests {
         assert_eq!(take_deny_queue(&hub), Vec::<String>::new());
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn a_request_filed_before_its_code_is_ended_in_the_core_when_the_host_approves_it_with_the_gate_closed() {
         let hub = temp_hub();
@@ -2762,7 +2810,10 @@ mod tests {
         assert_eq!(take_deny_queue(&hub), Vec::<String>::new());
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn an_end_the_core_could_not_take_is_queued_and_retried_by_the_next_pull() {
         let hub = temp_hub();
@@ -2787,7 +2838,10 @@ mod tests {
         assert_eq!(ids_in_core(true).await, Vec::<String>::new());
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn the_host_may_end_its_copy_when_the_core_is_down_but_the_core_keeps_it_queued() {
         let hub = temp_hub();
@@ -2801,7 +2855,10 @@ mod tests {
         assert_eq!(take_deny_queue(&hub), ids, "so it waits in the queue");
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn a_gate_that_opened_while_the_host_settled_still_ends_the_request_in_the_core() {
         let hub = temp_hub();
@@ -2819,7 +2876,10 @@ mod tests {
         assert_eq!(ids_in_core(true).await, Vec::<String>::new(), "ended, not skipped because the gate is open");
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn the_end_and_the_filing_of_a_request_stop_at_the_pulls_budget() {
         let hub = temp_hub();
@@ -2842,7 +2902,10 @@ mod tests {
         assert_eq!(ids_in_core(true).await, Vec::<String>::new());
     }
 
-    #[cfg_attr(windows, ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed")]
+    #[cfg_attr(
+        windows,
+        ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+    )]
     #[tokio::test]
     async fn a_device_name_over_100_characters_is_compared_cut_like_the_core_cuts_it() {
         let hub = temp_hub();

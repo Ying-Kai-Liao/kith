@@ -124,7 +124,10 @@ fn python_missing() -> bool {
     missing
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn stop_typed_while_working_stops_the_turn() {
     if python_missing() {
@@ -146,7 +149,10 @@ async fn stop_typed_while_working_stops_the_turn() {
     );
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn a_correction_restarts_the_work_with_it() {
     if python_missing() {
@@ -164,7 +170,10 @@ async fn a_correction_restarts_the_work_with_it() {
     assert!(redo.contains("task B: plan the July trip") && redo.contains("actually make it August"), "{redo}");
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn another_subject_gets_its_own_turn_and_more_detail_merges() {
     if python_missing() {
@@ -186,7 +195,10 @@ async fn another_subject_gets_its_own_turn_and_more_detail_merges() {
     assert!(more.contains("thank the testers"), "details for the same work merged: {more}");
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn without_a_router_messages_queue_and_merge() {
     if python_missing() {

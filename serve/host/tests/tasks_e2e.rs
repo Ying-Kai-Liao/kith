@@ -54,7 +54,10 @@ fn python_missing() -> bool {
     missing
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn a_message_starts_a_task_and_the_next_goes_on_with_it() {
     if python_missing() {
@@ -80,7 +83,10 @@ async fn a_message_starts_a_task_and_the_next_goes_on_with_it() {
     assert_eq!(session(&a), session(&answer(&host, &bot, &root, "task A", "step 1.").await), "same session");
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn a_new_task_runs_beside_the_last_in_a_session_of_its_own_and_stops_alone() {
     if python_missing() {
@@ -114,7 +120,10 @@ async fn a_new_task_runs_beside_the_last_in_a_session_of_its_own_and_stops_alone
     );
 }
 
-#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 /// A card's Reply points the box at its task: the message carries the task's root as its thread, and lands there
 /// (in that task's session) even while a newer task is the one the box would go on with.
 #[tokio::test]
