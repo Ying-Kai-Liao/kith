@@ -444,7 +444,13 @@ impl CoreWriter {
     /// `hostclaim.queued`: the turns the core queued that no host began (a schedule's fire), for the host's runner
     /// (`routines/core_runs.rs`). `Err(why)`: the core did not answer.
     pub fn queued(&self) -> Result<Vec<Value>, String> {
-        let v = self.data("hostclaim.queued", &json!({}))?;
+        self.queued_from(&["schedule"])
+    }
+
+    /// [`Self::queued`] for the detached sources it names (`schedule`, `wake`, `ask`): the wake clock lists the wake turns.
+    pub fn queued_from(&self, sources: &[&str]) -> Result<Vec<Value>, String> {
+        let params = if sources == ["schedule"] { json!({}) } else { json!({"sources": sources}) };
+        let v = self.data("hostclaim.queued", &params)?;
         Ok(v["turns"].as_array().cloned().unwrap_or_default())
     }
 
@@ -458,11 +464,16 @@ impl CoreWriter {
     /// own process attaches itself with `claim.attach` before it starts the engine. The revoke epoch is read first, before the
     /// host's may check of the turn's person.
     pub fn claim_run(&self, conversation: &str, person: &str, turn: i64) -> RunClaim {
+        self.claim_run_as("scheduleRun", conversation, person, turn)
+    }
+
+    /// [`Self::claim_run`] of any detached run kind: `scheduleRun`, `wakeRun` or `askRun` (the core's `hostclaim.claim` kinds).
+    pub fn claim_run_as(&self, kind: &str, conversation: &str, person: &str, turn: i64) -> RunClaim {
         let epoch = match self.epoch(person) {
             Ok(e) => e,
             Err(e) => return RunClaim::Down(e.to_string()),
         };
-        let ask = json!({"conversation": conversation, "kind": "scheduleRun", "person": person, "turn": turn,
+        let ask = json!({"conversation": conversation, "kind": kind, "person": person, "turn": turn,
                          "revokeSeen": epoch, "holderInstance": self.instance});
         match self.call("hostclaim.claim", &ask) {
             Answer::Down { why, .. } | Answer::Refused(why) => RunClaim::Down(why),

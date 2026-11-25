@@ -68,18 +68,8 @@ pub(super) trait Ops {
     fn cron(&self, turn: &Value, job: &str) -> Started;
 }
 
-/// What [`Ops::cron`] came to.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum Started {
-    /// Claimed and running as a process of its own.
-    Ran,
-    /// Not now (a writer holds the conversation, the core did not answer): the turn stays queued and is pulled again.
-    Later,
-    /// The turn is gone (the core cancelled it, it was claimed elsewhere, its person was revoked): nothing to do.
-    Gone,
-    /// It cannot run and the claim is given back: the turn is cancelled with this reason.
-    Failed(String),
-}
+/// What [`Ops::cron`] came to: the detached-run module's answer (`run_door.rs`).
+pub(super) use super::run_door::Started;
 
 /// The agent a bot's claims name (`Actor::writer_agent`): `BotConfig::claim_agent`.
 fn agent_of(cfg: &crate::store::BotConfig) -> String {

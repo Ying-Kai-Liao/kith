@@ -183,3 +183,48 @@ fn a_switch_still_stepping_is_the_files_and_a_damaged_one_is_the_cores() {
         assert_eq!(spawns(st), before, "{text:?} is the core's");
     }
 }
+
+#[test]
+fn the_clock_the_pull_and_the_claim_of_a_wake_turn_run_through_the_cores_rows() {
+    use crate::terminal::core_writer::{CoreWriter, RunClaim};
+    let core = Core::start(true);
+    let st = core.state();
+    let owed = Request {
+        session: "sess-run-1",
+        id: "ask:job-1/1",
+        agent: "builder",
+        person: None,
+        room: None,
+        host_door: false,
+        why: "an answer came",
+        text: "go on",
+    };
+    assert_eq!(enqueue(st, &owed).unwrap(), Queued::New);
+    // The clock: the core takes what is due as one run and one turn.
+    let ticked = tick(st).expect("the host's tick is answered");
+    assert_eq!(ticked["taken"].as_array().map(Vec::len), Some(1), "{ticked}");
+    // The pull: the wake source lists it with the door, the request ids and the note (the marker names the run).
+    let writer = CoreWriter::new(core.folders.clone());
+    let turns = writer.queued_from(&["wake"]).expect("the wake turns are listed");
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    let t = &turns[0];
+    assert_eq!(
+        (t["source"].as_str(), t["door"].as_str(), t["engine"].as_str()),
+        (Some("wake"), Some("run"), Some("claude"))
+    );
+    assert_eq!(t["requestIds"], serde_json::json!(["ask:job-1/1"]));
+    let note = t["note"].as_str().unwrap();
+    let run = note.strip_prefix("[kith wake ").and_then(|n| n.split_once(']')).map(|(r, _)| r).expect("the marker");
+    assert!(writer.queued().unwrap().is_empty(), "a host that runs only cron jobs never sees a wake's turn");
+    // The turn the queue's item says it is, for the door's checks.
+    let turn = turn_of(st, run, note).expect("the item of that run");
+    assert_eq!(
+        (turn.session.as_str(), turn.agent.as_str(), turn.ids.as_slice()),
+        ("sess-run-1", "builder", ["ask:job-1/1".to_owned()].as_slice())
+    );
+    // The claim: widened to a wake's turn, on the session the wake resumes.
+    let (person, id) = (t["person"].as_str().unwrap(), t["turn"].as_i64().unwrap());
+    let claimed = writer.claim_run_as("wakeRun", "sess-run-1", person, id);
+    assert!(matches!(claimed, RunClaim::Claimed(_)), "{claimed:?}");
+    assert_eq!(spawns(st), 0, "no kith-wake was started");
+}
