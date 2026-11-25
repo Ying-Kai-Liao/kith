@@ -45,6 +45,13 @@ foreach ($d in @('C:\Program Files\Git', 'C:\Windows\System32\cmd.exe', 'C:\Prog
 $py = (Get-Command python -ErrorAction SilentlyContinue | Select-Object -First 1).Source
 if ($py) { Log "python $py : $((icacls (Split-Path $py) 2>&1 | Select-String 'APPLICATION PACKAGES') -join ' | ')" }
 
+Section 'busybox-w32 (a non-MSYS shell) for the P-G2 "what does Git Bash need" try'
+Try-Do 'busybox' {
+  New-Item -ItemType Directory -Force C:\probe\busybox | Out-Null
+  Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Uri 'https://frippery.org/files/busybox/busybox64.exe' -OutFile C:\probe\busybox\busybox.exe
+  Log ("busybox bytes: " + (Get-Item C:\probe\busybox\busybox.exe).Length)
+}
+
 Section 'install chrome-headless-shell and ffmpeg where a box can read them (P-G11)'
 Try-Do 'chrome' {
   New-Item -ItemType Directory -Force C:\probe\chrome | Out-Null

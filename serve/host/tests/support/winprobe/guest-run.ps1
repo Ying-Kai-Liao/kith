@@ -99,6 +99,13 @@ $bashScript = 'echo BASH_START $BASH_VERSION; pwd; ls / | head -5; echo wrote > 
 Bp box --name g2bash @caps @boxEnv --cwd $W --timeout 60 --out "$Out\g2-bash.txt" $DD 'C:\Program Files\Git\usr\bin\bash.exe' -c $bashScript
 Bp box --name g2bash2 @caps @boxEnv --cwd $W --timeout 60 --out "$Out\g2-bash-login.txt" $DD 'C:\Program Files\Git\bin\bash.exe' -lc 'echo LOGIN_BASH_OK; pwd'
 
+Section 'P-G2 non-MSYS shell: busybox-w32 sh in the box'
+if (Test-Path C:\probe\busybox\busybox.exe) {
+  Bp box --name g2busy @caps @boxEnv --cwd $W --timeout 40 --out "$Out\g2-busybox.txt" $DD C:\probe\busybox\busybox.exe sh -c 'echo BUSYBOX_SH_OK; pwd; echo hi > /dev/null; echo wrote > w/busy.txt; cat w/busy.txt; ls | head -3'
+} else { Log 'no busybox' }
+Section 'P-G2 Git Bash with MSYS env tweaks (does any env var avoid the named-object directory)'
+Bp box --name g2bashenv @caps @boxEnv --env 'MSYS=winsymlinks:nativestrict' --env 'MSYS2_NOSTART=1' --cwd $W --timeout 40 --out "$Out\g2-bash-env.txt" $DD 'C:\Program Files\Git\usr\bin\bash.exe' -c 'echo BASH_ENV_OK'
+
 Section 'P-G2 git in the box (and GIT_CONFIG_GLOBAL forms, W21 rule 10)'
 $gitScript = 'cd /c/guest/w && rm -rf repo && git init -q repo && cd repo && echo hi > f.txt && git add f.txt && ' +
   'git -c user.name=a -c user.email=a@b.c commit -q -m first && git log --oneline && git status --short && echo GIT_OK'
