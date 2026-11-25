@@ -443,7 +443,7 @@ pub fn run_with(
                 plan.harness
             );
         }
-        return other_engine(&plan, kernel, env, &runs, pid, task, how);
+        return other_engine(&plan, env, &runs, pid, task);
     }
     if flags.held && !task.is_empty() {
         eprintln!("kith: --held is for an interactive session; this task runs here (--direct)");
@@ -516,16 +516,8 @@ fn run_folder(plan: &plan::Plan, pid: i64) -> Result<PathBuf, String> {
     Ok(d)
 }
 
-/// Another harness: the same run, handed to its adapter (prompt in a file, directories and MCP configs as lists).
-fn other_engine(
-    plan: &plan::Plan,
-    kernel: &Path,
-    mut env: Env,
-    runs: &Path,
-    pid: i64,
-    task: String,
-    how: Engine,
-) -> i32 {
+/// Another harness: the same run, handed to `kernel engine-run` (prompt in a file, directories and MCP configs as lists).
+fn other_engine(plan: &plan::Plan, mut env: Env, runs: &Path, pid: i64, task: String) -> i32 {
     let mcp_file = runs.join(format!("{pid}.mcp.json"));
     let prompt_file = runs.join(format!("{pid}.prompt.md"));
     if let Err(e) = std::fs::write(&prompt_file, format!("{}\n", plan.system_prompt)) {
@@ -580,18 +572,14 @@ fn other_engine(
             .collect();
     }
     if task.is_empty() {
-        return terminal::adapter(&plan.agent, kernel, &plan.harness, flags, &env, how);
+        return terminal::adapter(&plan.agent, &plan.harness, flags, &env, Engine::native());
     }
-    start::other(
-        Adapter {
-            kernel,
-            env,
-            harness: plan.harness.clone(),
-            flags,
-            task,
-        },
-        how,
-    )
+    start::other(Adapter {
+        env,
+        harness: plan.harness.clone(),
+        flags,
+        task,
+    })
 }
 
 #[cfg(test)]

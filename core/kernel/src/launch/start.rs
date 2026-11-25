@@ -223,12 +223,11 @@ fn code_of(s: std::process::ExitStatus) -> i32 {
     s.code().unwrap_or(1)
 }
 
-/// Another engine's one-shot: the same run handed to its adapter (the prompt in a file, directories and MCP configs as lists).
-pub struct Adapter<'a> {
-    pub kernel: &'a Path,
+/// Another engine's one-shot: the same run handed to `kernel engine-run` (the prompt in a file, directories and MCP configs as lists).
+pub struct Adapter {
     pub env: Env,
     pub harness: String,
-    /// The adapter's flags before the task: `--permission-mode`, `--resume`, `--output`, then `--`.
+    /// The engine run's flags before the task: `--permission-mode`, `--resume`, `--output`, then `--`.
     pub flags: Vec<String>,
     pub task: String,
 }
@@ -245,32 +244,20 @@ fn run_engine(cmd: &mut Command) -> std::io::Result<std::process::ExitStatus> {
     cmd.status()
 }
 
-/// A program that lists `engine-run` runs the task over ACP; exit 78 (no ACP one-shot for this engine, nothing started) and an
-/// older program go on to the adapter script (`adapters/harness.py`, until the last engine has a Rust one-shot).
-pub fn other(a: Adapter<'_>, how: Engine) -> i32 {
-    if crate::MODULES.contains(&"engine-run")
-        && let Ok(me) = std::env::current_exe()
-    {
-        let mut args = vec![
-            "kernel".to_owned(),
-            "engine-run".to_owned(),
-            a.harness.clone(),
-        ];
-        args.extend(a.flags.iter().cloned());
-        args.push(a.task.clone());
-        let mut cmd = Command::new(me);
-        cmd.args(&args).env_clear().envs(&a.env);
-        let rc = match run_engine(&mut cmd) {
-            Ok(s) => code_of(s),
-            Err(e) => failed("kith", &e),
-        };
-        if rc != 78 {
-            return rc;
-        }
-    }
-    let script = a.kernel.join("adapters/harness.py");
-    let mut args = vec![script.to_string_lossy().into_owned(), a.harness];
+/// Runs the task over ACP (`kith kernel engine-run`); its exit code is final, 78 (no ACP one-shot for this engine, nothing
+/// started) included: there is no adapter script behind it any more.
+pub fn other(a: Adapter) -> i32 {
+    let me = match std::env::current_exe() {
+        Ok(me) => me,
+        Err(e) => return failed("kith", &e),
+    };
+    let mut args = vec!["kernel".to_owned(), "engine-run".to_owned(), a.harness];
     args.extend(a.flags);
     args.push(a.task);
-    start("python3", &args, &a.env, how)
+    let mut cmd = Command::new(me);
+    cmd.args(&args).env_clear().envs(&a.env);
+    match run_engine(&mut cmd) {
+        Ok(s) => code_of(s),
+        Err(e) => failed("kith", &e),
+    }
 }

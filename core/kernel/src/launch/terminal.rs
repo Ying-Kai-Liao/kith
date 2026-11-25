@@ -273,23 +273,27 @@ fn run_child(
     start::start(&cmd[0], &cmd[1..], env, Engine::Spawn)
 }
 
-/// Another harness at the terminal: its adapter script, with the prompt and folders in the environment (`kernel/bin/kith` ends in
-/// `exec python3 adapters/harness.py HARNESS FLAGS`: no program of ours runs a non-Claude terminal yet).
-pub fn adapter(
-    agent: &str,
-    kernel: &Path,
-    harness: &str,
-    mut flags: Vec<String>,
-    env: &Env,
-    how: Engine,
-) -> i32 {
+/// Another harness at the terminal: the engine's own session, `kith kernel engine-run ENGINE --interactive FLAGS` in place of this
+/// process (the prompt, folders and MCP configs travel in `KITH_RUN_*`). No adapter script runs any more.
+pub fn adapter(agent: &str, harness: &str, flags: Vec<String>, env: &Env, how: Engine) -> i32 {
     if !is_tty() {
         return no_terminal(agent);
     }
-    let script = kernel.join("adapters/harness.py");
-    let mut args = vec![script.to_string_lossy().into_owned(), harness.to_owned()];
-    args.append(&mut flags);
-    start::start("python3", &args, env, how)
+    let me = match std::env::current_exe() {
+        Ok(me) => me.to_string_lossy().into_owned(),
+        Err(e) => {
+            eprintln!("kith: can't find this program to start {harness}: {e}");
+            return 1;
+        }
+    };
+    let mut args = vec![
+        "kernel".to_owned(),
+        "engine-run".to_owned(),
+        harness.to_owned(),
+        "--interactive".to_owned(),
+    ];
+    args.extend(flags);
+    start::start(&me, &args, env, how)
 }
 
 #[cfg(test)]
