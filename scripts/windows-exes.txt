@@ -1,0 +1,13 @@
+# The programs the Windows release zip (kith-<version>-windows-x64.zip, bin\) carries, in one place.
+# scripts/package-windows.sh reads this list: it builds each cargo package and checks every exe is present.
+#
+#   exe              cargo package   status    owner (why it is not required yet)
+#
+# required: the job fails if it is missing. pending: shipped when it builds, a loud warning when it does not (and a
+# failure on a v* tag, KITH_WINDOWS_STRICT=1). When a pending program lands, change its status to required: one line.
+kith.exe           kith-serve    required  W2a
+kith-servew.exe    kith-serve    required  W2a
+kith-holder.exe    kith-holder   required  W2a
+kith-stub.exe      kith-stub     required  W2a
+kith-shim.exe      kith-shim     pending   W16(no-crate-yet;the-desktop-app-shim)
+project-id.exe     project-id    pending   W17(Windows-router-refusal-slice)
