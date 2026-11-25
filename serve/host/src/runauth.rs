@@ -1188,9 +1188,17 @@ mod tests {
         assert!(guest_identity("t", PeerInfo { pid: None }, true, |_: &str, _: u32| Some(id("sam"))).await.is_none());
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_socket_lives_under_the_kernels_machine_folder() {
         assert!(socket_path().ends_with("run/host.sock"));
+    }
+
+    // On Windows the run channel is a named pipe since W5b (#1189), so the folder test above is Unix-only.
+    #[cfg(windows)]
+    #[test]
+    fn the_run_channel_is_a_named_pipe_hashed_from_the_machine_run_folder() {
+        assert!(socket_path().to_string_lossy().starts_with(r"\\.\pipe\kith-host-"));
     }
 
     fn consume_line(token: &str, command: &str) -> Vec<u8> {
