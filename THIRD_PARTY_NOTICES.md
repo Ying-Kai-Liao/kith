@@ -15,7 +15,7 @@ Local voice (kith-tts) uses Phonon, Gradium's on-device text to speech: the ptts
 model and voices (https://huggingface.co/gradium/phonon-31m-en and /gradium/phonon-voices, Apache-2.0,
 Copyright Gradium). The model files are downloaded on first use and are not part of this repository.
 
-Kith includes 713 third-party packages and vendored files under the licenses below.
+Kith includes 714 third-party packages and vendored files under the licenses below.
 
 ## 0BSD
 
@@ -3574,6 +3574,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - js-sys 0.3.105 (cargo)
   https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys
   Copyright (c) 2014 Alex Crichton
+- junction 1.4.2 (cargo)
+  https://github.com/tesuji/junction
+  Copyright (c) 2020 lzutao
 - kasuari 0.4.12 (cargo)
   https://github.com/ratatui/kasuari
   Copyright (c) 2016 Dylan Ede

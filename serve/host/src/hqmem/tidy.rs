@@ -313,27 +313,73 @@ fn approval_key(conn: &Connection, create: bool) -> Option<Vec<u8>> {
     if create && !path.exists() {
         make_key(&path).ok()?;
     }
+    // A key another local account can read is no key: refuse it rather than sign with it.
+    #[cfg(windows)]
+    if !owner_only(&path) {
+        return None;
+    }
     std::fs::read(&path).ok().filter(|k| k.len() == 32)
+}
+
+/// Whether only the owner (with SYSTEM and Administrators) can get into `path`, read by SID (`kith-winsys`).
+#[cfg(windows)]
+fn owner_only(path: &Path) -> bool {
+    matches!(kith_winsys::acl::check(path), Ok(kith_winsys::acl::Check::OwnerOnly))
 }
 
 fn make_key(path: &Path) -> Result<()> {
     use std::io::Write as _;
-    use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
     let dir = path.parent().ok_or_else(|| anyhow!("no folder for the key"))?;
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    // Owner-only modes on Unix; on Windows an access list with no entry for anyone else (kith-winsys), set on the folder
+    // and again on the file before the key is written to it.
+    let mut folder = std::fs::DirBuilder::new();
+    folder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut folder, 0o700);
+    folder.create(dir)?;
+    #[cfg(windows)]
+    kith_winsys::acl::restrict(dir, true).map_err(|e| anyhow!("can't make {} private: {e}", dir.display()))?;
     let mut key = [0u8; 32];
     getrandom::fill(&mut key).map_err(|_| anyhow!("random key unavailable"))?;
     let tmp = dir.join(format!(".memory-approvals.{}.tmp", uuid::Uuid::new_v4()));
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    let mut f = opts.open(&tmp)?;
+    #[cfg(windows)]
+    if let Err(e) = kith_winsys::acl::restrict(&tmp, false) {
+        drop(f);
+        let _ = std::fs::remove_file(&tmp);
+        return Err(anyhow!("can't make the key private: {e}"));
+    }
     f.write_all(&key)?;
     f.sync_all()?;
     // Linked into place whole, so two processes making it at once keep one key and none reads half of one.
     let linked = std::fs::hard_link(&tmp, path);
     let _ = std::fs::remove_file(&tmp);
-    match linked {
-        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => Err(e.into()),
-        _ => Ok(()),
+    #[cfg(windows)]
+    let made_here = linked.is_ok();
+    if let Err(e) = linked
+        && e.kind() != std::io::ErrorKind::AlreadyExists
+    {
+        return Err(e.into());
     }
+    // Only a key this call made is removed when its list turns out open. Another host's key (the link shares its
+    // restricted descriptor) is refused and left alone: a failed check there is nearly always transient, and deleting
+    // it would void the approvals that host already signed.
+    #[cfg(windows)]
+    match kith_winsys::acl::check(path) {
+        Ok(kith_winsys::acl::Check::OwnerOnly) => {}
+        Ok(kith_winsys::acl::Check::Open(why)) => {
+            if made_here {
+                let _ = std::fs::remove_file(path);
+            }
+            bail!("the approvals key is open to other accounts: {why}");
+        }
+        Err(e) => bail!("can't read the approvals key's access list (the next call checks again): {e}"),
+    }
+    Ok(())
 }
 
 /// The HMAC over what a grant is checked against (twin of `signature` in `kernel/lib/kith_facets.py`). Each text is
