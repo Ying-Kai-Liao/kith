@@ -209,6 +209,32 @@ kith_launch_json_flag() {
   return 1
 }
 
+# kith_switched VERB   succeeds when lib/core-switched.txt has a line for VERB (a commented one is no line). kith_core_exec routes a verb under
+# KITH_CORE=rust without a line too; a verb that ships off asks for the line first.
+kith_switched() {
+  awk -F'\t' -v v="$1" '$1 == v { f = 1 } END { exit !f }' "$KITH/lib/core-switched.txt" 2>/dev/null
+}
+
+# kith_oneshot_flag   ARGS...   succeeds when `kith AGENT ARGS` is a one-shot the program can run itself (`kith kernel launch-exec`): a task
+# stands after the leading flags (the flag loop of bin/kith: a flag with a value skips it, `--`, a word or a task that starts with a
+# dash and holds a blank ends the flags). A terminal run, --print, --launch-json, --inspect, --render, a flag the old body refuses
+# and a flag with no value stay with the old body.
+kith_oneshot_flag() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --print|--launch-json|--inspect|--render) return 1 ;;
+      --held|--direct|--bypass|-c|--continue) shift ;;
+      --hold|--resume|--account|--backup|-p|--project|-m|--model|-e|--effort|-H|--harness|--permission-mode) shift 2 || return 1 ;;
+      -r) if [[ -n ${2:-} && $2 != -* ]]; then shift 2; else shift; fi ;;
+      --) shift; [[ $# -gt 0 ]]; return ;;
+      -*[[:space:]]*) return 0 ;;
+      -*) return 1 ;;
+      *) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 # Held terminals (docs/plans/runtime-design.md section 4, M1-7): `kith AGENT --held` asks the core daemon to start the engine in
 # the holder (terminal.open) and attaches to it; `kith attach` comes back to one. The calls go through the hidden Rust verb
 # `kith kernel core-call` (owner socket only; terminal.* methods, and the people.suspend, people.undo, people.removePerson and people.removeBot that kith-auth mirrors); the keys and the screen through `kith kernel attach`.
