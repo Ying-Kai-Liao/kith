@@ -75,6 +75,8 @@ pub(super) async fn step(hub: &Arc<Hub>) -> bool {
     let Some(core) = writer else { return true };
     super::reap(hub);
     lock(&HANDED).retain(|_, at| at.elapsed() < HANDED_FOR);
+    // A run that ended some other way than starting (withdrawn, cancelled, already ran) leaves its wait behind: forgotten once old.
+    lock(&LATER).retain(|_, at| at.elapsed() < LATER_FOR * 4);
     let st = state.clone();
     match wake::blocking(move || wake::tick(&st)).await {
         Some(Ok(_)) => housekeeping(),
@@ -125,12 +127,13 @@ pub(super) fn engine_gap(t: &Value, harness: Option<&str>) -> Option<&'static st
         .then_some(ENGINE_GAP)
 }
 
-/// The `harness:` of the agent's agent.md, `claude` when it names none; `None` when the file is not found.
-fn harness_of_agent(state: &Path, agent: &str) -> Option<String> {
-    let agents = crate::terminal::core_holders::folders_of(state)?.agents;
-    let text = [agents.join(agent).join("agent.md"), agents.join(agent).join("role/agent.md")]
-        .iter()
-        .find_map(|p| std::fs::read_to_string(p).ok())?;
+/// The `harness:` of the agent's pinned snapshot (`kith-pkg resolve`, what the launch reads: `$pkg/agent.md`), `claude` when it
+/// names none; `None` when the snapshot cannot be read. Blocking (a process and the agents folder): call it off the async workers.
+fn harness_of_agent(agent: &str) -> Option<String> {
+    let kernel = crate::kernel::current_kernel()?;
+    let out = Command::new(kernel.join("bin/kith-pkg")).args(["resolve", agent]).stdin(Stdio::null()).output().ok()?;
+    let dir = out.status.success().then(|| std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))?;
+    let text = std::fs::read_to_string(dir.join("agent.md")).ok()?;
     let mut lines = text.lines();
     if lines.next() == Some("---") {
         for l in lines.take_while(|l| *l != "---") {
@@ -211,7 +214,10 @@ async fn door(hub: &Arc<Hub>, core: &Arc<CoreWriter>, t: &Value, core_turn: i64,
     for c in &live {
         let _ = hub.store.card_resume_claim(&c.id, crate::store::now_ms()); // a restart gave the claim back: held again
     }
-    let harness = harness_of_agent(&state_of(hub), &turn.agent);
+    let harness = {
+        let agent = turn.agent.clone();
+        wake::blocking(move || harness_of_agent(&agent)).await.flatten()
+    };
     if let Some(why) = engine_gap(t, harness.as_deref()) {
         tracing::warn!(run = %turn.run, why, "wake: a detached turn that cannot run is cancelled before its claim");
         return cancel(core, core_turn, why).await;
