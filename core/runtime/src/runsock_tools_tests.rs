@@ -49,7 +49,7 @@ fn rig() -> Rig {
             ..Config::default()
         },
     );
-    d.ready(Duration::from_secs(10)).expect("serving");
+    d.ready(crate::tests::DAEMON_UP).expect("serving");
     Rig {
         sock: endpoint(&Layout::new(&m)),
         _t: t,
@@ -321,7 +321,7 @@ fn a_daemon_restart_ends_every_token() {
             ..crate::daemon::Config::default()
         },
     );
-    d.ready(Duration::from_secs(10)).expect("serving again");
+    d.ready(crate::tests::DAEMON_UP).expect("serving again");
     let _ = kernel;
     let go = r._t.path().join("go-restart");
     let mut sh = shell(
