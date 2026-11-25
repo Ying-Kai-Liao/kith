@@ -140,6 +140,22 @@ kith_core_exec() {
   KITH_BIN=$bin exec "$bin" kernel $verb "$@"
 }
 
+# kith_wake_exec ARGS...   `kith wake`: execs the program's own `kernel wake` (a thin client of the core's wake rows, no Python) when the
+# wake queue is the core's (the tombstone in sessions/queue/: the step writes it before the switch record and the rollback removes it
+# last) and the program lists `wake`; otherwise returns 1 and kith-wake answers, which is itself the core's client once switched.
+kith_wake_exec() {
+  local bin ver
+  [[ ${KITH_CORE:-} != python && -e ${KITH_STATE:-/nonexistent}/sessions/queue/.tombstone ]] || return 1
+  if [[ -n ${_kith_core_primed:-} ]]; then
+    bin=$_kith_core_bin ver=$_kith_core_ver
+  else
+    bin=$(kith_find_bin) && [[ -n $bin ]] || return 1
+    ver=$("$bin" kernel version 2>/dev/null)
+  fi
+  [[ -n $bin && $ver == *'"wake"'* ]] || return 1
+  KITH_BIN=$bin exec "$bin" kernel wake "$@"
+}
+
 # kith_cost_bin   prints the kith program that has the cost ledger's writers (`cost-ledger` in `kith kernel version`) and returns 0, or
 # returns 1 when this Mac has none. KITH_CORE does not matter: there is no Python cost to go back to. The SessionStart hook of
 # `kith AGENT` names the program when there is one, else the launch writes no cost hook.

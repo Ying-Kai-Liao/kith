@@ -432,3 +432,88 @@ fn an_idle_session_is_stopped_by_its_wrapper_with_an_intent_and_a_busy_one_is_le
         fs::read_to_string(state.join("sessions/intent").join(format!("{SID}.json"))).unwrap();
     assert!(intent.contains(r#""why": "quit""#), "{intent}");
 }
+
+/// A core that records what it was asked and answers `{}`.
+struct Recorder(RefCell<Vec<(String, serde_json::Value)>>);
+
+impl super::core::Core for Recorder {
+    fn call(
+        &self,
+        method: &str,
+        params: &serde_json::Value,
+        _: Option<Duration>,
+    ) -> Result<serde_json::Value, super::core::CoreErr> {
+        self.0
+            .borrow_mut()
+            .push((method.to_owned(), params.clone()));
+        Ok(serde_json::json!({}))
+    }
+}
+
+/// A terminal's exit with the wake queue the core's (R8): one `wake.released` for its session and no shell, so no
+/// `kith-ask --sweep` (the marker a fake one writes stays away). Before the cutover the shell line still runs.
+#[test]
+fn a_terminal_exit_is_one_wake_released_call_once_the_queue_is_the_cores_and_the_shell_line_before()
+{
+    let t = Tmp::new();
+    let tr = transcript(&t);
+    let state = t.state();
+    let kernel = t.0.join("kernel");
+    fs::create_dir_all(kernel.join("bin")).unwrap();
+    let marker = t.0.join("swept");
+    fs::write(
+        kernel.join("bin/kith-ask"),
+        format!("open({:?}, 'w').close()\n", marker.display().to_string()),
+    )
+    .unwrap();
+    let engine = script(
+        &t,
+        "engine",
+        &format!(
+            "TRANSCRIPT={tr}; KITH_STATE={}\n{ENTRY}entry\n",
+            state.display()
+        ),
+    );
+    let env = |k: &str| (k == "KITH_IDLE_POLL").then(|| "1000".to_owned());
+    let c = ctx(&t, &env);
+    let cmd = vec![engine];
+    let exit = |core: &Recorder| {
+        run(&c, &NoHost, Some(core), &kernel, "coder", &cmd, &|_| {});
+    };
+
+    let before = Recorder(RefCell::new(Vec::new()));
+    exit(&before);
+    assert!(
+        before.0.borrow().iter().all(|(m, _)| m != "wake.released"),
+        "the files are still the queue"
+    );
+    for _ in 0..100 {
+        if marker.exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(marker.exists(), "before the cutover the shell line sweeps");
+    fs::remove_file(&marker).unwrap();
+
+    fs::create_dir_all(state.join("sessions/queue")).unwrap();
+    fs::write(state.join("sessions/queue/.tombstone"), "{}").unwrap();
+    let after = Recorder(RefCell::new(Vec::new()));
+    exit(&after);
+    let released: Vec<_> = after
+        .0
+        .borrow()
+        .iter()
+        .filter(|(m, _)| m == "wake.released")
+        .cloned()
+        .collect();
+    assert_eq!(
+        released,
+        [(
+            "wake.released".to_owned(),
+            serde_json::json!({"session": SID})
+        )]
+    );
+    std::thread::sleep(Duration::from_millis(600));
+    assert!(!marker.exists(), "no shell: nothing started the sweep");
+}

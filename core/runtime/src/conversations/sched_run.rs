@@ -139,6 +139,13 @@ pub(crate) fn attach(
             "UPDATE turns SET state = 'running', started_at = ?2 WHERE claim_id = ?1 AND state = 'claimed'",
             params![claim_id, now],
         )?;
+        // A `--bg` ask's callee: its record learns the claim and the process (so `ask.end` finds the run exactly) and the
+        // session it runs in (so `-c` resumes it), in the attach's own transaction (ask design R2, O2).
+        tx.execute(
+            "UPDATE asks SET claim_id = ?1, pid = ?2, pid_at_ms = ?3, session = COALESCE(session, conversation)
+             WHERE turn = (SELECT id FROM turns WHERE claim_id = ?1 AND source = 'ask')",
+            params![claim_id, pid, now],
+        )?;
         tx.commit()?;
         return Ok(json!({ "attached": true }));
     }

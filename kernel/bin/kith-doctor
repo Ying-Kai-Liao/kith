@@ -135,7 +135,7 @@ def tools():
             bad(f'git has no {key}: git config --global {key} "..."')
     ok('git') if shutil.which('git') else bad('git is missing: xcode-select --install')
     ok('claude') if shutil.which('claude') else bad('claude is missing: https://claude.com/claude-code')
-    other = [h for h in ('codex', 'pi', 'agy', 'hermes', 'qwen', 'dsh', 'opencode') if shutil.which(h)]
+    other = [h for h in ('codex', 'pi', 'agy', 'hermes', 'qwen', 'opencode') if shutil.which(h)]
     note('other harnesses: ' + (', '.join(other) or 'none') + ' (an agent runs on one with harness: in agent.md)')
     if not shutil.which('gh'):
         warn('gh is missing: backups, sharing and kith search need it (brew install gh)')
@@ -196,7 +196,7 @@ def repos_and_agents():
         m = re.search(r'^harness:\s*(\S+)', (Path(o['dir']) / 'agent.md').read_text(), re.M)
         harness = {'claude-code': 'claude'}.get(m.group(1), m.group(1)) if m else 'claude'
         if harness != 'claude' and not shutil.which(harness) \
-                and harness not in ('dsh', 'opencode'):   # those two run through npx when not installed
+                and harness != 'opencode':   # it runs through npx when not installed
             notes.append(f'runs on {harness}, which is not installed')
         deps = run(str(KITH / 'bin' / 'kith-pkg'), 'deps', name)
         if deps.returncode:
