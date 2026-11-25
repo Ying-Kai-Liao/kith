@@ -13603,7 +13603,8 @@
    "/core/locks/"
   ],
   "pty": true,
-  "stderr": false
+  "stderr": false,
+  "no_daemon": true
  },
  {
   "name": "launch-exec-term-held-no-tty",
@@ -13843,7 +13844,8 @@
    "/run/t",
    "/store/",
    "/core/locks/"
-  ]
+  ],
+  "no_daemon": true
  },
  {
   "name": "launch-exec-term-held-resume-no-daemon",
@@ -14095,7 +14097,8 @@
    "/core/locks/"
   ],
   "pty": true,
-  "stderr": false
+  "stderr": false,
+  "no_daemon": true
  },
  {
   "name": "launch-exec-term-held-guest",
@@ -14338,6 +14341,7 @@
    "/core/locks/"
   ],
   "pty": true,
-  "stderr": false
+  "stderr": false,
+  "no_daemon": true
  }
 ]

@@ -131,6 +131,8 @@ rm -f "$T/go" "$T/started"; touch "$T/go"
 ( cd "$T/work" && KITH_CLAUDE_ARGS="--continue" "$KERNEL/bin/kith" designer "task" ) >/dev/null 2>&1
 is "-c with no id: runs unlocked" "$?" 0
 
+# (These rows start the script's own body with no kith program at all; the kernel copy of launch-exec on has no program beside it to find.)
+if [[ ${KITH_LAUNCH_EXEC:-} != on ]]; then
 # no kith-stub: one stderr line and the run goes on (the default flips to a refusal in M3); KITH_REQUIRE_STUB=1 refuses
 SID3=33333333-3333-4333-8333-333333333333
 err=$(cd "$T/work" && KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
@@ -139,6 +141,7 @@ err=$(cd "$T/work" && KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope
 [[ $rc != 0 && $err == *"cannot be locked"* ]] && ok "KITH_REQUIRE_STUB=1: refused with an install hint" || bad "require stub" "$rc $err"
 err=$(cd "$T/work" && KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
 [[ $rc != 0 && $err == *"cannot be locked"* ]] && ok "KITH_REQUIRE_STUB=1: refused with an install hint" || bad "require stub" "$rc $err"
+fi
 
 rows_registry() {   # rows_registry SESSION-ID: needs $RUNNER (the wrapper to run) and $LABEL
 # an interactive run: kith-sessions run keeps claude's registry entry and its /exit intent even though the child is the stub
@@ -260,6 +263,7 @@ else
   echo "skip: the Rust run rows need KITH_BIN (a kith program that lists threads-run)"
 fi
 
+if [[ ${KITH_LAUNCH_EXEC:-} != on ]]; then   # (a program that does not answer: the script's body, as above)
 # Writer mode (the claims marker) with the core not answering: the owner's run goes on under the lock alone, and the stub is
 # told so (--lock-alone: it clears a host warm process that has the conversation loaded before claude starts; the clear itself
 # is core/stub/tests/lock_alone.rs). With the core answering it never is (kith-sessions-core-check W1).
@@ -278,6 +282,7 @@ grep -q 'conversation lock alone' "$T/r6.out" && ok "lock alone: one line says s
 grep -qx 'lock-alone' "$T/r6.out" && bad "lock alone: kith-sessions' mark reached the terminal" || ok "lock alone: the mark stays between kith-sessions and bin/kith"
 touch "$T/go"; wait $R6
 rm -f "$REG/claims.tombstone"
+fi
 
 [[ $fail == 0 ]] && echo "all checks passed"
 exit $fail
