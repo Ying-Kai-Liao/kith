@@ -9,7 +9,7 @@ use kith_kernel::paths::Paths;
 use kith_kernel::wake::{Fail, run};
 use serde_json::Value;
 
-use crate::core_front::serve_for_test;
+use crate::core_front::{Answer, call_owner, serve_for_test};
 
 /// A short folder: a Unix socket path holds about a hundred bytes.
 fn folders(tag: &str) -> Paths {
@@ -24,13 +24,10 @@ fn folders(tag: &str) -> Paths {
 
 /// The verb over `folders`' daemon (what `wake_cmd::call` does in a real run, but at these folders and not the process's).
 fn kith(f: &Paths, line: &str, env: &[(&str, &str)]) -> (i32, String, String) {
-    let call = |method: &str, params: &Value| match kith_core::reach(f, method, params, false) {
-        kith_core::Reached::Answered(v) => Ok(v),
-        kith_core::Reached::Refused(kith_core::Error::Busy(w))
-        | kith_core::Reached::Mismatch(w)
-        | kith_core::Reached::Lost(w) => Err(Fail::NoAnswer(w)),
-        kith_core::Reached::Refused(e) => Err(Fail::Refused(e.to_string())),
-        kith_core::Reached::NoDaemon => Err(Fail::NoAnswer("no core daemon answers".to_owned())),
+    let call = |method: &str, params: &Value| match call_owner(f, method, params, false) {
+        Answer::Done(v) => Ok(v),
+        Answer::Down { why, .. } => Err(Fail::NoAnswer(why)),
+        Answer::Refused(why) => Err(Fail::Refused(why)),
     };
     let get = |k: &str| env.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_owned());
     let args: Vec<String> = line.split_whitespace().map(str::to_owned).collect();
@@ -68,10 +65,10 @@ fn every_verb_goes_through_the_real_dispatch_and_a_missing_core_refuses_and_writ
     assert!(err.starts_with("kith-wake: "), "{err}");
 
     // R8: the terminal exit's call.
-    let released = kith_core::reach(&f, "wake.released", &serde_json::json!({"session": "s1"}), false);
+    let released = call_owner(&f, "wake.released", &serde_json::json!({"session": "s1"}), false);
     assert!(
-        matches!(released, kith_core::Reached::Answered(ref v) if v["unparked"].as_array().is_some_and(Vec::is_empty)),
-        "{released:?}"
+        matches!(released, Answer::Done(ref v) if v["unparked"].as_array().is_some_and(Vec::is_empty)),
+        "wake.released refused or unanswered"
     );
 
     daemon.stop();
