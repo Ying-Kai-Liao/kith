@@ -13021,7 +13021,7 @@
           "summary": "`bg`, on the callee's computer: the pairing epoch the ask was sent under.",
           "required": false,
           "schema": {
-            "type": "integer"
+            "type": "string"
           }
         },
         {
@@ -14062,7 +14062,7 @@
     },
     {
       "name": "ask.peerLink",
-      "summary": "A pairing with another computer starts (the host writes this before it writes the pairing): `epoch` is the live one for `computer`, and the fence every open, claim and attach of an ask from that computer reads. A newer epoch replaces the one kept, ending it first in the same transaction (as `ask.endPeer`); the same epoch again changes nothing, and an ended epoch is never made live again; an older one is refused. Answers `{computer, epoch, linked, ended, sessions, kill}`.",
+      "summary": "A pairing with another computer starts (the host writes this before it writes the pairing): `epoch` is the live one for `computer` in `dir` (`in`: asks that computer sends here, the fence every open, claim and attach of such an ask reads; `out`: asks sent there). A different epoch than the live one ends it first, in the same transaction (as `ask.endPeer`); the live epoch again changes nothing; an epoch that was ended is refused, since it is never made live again. Epochs are the host's pairing ids and have no order. Answers `{computer, dir, epoch, linked, ended, sessions, kill}`.",
       "params": [
         {
           "name": "computer",
@@ -14073,11 +14073,19 @@
           }
         },
         {
-          "name": "epoch",
-          "summary": "The pairing epoch.",
+          "name": "dir",
+          "summary": "`in` (asks that computer sends here) or `out` (asks sent there): the two directions are two pairings.",
           "required": true,
           "schema": {
-            "type": "integer"
+            "type": "string"
+          }
+        },
+        {
+          "name": "epoch",
+          "summary": "The pairing epoch, as the host stores it (a hash: compared, never ordered).",
+          "required": true,
+          "schema": {
+            "type": "string"
           }
         }
       ],
@@ -14105,6 +14113,9 @@
           "computer": {
             "kind": "positional"
           },
+          "dir": {
+            "kind": "positional"
+          },
           "epoch": {
             "kind": "positional"
           }
@@ -14113,11 +14124,19 @@
     },
     {
       "name": "ask.endPeer",
-      "summary": "The pairing with a computer ends (the host calls it before it removes the pairing, and again from its level-triggered reconcile). In one transaction: the fence is down, so nothing of that epoch opens, is claimed or attaches; the asks that computer sent here are ended (running ones stopped, with the claims to kill, queued and claimed ones refused, each with a row it can read); the asks sent there are cut off, each with one notice row and wake; and every stop owed to it is dropped. Safe to repeat. Answers `{computer, ended, sessions, kill}`.",
+      "summary": "One pairing with a computer ends (the host calls it before it removes the pairing, and again from its level-triggered reconcile). In one transaction the fence of that direction is down, so nothing of that epoch opens, is claimed or attaches, and: for `in`, the asks that computer sent here are ended (running ones stopped, with the claims to kill, queued and claimed ones refused, each with a row it can read); for `out`, the asks sent there are cut off, each with one notice row and wake, and every stop owed to it is dropped. The other direction is left alone. Safe to repeat. Answers `{computer, dir, ended, sessions, kill}`.",
       "params": [
         {
           "name": "computer",
           "summary": "The other computer.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dir",
+          "summary": "`in` ends the asks that computer sent here; `out` cuts off the asks sent there.",
           "required": true,
           "schema": {
             "type": "string"
@@ -14147,6 +14166,9 @@
         "args": {
           "computer": {
             "kind": "positional"
+          },
+          "dir": {
+            "kind": "positional"
           }
         }
       }
@@ -14168,7 +14190,7 @@
           "summary": "The pairing epoch the ask was sent under.",
           "required": true,
           "schema": {
-            "type": "integer"
+            "type": "string"
           }
         },
         {

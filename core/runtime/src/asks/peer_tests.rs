@@ -22,15 +22,45 @@ fn exec(r: &Rig, sql: &'static str, arg: i64) {
         .unwrap();
 }
 
-fn link(r: &Rig, computer: &str, epoch: i64) -> Value {
+/// The host's pairing epoch is a hash with no order: the tests use names.
+fn ep(n: i64) -> String {
+    format!("epoch-{n}")
+}
+
+fn link_dir(r: &Rig, dir: &str, epoch: i64) -> Value {
     r.host(
         "ask.peerLink",
-        &json!({"computer": computer, "epoch": epoch}),
+        &json!({"computer": MAC, "dir": dir, "epoch": ep(epoch)}),
     )
 }
 
-fn end(r: &Rig, computer: &str) -> Value {
-    r.host("ask.endPeer", &json!({"computer": computer}))
+/// The pairing the computer's asks to this one come under.
+fn link_in(r: &Rig, epoch: i64) -> Value {
+    link_dir(r, "in", epoch)
+}
+
+/// The pairing this one's asks to the computer go under.
+fn link_out(r: &Rig, epoch: i64) -> Value {
+    link_dir(r, "out", epoch)
+}
+
+fn end_in(r: &Rig) -> Value {
+    r.host("ask.endPeer", &json!({"computer": MAC, "dir": "in"}))
+}
+
+fn end_out(r: &Rig) -> Value {
+    r.host("ask.endPeer", &json!({"computer": MAC, "dir": "out"}))
+}
+
+/// The pairing ends behind the asks' back: the row only, no sweep.
+fn drop_fence(r: &Rig, dir: &str) {
+    r.d.shared()
+        .with_core(|c| {
+            c.conn()
+                .execute("UPDATE ask_peers SET live = 0 WHERE dir = ?1", [dir])?;
+            Ok(())
+        })
+        .unwrap();
 }
 
 /// A peer ask of `boss`, in `sess-1`, for `echo` on `computer`.
@@ -55,7 +85,7 @@ fn origin_params(r: &Rig, id: &str, key: &str, epoch: i64, env: &[(&str, &str)])
     p["task"] = json!("do it here");
     p["originComputer"] = json!(MAC);
     p["originKey"] = json!(key);
-    p["originEpoch"] = json!(epoch);
+    p["originEpoch"] = json!(ep(epoch));
     p
 }
 
@@ -69,7 +99,7 @@ fn apply(
 ) -> Value {
     let mut p = r.env(&[]);
     p["id"] = json!(id);
-    p["epoch"] = json!(epoch);
+    p["epoch"] = json!(ep(epoch));
     p["rows"] = rows.clone();
     if let Some(s) = state {
         p["state"] = json!(s);
@@ -127,7 +157,7 @@ fn a_peer_open_needs_a_live_pairing_and_makes_no_turn() {
         p
     });
     assert!(matches!(none, Err(Error::Refused(_))), "{none:?}");
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     let opened = peer(&r, "p1", MAC);
     assert_eq!(opened["turn"], Value::Null, "{opened}");
     assert_eq!(r.ask_state("p1"), "open");
@@ -150,7 +180,7 @@ fn a_peer_open_needs_a_live_pairing_and_makes_no_turn() {
 #[test]
 fn a_peer_open_is_the_owners_only() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     let ask = |env: &[(&str, &str)]| {
         let mut p = r.env(env);
         p["id"] = json!("g1");
@@ -194,7 +224,7 @@ fn a_peer_open_is_the_owners_only() {
 #[test]
 fn an_origin_open_makes_a_bg_turn_and_the_same_key_again_finds_the_row() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_in(&r, 1);
     let first = origin(&r, "o1", "k1", 1);
     let turn = turn_of(&first);
     assert_eq!(r.turn_state(turn), "queued");
@@ -218,7 +248,7 @@ fn an_origin_open_makes_a_bg_turn_and_the_same_key_again_finds_the_row() {
 #[test]
 fn an_origin_open_at_an_old_or_ended_epoch_is_a_refused_row_it_can_read() {
     let r = Rig::new();
-    link(&r, MAC, 2);
+    link_in(&r, 2);
     let old = origin(&r, "o1", "k1", 1);
     assert_eq!(old["refused"], json!(true), "{old}");
     assert_eq!(r.ask_state("o1"), "refused");
@@ -228,7 +258,7 @@ fn an_origin_open_at_an_old_or_ended_epoch_is_a_refused_row_it_can_read() {
     // The same send again answers the same row.
     assert_eq!(origin(&r, "o9", "k1", 2)["replayed"], json!(true));
     // An epoch that was ended refuses too, and a computer never paired.
-    end(&r, MAC);
+    end_in(&r);
     assert_eq!(origin(&r, "o3", "k3", 2)["refused"], json!(true));
     let mut p = origin_params(&r, "o4", "k4", 1, &[]);
     p["originComputer"] = json!("never-paired");
@@ -242,7 +272,7 @@ fn an_origin_open_at_an_old_or_ended_epoch_is_a_refused_row_it_can_read() {
 #[test]
 fn a_cap_refusal_of_an_origin_open_is_a_row_too() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     let p = origin_params(
         &r,
         "o1",
@@ -270,13 +300,13 @@ fn a_cap_refusal_of_an_origin_open_is_a_row_too() {
 #[test]
 fn end_peer_refuses_queued_and_claimed_and_stops_running_in_one_step() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_in(&r, 1);
     let queued = turn_of(&origin(&r, "q", "kq", 1));
     let claimed = turn_of(&origin(&r, "c", "kc", 1));
     let running = turn_of(&origin(&r, "r", "kr", 1));
     let held = r.claim("c", claimed);
     let live = r.start("r", running);
-    let ended = end(&r, MAC);
+    let ended = end_in(&r);
     assert_eq!(ended["ended"], json!(["c", "q", "r"]), "{ended}");
     assert_eq!(r.ask_state("q"), "refused");
     assert_eq!(r.ask_state("c"), "refused");
@@ -302,7 +332,7 @@ fn end_peer_refuses_queued_and_claimed_and_stops_running_in_one_step() {
     assert_eq!(attach(&r, "c", held)["refused"], json!("gone"));
     assert_eq!(r.turn_state(claimed), "cancelled");
     // Twice is the same.
-    let twice = end(&r, MAC);
+    let twice = end_in(&r);
     assert_eq!(twice["ended"], json!([]));
     assert_eq!(r.ask_state("r"), "stopped");
 }
@@ -310,9 +340,9 @@ fn end_peer_refuses_queued_and_claimed_and_stops_running_in_one_step() {
 #[test]
 fn after_end_peer_nothing_opens_claims_or_attaches() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_in(&r, 1);
     let turn = turn_of(&origin(&r, "a", "ka", 1));
-    end(&r, MAC);
+    end_in(&r);
     // Opening: refused as a row, no turn.
     assert_eq!(origin(&r, "b", "kb", 1)["refused"], json!(true));
     // Claiming: the sweep cancelled the turn; the claim is refused.
@@ -331,9 +361,9 @@ fn after_end_peer_nothing_opens_claims_or_attaches() {
 fn the_claim_fence_alone_refuses_a_turn_of_an_ended_epoch() {
     // No sweep: the epoch is ended behind the ask's back (PeerFence variant v7 without the sweep, here for the claim).
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_in(&r, 1);
     let turn = turn_of(&origin(&r, "a", "ka", 1));
-    exec(&r, "UPDATE ask_peers SET live = 0 WHERE epoch = ?1", 1);
+    drop_fence(&r, "in");
     let refused = try_claim(&r, "a", turn);
     assert!(matches!(refused, Err(Error::Refused(_))), "{refused:?}");
     assert_eq!(r.turn_state(turn), "cancelled");
@@ -342,12 +372,12 @@ fn the_claim_fence_alone_refuses_a_turn_of_an_ended_epoch() {
 #[test]
 fn the_attach_fence_alone_refuses_the_run_and_its_engine_never_starts() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_in(&r, 1);
     let turn = turn_of(&origin(&r, "a", "ka", 1));
     let claim = r.claim("a", turn);
     assert_eq!(r.turn_state(turn), "claimed");
     // The pairing ends between the claim and the child's attach; no sweep ran.
-    exec(&r, "UPDATE ask_peers SET live = 0 WHERE epoch = ?1", 1);
+    drop_fence(&r, "in");
     assert_eq!(attach(&r, "a", claim)["refused"], json!("gone"));
     assert_eq!(r.turn_state(turn), "cancelled");
     let state: String = r.sql(
@@ -361,31 +391,102 @@ fn the_attach_fence_alone_refuses_the_run_and_its_engine_never_starts() {
 }
 
 #[test]
-fn a_new_epoch_replaces_the_old_and_ends_what_came_under_it() {
+fn a_new_epoch_replaces_the_old_and_ends_what_came_under_it_in_that_direction_only() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_in(&r, 1);
+    link_out(&r, 1);
     let turn = turn_of(&origin(&r, "a", "ka", 1));
     peer(&r, "p", MAC);
-    let said = link(&r, MAC, 2);
-    assert_eq!(said["linked"], json!(true), "{said}");
-    assert_eq!(said["ended"], json!(["a", "p"]), "{said}");
+    // A different epoch for `in` ends the live one first, in the same step: its asks go, the other direction's stay.
+    let said = link_in(&r, 2);
+    assert_eq!(said["ended"], json!(["a"]), "{said}");
     assert_eq!(r.ask_state("a"), "refused");
-    assert_eq!(r.ask_state("p"), "cut_off");
     assert_eq!(r.turn_state(turn), "cancelled");
+    assert_eq!(r.ask_state("p"), "open");
     // The old epoch opens nothing; the new one does.
     assert_eq!(origin(&r, "b", "kb", 1)["refused"], json!(true));
     assert!(origin(&r, "c", "kc", 2)["turn"].is_i64());
-    // An older epoch is refused, the same epoch again changes nothing, and an ended epoch is never live again.
-    let older = r.call(
+    // An epoch that was ended is refused, the live one again changes nothing.
+    let again = r.call(
         Principal::Host,
         "ask.peerLink",
-        &json!({"computer": MAC, "epoch": 1}),
+        &json!({"computer": MAC, "dir": "in", "epoch": ep(1)}),
     );
-    assert!(matches!(older, Err(Error::Refused(_))), "{older:?}");
-    assert_eq!(link(&r, MAC, 2)["linked"], json!(true));
-    end(&r, MAC);
-    assert_eq!(link(&r, MAC, 2)["linked"], json!(false));
+    assert!(matches!(again, Err(Error::Refused(_))), "{again:?}");
+    link_in(&r, 2);
+    assert!(origin(&r, "e", "ke", 2)["turn"].is_i64());
+    // `out` goes the same way and cuts off what was sent under the old one.
+    let said = link_out(&r, 2);
+    assert_eq!(said["ended"], json!(["p"]), "{said}");
+    assert_eq!(r.ask_state("p"), "cut_off");
+    end_in(&r);
     assert_eq!(origin(&r, "d", "kd", 2)["refused"], json!(true));
+    let ended = r.call(
+        Principal::Host,
+        "ask.peerLink",
+        &json!({"computer": MAC, "dir": "in", "epoch": ep(2)}),
+    );
+    assert!(matches!(ended, Err(Error::Refused(_))), "{ended:?}");
+}
+
+#[test]
+fn two_computers_paired_both_ways_end_one_direction_and_the_other_goes_on() {
+    let r = Rig::new();
+    link_in(&r, 1);
+    link_out(&r, 5);
+    let turn = turn_of(&origin(&r, "a", "ka", 1));
+    peer(&r, "p", MAC);
+    // `in` ends: the asks that computer sent here are ended; the ask sent there is untouched, and still owed.
+    let ended = end_in(&r);
+    assert_eq!(ended["ended"], json!(["a"]), "{ended}");
+    assert_eq!(r.ask_state("p"), "open");
+    assert_eq!(r.turn_state(turn), "cancelled");
+    assert_eq!(
+        r.host("ask.peerOwed", &json!({}))["send"][0]["id"],
+        json!("p")
+    );
+    // A new ask still opens `out`, and the other way refuses.
+    peer(&r, "p2", MAC);
+    assert_eq!(origin(&r, "b", "kb", 1)["refused"], json!(true));
+    // The other way round: `out` ends, and what came `in` opens and runs.
+    link_in(&r, 3);
+    let live = turn_of(&origin(&r, "c", "kc", 3));
+    end_out(&r);
+    assert_eq!(r.ask_state("p"), "cut_off");
+    assert_eq!(r.ask_state("p2"), "cut_off");
+    let claim = r.start("c", live);
+    assert_eq!(r.turn_state(live), "running");
+    assert!(claim > 0);
+    assert_eq!(r.ask_state("c"), "open");
+    // The `out` pairing is over: nothing to open there.
+    let mut p = r.env(&[]);
+    p["id"] = json!("p3");
+    p["asked"] = json!("echo");
+    p["mode"] = json!("peer");
+    p["peer"] = json!(MAC);
+    p["task"] = json!("t");
+    assert!(matches!(
+        r.call(Principal::Owner, "ask.open", &p),
+        Err(Error::Refused(_))
+    ));
+}
+
+#[test]
+fn a_host_cannot_open_a_peer_ask() {
+    let r = Rig::new();
+    link_out(&r, 1);
+    let mut p = r.env(&[]);
+    p["id"] = json!("p1");
+    p["asked"] = json!("echo");
+    p["mode"] = json!("peer");
+    p["peer"] = json!(MAC);
+    p["task"] = json!("t");
+    let said = r.call(Principal::Host, "ask.open", &p);
+    assert!(matches!(said, Err(Error::NotAllowed(_))), "{said:?}");
+    assert_eq!(
+        count(&r, "SELECT count(*) FROM asks WHERE peer = ?1", MAC),
+        0
+    );
 }
 
 // ---- following ----
@@ -393,7 +494,7 @@ fn a_new_epoch_replaces_the_old_and_ends_what_came_under_it() {
 #[test]
 fn peer_owed_lists_the_send_then_the_follow_and_the_stop() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     peer(&r, "p1", MAC);
     let owed = r.host("ask.peerOwed", &json!({}));
     assert_eq!(owed["send"][0]["id"], json!("p1"), "{owed}");
@@ -415,7 +516,7 @@ fn peer_owed_lists_the_send_then_the_follow_and_the_stop() {
     assert_eq!(r.host("ask.peerOwed", &json!({}))["stop"], json!([]));
     // An unpaired computer is owed nothing.
     peer(&r, "p2", MAC);
-    end(&r, MAC);
+    end_out(&r);
     let owed = r.host("ask.peerOwed", &json!({}));
     assert_eq!(owed, json!({"send": [], "follow": [], "stop": []}));
 }
@@ -423,7 +524,7 @@ fn peer_owed_lists_the_send_then_the_follow_and_the_stop() {
 #[test]
 fn peer_apply_copies_each_row_once_with_one_wake_per_row_and_books_the_cost_once() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     peer(&r, "p1", MAC);
     let rows = json!([
         {"n": 1, "as": "echo", "kind": "progress", "text": "halfway"},
@@ -468,7 +569,7 @@ fn peer_apply_copies_each_row_once_with_one_wake_per_row_and_books_the_cost_once
 #[test]
 fn peer_apply_in_pieces_copies_from_after_the_last_row() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     peer(&r, "p1", MAC);
     let one = json!([{"n": 1, "kind": "progress", "text": "a"}]);
     apply(&r, "p1", 1, &one, Some("open"), None);
@@ -493,7 +594,7 @@ fn peer_apply_in_pieces_copies_from_after_the_last_row() {
     let local = r.call(Principal::Host, "ask.peerApply", &{
         let mut p = r.env(&[]);
         p["id"] = json!("local");
-        p["epoch"] = json!(1);
+        p["epoch"] = json!(ep(1));
         p
     });
     assert!(matches!(local, Err(Error::Refused(_))), "{local:?}");
@@ -502,7 +603,7 @@ fn peer_apply_in_pieces_copies_from_after_the_last_row() {
 #[test]
 fn a_computer_that_stopped_it_on_its_own_tells_the_asker_once() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     peer(&r, "p1", MAC);
     apply(&r, "p1", 1, &json!([]), Some("stopped"), None);
     assert_eq!(r.ask_state("p1"), "stopped");
@@ -515,7 +616,7 @@ fn a_computer_that_stopped_it_on_its_own_tells_the_asker_once() {
 #[test]
 fn nothing_reaches_the_asker_after_a_stop_but_the_cost_and_the_confirmation_do() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     peer(&r, "p1", MAC);
     apply(&r, "p1", 1, &json!([]), Some("open"), None);
     r.owner("ask.end", &json!({"roots": ["p1"]}));
@@ -545,7 +646,7 @@ fn nothing_reaches_the_asker_after_a_stop_but_the_cost_and_the_confirmation_do()
 #[test]
 fn a_stop_of_a_tree_owes_a_stop_to_every_peer_ask_in_it() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     r.open_bg("root");
     r.open(
         "mid",
@@ -580,7 +681,7 @@ fn a_stop_of_a_tree_owes_a_stop_to_every_peer_ask_in_it() {
 #[test]
 fn the_tick_cuts_off_a_peer_ask_past_the_wait_once_and_the_stop_stays_owed() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     peer(&r, "late", MAC);
     peer(&r, "fresh", MAC);
     exec(
@@ -627,11 +728,11 @@ fn the_tick_cuts_off_a_peer_ask_past_the_wait_once_and_the_stop_stays_owed() {
 #[test]
 fn an_unpaired_computers_asks_are_cut_off_at_once_with_one_notice() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     peer(&r, "p1", MAC);
     peer(&r, "p2", MAC);
     // The link ends through the row: both are cut off in the same step, one row and one wake each, nothing owed.
-    let ended = end(&r, MAC);
+    let ended = end_out(&r);
     assert_eq!(ended["ended"], json!(["p1", "p2"]), "{ended}");
     for id in ["p1", "p2"] {
         assert_eq!(r.ask_state(id), "cut_off");
@@ -640,7 +741,7 @@ fn an_unpaired_computers_asks_are_cut_off_at_once_with_one_notice() {
         assert_eq!(owed, 0);
     }
     assert_eq!(wakes(&r), 2);
-    end(&r, MAC);
+    end_out(&r);
     r.tick();
     assert_eq!(r.rows("p1").len(), 1);
     assert_eq!(wakes(&r), 2);
@@ -649,9 +750,9 @@ fn an_unpaired_computers_asks_are_cut_off_at_once_with_one_notice() {
 #[test]
 fn the_tick_cuts_off_an_ask_whose_pairing_ended_behind_its_back() {
     let r = Rig::new();
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     peer(&r, "p1", MAC);
-    exec(&r, "UPDATE ask_peers SET live = 0 WHERE epoch = ?1", 1);
+    drop_fence(&r, "out");
     r.tick();
     assert_eq!(r.ask_state("p1"), "cut_off");
     r.tick();
@@ -673,7 +774,7 @@ fn every_peer_row_checks_its_params_and_stays_off_the_run_socket() {
         let unknown = r.call(
             who,
             method,
-            &json!({"computer": "x", "id": "x", "epoch": 1, "zzz": 1}),
+            &json!({"computer": "x", "dir": "in", "id": "x", "epoch": "e", "zzz": 1}),
         );
         assert!(
             matches!(unknown, Err(Error::BadParams(_))),
@@ -689,9 +790,12 @@ fn every_peer_row_checks_its_params_and_stays_off_the_run_socket() {
     assert!(matches!(unknown, Err(Error::BadParams(_))), "{unknown:?}");
     // No guest reaches them.
     for (method, params) in [
-        ("ask.peerLink", json!({"computer": "x", "epoch": 1})),
-        ("ask.endPeer", json!({"computer": "x"})),
-        ("ask.peerApply", json!({"id": "x", "epoch": 1})),
+        (
+            "ask.peerLink",
+            json!({"computer": "x", "dir": "in", "epoch": "e"}),
+        ),
+        ("ask.endPeer", json!({"computer": "x", "dir": "out"})),
+        ("ask.peerApply", json!({"id": "x", "epoch": "e"})),
         ("ask.peerOwed", json!({})),
     ] {
         let denied = r.call(Principal::RunToken, method, &params);
@@ -701,12 +805,12 @@ fn every_peer_row_checks_its_params_and_stays_off_the_run_socket() {
         );
     }
     // Every param the table names reaches the code.
-    link(&r, MAC, 1);
+    link_out(&r, 1);
     peer(&r, "p1", MAC);
     let said = r.call(Principal::Host, "ask.peerApply", &{
         let mut p = r.env(&[]);
         p["id"] = json!("p1");
-        p["epoch"] = json!(1);
+        p["epoch"] = json!(ep(1));
         p["rows"] = json!([{"n": 1, "as": "echo", "kind": "progress", "text": "t", "at": 5}]);
         p["state"] = json!("open");
         p["cost"] = json!(0.1);
@@ -716,7 +820,7 @@ fn every_peer_row_checks_its_params_and_stays_off_the_run_socket() {
     let bad_state = r.call(Principal::Host, "ask.peerApply", &{
         let mut p = r.env(&[]);
         p["id"] = json!("p1");
-        p["epoch"] = json!(1);
+        p["epoch"] = json!(ep(1));
         p["state"] = json!("sideways");
         p
     });

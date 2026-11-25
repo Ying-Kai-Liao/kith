@@ -109,7 +109,7 @@ pub(super) const ROWS: &[Method] = &[
             ),
             flag(
                 "originEpoch",
-                "int",
+                "string",
                 &["--origin-epoch"],
                 "`bg`, on the callee's computer: the pairing epoch the ask was sent under.",
             ),
@@ -313,18 +313,22 @@ pub(super) const ROWS: &[Method] = &[
     ),
     ask(
         "ask.peerLink",
-        "A pairing with another computer starts (the host writes this before it writes the pairing): `epoch` is the live one for `computer`, and the fence every open, claim and attach of an ask from that computer reads. A newer epoch replaces the one kept, ending it first in the same transaction (as `ask.endPeer`); the same epoch again changes nothing, and an ended epoch is never made live again; an older one is refused. Answers `{computer, epoch, linked, ended, sessions, kill}`.",
+        "A pairing with another computer starts (the host writes this before it writes the pairing): `epoch` is the live one for `computer` in `dir` (`in`: asks that computer sends here, the fence every open, claim and attach of such an ask reads; `out`: asks sent there). A different epoch than the live one ends it first, in the same transaction (as `ask.endPeer`); the live epoch again changes nothing; an epoch that was ended is refused, since it is never made live again. Epochs are the host's pairing ids and have no order. Answers `{computer, dir, epoch, linked, ended, sessions, kill}`.",
         &[
             pos("computer", "string", true, "The other computer."),
-            pos("epoch", "int", true, "The pairing epoch."),
+            pos("dir", "string", true, "`in` (asks that computer sends here) or `out` (asks sent there): the two directions are two pairings."),
+            pos("epoch", "string", true, "The pairing epoch, as the host stores it (a hash: compared, never ordered)."),
         ],
         &["asks", "peer-link"],
     )
     .principals(OWNER_HOST),
     ask(
         "ask.endPeer",
-        "The pairing with a computer ends (the host calls it before it removes the pairing, and again from its level-triggered reconcile). In one transaction: the fence is down, so nothing of that epoch opens, is claimed or attaches; the asks that computer sent here are ended (running ones stopped, with the claims to kill, queued and claimed ones refused, each with a row it can read); the asks sent there are cut off, each with one notice row and wake; and every stop owed to it is dropped. Safe to repeat. Answers `{computer, ended, sessions, kill}`.",
-        &[pos("computer", "string", true, "The other computer.")],
+        "One pairing with a computer ends (the host calls it before it removes the pairing, and again from its level-triggered reconcile). In one transaction the fence of that direction is down, so nothing of that epoch opens, is claimed or attaches, and: for `in`, the asks that computer sent here are ended (running ones stopped, with the claims to kill, queued and claimed ones refused, each with a row it can read); for `out`, the asks sent there are cut off, each with one notice row and wake, and every stop owed to it is dropped. The other direction is left alone. Safe to repeat. Answers `{computer, dir, ended, sessions, kill}`.",
+        &[
+            pos("computer", "string", true, "The other computer."),
+            pos("dir", "string", true, "`in` ends the asks that computer sent here; `out` cuts off the asks sent there."),
+        ],
         &["asks", "end-peer"],
     )
     .principals(OWNER_HOST),
@@ -333,7 +337,7 @@ pub(super) const ROWS: &[Method] = &[
         "Copies what another computer says of an ask sent there, in one transaction: each row once (the same call again adds nothing), one owed wake per row, the ask's final state and its cost (booked once). Nothing is copied once the ask was stopped, cut off or final, and its computer's final row and a cut-off notice never both reach the asker; a final state clears the stop owed. The call is the computer answering: the send counts as made and the away wait starts over. An `epoch` other than the ask's is dropped. Answers `{id, applied, rows, state, fetched}`.",
         &[
             pos("id", "string", true, "The ask on this computer."),
-            pos("epoch", "int", true, "The pairing epoch the ask was sent under."),
+            pos("epoch", "string", true, "The pairing epoch the ask was sent under."),
             flag(
                 "rows",
                 "json",

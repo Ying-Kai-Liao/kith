@@ -43,20 +43,21 @@ fn secs(now: i64) -> f64 {
     now as f64 / 1000.0
 }
 
-/// Whether `epoch` is the live pairing with `computer`, read in the caller's transaction.
-pub(crate) fn live_in(tx: &Connection, computer: &str, epoch: i64) -> Result<bool> {
+/// Whether `epoch` is the live pairing with `computer` in direction `dir` (`in`: asks it sends here; `out`: asks sent there),
+/// read in the caller's transaction. The epoch is the host's pairing id: compared, never ordered.
+pub(crate) fn live_in(tx: &Connection, computer: &str, dir: &str, epoch: &str) -> Result<bool> {
     Ok(tx.query_row(
-        "SELECT EXISTS (SELECT 1 FROM ask_peers WHERE computer = ?1 AND epoch = ?2 AND live = 1)",
-        params![computer, epoch],
+        "SELECT EXISTS (SELECT 1 FROM ask_peers WHERE computer = ?1 AND dir = ?2 AND epoch = ?3 AND live = 1)",
+        params![computer, dir, epoch],
         |r| r.get(0),
     )?)
 }
 
-/// The live pairing epoch with `computer`, if any.
-fn epoch_in(tx: &Connection, computer: &str) -> Result<Option<i64>> {
+/// The live `out` pairing epoch with `computer`, if any.
+fn epoch_in(tx: &Connection, computer: &str) -> Result<Option<String>> {
     Ok(tx
         .query_row(
-            "SELECT epoch FROM ask_peers WHERE computer = ?1 AND live = 1",
+            "SELECT epoch FROM ask_peers WHERE computer = ?1 AND dir = 'out' AND live = 1",
             [computer],
             |r| r.get(0),
         )
@@ -71,7 +72,8 @@ pub(crate) fn cut_origin_in(tx: &Connection, turn: i64) -> Result<Option<String>
             "SELECT a.origin_computer FROM turns t JOIN asks a ON a.turn = t.id
              WHERE t.id = ?1 AND t.source = 'ask' AND a.origin_computer IS NOT NULL
                AND NOT EXISTS (SELECT 1 FROM ask_peers p
-                               WHERE p.computer = a.origin_computer AND p.epoch = a.origin_epoch AND p.live = 1)",
+                               WHERE p.computer = a.origin_computer AND p.dir = 'in'
+                                 AND p.epoch = a.origin_epoch AND p.live = 1)",
             [turn],
             |r| r.get(0),
         )
@@ -109,7 +111,7 @@ pub(super) fn open_peer_check_in(
     place: &d::Place,
     env: &dyn Fn(&str) -> Option<String>,
     l: &LedgerOpen<'_>,
-) -> Result<i64> {
+) -> Result<String> {
     let Some(computer) = l.peer.filter(|c| !c.is_empty()) else {
         return Err(Error::BadParams(
             "kith-core: asks: a peer ask needs the computer asked (peer)".into(),
@@ -203,7 +205,7 @@ pub(super) fn refused_origin_in(
         peer_seen_ms: None,
         origin_computer: Some(og.computer.to_owned()),
         origin_key: Some(og.key.to_owned()),
-        origin_epoch: Some(og.epoch),
+        origin_epoch: Some(og.epoch.to_owned()),
     };
     ask.put(tx)?;
     rows::add_in(
@@ -256,12 +258,12 @@ pub(crate) fn cut_off_in(tx: &Connection, st: &mut State, now: i64) -> Result<Ve
         .filter(|a| a.mode.as_deref() == Some("peer") && is_live(a))
         .collect();
     for a in open {
-        let (Some(computer), Some(epoch)) = (a.peer.clone(), a.peer_epoch) else {
+        let (Some(computer), Some(epoch)) = (a.peer.clone(), a.peer_epoch.clone()) else {
             continue;
         };
         let who = format!("{}@{computer}", a.asked.as_deref().unwrap_or("the agent"));
         let seen = a.peer_seen_ms.or(a.at_ms).unwrap_or(0);
-        if !live_in(tx, &computer, epoch)? {
+        if !live_in(tx, &computer, "out", &epoch)? {
             let text = format!("{who} was cut off (the link ended); it may have finished there");
             let id = a.id.clone();
             cut_off_ask_in(tx, st, a, &text, false, now)?;
@@ -285,13 +287,14 @@ pub(crate) struct EndedPeer {
     pub kill: Vec<Kill>,
 }
 
-/// Ends the pairing with `computer` and sweeps its asks, in the caller's transaction (`st` is the wake queue's state the
-/// caller saves):
+/// Ends the live pairing with `computer` in direction `dir` and sweeps its asks, in the caller's transaction (`st` is the wake
+/// queue's state the caller saves). The two directions are two pairings with two epochs: ending one leaves the other's asks
+/// alone. The row keeps its epoch with `live = 0` and is never made live again.
 /// - the fence goes first (`live = 0`), so nothing opened, claimed or attached after this reads a live epoch;
-/// - the callee's end: its running asks (and what they asked) are stopped, the run's claim to `ending` for the waiter to
-///   kill; its queued and claimed ones are refused with a row (`end_tree_in` ends their turn and unspawned claim, so no attach
-///   can win);
-/// - the caller's end: every open ask of that computer is cut off with one row (the link ended: it may have finished
+/// - `in` (asks that computer sends here): its running asks (and what they asked) are stopped, the run's claim to `ending` for
+///   the waiter to kill; its queued and claimed ones are refused with a row (`end_tree_in` ends their turn and unspawned
+///   claim, so no attach can win);
+/// - `out` (asks sent there): every open ask of that computer is cut off with one row (the link ended: it may have finished
 ///   there) and every stop owed to it is dropped, since there is no link left to carry it.
 ///
 /// Repeating it changes nothing.
@@ -299,14 +302,46 @@ pub(crate) fn end_epoch_in(
     tx: &rusqlite::Transaction<'_>,
     st: &mut State,
     computer: &str,
+    dir: &str,
     now: i64,
 ) -> Result<EndedPeer> {
     tx.execute(
-        "UPDATE ask_peers SET live = 0 WHERE computer = ?1",
-        [computer],
+        "UPDATE ask_peers SET live = 0 WHERE computer = ?1 AND dir = ?2",
+        params![computer, dir],
     )?;
     let mut out = EndedPeer::default();
-    // The callee's end. A turn that has attached (`running`) is a run to stop; any other open ask of the epoch never started.
+    if dir == "in" {
+        end_in_asks(tx, st, computer, now, &mut out)?;
+    } else {
+        let peers: Vec<Ask> = load_all(tx)?
+            .into_iter()
+            .filter(|a| a.peer.as_deref() == Some(computer) && is_live(a))
+            .collect();
+        for a in peers {
+            let who = format!("{}@{computer}", a.asked.as_deref().unwrap_or("the agent"));
+            let text = format!("{who} was cut off (the link ended); it may have finished there");
+            out.ids.push(a.id.clone());
+            cut_off_ask_in(tx, st, a, &text, false, now)?;
+        }
+        tx.execute(
+            "UPDATE asks SET stop_owed = 0 WHERE peer = ?1 AND stop_owed = 1",
+            [computer],
+        )?;
+    }
+    out.ids.sort();
+    out.ids.dedup();
+    Ok(out)
+}
+
+/// The `in` half of [`end_epoch_in`]: the asks that computer sent here.
+fn end_in_asks(
+    tx: &rusqlite::Transaction<'_>,
+    st: &mut State,
+    computer: &str,
+    now: i64,
+    out: &mut EndedPeer,
+) -> Result<()> {
+    // A turn that has attached (`running`) is a run to stop; any other open ask of the epoch never started.
     let all: Vec<(String, bool)> = {
         let mut stmt = tx.prepare(
             "SELECT a.id, COALESCE((SELECT t.state FROM turns t WHERE t.id = a.turn), '') = 'running'
@@ -323,105 +358,81 @@ pub(crate) fn end_epoch_in(
         .filter(|(_, run)| *run)
         .map(|(id, _)| id.as_str())
         .collect();
-    if !ids.is_empty() {
-        let ended = end_tree_in(
-            tx,
-            &EndReq {
-                roots: &ids,
-                sessions: &[],
-                persons: &[],
-            },
-            now,
-        )?;
-        for s in &ended.sessions {
-            wake::withdraw_in(tx, st, secs(now), s, None)?;
-        }
-        out.ids.extend(ended.ids);
-        out.sessions = ended.sessions;
-        out.kill = ended.kill;
-        for id in ids.iter().filter(|id| !started.contains(id.as_str())) {
-            let n = tx.execute(
-                "UPDATE asks SET state = 'refused' WHERE id = ?1 AND state = 'stopped'",
-                [id],
-            )?;
-            if n == 1 {
-                rows::add_in(
-                    tx,
-                    id,
-                    None,
-                    Kind::Lost,
-                    "refused: the link ended before it started",
-                    now,
-                )?;
-            }
-        }
+    if ids.is_empty() {
+        return Ok(());
     }
-    // The caller's end.
-    let peers: Vec<Ask> = load_all(tx)?
-        .into_iter()
-        .filter(|a| a.peer.as_deref() == Some(computer) && is_live(a))
-        .collect();
-    for a in peers {
-        let who = format!("{}@{computer}", a.asked.as_deref().unwrap_or("the agent"));
-        let text = format!("{who} was cut off (the link ended); it may have finished there");
-        out.ids.push(a.id.clone());
-        cut_off_ask_in(tx, st, a, &text, false, now)?;
-    }
-    tx.execute(
-        "UPDATE asks SET stop_owed = 0 WHERE peer = ?1 AND stop_owed = 1",
-        [computer],
+    let ended = end_tree_in(
+        tx,
+        &EndReq {
+            roots: &ids,
+            sessions: &[],
+            persons: &[],
+        },
+        now,
     )?;
-    out.ids.sort();
-    out.ids.dedup();
-    Ok(out)
+    for s in &ended.sessions {
+        wake::withdraw_in(tx, st, secs(now), s, None)?;
+    }
+    out.ids.extend(ended.ids);
+    out.sessions = ended.sessions;
+    out.kill = ended.kill;
+    for id in ids.iter().filter(|id| !started.contains(id.as_str())) {
+        let n = tx.execute(
+            "UPDATE asks SET state = 'refused' WHERE id = ?1 AND state = 'stopped'",
+            [id],
+        )?;
+        if n == 1 {
+            rows::add_in(
+                tx,
+                id,
+                None,
+                Kind::Lost,
+                "refused: the link ended before it started",
+                now,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// `ask.endPeer`: [`end_epoch_in`] in one transaction.
-pub(crate) fn end(core: &mut Core, computer: &str, now: i64) -> Result<EndedPeer> {
+pub(crate) fn end(core: &mut Core, computer: &str, dir: &str, now: i64) -> Result<EndedPeer> {
     wake::write_tx(core, secs(now), |tx, st| {
-        end_epoch_in(tx, st, computer, now)
+        end_epoch_in(tx, st, computer, dir, now)
     })
 }
 
-/// `ask.peerLink` (a pairing starts, the widening write): `epoch` is the live one for `computer`. A newer epoch than the one
-/// kept replaces it, ending that one first in the same transaction; the same epoch again changes nothing (an ended epoch is
-/// never made live again); an older one is refused. Answers whether it linked, and what the old epoch's end ended.
+/// `ask.peerLink` (a pairing starts, the widening write): `epoch` is the live one for `computer` in `dir`. A different epoch
+/// than the live one ends that one first, in the same transaction; the live epoch again changes nothing; an epoch that was
+/// ended is refused (it is never made live again). Epochs are the host's pairing ids: compared, never ordered. Answers what
+/// the old epoch's end ended.
 pub(crate) fn link(
     core: &mut Core,
     computer: &str,
-    epoch: i64,
+    dir: &str,
+    epoch: &str,
     now: i64,
-) -> Result<(bool, EndedPeer)> {
-    if epoch < 0 {
-        return Err(Error::BadParams(
-            "kith-core: asks: epoch is not negative".into(),
-        ));
-    }
+) -> Result<EndedPeer> {
     wake::write_tx(core, secs(now), |tx, st| {
-        let old: Option<(i64, bool)> = tx
+        let kept: Option<bool> = tx
             .query_row(
-                "SELECT epoch, live FROM ask_peers WHERE computer = ?1",
-                [computer],
-                |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0)),
+                "SELECT live FROM ask_peers WHERE computer = ?1 AND dir = ?2 AND epoch = ?3",
+                params![computer, dir, epoch],
+                |r| Ok(r.get::<_, i64>(0)? != 0),
             )
             .optional()?;
-        match old {
-            Some((e, live)) if e == epoch => Ok((live, EndedPeer::default())),
-            Some((e, _)) if e > epoch => Err(Error::Refused(format!(
-                "kith-core: asks: {computer} is paired at epoch {e} already; epoch {epoch} is older"
+        match kept {
+            Some(true) => Ok(EndedPeer::default()),
+            Some(false) => Err(Error::Refused(format!(
+                "kith-core: asks: that pairing with {computer} ({dir}) has ended; a new pairing has a new epoch"
             ))),
-            _ => {
-                let ended = if matches!(old, Some((_, true))) {
-                    end_epoch_in(tx, st, computer, now)?
-                } else {
-                    EndedPeer::default()
-                };
+            None => {
+                let ended = end_epoch_in(tx, st, computer, dir, now)?;
                 tx.execute(
-                    "INSERT INTO ask_peers (computer, epoch, live) VALUES (?1, ?2, 1)
-                     ON CONFLICT (computer) DO UPDATE SET epoch = excluded.epoch, live = 1",
-                    params![computer, epoch],
+                    "INSERT INTO ask_peers (computer, dir, epoch, live) VALUES (?1, ?2, ?3, 1)",
+                    params![computer, dir, epoch],
                 )?;
-                Ok((true, ended))
+                Ok(ended)
             }
         }
     })
@@ -439,7 +450,7 @@ pub(crate) struct InRow {
 /// What `ask.peerApply` was told.
 pub(crate) struct Apply<'a> {
     pub id: &'a str,
-    pub epoch: i64,
+    pub epoch: &'a str,
     pub rows: Vec<InRow>,
     /// The ask's state on its computer; a final one ends the ask here.
     pub state: Option<&'a str>,
@@ -472,16 +483,17 @@ pub(crate) fn apply(core: &mut Core, machine: &Path, f: &Apply<'_>, now: i64) ->
                 f.id
             )));
         }
-        if a.peer_epoch != Some(f.epoch) {
+        if a.peer_epoch.as_deref() != Some(f.epoch) {
             return Ok(json!({"id": f.id, "applied": false, "stale": true}));
         }
         let live = is_live(&a);
         // The computer's cost joins the chain once, whatever became of the ask here.
+        // A live ask takes its final state here, so a cost that tips the chain's cap makes it `capped` and stays so.
         if let (Some(_), Some(cost)) = (end, f.cost)
             && cost > 0.0
             && rows::count_cost_in(tx, f.id, PEER_COST)?
         {
-            settle_in(tx, machine, f.id, cost, None, now)?;
+            settle_in(tx, machine, f.id, cost, end.filter(|_| live), now)?;
         }
         let Some(mut a) = get(tx, f.id)? else {
             return Err(Error::Refused(format!("kith-core: asks: no ask {}", f.id)));
@@ -512,7 +524,9 @@ pub(crate) fn apply(core: &mut Core, machine: &Path, f: &Apply<'_>, now: i64) ->
                 }
             }
             if let Some(s) = end {
-                s.clone_into(&mut a.state);
+                if a.state != "capped" {
+                    s.clone_into(&mut a.state);
+                }
                 a.done = true;
                 a.answered_ms = Some(now);
                 a.parked_card = None;
@@ -553,19 +567,19 @@ pub(crate) fn apply(core: &mut Core, machine: &Path, f: &Apply<'_>, now: i64) ->
 pub(crate) fn owed(core: &Core) -> Result<Value> {
     let asks = load_all(core.conn())?;
     let costs = d::chain_costs(&regs(&asks));
-    let linked: BTreeMap<String, i64> = {
+    let linked: BTreeMap<String, String> = {
         let mut st = core
             .conn()
-            .prepare("SELECT computer, epoch FROM ask_peers WHERE live = 1")?;
-        st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+            .prepare("SELECT computer, epoch FROM ask_peers WHERE dir = 'out' AND live = 1")?;
+        st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<std::result::Result<_, _>>()?
     };
     let (mut send, mut follow, mut stop) = (Vec::new(), Vec::new(), Vec::new());
     for a in asks.iter().filter(|a| a.mode.as_deref() == Some("peer")) {
-        let (Some(computer), Some(epoch)) = (&a.peer, a.peer_epoch) else {
+        let (Some(computer), Some(epoch)) = (&a.peer, &a.peer_epoch) else {
             continue;
         };
-        if linked.get(computer) != Some(&epoch) {
+        if linked.get(computer) != Some(epoch) {
             continue;
         }
         if is_live(a) && !a.sent {

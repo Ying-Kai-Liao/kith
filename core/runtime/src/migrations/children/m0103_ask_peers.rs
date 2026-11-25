@@ -11,9 +11,11 @@
 //! link ended, or the computer was away past the wait). SQLite cannot widen a CHECK, so the table is rebuilt, as 102 did; a
 //! row from before keeps its values and gets the defaults (no peer, nothing owed).
 //!
-//! `ask_peers` is the fence, one row per computer: the pairing epoch that may open, claim and attach asks here, and whether it
-//! is `live`. It is written first when a pairing starts and ends in the same transaction as the asks of its epoch
-//! (`ask.endPeer`); no SQL foreign key (lane rule).
+//! `ask_peers` is the fence, one row per pairing epoch of a computer and direction (`in`: asks that computer sends here,
+//! mirroring the host's `peers_in`; `out`: asks sent there, mirroring `peers_out`; two computers paired both ways hold two
+//! pairings). The epoch is the host's own pairing id (TEXT, a hash with no order). A row is `live` until its pairing ends and
+//! is never made live again; at most one epoch per (computer, direction) is live. It is written first when a pairing starts and
+//! ends in the same transaction as the asks of its epoch (`ask.endPeer`); no SQL foreign key (lane rule).
 
 use super::Migration;
 
@@ -61,14 +63,14 @@ pub(super) const MIGRATION: Migration = Migration {
             cli_start TEXT,
             session TEXT,
             peer TEXT,
-            peer_epoch INTEGER,
+            peer_epoch TEXT,
             sent INTEGER NOT NULL DEFAULT 0 CHECK (sent IN (0, 1)),
             fetched INTEGER NOT NULL DEFAULT 0,
             stop_owed INTEGER NOT NULL DEFAULT 0 CHECK (stop_owed IN (0, 1)),
             peer_seen_ms INTEGER,
             origin_computer TEXT,
             origin_key TEXT,
-            origin_epoch INTEGER
+            origin_epoch TEXT
         ) WITHOUT ROWID;
         INSERT INTO asks_peers (id, chain, parent, reply_session, hop, cross_hops, crossed, asked, caller_agent,
             caller_person, caller_via, conversation, cost, cost_base, cap_usd, state, at_ms, answered_ms, capped_ms,
@@ -88,9 +90,12 @@ pub(super) const MIGRATION: Migration = Migration {
         CREATE INDEX asks_peer ON asks (peer) WHERE peer IS NOT NULL;
 
         CREATE TABLE ask_peers (
-            computer TEXT PRIMARY KEY,
-            epoch INTEGER NOT NULL,
-            live INTEGER NOT NULL CHECK (live IN (0, 1))
+            computer TEXT NOT NULL,
+            dir TEXT NOT NULL CHECK (dir IN ('in', 'out')),
+            epoch TEXT NOT NULL,
+            live INTEGER NOT NULL CHECK (live IN (0, 1)),
+            PRIMARY KEY (computer, dir, epoch)
         ) WITHOUT ROWID;
+        CREATE UNIQUE INDEX ask_peers_live ON ask_peers (computer, dir) WHERE live = 1;
     ",
 };

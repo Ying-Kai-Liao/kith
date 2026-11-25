@@ -110,7 +110,7 @@ pub(crate) struct Ask {
     /// epoch the ask was opened under; whether the computer answered the send; the last of its rows copied here; a stop it
     /// has not confirmed; and when it last answered (the away wait runs from it).
     pub peer: Option<String>,
-    pub peer_epoch: Option<i64>,
+    pub peer_epoch: Option<String>,
     pub sent: bool,
     pub fetched: i64,
     pub stop_owed: bool,
@@ -118,7 +118,7 @@ pub(crate) struct Ask {
     /// The callee's end (an ordinary `bg` ask): who asked it, under which of their ask ids and pairing epoch.
     pub origin_computer: Option<String>,
     pub origin_key: Option<String>,
-    pub origin_epoch: Option<i64>,
+    pub origin_epoch: Option<String>,
 }
 
 // TODO(A4): `lost` (migration 102) is not here: the import reads files that never held it; add it with the cutover.
@@ -492,7 +492,7 @@ pub(crate) struct LedgerOpen<'a> {
 pub(crate) struct Origin<'a> {
     pub computer: &'a str,
     pub key: &'a str,
-    pub epoch: i64,
+    pub epoch: &'a str,
 }
 
 /// Opens ask `o.id`: the cap check and the insert as one transaction (`open_record` under the box lock). `env` is the
@@ -558,7 +558,7 @@ fn open_checked_in(
     }
     // The fence on opening (PeerFence `FenceOpen`): the pairing it came under is the live one, read in this transaction.
     if let Some(og) = origin
-        && !peer::live_in(tx, og.computer, og.epoch)?
+        && !peer::live_in(tx, og.computer, "in", og.epoch)?
     {
         return Err(Error::Refused(format!(
             "kith-core: asks: {} is not paired with this computer at epoch {}; the ask is refused",
@@ -720,7 +720,7 @@ fn open_checked_in(
         peer_seen_ms: peering.then_some(now),
         origin_computer: origin.map(|og| og.computer.to_owned()),
         origin_key: origin.map(|og| og.key.to_owned()),
-        origin_epoch: origin.map(|og| og.epoch),
+        origin_epoch: origin.map(|og| og.epoch.to_owned()),
     };
     let ask = match o.ledger.as_ref().and_then(|l| l.cont).filter(|_| peering) {
         Some(c) => Ask {

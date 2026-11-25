@@ -132,7 +132,7 @@ pub(crate) fn attach(
                            AND (?5 IS NOT NULL OR t.source = 'schedule')
                            AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.turn = t.id AND a.origin_computer IS NOT NULL
                                            AND NOT EXISTS (SELECT 1 FROM ask_peers p WHERE p.computer = a.origin_computer
-                                                           AND p.epoch = a.origin_epoch AND p.live = 1)))",
+                                                           AND p.dir = 'in' AND p.epoch = a.origin_epoch AND p.live = 1)))",
             super::detached::sources_sql()
         ),
         params![claim_id, now, pid, started, conversation],

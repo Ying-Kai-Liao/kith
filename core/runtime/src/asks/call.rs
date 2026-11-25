@@ -59,11 +59,15 @@ fn need<'a>(params: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| bad(&format!("{key} is required")))
 }
 
-fn need_epoch(params: &Value) -> Result<i64> {
-    params
-        .get("epoch")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| bad("epoch is required"))
+/// The direction of a pairing: `in` (asks that computer sends here) or `out` (asks sent there).
+fn need_dir(params: &Value) -> Result<&str> {
+    need(params, "dir").and_then(|d| {
+        if matches!(d, "in" | "out") {
+            Ok(d)
+        } else {
+            Err(bad("dir is in or out"))
+        }
+    })
 }
 
 fn kills(kill: &[crate::conversations::claims::Kill]) -> Vec<Value> {
@@ -105,10 +109,10 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
             let origin = match (
                 word(params, "originComputer"),
                 word(params, "originKey"),
-                params.get("originEpoch").and_then(Value::as_i64),
+                word(params, "originEpoch"),
             ) {
                 (Some(computer), Some(key), Some(epoch))
-                    if !computer.is_empty() && !key.is_empty() =>
+                    if !computer.is_empty() && !key.is_empty() && !epoch.is_empty() =>
                 {
                     Some(Origin {
                         computer,
@@ -243,22 +247,29 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
             Ok(json!({ "ended": ended.ids, "sessions": ended.sessions, "kill": kill }))
         }
         "ask.peerLink" => {
-            let (linked, ended) =
-                peer::link(core, need(params, "computer")?, need_epoch(params)?, now)?;
+            let ended = peer::link(
+                core,
+                need(params, "computer")?,
+                need_dir(params)?,
+                need(params, "epoch")?,
+                now,
+            )?;
             Ok(json!({
                 "computer": need(params, "computer")?,
-                "epoch": need_epoch(params)?,
-                "linked": linked,
+                "dir": need_dir(params)?,
+                "epoch": need(params, "epoch")?,
+                "linked": true,
                 "ended": ended.ids,
                 "sessions": ended.sessions,
                 "kill": kills(&ended.kill),
             }))
         }
         "ask.endPeer" => {
-            let computer = need(params, "computer")?;
-            let ended = peer::end(core, computer, now)?;
+            let (computer, dir) = (need(params, "computer")?, need_dir(params)?);
+            let ended = peer::end(core, computer, dir, now)?;
             Ok(json!({
                 "computer": computer,
+                "dir": dir,
                 "ended": ended.ids,
                 "sessions": ended.sessions,
                 "kill": kills(&ended.kill),
@@ -294,7 +305,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                 &folders.machine,
                 &Apply {
                     id: need(params, "id")?,
-                    epoch: need_epoch(params)?,
+                    epoch: need(params, "epoch")?,
                     rows,
                     state: word(params, "state"),
                     cost: params.get("cost").and_then(Value::as_f64),
