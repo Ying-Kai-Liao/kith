@@ -245,19 +245,11 @@ fn run_engine(cmd: &mut Command) -> std::io::Result<std::process::ExitStatus> {
 }
 
 /// Runs the task over ACP (`kith kernel engine-run`); its exit code is final, 78 (no ACP one-shot for this engine, nothing
-/// started) included: there is no adapter script behind it any more. A program without the module cannot run the engine at all.
+/// started) included: there is no adapter script behind it any more.
 pub fn other(a: Adapter) -> i32 {
-    let me = if crate::MODULES.contains(&"engine-run") {
-        std::env::current_exe().ok()
-    } else {
-        None
-    };
-    let Some(me) = me else {
-        eprintln!(
-            "kith: {} runs through the kith program (kernel engine-run), and this Mac has none that has it (install or update kith)",
-            a.harness
-        );
-        return 1;
+    let me = match std::env::current_exe() {
+        Ok(me) => me,
+        Err(e) => return failed("kith", &e),
     };
     let mut args = vec!["kernel".to_owned(), "engine-run".to_owned(), a.harness];
     args.extend(a.flags);
