@@ -37,21 +37,9 @@
 //! process's environment (`ps eww` shows a Python or Node child's), so a token alone could be lifted from a
 //! neighbouring run. The peer pid of the connection must descend from the pid the run's process was started as.
 
-#[cfg(unix)]
-use kith_kernel::permit;
-/// kith-kernel's `permit` is Unix-only until windows-owner W5b. Without it a yes to a blocked call cannot be remembered
-/// for the retry (no once-key), which is the answer `host_once_key` already gives for a call it cannot key.
-#[cfg(not(unix))]
-mod permit {
-    pub const ONCE_KEEP_S: f64 = 24.0 * 3600.0;
-    pub const SHORT_ONCE_S: f64 = 600.0;
-    pub const NO_VERDICT: [&str; 2] = ["Auto mode could not evaluate", "Classifier unavailable"];
-    pub fn host_once_key(_tool: &str, _input: &serde_json::Value) -> Option<String> {
-        None
-    }
-}
 use crate::LockExt as _;
 use anyhow::{Context, Result};
+use kith_kernel::permit;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
@@ -78,6 +66,7 @@ const MAX_REQUEST: usize = 64 * 1024;
 const MAX_ARG_LEN: usize = 4096;
 const READ_BUDGET: Duration = Duration::from_secs(5);
 /// How far up the process tree a peer is followed before it counts as not descending.
+#[cfg(unix)]
 const MAX_HOPS: usize = 64;
 
 /// What a token may ask for.
@@ -566,8 +555,21 @@ pub async fn grant_for_env_async(
 /// The kernel's `KITH_MACHINE` is the source of truth, because bin/kith allows exactly this path in a guest's sandbox:
 /// ~/.kith on this Mac's own layout, ~/.config/kith under the old link layout. Read in process by the kernel's rules
 /// (`kith-kernel` paths, what `kith kernel paths` prints).
+#[cfg(unix)]
 pub fn socket_path() -> PathBuf {
     crate::kernel::machine_dir(&kith_kernel::paths::known_home().unwrap_or_default()).join("run").join("host.sock")
+}
+
+/// On Windows the run socket is a named pipe, `\\.\pipe\kith-host-<hash>`: pipe names are one namespace for the machine, so the
+/// run folder it would have been in is hashed into it, as the core does for its own pipes (`core/runtime/src/owner.rs`).
+#[cfg(not(unix))]
+pub fn socket_path() -> PathBuf {
+    let dir = crate::kernel::machine_dir(&kith_kernel::paths::known_home().unwrap_or_default()).join("run");
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for b in dir.to_string_lossy().to_lowercase().bytes() {
+        hash = (hash ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+    }
+    PathBuf::from(format!(r"\\.\pipe\kith-host-{hash:016x}"))
 }
 
 // ---- requests
@@ -769,7 +771,8 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
     // tokens) has it. The core being down is "not authorized", never a guess.
     let token = serde_json::from_slice::<Value>(line).ok().and_then(|v| v["token"].as_str().map(str::to_owned));
     let guest = match &token {
-        Some(t) if line.len() <= MAX_REQUEST && table.resolve(t, peer).is_none() => {
+        // Guests are refused on a Windows host (windows-owner WI6): no token of the core's is asked about there.
+        Some(t) if line.len() <= MAX_REQUEST && !cfg!(windows) && table.resolve(t, peer).is_none() => {
             guest_identity(t, peer, true, crate::core_front::resolve_run).await
         }
         _ => None,
@@ -944,17 +947,88 @@ fn bind(path: &Path) -> Result<tokio::net::UnixListener> {
     Ok(listener)
 }
 
-/// host.sock is a Unix socket, and guests are refused on a Windows host (windows-owner WI6), so there is no run socket
-/// to bind: the host says so by name and runs without tokens, which is what [`grant_for`] already does with no socket.
+/// Makes the run pipe and answers requests on it in the background: the owner's ask tokens (cards), never a guest's (WI6).
+///
+/// The pipe is owner-only (access for this account and SYSTEM, set as the pipe is made, `kith_winsys::pipe`), the first
+/// instance of the name is made with `FILE_FLAG_FIRST_PIPE_INSTANCE` so nothing else can already hold it, and remote clients
+/// are refused. A name that is taken, or any other failure, leaves the host running and runs without tokens (see
+/// [`grant_for`]). The access list alone keeps other accounts out; the token and the peer's process ancestry are checked
+/// after that, as on the Unix socket.
 #[cfg(not(unix))]
 pub fn start() {
-    tracing::warn!("run socket not started: not on Windows (guests are refused there; windows-owner WI6)");
+    let path = socket_path();
+    let listener = match kith_winsys::pipe::listen(&path.to_string_lossy()) {
+        Ok(l) => Arc::new(l),
+        Err(error) => {
+            tracing::warn!(%error, "run pipe not started: runs get no ask token and no cards");
+            return;
+        }
+    };
+    let _ = SOCKET.set(path.clone());
+    tracing::info!(pipe = %path.display(), "run pipe listening");
+    let (table, rt) = (table().clone(), tokio::runtime::Handle::current());
+    let live = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    std::thread::spawn(move || {
+        loop {
+            match listener.accept() {
+                Ok(stream) => {
+                    use std::sync::atomic::Ordering::SeqCst;
+                    if live.fetch_add(1, SeqCst) >= MAX_PIPE_CONNECTIONS {
+                        live.fetch_sub(1, SeqCst);
+                        continue;
+                    }
+                    let (table, rt, live) = (table.clone(), rt.clone(), live.clone());
+                    std::thread::spawn(move || {
+                        serve_pipe(&table, &rt, stream);
+                        live.fetch_sub(1, SeqCst);
+                    });
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "run pipe accept failed");
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+            }
+        }
+    });
+}
+
+/// Connections served at once on the pipe; one past it is dropped unread.
+#[cfg(not(unix))]
+const MAX_PIPE_CONNECTIONS: usize = 64;
+
+/// One request line and its answer, as `serve_one` does on the Unix socket. A client that does not send a line in the
+/// read budget, or sends too long a one, is refused as malformed.
+#[cfg(not(unix))]
+fn serve_pipe(table: &TokenTable, rt: &tokio::runtime::Handle, mut stream: kith_winsys::pipe::Stream) {
+    use std::io::{BufRead as _, Read as _, Write as _};
+    let peer = PeerInfo { pid: stream.peer_pid() };
+    stream.set_read_timeout(Some(READ_BUDGET));
+    stream.set_write_timeout(Some(READ_BUDGET));
+    let mut line = Vec::new();
+    // One byte past the cap tells an oversized line from one that is exactly at it.
+    let read = std::io::BufReader::new((&mut stream).take(MAX_REQUEST as u64 + 1)).read_until(b'\n', &mut line);
+    let response = match read {
+        Ok(n) if n > 0 => {
+            if line.last() == Some(&b'\n') {
+                line.pop();
+            }
+            rt.block_on(handle_request(table, &line, peer))
+        }
+        _ => Response::refused("malformed request"),
+    };
+    let _ = stream.write_all(response.to_line().as_bytes());
 }
 
 // ---- process ancestry
 
 /// Whether `pid` is `ancestor` or has it among its parents. Asks `ps`, which both macOS and Linux have; any failure
 /// (a process gone, `ps` missing) is "no".
+#[cfg(not(unix))]
+fn descends(pid: u32, ancestor: u32) -> bool {
+    kith_winsys::tree::descends(pid, ancestor)
+}
+
+#[cfg(unix)]
 fn descends(pid: u32, ancestor: u32) -> bool {
     let mut cur = pid;
     for _ in 0..MAX_HOPS {
