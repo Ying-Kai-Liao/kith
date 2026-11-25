@@ -46,6 +46,10 @@ FILES=(
   core/runtime/src/import/authority.rs    # M2-18c: record_suspends (a revoke the file has and the core missed gets the open_removals row), record_removals
   core/runtime/src/authority/mod.rs       # the readers: snapshot (revoked), may/resolve/cut_off over secrets
   core/kernel/src/secrets/authority.rs    # P1-15 M1: the Rust launch's reader on the tombstone: may/resolve are people.may/people.resolve asked in process, mcp-config/exec read people.secretsView; no answer is exit 3, never the replaced file (RouterDoor, RouterStale)
+  core/kernel/src/access.rs               # W22a: the access rules the core and the Rust kith-auth both call (one copy, WI14): canonical, owner, is_owner, parent_of, cut_off (MayP/MayB refuse a revoked person and their bots), held (bridge_held), take_once (the once used up in the locked step); secrets.rs re-exports them
+  core/kernel/src/access/rules.rs         # W22a: Rules::may, resolve (with the bot cut to its owner's), who, bridge_held over one auth.json snapshot (revoked is checked before any row)
+  core/kernel/src/access/jobs.rs          # W22a: an agent's jobs and doors read from capabilities.yaml (what a tick, a helper's always and once can grant)
+  core/kernel/src/access/packages.rs      # W22a: the package facts the rules ask for (where an agent's package is, its jobs and capabilities)
   core/kernel/src/launch/plan.rs          # P1-12 R0: who the run is for, with the sync hold (a person is resolved only while this Mac is in sync with the cloud), in Rust now
   core/kernel/src/launch/exec.rs          # P1-12 R3a: a one-shot run in this process: the revoke epoch is read BEFORE the plan resolves the person (I1), `proc` before the engine (I5), KITH_REVOKE_SEEN with every claim
   core/kernel/src/launch/start.rs         # R3a: the claim and the guest's once grants after it, then the engine (the pid the revoke sweep finds)
