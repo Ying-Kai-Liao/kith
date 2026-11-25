@@ -15,6 +15,9 @@ pub mod assemble;
 pub mod exec;
 pub mod facets;
 pub mod guard;
+// Unix only: it takes the session's claim through `threads` (W12).
+#[cfg(unix)]
+pub mod held;
 pub mod json;
 pub mod judge;
 pub mod machine;
@@ -36,6 +39,9 @@ pub mod winenv;
 // Windows: a run's launcher starts inside its named job object, in one call (the Unix `start` has `exec`).
 #[cfg(windows)]
 pub mod winstart;
+// Unix only, with `exec` and `start` it stands on: a terminal run holds the session's claim (W12).
+#[cfg(unix)]
+pub mod terminal;
 
 // The fixtures below are Unix trees (`/usr/local/bin/kith`, `/kt/...`, modes, symlinks); the Windows ones are `win_tests`.
 #[cfg(all(test, unix))]
