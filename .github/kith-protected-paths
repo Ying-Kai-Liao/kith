@@ -151,3 +151,4 @@ core/kernel/src/threads/run.rs
 kernel/lib/kith_door_core.py
 kernel/tests/kith-door-core-check
 kernel/tests/kith-project-id-guest-check
+core/kernel/src/secrets/authority.rs
