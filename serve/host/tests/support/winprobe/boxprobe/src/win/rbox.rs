@@ -406,51 +406,27 @@ pub unsafe fn cmd_g3n_box(a: &[String]) -> Res<()> {
             lg(&dir, &format!("{n} ShellExecuteEx {verb} still blocked after 4 s (left running)"));
         }
     }
-    let o = std::process::Command::new("cscript.exe").args(["//nologo", &js, &format!("{dir}\\g3n.log")]).output();
-    lg(&dir, &format!("55-57,60 cscript g3n.js: {:?}", o.map(|o| String::from_utf8_lossy(&o.stdout).to_string())));
-    let o = std::process::Command::new("schtasks.exe")
-        .args(["/create", "/tn", "kithprobe58", "/tr", "ping.exe -n 58 127.0.0.1", "/sc", "once", "/st", "23:59", "/f"])
-        .output();
-    lg(
-        &dir,
-        &format!(
-            "58 schtasks create: {:?}",
-            o.map(|o| format!("rc={} {}", o.status, String::from_utf8_lossy(&o.stdout)))
-        ),
+    // `status`, never `output`: a box cannot open NUL or make the named pipe Rust's piped stdio uses; the tools' own output
+    // goes to this process's stdout (the run's out file)
+    let run = |tag: &str, exe: &str, args: &[&str]| {
+        let r = std::process::Command::new(exe).args(args).stdin(std::process::Stdio::inherit()).status();
+        lg(&dir, &format!("{tag} {exe} {args:?}: {r:?}"));
+    };
+    let log = format!("{dir}\\g3n.log");
+    run("55-57,60", "cscript.exe", &["//nologo", &js, &log]);
+    run(
+        "58 create",
+        "schtasks.exe",
+        &["/create", "/tn", "kithprobe58", "/tr", "ping.exe -n 58 127.0.0.1", "/sc", "once", "/st", "23:59", "/f"],
     );
-    let o = std::process::Command::new("schtasks.exe").args(["/run", "/tn", "kithprobe58"]).output();
-    lg(
-        &dir,
-        &format!("58 schtasks run: {:?}", o.map(|o| format!("rc={} {}", o.status, String::from_utf8_lossy(&o.stdout)))),
-    );
-    let o = std::process::Command::new("sc.exe")
-        .args(["create", "kithprobesvc59", "binPath=", "cmd.exe /c ping -n 59 127.0.0.1"])
-        .output();
-    lg(
-        &dir,
-        &format!("59 sc create: {:?}", o.map(|o| format!("rc={} {}", o.status, String::from_utf8_lossy(&o.stdout)))),
-    );
-    let o = std::process::Command::new("sc.exe").args(["start", "kithprobesvc59"]).output();
-    lg(
-        &dir,
-        &format!("59 sc start: {:?}", o.map(|o| format!("rc={} {}", o.status, String::from_utf8_lossy(&o.stdout)))),
-    );
-    for args in [
-        vec!["/create", "kithprobe61"],
-        vec!["/addfile", "kithprobe61", "file:///C:/probe/bin/g3n.js", &format!("{dir}\\bits.js")],
-        vec!["/setnotifycmdline", "kithprobe61", "ping.exe", "-n 61 127.0.0.1"],
-        vec!["/resume", "kithprobe61"],
-    ] {
-        let o = std::process::Command::new("bitsadmin.exe").args(&args).output();
-        lg(
-            &dir,
-            &format!(
-                "61 bitsadmin {}: {:?}",
-                args[0],
-                o.map(|o| format!("rc={} {}", o.status, String::from_utf8_lossy(&o.stdout).trim()))
-            ),
-        );
-    }
+    run("58 run", "schtasks.exe", &["/run", "/tn", "kithprobe58"]);
+    run("59 create", "sc.exe", &["create", "kithprobesvc59", "binPath=", "cmd.exe /c ping -n 59 127.0.0.1"]);
+    run("59 start", "sc.exe", &["start", "kithprobesvc59"]);
+    let bits = format!("{dir}\\bits.js");
+    run("61", "bitsadmin.exe", &["/create", "kithprobe61"]);
+    run("61", "bitsadmin.exe", &["/addfile", "kithprobe61", "file:///C:/probe/bin/g3n.js", &bits]);
+    run("61", "bitsadmin.exe", &["/setnotifycmdline", "kithprobe61", "ping.exe", "-n 61 127.0.0.1"]);
+    run("61", "bitsadmin.exe", &["/resume", "kithprobe61"]);
     std::thread::sleep(Duration::from_secs(4));
     lg(&dir, "box native done");
     std::fs::write(format!("{dir}\\g3n-done.txt"), "done").ok();
@@ -716,4 +692,93 @@ pub unsafe fn shim_box(real: &str, args: &[String]) -> Res<i32> {
     GetExitCodeProcess(pi.hProcess, &mut code);
     TerminateJobObject(job, 1);
     Ok(code as i32)
+}
+
+// ---- variant U: the guest runs as a second local account (`kithbox`), started by the guest-owner user ----------------------
+
+/// `ubox --user kithbox --pwfile F --name N [--job-name J] [--timeout S] [--linger S] --out F [--cwd D] [--env K=V]...
+///  [--kill-measure] -- cmd args`: CreateProcessWithLogonW as the other account, suspended; the host puts it in a job, then
+/// resumes it. The child's output goes to `--out` through a `cmd /c ... > out 2>&1` wrapper (the other account must be able to
+/// write that file).
+pub unsafe fn cmd_ubox(a: &[String]) -> Res<()> {
+    let user = opt(a, "--user").ok_or("--user")?;
+    let pw = std::fs::read_to_string(opt(a, "--pwfile").ok_or("--pwfile")?).map_err(|e| e.to_string())?;
+    let pw = pw.trim();
+    let name = opt(a, "--name").ok_or("--name")?;
+    let out_path = opt(a, "--out").ok_or("--out")?;
+    let job = make_job(opt(a, "--job-name").as_deref())?;
+    let inner = cmdline(&tail(a));
+    let line = format!("cmd.exe /c \"{inner} > \"{out_path}\" 2>&1\"");
+    let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
+    let mut env: Vec<(String, String)> = vec![
+        ("SystemRoot".into(), sysroot.clone()),
+        ("windir".into(), sysroot.clone()),
+        ("ComSpec".into(), format!("{sysroot}\\System32\\cmd.exe")),
+        ("PATH".into(), format!("{sysroot}\\System32;{sysroot}")),
+    ];
+    for e in opts(a, "--env") {
+        if let Some((k, v)) = e.split_once('=') {
+            env.retain(|(ek, _)| !ek.eq_ignore_ascii_case(k));
+            env.push((k.to_string(), v.to_string()));
+        }
+    }
+    env.sort_by_key(|(k, _)| k.to_ascii_uppercase());
+    let mut block: Vec<u16> = Vec::new();
+    for (k, v) in &env {
+        block.extend(format!("{k}={v}").encode_utf16());
+        block.push(0);
+    }
+    block.push(0);
+    let mut si: windows_sys::Win32::System::Threading::STARTUPINFOW = std::mem::zeroed();
+    si.cb = std::mem::size_of_val(&si) as u32;
+    let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+    let mut cl = wide(&line);
+    let cwd = opt(a, "--cwd").map(|c| wide(&c));
+    let t0 = Instant::now();
+    let ok = windows_sys::Win32::System::Threading::CreateProcessWithLogonW(
+        wide(&user).as_ptr(),
+        wide(".").as_ptr(),
+        wide(pw).as_ptr(),
+        1, // LOGON_WITH_PROFILE
+        null(),
+        cl.as_mut_ptr(),
+        CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | 4, // | CREATE_SUSPENDED
+        block.as_ptr().cast(),
+        cwd.as_ref().map_or(null(), |c| c.as_ptr()),
+        &si,
+        &mut pi,
+    );
+    if ok == 0 {
+        return Err(format!("CreateProcessWithLogonW err {}", last()));
+    }
+    r("ubox", format!("{name} created suspended pid={} as {user}", pi.dwProcessId));
+    let assigned = windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(job, pi.hProcess);
+    r(
+        "ubox",
+        format!("{name} AssignProcessToJobObject ok={} err={}", assigned != 0, if assigned == 0 { last() } else { 0 }),
+    );
+    let mut tok: HANDLE = null_mut();
+    let to = OpenProcessToken(pi.hProcess, 8, &mut tok);
+    r("ubox", format!("{name} host opens the child's token: ok={} err={}", to != 0, if to == 0 { last() } else { 0 }));
+    let probe = OpenProcess(0x10_0000, 0, pi.dwProcessId);
+    r("ubox", format!("{name} host re-opens the child by pid (SYNCHRONIZE): ok={}", !probe.is_null()));
+    let rt = ResumeThread(pi.hThread);
+    r("ubox", format!("{name} ResumeThread -> {rt}"));
+    let timeout: u64 = opt(a, "--timeout").and_then(|s| s.parse().ok()).unwrap_or(60);
+    match wait(&pi, timeout) {
+        Some(c) => r("ubox", format!("{name} exit={c} ms={}", t0.elapsed().as_millis())),
+        None => r("ubox", format!("{name} TIMEOUT after {timeout}s (process killed)")),
+    }
+    r("ubox", format!("{name} job_active_after_exit={:?} job_pids={:?}", job_active(job), job_pids(job)));
+    if let Some(s) = opt(a, "--linger").and_then(|s| s.parse::<u64>().ok()) {
+        std::thread::sleep(Duration::from_secs(s));
+        r("ubox", format!("{name} job_active_after_linger={:?} job_pids={:?}", job_active(job), job_pids(job)));
+    }
+    dump(&out_path, &name);
+    if flag(a, "--kill-measure") {
+        kill_measure(&format!("kill-{name}"), job);
+    } else {
+        TerminateJobObject(job, 1);
+    }
+    Ok(())
 }

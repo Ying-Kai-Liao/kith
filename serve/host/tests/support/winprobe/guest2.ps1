@@ -29,6 +29,14 @@ $pw = 'Kp1!' + [guid]::NewGuid().ToString('N')
 Write-Host "::add-mask::$pw"
 net user kithguest $pw /add /y | Out-Null
 Log "kithguest is in Administrators: $(([bool](net localgroup Administrators | Select-String -SimpleMatch 'kithguest')))"
+# variant U: the second local account the guest runs as
+$pw2 = 'Kp2!' + [guid]::NewGuid().ToString('N')
+Write-Host "::add-mask::$pw2"
+net user kithbox $pw2 /add /y | Out-Null
+Log "kithbox is in Administrators: $(([bool](net localgroup Administrators | Select-String -SimpleMatch 'kithbox')))"
+New-Item -ItemType Directory -Force C:\guest | Out-Null
+Set-Content -NoNewline C:\guest\kithbox.pw $pw2
+icacls C:\guest\kithbox.pw /inheritance:r /grant 'kithguest:R' /grant 'Administrators:F' /Q | Out-Null
 
 Section 'files a box can read, owned by the admin'
 Copy-Item $Boxprobe 'C:\probe\bin\boxprobe.exe' -Force
@@ -158,6 +166,17 @@ Try-Do 'wfp-a cleanup' {
   CheckNetIsolation.exe LoopbackExempt -c 2>&1 | Out-Null
 }
 
+Section 'Variant U: the guest runs as a second local account (kithbox) started by the guest-owner user'
+Run-Guest 'u' 900000
+Section 'P-G14 U: raw persistent WFP filter keyed on the kithbox user'
+Try-Do 'wfp-u' {
+  $boxSid = (Get-LocalUser kithbox).SID.Value
+  Log "kithbox SID: $boxSid"
+  & $bp wfp-install --sd "D:(A;;CC;;;$boxSid)" --port 18080 2>&1 | ForEach-Object { Log "$_" }
+}
+Run-Guest 'net-wfp-u' 300000
+Try-Do 'wfp-u cleanup' { & $bp wfp-remove 2>&1 | ForEach-Object { Log "$_" } }
+
 Section 'cleanup: leftovers, the user'
 Try-Do 'cleanup' {
   Get-CimInstance Win32_Process -Filter "Name='PING.EXE'" | Where-Object { $_.CommandLine -match 'ping(\.exe)? -n (4[1-9]|[5-9]\d|[1-3]\d\d) ' } | ForEach-Object {
@@ -168,6 +187,7 @@ Try-Do 'cleanup' {
   bitsadmin.exe /reset 2>&1 | Out-Null
   Copy-Item 'C:\guest\out\*' $Out -Recurse -Force -ErrorAction SilentlyContinue
   net user kithguest /delete 2>&1 | Out-Null
+  net user kithbox /delete 2>&1 | Out-Null
 }
 Section 'done'
 exit 0

@@ -45,17 +45,20 @@ function Bx($name, $opts, $cmd, $timeout = 60, $more = @()) {
 function Txt($name) { (Get-Content "$Out\$name.txt" -Raw -ErrorAction SilentlyContinue) }
 
 # icacls cannot name an arbitrary domain-style SID (R's run SIDs); .NET can. Rights are FileSystemRights names.
+function AclObj($path) { if (Test-Path -LiteralPath $path -PathType Container) { New-Object System.IO.DirectoryInfo($path) } else { New-Object System.IO.FileInfo($path) } }
 function AclAdd($path, $sid, $rights, $type = 'Allow', $inh = 'ContainerInherit,ObjectInherit') {
-  $acl = Get-Acl -LiteralPath $path
+  $o = AclObj $path
+  $acl = $o.GetAccessControl()
   $id = New-Object System.Security.Principal.SecurityIdentifier($sid)
   if (-not (Test-Path -LiteralPath $path -PathType Container)) { $inh = 'None' }
   $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($id, $rights, $inh, 'None', $type)))
-  Set-Acl -LiteralPath $path -AclObject $acl
+  $o.SetAccessControl($acl)
 }
 function AclPurge($path, $sid) {
-  $acl = Get-Acl -LiteralPath $path
+  $o = AclObj $path
+  $acl = $o.GetAccessControl()
   $acl.PurgeAccessRules((New-Object System.Security.Principal.SecurityIdentifier($sid)))
-  Set-Acl -LiteralPath $path -AclObject $acl
+  $o.SetAccessControl($acl)
 }
 function Setup-Workspace {
   New-Item -ItemType Directory -Force $K, $W, $R, "$K\hosttmp" | Out-Null
@@ -63,7 +66,7 @@ function Setup-Workspace {
   Log "run SIDs: A caps w=$capW r=$capR ; R arbitrary SIDs w=$rW r=$rR"
   Log ((icacls $W /grant "*${capW}:(OI)(CI)(M)") -join ' ')
   AclAdd $W $rW 'Modify'
-  Log "R grant on W: $((Get-Acl $W).Sddl)"
+  Log "R grant on W: $(((AclObj $W).GetAccessControl()).Sddl)"
   Log ((icacls $R /grant "*${capR}:(OI)(CI)(RX)") -join ' ')
   AclAdd $R $rR 'ReadAndExecute' 
   New-Item -ItemType Directory -Force "$W\tmp" | Out-Null
@@ -134,6 +137,99 @@ if ($Only -eq 'net-wfp-a') {
   $VAi = @('--kind', 'a', '--ac', 'kithprobe.n2', '--cap', 'kith.run.n2x', '--wk', '85') + $envW
   $VAoi = @('--kind', 'a', '--cap', 'kith.run.n2y', '--wk', '85') + $envW
   Do-Net 'wfp' ([ordered]@{ 'A-n2-package-SID' = $VAn; 'A-n2-package-SID-internetClient' = $VAi; 'A-other-package-internetClient-control' = $VAoi })
+  exit 0
+}
+
+if ($Only -eq 'u' -or $Only -eq 'net-wfp-u') {
+  # Variant U: the guest runs as a second local account `kithbox` that this user starts with CreateProcessWithLogonW
+  Setup-Workspace
+  $UO = 'C:\guest\uout'
+  New-Item -ItemType Directory -Force $UO | Out-Null
+  $boxSid = (New-Object System.Security.Principal.NTAccount('.\kithbox')).Translate([System.Security.Principal.SecurityIdentifier]).Value
+  Log "kithbox SID: $boxSid"
+  Log ((icacls $UO /grant 'kithbox:(OI)(CI)(M)' /Q) -join ' ')
+  Log ((icacls $W /grant 'kithbox:(OI)(CI)(M)' /Q) -join ' ')
+  Log ((icacls $R /grant 'kithbox:(OI)(CI)(RX)' /Q) -join ' ')
+  $envU = @('--env', "HOME=$W", '--env', "TEMP=$W\tmp", '--env', "TMP=$W\tmp", '--env', "USERPROFILE=$W", '--env', "PATH=$sysPath")
+  function Ux($name, $cmd, $timeout = 60, $more = @()) {
+    Bp ubox --user kithbox --pwfile C:\guest\kithbox.pw --name $name --out "$UO\$name.txt" --timeout $timeout --cwd $W @envU @more $DD @cmd
+  }
+  if ($Only -eq 'net-wfp-u') {
+    Section 'network (U, raw WFP keyed on the kithbox user): proxy 127.0.0.1:18080 only'
+    $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.*' } | Select-Object -First 1).IPAddress
+    $ls = @()
+    foreach ($x in @(@('127.0.0.1', 18080), @('127.0.0.1', 18081), @('0.0.0.0', 18082))) {
+      $ls += Start-Process $bp -ArgumentList 'tcp-listen', '--bind', $x[0], '--port', $x[1], '--hold', '150' -PassThru -WindowStyle Hidden -RedirectStandardOutput "$Out\lis-u-$($x[1]).txt"
+    }
+    Start-Sleep -Seconds 2
+    Log 'CONTROL, unboxed owner:'
+    foreach ($t in @('127.0.0.1:18080', '127.0.0.1:18081', "${ip}:18082", 'example.com:443')) { Bp connect $t }
+    $n = 0
+    foreach ($t in @('127.0.0.1:18080', '127.0.0.1:18081', "${ip}:18082", 'example.com:443', '1.1.1.1:443')) { $n++; Ux "netu-$n" @($bp, 'connect', $t) 40 }
+    $ls | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+    exit 0
+  }
+  Section 'U: identity and tokens'
+  Ux 'u-whoami' @('C:\Windows\System32\whoami.exe', '/user', '/groups') 30
+  Ux 'u-acinfo' @($bp, 'ac-info') 30
+  Section 'U: pinned PortableGit bash (script file, so cmd.exe quoting stays out of it)'
+  [IO.File]::WriteAllText("$W\u.sh", $bashScript.Replace("`r`n", "`n"))
+  Ux 'u-bash' @($pgit, (Msys "$W\u.sh")) 60
+  Section 'U: reads and writes outside the grants'
+  Ux 'u-rd-secret' @($bp, 'try-open', "$UP\secret.txt", 'r') 30
+  Ux 'u-wr-profile' @($bp, 'try-open', "$UP\kw\outside.txt", 'c') 30
+  Ux 'u-wr-guestroot' @($bp, 'try-open', 'C:\guest\open\box-made.txt', 'c') 30
+  Ux 'u-wr-wintemp' @($bp, 'try-open', 'C:\Windows\Temp\box-made-u.txt', 'c') 30
+  Ux 'u-wr-grant' @($bp, 'try-open', "$W\ok-u.txt", 'c') 30
+  Ux 'u-wr-ro' @($bp, 'try-open', "$R\hello.txt", 'w') 30
+  Section 'U: CredRead, HKCU, NUL, pipes, other processes of the owner'
+  cmdkey /generic:kithprobe-master /user:kith /pass:notasecret | Out-Null
+  Ux 'u-cred' @($bp, 'cred-read', 'kithprobe-master') 30
+  cmdkey /delete:kithprobe-master | Out-Null
+  Ux 'u-reg' @($bp, 'reg-read') 30
+  Ux 'u-nul' @($bp, 'nul-open') 30
+  Ux 'u-pipe' @($bp, 'pipe-create', 'kith-run-u', '--first') 30
+  $sl = Start-Process ping.exe -ArgumentList '-n', '60', '127.0.0.1' -PassThru -WindowStyle Hidden
+  Ux 'u-open-owner-proc' @($bp, 'open-proc', $sl.Id) 30
+  Stop-Process -Id $sl.Id -Force -ErrorAction SilentlyContinue
+  Section 'U: node, python, git, G4 and G15'
+  Ux 'u-node' @($node, '-e', "require('fs').writeFileSync(String.raw``$W\node-u.txt``,'ok');console.log('NODE_OK')") 40
+  Ux 'u-py' @($py, '-c', "open(r'$W\py-u.txt','w').write('ok');print('PY_OK')") 40
+  Ux 'u-git4' @('C:\probe\pgit\cmd\git.exe', 'config', '--global', '-l') 30 @('--env', "GIT_CONFIG_GLOBAL=$W\empty.gitconfig")
+  Ux 'u-git4init' @('C:\probe\pgit\cmd\git.exe', 'init', '-q', "$W\repo4-u") 30 @('--env', "GIT_CONFIG_GLOBAL=$W\empty.gitconfig")
+  [IO.File]::WriteAllText("$W\u2.sh", "node -e `"const o=require('os');console.log('tmpdir',o.tmpdir(),'home',o.homedir())`"; npm config get cache; npm --version; python -m pip --version; echo G15_END`n")
+  Ux 'u-g15' @($pgit, (Msys "$W\u2.sh")) 90 @('--env', "APPDATA=$W\appdata", '--env', "LOCALAPPDATA=$W\local", '--env', "npm_config_cache=$W\npmcache", '--env', "PIP_CACHE_DIR=$W\pipcache")
+  Section 'U: P-G3n escapes (kithbox starts processes outside the job? the host watches)'
+  Try-Do 'g3n-u' {
+    $d = "$W\g3n-u"
+    New-Item -ItemType Directory -Force $d | Out-Null
+    $job = 'Local\kith-g3n-u'
+    $watch = Start-Process $bp -ArgumentList 'watch', '--secs', '80', '--job', $job -PassThru -WindowStyle Hidden -RedirectStandardOutput "$Out\g3n-u.watch.txt"
+    Start-Sleep -Seconds 1
+    $bx = Start-Process $bp -ArgumentList (Q (@('ubox', '--user', 'kithbox', '--pwfile', 'C:\guest\kithbox.pw', '--name', 'g3nu', '--job-name', $job, '--timeout', '70', '--linger', '10', '--out', "$UO\g3nu.txt", '--cwd', $W) + $envU + @('--', $bp, 'g3n-box', $d, 'C:\probe\bin\g3n.js'))) -PassThru -WindowStyle Hidden -RedirectStandardOutput "$Out\g3n-u.master.txt"
+    for ($i = 0; $i -lt 40 -and -not (Test-Path "$d\g3n-done.txt") -and -not $bx.HasExited; $i++) { Start-Sleep -Seconds 2 }
+    Start-Sleep -Seconds 3
+    Log '--- survivors named by their ping -n counts (51..61), job still alive; in the job?'
+    Get-CimInstance Win32_Process -Filter "Name='PING.EXE'" | Where-Object { $_.CommandLine -match 'ping(\.exe)? -n (5[1-9]|6[01]) ' } | ForEach-Object {
+      Log "survivor method=$([regex]::Match($_.CommandLine, '-n (\d\d)').Groups[1].Value) pid=$($_.ProcessId) parent=$($_.ParentProcessId) cmd=$($_.CommandLine)"
+      Bp injob --pid $_.ProcessId --job $job
+    }
+    Log ((Get-Content "$d\g3n.log" -ErrorAction SilentlyContinue) -join "`n")
+    $bx.WaitForExit(120000) | Out-Null
+    Log ((Get-Content "$Out\g3n-u.master.txt" -ErrorAction SilentlyContinue) -join "`n")
+    Start-Sleep -Seconds 2
+    Log '--- after the run job was terminated: still running (escaped the job):'
+    Get-CimInstance Win32_Process -Filter "Name='PING.EXE'" | Where-Object { $_.CommandLine -match 'ping(\.exe)? -n (5[1-9]|6[01]) ' } | ForEach-Object {
+      Log "STILL RUNNING after job terminate: method=$([regex]::Match($_.CommandLine, '-n (\d\d)').Groups[1].Value) pid=$($_.ProcessId) parent=$($_.ParentProcessId)"
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Stop-Process -Id $watch.Id -Force -ErrorAction SilentlyContinue
+    Log ((Get-Content "$Out\g3n-u.watch.txt" -ErrorAction SilentlyContinue | Select-String -NotMatch 'wsl.exe|svchost|unreadable') -join "`n")
+    schtasks.exe /delete /tn kithprobe58 /f 2>&1 | Out-Null
+  }
+  Section 'U: F23 kill measure with real bash children'
+  [IO.File]::WriteAllText("$W\u3.sh", "sleep 100 & sleep 101 & (sleep 102 &); sleep 50`n")
+  Ux 'u-f23' @($pgit, (Msys "$W\u3.sh")) 12 @('--kill-measure')
   exit 0
 }
 

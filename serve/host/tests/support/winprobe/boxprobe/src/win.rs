@@ -1174,6 +1174,7 @@ pub fn main() {
         "sid-of",
         "rsid",
         "wfp-install",
+        "ubox",
         "wfp-remove",
         "kill-test",
     ];
@@ -1220,6 +1221,7 @@ pub fn main() {
             "sid-of" => rbox::cmd_sid_of(a),
             "rsid" => rbox::cmd_rsid(a),
             "wfp-install" => wfp_cmd(true, a),
+            "ubox" => rbox::cmd_ubox(a),
             "wfp-remove" => wfp_cmd(false, a),
             "kill-test" => rbox::cmd_kill_test(a),
             _ => Err("unknown".into()),
