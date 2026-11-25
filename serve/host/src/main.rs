@@ -27,6 +27,7 @@ mod environment;
 mod hqmem;
 mod hub;
 mod kernel;
+mod kernel_windows;
 #[cfg(unix)]
 mod launch_cmd;
 #[cfg(unix)]
