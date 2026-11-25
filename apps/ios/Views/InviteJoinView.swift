@@ -9,20 +9,30 @@ import SwiftUI
 final class InviteJoinModel: Identifiable {
     let link: InviteLink
     private(set) var state: InviteJoinState
+    /// The first step: what the invite is for. The join itself runs only after the person accepts.
+    let preview: InvitePreviewModel
+    private(set) var accepted = false
     @ObservationIgnored private var task: Task<Void, Never>?
     private unowned let app: AppStore
 
     nonisolated var id: String { link.inviteId }
 
-    init(link: InviteLink, app: AppStore) {
+    init(link: InviteLink, app: AppStore, previews: any InvitePreviewProvider = MockInvitePreviewProvider()) {
         self.link = link
         self.app = app
+        preview = InvitePreviewModel(link: link, provider: previews)
         state = InviteJoinState(.joining, computerId: link.computerId)
     }
 
-    /// Runs the join, or runs it again after it stopped; one run at a time.
+    /// "Accept and sign in": from here the join runs. Tapping twice does nothing more.
+    func accept() {
+        accepted = true
+        start()
+    }
+
+    /// Runs the join, or runs it again after it stopped; one run at a time. Not before the person accepted.
     func start() {
-        guard task == nil else { return }
+        guard accepted, task == nil else { return }
         task = Task { [weak self] in
             guard let self else { return }
             await InviteJoin.run(link, deps: AppInviteDeps(app: app)) { self.state = $0 }
@@ -82,6 +92,15 @@ struct InviteJoinView: View {
     }
 
     var body: some View {
+        if model.accepted {
+            progressBody
+        } else {
+            InvitePreviewView(model: model.preview, accept: { model.accept() }, dismiss: { dismiss() })
+                .safeAreaInset(edge: .top, spacing: 0) { ModalHeader("Invitation") }
+        }
+    }
+
+    private var progressBody: some View {
         VStack(spacing: 24) {
             Image(systemName: icon)
                 .font(.system(size: 44))
@@ -113,11 +132,21 @@ struct InviteJoinView: View {
                 Button("Try again") { model.start() }.buttonStyle(.secondary)
             case .done:
                 if let id = state.computerId {
-                    Text("You can use the agents they picked for you. Open the Bots tab to start a chat.")
-                        .font(.subheadline).foregroundStyle(Palette.secondary).multilineTextAlignment(.center)
+                    if let items = model.preview.preview?.items, !items.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(items) { InvitePreviewRow(item: $0) }
+                        }
+                    } else {
+                        Text("You can use the agents they picked for you.")
+                            .font(.subheadline).foregroundStyle(Palette.secondary).multilineTextAlignment(.center)
+                    }
                     Text(roleLine(id)).font(.footnote).foregroundStyle(Palette.tertiary)
                 }
-                Button("Done") { dismiss() }.buttonStyle(.primary)
+                if let first = model.preview.preview?.items.first {
+                    Button("Open \(first.name)") { openFirst() }.buttonStyle(.primary)
+                } else {
+                    Button("Done") { dismiss() }.buttonStyle(.primary)
+                }
             }
             if state.step != .done {
                 Text("This works on this iPhone only. To use another device, open the link there too.")
@@ -133,6 +162,16 @@ struct InviteJoinView: View {
         .background(Palette.background)
         .safeAreaInset(edge: .top, spacing: 0) { ModalHeader("Join a computer") }
         .task { model.start() }
+    }
+
+    /// Opens the first thing they were invited to when the computer has a bot that matches it; else the bot list.
+    private func openFirst() {
+        if let id = state.computerId, let store = accounts.store(for: id),
+           let items = model.preview.preview?.items,
+           let bot = InvitePreviewModel.target(for: items, in: Array(store.bots.values)) {
+            accounts.selection = BotReference(accountId: accounts.accountId, computerId: id, botId: bot.id)
+        }
+        dismiss()
     }
 
     /// This device's six digits while its request is pending (the step is `asking`, then `connecting` while it waits).

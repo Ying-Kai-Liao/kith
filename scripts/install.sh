@@ -250,7 +250,7 @@ def started_by_swap(etime):                         # etime has whole seconds, s
         return False
 
 
-def runs_kernel_file(command):
+def kernel_program(command):                        # (the program's path inside the kernel, the words after it), or None
     starts = [command]
     m = INTERPRETERS.match(command)
     if m:
@@ -260,7 +260,30 @@ def runs_kernel_file(command):
                 break
             if not words[i].startswith('-'):
                 starts.append(' '.join(words[i:]))
-    return any(c.startswith(r) for c in starts for r in ROOTS)
+    for c in starts:
+        for r in ROOTS:
+            if c.startswith(r):
+                words = c[len(r):].split()
+                return (words[0] if words else ''), words[1:]
+    return None
+
+
+# An agent run's own wrappers are not old writers: a background `kith ask` run, the account chain it runs, and what
+# bin/kith execs into for a run. They write neither settings.json nor auth.json; the kith-auth and kith_settings.py they
+# call are processes of their own and match WRITER. `kith ask --cap N` sets the chain cap in settings.json, so it stays.
+# bin/kith itself is not listed: a launch execs into one of these (or into claude) within seconds, and the wait reads
+# each process's command line again, so it drops out, while its other verbs (`kith account ...`) wait on writers.
+AGENT_RUN = {
+    'bin/kith-ask': lambda args: [a for a in args if a != '--bg'][:1] != ['--cap'],
+    'lib/kith_accounts.py': lambda args: args[:1] == ['run-chain'],
+    'bin/kith-sessions': lambda args: args[:1] == ['run'],
+    'adapters/harness.py': lambda args: True,
+}
+
+
+def old_kernel_program(command):
+    prog = kernel_program(command)
+    return prog is not None and not AGENT_RUN.get(prog[0], lambda args: False)(prog[1])
 
 
 def process_table():                                # [(pid, (pid, start), etime, tty, command)], -ww: never cut a command line
@@ -278,7 +301,7 @@ def old_writers():                                  # keyed by (pid, start time)
     for pid, key, etime, tty, command in process_table():
         if pid in mine:
             continue
-        if (WRITER.search(command) or (tty.startswith('?') and runs_kernel_file(command))) and started_by_swap(etime):
+        if (WRITER.search(command) or (tty.startswith('?') and old_kernel_program(command))) and started_by_swap(etime):
             found.add(key)
     return found
 
