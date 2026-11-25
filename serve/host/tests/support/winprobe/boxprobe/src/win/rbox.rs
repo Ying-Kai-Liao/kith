@@ -427,6 +427,19 @@ pub unsafe fn cmd_g3n_box(a: &[String]) -> Res<()> {
     run("61", "bitsadmin.exe", &["/addfile", "kithprobe61", "file:///C:/probe/bin/g3n.js", &bits]);
     run("61", "bitsadmin.exe", &["/setnotifycmdline", "kithprobe61", "ping.exe", "-n 61 127.0.0.1"]);
     run("61", "bitsadmin.exe", &["/resume", "kithprobe61"]);
+    // two more launchers that need no script host or PowerShell (cscript and PowerShell cannot start in every box); spawned, not waited
+    for (tag, exe, args) in [
+        ("57w", "wmic.exe", vec!["process", "call", "create", "ping.exe -n 57 127.0.0.1"]),
+        (
+            "55m",
+            "mshta.exe",
+            vec!["vbscript:CreateObject(\"WScript.Shell\").Run(\"ping.exe -n 55 127.0.0.1\",0,False)(window.close)"],
+        ),
+    ] {
+        let r =
+            std::process::Command::new(exe).args(&args).stdin(std::process::Stdio::inherit()).spawn().map(|c| c.id());
+        lg(&dir, &format!("{tag} {exe} spawned: {r:?}"));
+    }
     std::thread::sleep(Duration::from_secs(4));
     lg(&dir, "box native done");
     std::fs::write(format!("{dir}\\g3n-done.txt"), "done").ok();

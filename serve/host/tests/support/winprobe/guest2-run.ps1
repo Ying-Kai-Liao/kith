@@ -30,7 +30,7 @@ $tools = @(Get-Content 'C:\probe\tools.txt' -ErrorAction SilentlyContinue)
 $py = $tools[0]; $node = $tools[1]
 $pgit = 'C:\probe\pgit\usr\bin\bash.exe'
 $busy = 'C:\probe\busybox\busybox.exe'
-$sysPath = "C:\probe\pgit\usr\bin;C:\probe\pgit\mingw64\bin;$env:SystemRoot\System32;$env:SystemRoot;$(Split-Path $node);$(Split-Path $py)"
+$sysPath = "C:\probe\pgit\usr\bin;C:\probe\pgit\cmd;C:\probe\pgit\mingw64\bin;$env:SystemRoot\System32;$env:SystemRoot;$(Split-Path $node);$(Split-Path $py)"
 $envW = @('--env', "HOME=$W", '--env', "TEMP=$W\tmp", '--env', "TMP=$W\tmp", '--env', "USERPROFILE=$W", '--env', "PATH=$sysPath", '--cwd', $W)
 $VA = @('--kind', 'a', '--cap', 'kith.r.probe', '--cap', 'kith.w.probe') + $envW
 $VRm = @('--kind', 'r', '--il', 'medium', '--run', 'kith.run.x', '--grant', 'kith.r.probe', '--grant', 'kith.w.probe') + $envW
@@ -155,6 +155,8 @@ if ($Only -eq 'u' -or $Only -eq 'net-wfp-u') {
   Log ((icacls $UO /grant 'kithbox:(OI)(CI)(M)' /Q) -join ' ')
   Log ((icacls $W /grant 'kithbox:(OI)(CI)(M)' /Q) -join ' ')
   Log ((icacls $R /grant 'kithbox:(OI)(CI)(RX)' /Q) -join ' ')
+  # ancestors of the workspace need ReadAttributes (git and MSYS stat their path), no inheritance
+  foreach ($anc in @($UP, $KW)) { Log ((icacls $anc /grant 'kithbox:(RA,RC,S)' /Q) -join ' ') }
   $envU = @('--env', "HOME=$W", '--env', "TEMP=$W\tmp", '--env', "TMP=$W\tmp", '--env', "USERPROFILE=$W", '--env', "PATH=$sysPath")
   function Ux($name, $cmd, $timeout = 60, $more = @()) {
     Bp ubox --user kithbox --pwfile C:\guest\kithbox.pw --name $name --out "$UO\$name.txt" --timeout $timeout --cwd $W @envU @more $DD @cmd
@@ -534,7 +536,8 @@ Section 'G15: git, npm, pip, node honour TEMP/TMP/HOME and the cache variables (
 $cache = @('--env', "APPDATA=$W\appdata", '--env', "LOCALAPPDATA=$W\local", '--env', "npm_config_cache=$W\npmcache", '--env', "PIP_CACHE_DIR=$W\pipcache",
   '--env', "XDG_CACHE_HOME=$W\xdg", '--env', "UV_CACHE_DIR=$W\uvcache", '--env', "TMPDIR=$(Msys $W)/tmp", '--env', "npm_config_userconfig=$W\npmrc")
 New-Item -ItemType Directory -Force "$W\appdata", "$W\local" | Out-Null
-Bx 'g15-bash' $VRu @($pgit, '-c', "node -e ""const o=require('os');console.log('tmpdir',o.tmpdir(),'home',o.homedir())""; npm config get cache; npm --version; python -c ""import tempfile,os;print('pytmp',tempfile.gettempdir(),os.path.expanduser('~'))""; python -m pip --version; python -m pip config debug 2>&1 | head -5; echo G15_END") 90 $cache
+[IO.File]::WriteAllText("$W\g15.sh", "node -e `"const o=require('os');console.log('tmpdir',o.tmpdir(),'home',o.homedir())`"; npm config get cache; npm --version; python -c `"import tempfile,os;print('pytmp',tempfile.gettempdir(),os.path.expanduser('~'))`"; python -m pip --version; python -m pip config debug 2>&1 | head -5; git config --global -l; echo G15_END`n")
+Bx 'g15-bash' $VRu @($pgit, (Msys "$W\g15.sh")) 90 $cache
 Bx 'g15-npm-init' $VRu @($pgit, '-c', "cd $(Msys $W) && mkdir -p npmt && cd npmt && npm init -y >/dev/null && npm ls 2>&1 | head -3; echo NPM_RC=`$?") 90 $cache
 Log 'files the boxed tools made outside the workspace (should be none):'
 Log ((Get-ChildItem "$UP\AppData" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-15) } | Select-Object -First 10 -ExpandProperty FullName) -join "`n")
