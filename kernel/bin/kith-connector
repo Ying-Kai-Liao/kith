@@ -34,7 +34,7 @@ def host_call(method, body):
     try:
         status, payload = kith_hostlocal.request(f'/api/{method}', body, 60)
     except kith_hostlocal.HostUnreachable as e:
-        die(e.name if e.name != 'URLError' else "the Kith host isn't running here; start it with `kith serve start`")
+        die("the Kith host isn't running here; start it with `kith serve start`" if e.down or e.name == 'URLError' else e.name)
     if 200 <= status < 300:
         try:
             return json.loads(payload)

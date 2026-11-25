@@ -155,7 +155,7 @@ def call(method, body, timeout=30):
         try:
             return json.loads(payload), None
         except ValueError:
-            return None, 'the Kith host answered something that is not JSON'
+            return None, 'kith serve is not reachable (JSONDecodeError)'
     try:
         why = json.loads(payload).get('error')
     except (ValueError, AttributeError):
