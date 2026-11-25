@@ -492,12 +492,7 @@ pub fn plan_in(
     let mut ctmp = String::new();
     let mut ctmp_note = String::new();
     if !p_owner {
-        // Guests are parked on Windows (this module is Unix-only today; the refusal waits for the lift of its gate).
-        #[cfg(windows)]
-        {
-            say(&format!("kith: {}", crate::GUESTS_NOT_ON_WINDOWS));
-            return Err(3);
-        }
+        // A guest on Windows never gets here: `windows_guest_refusal` above refuses it first.
         let plain = p_id.starts_with(|c: char| c.is_ascii_lowercase())
             && p_id
                 .chars()
@@ -1383,8 +1378,10 @@ pub fn windows_guest_refusal(env: &Env) -> Option<String> {
     .iter()
     .any(|k| !get(env, k).is_empty());
     guest.then(|| {
-        "kith: runs for anyone but the owner (an invited person, a bot guest) are not offered on Windows. Nothing was started."
-            .to_owned()
+        format!(
+            "kith: {} Nothing was started.",
+            crate::GUESTS_NOT_ON_WINDOWS
+        )
     })
 }
 

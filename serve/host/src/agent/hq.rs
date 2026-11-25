@@ -795,10 +795,7 @@ async fn launch_text(
 ) -> Result<String> {
     use kith_kernel::launch::{assemble, winenv};
     if person.is_some() {
-        return Err(Refused(
-            "Runs for anyone but the owner are not offered on Windows. Nothing was started.".to_owned(),
-        )
-        .into());
+        return Err(Refused(format!("{} Nothing was started.", kith_kernel::GUESTS_NOT_ON_WINDOWS)).into());
     }
     let Some(kernel) = crate::kernel::current_kernel() else { bail!("{}", missing()) };
     let Some((agent, flags)) = args.split_first() else { bail!("no launch arguments") };
