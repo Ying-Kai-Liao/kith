@@ -244,14 +244,14 @@ fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Eng
         eprintln!("kith: --exec runs a task (kith {agent} \"...\"); --print and --launch-json answer elsewhere");
         return 2;
     }
-    let person = get(&env0, "KITH_PERSON").to_owned();
+    let person = get(env0, "KITH_PERSON").to_owned();
     // A room person (the meet of everyone in a room with people) has no row in auth.json: only the Rust launch builds its grant, and
     // it is the host's launch that starts those runs, not this one.
     if super::room::is_room_person(&person) {
         eprintln!("kith: {person} is a room person; it only launches through the Rust launch, not this script");
         return 3;
     }
-    let home_dir = PathBuf::from(get(&env0, "HOME"));
+    let home_dir = PathBuf::from(get(env0, "HOME"));
     let p = {
         let mut e = env0.clone();
         e.insert("KITH_ROOT".to_owned(), kernel.to_string_lossy().into_owned());
@@ -308,12 +308,12 @@ fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Eng
         sched,
     };
     // What the plan takes out of the environment and this run still needs (names of the caller's, for this run only).
-    let launch_kind = get(&env0, "KITH_LAUNCH_KIND").to_owned();
-    let launch_label = get(&env0, "KITH_LAUNCH_LABEL").to_owned();
-    let ask_id = get(&env0, "KITH_LAUNCH_ASK_ID").to_owned();
-    let sid_file = get(&env0, "KITH_LAUNCH_SID_FILE").to_owned();
-    let claude_args = get(&env0, "KITH_CLAUDE_ARGS").to_owned();
-    let via = if get(&env0, "KITH_VIA").is_empty() { "terminal".to_owned() } else { get(&env0, "KITH_VIA").to_owned() };
+    let launch_kind = get(env0, "KITH_LAUNCH_KIND").to_owned();
+    let launch_label = get(env0, "KITH_LAUNCH_LABEL").to_owned();
+    let ask_id = get(env0, "KITH_LAUNCH_ASK_ID").to_owned();
+    let sid_file = get(env0, "KITH_LAUNCH_SID_FILE").to_owned();
+    let claude_args = get(env0, "KITH_CLAUDE_ARGS").to_owned();
+    let via = if get(env0, "KITH_VIA").is_empty() { "terminal".to_owned() } else { get(env0, "KITH_VIA").to_owned() };
     let opts = ExecOpts { hooks: Hooks(Some(&steps)), ..ExecOpts::from_process(true, flags.held, "") };
     let plan = match plan::plan(agent, &flags.plan_argv, kernel, env0.clone(), &Mode::Exec(opts)) {
         Ok(p) => p,
@@ -329,7 +329,7 @@ fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Eng
         return code;
     }
     // The plan names the origin `terminal` for its cost tag when none was said; the run's own environment keeps what it was given.
-    if get(&env0, "KITH_VIA").is_empty() {
+    if get(env0, "KITH_VIA").is_empty() {
         env.remove("KITH_VIA");
         env.remove("HQ_VIA");
     }
