@@ -4,7 +4,8 @@
 # steps (python grant, loopback exemption, firewall filters) and cleanup. Not shipped.
 param(
   [Parameter(Mandatory)][string]$Boxprobe,
-  [Parameter(Mandatory)][string]$Out
+  [Parameter(Mandatory)][string]$Out,
+  [string]$Parts = 'all'
 )
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force 'C:\probe\bin', 'C:\guest\out', $Out | Out-Null
@@ -35,7 +36,7 @@ Write-Host "::add-mask::$pw2"
 net user kithbox $pw2 /add /y | Out-Null
 Log "kithbox is in Administrators: $(([bool](net localgroup Administrators | Select-String -SimpleMatch 'kithbox')))"
 New-Item -ItemType Directory -Force C:\guest | Out-Null
-Set-Content -NoNewline C:\guest\kithbox.pw $pw2
+[IO.File]::WriteAllText("C:\guest\kithbox.pw", $pw2)
 icacls C:\guest\kithbox.pw /inheritance:r /grant 'kithguest:R' /grant 'Administrators:F' /Q | Out-Null
 Log "kithbox.pw exists=$(Test-Path C:\guest\kithbox.pw) len=$((Get-Item C:\guest\kithbox.pw -ErrorAction SilentlyContinue).Length) acl=$((icacls C:\guest\kithbox.pw) -join ' ')"
 
@@ -94,6 +95,8 @@ function Run-Guest($only, $ms = 1200000) {
 }
 
 icacls C:\guest /grant 'kithguest:(OI)(CI)(F)' /Q | Out-Null
+$bp = 'C:\probe\bin\boxprobe.exe'
+if ($Parts -eq 'all') {
 Run-Guest 'main' 2400000
 
 # ---- G10: the admin steps -------------------------------------------------------------------------------------------
@@ -167,6 +170,8 @@ Run-Guest 'net-wfp-a' 300000
 Try-Do 'wfp-a cleanup' {
   & $bp wfp-remove 2>&1 | ForEach-Object { Log "$_" }
   CheckNetIsolation.exe LoopbackExempt -c 2>&1 | Out-Null
+}
+
 }
 
 Section 'Variant U: the guest runs as a second local account (kithbox) started by the guest-owner user'

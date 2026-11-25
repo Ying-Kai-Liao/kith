@@ -10,6 +10,10 @@ on:
       - serve/host/tests/support/fakemodel/**
       - serve/host/tests/support/winprobe/**
   workflow_dispatch:
+    inputs:
+      parts:
+        description: 'guest2 parts: all, or u (only variant U)'
+        default: all
 
 permissions:
   contents: read
@@ -121,6 +125,7 @@ jobs:
           ./serve/host/tests/support/winprobe/guest2.ps1
           -Boxprobe "$env:GITHUB_WORKSPACE/serve/host/target/debug/boxprobe.exe"
           -Out "$env:GITHUB_WORKSPACE/guest2-out"
+          -Parts "${{ inputs.parts || 'all' }}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
