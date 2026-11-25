@@ -415,10 +415,8 @@ fn lockfile_ok(d: &Item, base: &Path) -> bool {
     let inside = std::fs::canonicalize(&path)
         .ok()
         .zip(std::fs::canonicalize(base).ok())
-        .is_some_and(|(p, b)| {
-            p.to_string_lossy()
-                .starts_with(&format!("{}/", b.to_string_lossy()))
-        });
+        // Component-wise, not a "/" string prefix: Windows paths join with a backslash.
+        .is_some_and(|(p, b)| p != b && p.starts_with(&b));
     is_file && !is_link && inside
 }
 
