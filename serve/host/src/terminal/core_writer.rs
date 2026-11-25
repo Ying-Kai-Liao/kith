@@ -460,14 +460,9 @@ impl CoreWriter {
         self.cancel(turn, why)
     }
 
-    /// Claims a pulled schedule turn for a cron run that has no process yet (`hostclaim.claim`, kind `scheduleRun`): the run's
-    /// own process attaches itself with `claim.attach` before it starts the engine. The revoke epoch is read first, before the
-    /// host's may check of the turn's person.
-    pub fn claim_run(&self, conversation: &str, person: &str, turn: i64) -> RunClaim {
-        self.claim_run_as("scheduleRun", conversation, person, turn)
-    }
-
-    /// [`Self::claim_run`] of any detached run kind: `scheduleRun`, `wakeRun` or `askRun` (the core's `hostclaim.claim` kinds).
+    /// Claims a pulled detached turn for a run that has no process yet (`hostclaim.claim`, kind `scheduleRun`, `wakeRun` or
+    /// `askRun`): the run's own process attaches itself with `claim.attach` before it starts the engine. The revoke epoch is read
+    /// first, before the host's may check of the turn's person.
     pub fn claim_run_as(&self, kind: &str, conversation: &str, person: &str, turn: i64) -> RunClaim {
         let epoch = match self.epoch(person) {
             Ok(e) => e,

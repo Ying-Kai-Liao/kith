@@ -42,6 +42,8 @@ pub(crate) enum Started {
     Gone,
     /// It cannot run and the claim is given back: the turn is cancelled with this reason.
     Failed(String),
+    /// The claim was made and the run could not start: [`start`] cancelled the turn itself, with this reason.
+    Cancelled(String),
 }
 
 /// The turn a kind runs.
@@ -68,8 +70,11 @@ pub(crate) struct Launch {
     pub err_file: Option<PathBuf>,
     /// Told the process's pid once it started (a run token binds to it); what it answers is held until the process ended and
     /// was reported (the token's grant).
-    pub bind: Option<Box<dyn FnOnce(u32) -> Box<dyn Any + Send> + Send>>,
+    pub bind: Option<Bind>,
 }
+
+/// What a kind does with the started process's pid, and what it keeps until the run is reported.
+pub(crate) type Bind = Box<dyn FnOnce(u32) -> Box<dyn Any + Send> + Send>;
 
 /// Claims `run`'s turn, starts what `launch` makes of the claim's id and reports its end. Blocking until the process is started
 /// (the wait and the report are a thread of their own).
@@ -88,7 +93,7 @@ pub(crate) fn start(
         Ok(l) => l,
         Err(why) => {
             free(writer, run.turn, &why);
-            return Started::Failed(why);
+            return Started::Cancelled(why);
         }
     };
     let Launch { cmd, stdin, err_file, bind } = launched;
@@ -105,7 +110,7 @@ pub(crate) fn start(
         Err(error) => {
             let why = format!("couldn't start {}: {error}", run.what);
             free(writer, run.turn, &why);
-            Started::Failed(why)
+            Started::Cancelled(why)
         }
     }
 }
@@ -157,6 +162,7 @@ pub(crate) fn until_told(what: &str, turn: i64, pace: &Pace, mut ask: impl FnMut
 }
 
 /// Starts `cmd` and hands it the turn on stdin.
+#[cfg(test)]
 pub(crate) fn spawn_cmd(cmd: Command, spec: &Value) -> std::io::Result<Child> {
     spawn_with(cmd, Some(spec))
 }

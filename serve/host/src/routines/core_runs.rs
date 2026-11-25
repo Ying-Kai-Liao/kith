@@ -193,7 +193,10 @@ impl Routines {
                 // A cron job of kith-sched: its own process, for the owner and a guest alike.
                 match ops.cron(t, job) {
                     Started::Ran | Started::Later | Started::Gone => {}
-                    Started::Failed(why) => Self::give_up(hub, ops, turn, where_.as_ref(), &why),
+                    // The module cancelled a launch error's turn already; the notice and a second (idempotent) cancel stay.
+                    Started::Failed(why) | Started::Cancelled(why) => {
+                        Self::give_up(hub, ops, turn, where_.as_ref(), &why);
+                    }
                 }
                 continue;
             }

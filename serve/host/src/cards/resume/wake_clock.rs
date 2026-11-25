@@ -1,4 +1,4 @@
-//! The wake queue's clock and the run door by turn id (design 2026-11-21-wake-s4, package WK4b). Once the `wake` module is
+//! The wake queue's clock and the run door by turn id (design 2026-11-21-wake-s4, package `WK4b`). Once the `wake` module is
 //! switched the queue is rows of the core, and the host's taker no longer asks for a turn to run: it drives the core's clock
 //! and begins the turns the core made.
 //!
@@ -8,7 +8,7 @@
 //!   `kith-wake drain`: the lifecycle sweep (`kith kernel lifecycle sweep`) and, until asks are rows of the core, the ask
 //!   bridge (`kith-ask --sweep`, whose `enqueue` goes to the core).
 //! - **R3 the pull**: `hostclaim.queued` with the `wake` source lists the turns the tick made. A turn of a bot chat or a channel
-//!   thread still goes to its door as before (`handle`, WK4c moves those to the turn id). Every other turn is a run door turn,
+//!   thread still goes to its door as before (`handle`, `WK4c` moves those to the turn id). Every other turn is a run door turn,
 //!   the owner's session or a person's: its door checks answer the core (`wake.done` withdrawn when nothing is wanted or the
 //!   person's access ended, `wake.back` when access is unknown), and a turn that passes is claimed and started by the shared
 //!   detached-run module (`routines/run_door.rs`): `kith AGENT --resume SESSION NOTE` with `KITH_TURN_CLAIM` (and the person's
@@ -49,6 +49,10 @@ const LIFECYCLE_EVERY: Duration = Duration::from_secs(60);
 
 /// The runs given to a door of the old kind, and when.
 static HANDED: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(Mutex::default);
+/// How long a turn the core refused as held waits before the door claims it again.
+const LATER_FOR: Duration = Duration::from_secs(15);
+/// The runs whose claim was refused as held, and when.
+static LATER: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(Mutex::default);
 /// A housekeeping process is running: the next tick starts none beside it.
 static SWEEPING: AtomicBool = AtomicBool::new(false);
 static ASKING: AtomicBool = AtomicBool::new(false);
@@ -75,7 +79,7 @@ pub(super) async fn step(hub: &Arc<Hub>) -> bool {
     match wake::blocking(move || wake::tick(&st)).await {
         Some(Ok(_)) => housekeeping(),
         Some(Err(error)) => {
-            tracing::debug!(error = format!("{error:#}"), "wake: a tick was not made; the next one tries again")
+            tracing::debug!(error = format!("{error:#}"), "wake: a tick was not made; the next one tries again");
         }
         None => {}
     }
@@ -104,7 +108,7 @@ fn run_of(note: &str) -> Option<&str> {
     note.strip_prefix("[kith wake ")?.split_once(']').map(|(run, _)| run).filter(|r| !r.is_empty())
 }
 
-/// The door a session is for: a bot chat's or a channel thread's turn keeps its old door (WK4c), every other session is a
+/// The door a session is for: a bot chat's or a channel thread's turn keeps its old door (`WK4c`), every other session is a
 /// Claude session the run door resumes.
 fn old_door(session: &str) -> bool {
     session.starts_with("acp:") || session.contains('#')
@@ -112,8 +116,30 @@ fn old_door(session: &str) -> bool {
 
 /// Whether a turn may be started detached today. Until sched-turn S1 (`kernel launch AGENT --exec --kernel K --turn N --claim C`)
 /// lands, the host's launch is `kith AGENT --resume SESSION`: a Claude session. One place, so S1's follow-up switches it.
-pub(super) fn engine_gap(t: &Value) -> Option<&'static str> {
-    (!t["engine"].as_str().is_some_and(|e| e.eq_ignore_ascii_case("claude"))).then_some(ENGINE_GAP)
+///
+/// The agent's harness decides (the rule the launch uses: `harness:` of agent.md, unset is claude); the conversation's engine
+/// column is only the answer for an agent whose file cannot be read, since the core defaults a session it has not seen to claude.
+pub(super) fn engine_gap(t: &Value, harness: Option<&str>) -> Option<&'static str> {
+    let engine = harness.or_else(|| t["engine"].as_str());
+    (!engine.is_some_and(|e| e.eq_ignore_ascii_case("claude") || e.eq_ignore_ascii_case("claude-code")))
+        .then_some(ENGINE_GAP)
+}
+
+/// The `harness:` of the agent's agent.md, `claude` when it names none; `None` when the file is not found.
+fn harness_of_agent(state: &Path, agent: &str) -> Option<String> {
+    let agents = crate::terminal::core_holders::folders_of(state)?.agents;
+    let text = [agents.join(agent).join("agent.md"), agents.join(agent).join("role/agent.md")]
+        .iter()
+        .find_map(|p| std::fs::read_to_string(p).ok())?;
+    let mut lines = text.lines();
+    if lines.next() == Some("---") {
+        for l in lines.take_while(|l| *l != "---") {
+            if let Some(v) = l.strip_prefix("harness:") {
+                return Some(v.trim().to_owned()).filter(|h| !h.is_empty()).or_else(|| Some("claude".to_owned()));
+            }
+        }
+    }
+    Some("claude".to_owned())
 }
 
 /// Cancels a turn at the core and asks again until it answers (the turn would wait for ever otherwise).
@@ -133,6 +159,9 @@ async fn begin(hub: &Arc<Hub>, core: &Arc<CoreWriter>, state: &Path, t: &Value) 
     // Parked behind a terminal (or another writer): the tick unparks it when nothing holds the session. A turn this host
     // handed to an old door waits there for its answer.
     if t["parkedReason"].is_string() || lock(&TAKEN).contains_key(run) || lock(&HANDED).contains_key(run) {
+        return;
+    }
+    if lock(&LATER).get(run).is_some_and(|at| at.elapsed() < LATER_FOR) {
         return;
     }
     // Its earlier claim ran (a restart cut it off): its prompt may have gone out, so it is never begun again. R4 settles it.
@@ -182,42 +211,46 @@ async fn door(hub: &Arc<Hub>, core: &Arc<CoreWriter>, t: &Value, core_turn: i64,
     for c in &live {
         let _ = hub.store.card_resume_claim(&c.id, crate::store::now_ms()); // a restart gave the claim back: held again
     }
-    if let Some(why) = engine_gap(t) {
+    let harness = harness_of_agent(&state_of(hub), &turn.agent);
+    if let Some(why) = engine_gap(t, harness.as_deref()) {
         tracing::warn!(run = %turn.run, why, "wake: a detached turn that cannot run is cancelled before its claim");
         return cancel(core, core_turn, why).await;
     }
     let Some(bin) = crate::agent::hq::bin() else { return unstarted(hub, &turn.run, true, false) };
     let reply = live.iter().find(|c| c.reply_to.is_some());
-    let mut spawn = spawn_with(
+    let spawn = spawn_with(
         &turn.agent,
         person.as_deref().unwrap_or_default(),
         reply.and_then(|c| c.reply_to.as_deref()),
         session,
         &note,
     );
-    // A file or network card's once grant is consumed here, before the process starts, and its profile built from the result.
-    let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> =
-        spawn.env.iter().map(|(k, v)| (k.into(), v.into())).collect();
     let asked = reply.and_then(|c| crate::runauth::AskReply::parse(c.reply_to.as_deref()?, c.asked_by.as_deref()));
-    let grant = crate::runauth::grant_for_env_async(&mut env, &turn.agent, session, asked).await;
-    spawn.env = env.iter().filter_map(|(k, v)| Some((k.to_str()?.to_owned(), v.to_str()?.to_owned()))).collect();
-    let logs = log_files(&state_of(hub), &turn.run);
     let plan = Plan {
         bin,
         args: spawn.args,
         env: spawn.env,
-        logs,
-        grant,
+        asked,
+        agent: turn.agent.clone(),
+        state: state_of(hub),
+        run: turn.run.clone(),
         claim_person: t["person"].as_str().unwrap_or_default().to_owned(),
         conversation: session.to_owned(),
         turn: core_turn,
     };
     let (writer, handle) = (core.clone(), tokio::runtime::Handle::current());
     let started = wake::blocking(move || plan.start(&writer, &handle)).await;
+    // A turn that waits behind a writer is not asked again at once: every pass would claim and be refused.
+    if matches!(started, Some(Started::Later)) {
+        lock(&LATER).insert(turn.run.clone(), Instant::now());
+    } else {
+        lock(&LATER).remove(&turn.run);
+    }
     match started {
         Some(Started::Ran) => clear_held(hub, &live),
         Some(Started::Later) => show_holder(hub, &live, session).await,
-        Some(Started::Gone) | None => {}
+        // The module cancelled the turn itself (a launch or spawn error), or the turn is gone.
+        Some(Started::Gone | Started::Cancelled(_)) | None => {}
         Some(Started::Failed(why)) => {
             tracing::warn!(run = %turn.run, why, "wake: a run door turn could not start; its turn is cancelled");
             let core = core.clone();
@@ -259,8 +292,11 @@ struct Plan {
     bin: std::path::PathBuf,
     args: Vec<String>,
     env: Vec<(String, String)>,
-    logs: Option<Logs>,
-    grant: Option<crate::runauth::RunGrant>,
+    /// The ask a card's reply answers (its run token carries it).
+    asked: Option<crate::runauth::AskReply>,
+    agent: String,
+    state: std::path::PathBuf,
+    run: String,
     claim_person: String,
     conversation: String,
     turn: i64,
@@ -269,7 +305,7 @@ struct Plan {
 impl Plan {
     /// Claims the turn and starts `kith AGENT --resume SESSION NOTE` with the claim in `KITH_TURN_CLAIM`, in its own group.
     fn start(self, writer: &Arc<CoreWriter>, handle: &tokio::runtime::Handle) -> Started {
-        let Plan { bin, args, env, logs, grant, claim_person, conversation, turn } = self;
+        let Plan { bin, args, env, asked, agent, state, run: run_id, claim_person, conversation, turn } = self;
         let run = Run {
             turn,
             conversation: &conversation,
@@ -278,23 +314,25 @@ impl Plan {
             what: "kith --resume",
             ended: "the wake run",
         };
-        let handle = handle.clone();
+        let (handle, session) = (handle.clone(), conversation.clone());
         run_door::start(writer, &run, move |claim| {
+            // The run token is minted here, after the claim: a turn that waits behind a writer mints none. A file or network
+            // card's once grant is consumed here too, and the profile built from the result.
+            let mut os_env: Vec<(std::ffi::OsString, std::ffi::OsString)> =
+                env.iter().map(|(k, v)| (k.into(), v.into())).collect();
+            let grant = crate::runauth::grant_for_env(&mut os_env, &agent, &session, asked);
             let mut cmd = Command::new(bin);
             cmd.args(args)
                 .env_clear()
-                .envs(env.iter().map(|(k, v)| (k, v)))
+                .envs(os_env.iter().map(|(k, v)| (k, v)))
                 .env("KITH_TURN_CLAIM", claim.to_string())
                 .stdin(Stdio::null());
-            let err_file = match logs {
-                Some(l) => {
-                    cmd.stdout(l.out).stderr(l.err);
-                    Some(l.err_path)
-                }
-                None => {
-                    cmd.stdout(Stdio::null()).stderr(Stdio::null());
-                    None
-                }
+            let err_file = if let Some(l) = log_files(&state, &run_id) {
+                cmd.stdout(l.out).stderr(l.err);
+                Some(l.err_path)
+            } else {
+                cmd.stdout(Stdio::null()).stderr(Stdio::null());
+                None
             };
             run_door::detach(&mut cmd);
             let bind = grant.map(|grant| {

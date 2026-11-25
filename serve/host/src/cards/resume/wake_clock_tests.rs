@@ -122,9 +122,15 @@ fn a_wake_turns_run_is_named_by_its_note_and_a_bot_or_channel_session_keeps_its_
 
 #[test]
 fn only_a_claude_engine_runs_detached_until_sched_turn_lands() {
-    assert_eq!(engine_gap(&listed("claude")), None);
-    assert_eq!(engine_gap(&listed("codex")), Some(ENGINE_GAP));
-    assert_eq!(engine_gap(&json!({"turn": 1})), Some(ENGINE_GAP), "an engine the core did not name is not assumed");
+    assert_eq!(engine_gap(&listed("claude"), None), None);
+    assert_eq!(engine_gap(&listed("codex"), None), Some(ENGINE_GAP));
+    assert_eq!(
+        engine_gap(&json!({"turn": 1}), None),
+        Some(ENGINE_GAP),
+        "an engine the core did not name is not assumed"
+    );
+    assert_eq!(engine_gap(&listed("claude"), Some("codex")), Some(ENGINE_GAP), "the agent's harness decides");
+    assert_eq!(engine_gap(&listed("codex"), Some("claude")), None);
     assert_eq!(ENGINE_GAP, "this agent's engine cannot run detached turns yet");
 }
 
@@ -212,7 +218,7 @@ async fn a_turn_whose_earlier_claim_ran_is_cancelled_interrupted_and_never_begun
     until("the cancel", || !calls(&log, "hostclaim.cancel").is_empty()).await;
     let cancels = calls(&log, "hostclaim.cancel");
     assert!(cancels[0]["reason"].as_str().is_some_and(|w| w.starts_with("interrupted")), "{cancels:?}");
-    assert!(calls(&log, "hostclaim.claim").is_empty());
+    assert_eq!(calls(&log, "hostclaim.claim"), Vec::<Value>::new());
 }
 
 #[tokio::test]
