@@ -6,6 +6,7 @@
 //! - [`cred`]: one generic Credential Manager item.
 //! - [`tree`]: the parent chain of a process (Toolhelp32), for the run-token ancestry check.
 //! - [`event`]: a named event, the host's stop signal.
+//! - [`pipe`]: a named pipe only this account can open, the host's run channel for `kith permit`.
 //!
 //! Compiled on Windows only; on every other platform the crate is empty.
 #![cfg(windows)]
@@ -14,6 +15,7 @@
 pub mod acl;
 pub mod cred;
 pub mod event;
+pub mod pipe;
 pub mod tree;
 
 mod sid;

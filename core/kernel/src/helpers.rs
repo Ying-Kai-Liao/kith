@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 pub fn beside(exe: &Path, name: &str) -> Option<PathBuf> {
     let exe = exe.canonicalize().ok()?;
     let dir = exe.parent()?;
-    [dir.join(name), dir.join("kith/bin").join(name)]
+    [dir.join(name), dir.join("kith").join("bin").join(name)]
         .into_iter()
         .find(|p| executable(p))
 }

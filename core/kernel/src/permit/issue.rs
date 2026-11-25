@@ -44,6 +44,29 @@ pub fn is_ask_id(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
 }
 
+/// What a run is told when the host is down and was not brought back.
+#[cfg(unix)]
+fn not_running(_: &Env, _: &Path) -> String {
+    "kith: no approval cards for this run: the Kith host isn't running; asks are refused\n"
+        .to_owned()
+}
+
+/// The same on Windows, with the reason: a host that cannot be reached or restarted is named, never just "not running". A
+/// terminal start (`KITH_PERMIT_NO_RESTART`) never tried a restart, so it is not blamed on one.
+#[cfg(windows)]
+fn not_running(env: &Env, kernel: &Path) -> String {
+    let why = if super::host::endpoint(env, kernel).is_none() {
+        super::host::ENDPOINT_UNKNOWN
+    } else if env.get("KITH_PERMIT_NO_RESTART").is_some() {
+        "the host is not up"
+    } else {
+        super::host::RESTART_REFUSED
+    };
+    format!(
+        "kith: no approval cards for this run: the Kith host isn't running ({why}); asks are refused\n"
+    )
+}
+
 /// export lines for sh, or exit 1 with one stderr line. Never raises: an owner run goes on without a prompt tool.
 pub fn issue(env: &Env, kernel: &Path, agent: &str, session: &str, pid: &str) -> Out {
     let Some(pid) = pyval::int(pid) else {
@@ -83,7 +106,7 @@ pub fn issue(env: &Env, kernel: &Path, agent: &str, session: &str, pid: &str) ->
             );
         if !restarted {
             return Out {
-                stderr: "kith: no approval cards for this run: the Kith host isn't running; asks are refused\n".to_owned(),
+                stderr: not_running(env, kernel),
                 code: 1,
                 ..Out::default()
             };

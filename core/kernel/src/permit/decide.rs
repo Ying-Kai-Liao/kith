@@ -15,6 +15,7 @@ pub fn deny(message: &str) -> Value {
 }
 
 /// The `message` of a decision (an allow has none).
+#[cfg(unix)]
 pub fn message_of(d: &Value) -> String {
     d.get("message")
         .and_then(Value::as_str)
@@ -23,6 +24,7 @@ pub fn message_of(d: &Value) -> String {
 }
 
 /// Whether the decision is a clear allow.
+#[cfg(unix)]
 pub fn allowed(d: &Value) -> bool {
     d.get("behavior").and_then(Value::as_str) == Some("allow")
 }
