@@ -234,6 +234,23 @@ pub(super) fn ask(
     let started = std::env::current_dir().unwrap_or_default();
     work_in(host, agent, &p, err)?;
     let at = conversation(host, agent, &p);
+    if bg && let Some(prev) = at.prev.as_ref() {
+        // The conversation being continued keeps options and a folder the row cannot carry either.
+        let kept = ["-p", "-m", "-e"].into_iter().find(|f| {
+            prev.get("opts")
+                .and_then(|o| o.get(*f))
+                .is_some_and(|v| !v.is_null())
+        });
+        let elsewhere = prev
+            .get("dir")
+            .and_then(Value::as_str)
+            .is_some_and(|d| std::path::Path::new(d) != started);
+        if let Some(flag) = kept.or(elsewhere.then_some("-C")) {
+            return Err(die(format!(
+                "kith ask: this conversation keeps {flag}, which a background ask does not carry yet"
+            )));
+        }
+    }
     if bg {
         return background(host, agent, rest, &p, &at, out);
     }

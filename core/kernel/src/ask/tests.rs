@@ -247,3 +247,21 @@ fn bg_refuses_the_options_the_row_cannot_carry_by_name() {
     }
     assert!(none.calls.borrow().is_empty());
 }
+
+#[test]
+fn bg_continuing_a_conversation_that_kept_a_project_is_refused() {
+    let dir = std::env::temp_dir().join("kith-ask-unit").join("machine");
+    std::fs::create_dir_all(&dir).expect("folder");
+    let key = format!("coder|{}", std::env::current_dir().expect("cwd").display());
+    let kept =
+        json!({ key: {"agent": "coder", "session_id": "s1", "opts": {"-p": "kith"}, "dir": "/"} });
+    std::fs::write(dir.join("ask.json"), kept.to_string()).expect("file");
+    let none = Fake::new(vec![]);
+    let (code, _, err) = go(&none, &["--bg", "coder", "-c", "next"]);
+    assert_eq!(code, 1);
+    assert_eq!(
+        err,
+        "kith ask: this conversation keeps -p, which a background ask does not carry yet\n"
+    );
+    assert!(none.calls.borrow().is_empty());
+}
