@@ -586,6 +586,22 @@ const CORE_CALL_METHODS: &[&str] = &[
     "wake.queueStatus",
     "wake.wait",
     "wake.released",
+    // `kith ask` once the asks are the core's (`kernel ask`, kernel/bin/kith-ask forwards there): the ledger's rows. Daemon only,
+    // like the wake rows: a core that does not answer is a refusal, nothing is written. `ask.unpark` is here for `--reply`; `ask.revokeEverywhere` is
+    // the revoke order's, not here.
+    "ask.open",
+    "ask.settle",
+    "ask.finish",
+    "ask.post",
+    "ask.read",
+    "ask.park",
+    "ask.capTold",
+    "ask.end",
+    "ask.to",
+    "ask.delegations",
+    "ask.record",
+    "ask.limits",
+    "ask.unpark",
 ];
 
 /// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
@@ -724,6 +740,10 @@ fn core_call_dispatch(method: &str, params: &Value) -> CallEnd {
             | "schedule.runs"
             | "wake.queueList"
             | "wake.queueStatus"
+            | "ask.delegations"
+            | "ask.record"
+            | "ask.limits"
+            | "ask.to"
     );
     match kith_core::reach(&folders, method, params, repeatable) {
         kith_core::Reached::Answered(answer) => CallEnd::Answered(answer),
