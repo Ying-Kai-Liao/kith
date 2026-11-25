@@ -1010,7 +1010,7 @@ async fn a_turn_parked_behind_a_direct_run_asks_less_and_less_often() {
 
 mod units {
     use crate::agent::bot::writer::{Adoption, Rel, adopt_backoff, budget, chain, chain_opened, chain_root};
-    use crate::agent::bot::writer_turn::{cancel_reason, end_for};
+    use crate::agent::bot::writer_turn::{cancel_reason, end_for, gone_for};
     use crate::agent::bot::writer_wait::lock_backoff;
     use crate::terminal::core_writer::End;
     use std::path::Path;
@@ -1037,6 +1037,30 @@ mod units {
         assert_eq!(end_for(Some(Rel::Left), false, false), End::Left, "a fork leaves the claim, the process lives on");
         assert_eq!(end_for(None, false, true), End::Room, "a room person's turn");
         assert_eq!(end_for(Some(Rel::OutOfUsage), false, true), End::OutOfUsage);
+    }
+
+    /// A killed process its parent has not reaped yet still runs to `kill(pid, 0)`: for a failed prompt it is gone (the turn ends
+    /// `exit`, flake F3), and a process that is still there after the wait ended an ordinary failed turn.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_prompt_counts_a_killed_unreaped_process_as_gone_and_a_live_one_as_there() {
+        use std::process::Command;
+        let mut zombie = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = zombie.id();
+        // SAFETY: a signal to the child this test started; it is not waited for, so it stays a zombie.
+        unsafe { libc::kill(libc::pid_t::try_from(pid).unwrap(), libc::SIGKILL) };
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(crate::terminal::pid_runs(pid), "the zombie still runs to kill(pid, 0)");
+        assert!(gone_for(Some(Rel::Died), pid), "a zombie is gone");
+        assert!(!gone_for(Some(Rel::Killed), pid), "the other ends keep the plain check");
+        zombie.wait().unwrap();
+
+        let mut live = Command::new("sleep").arg("30").spawn().unwrap();
+        let started = Instant::now();
+        assert!(!gone_for(Some(Rel::Died), live.id()), "a live process is there");
+        assert!(started.elapsed() >= Duration::from_secs(1), "it was waited for before the end was decided");
+        live.kill().unwrap();
+        live.wait().unwrap();
     }
 
     /// An end that reports `exit` cancels its turn after, because nothing in the host runs a requeued core turn.

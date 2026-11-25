@@ -1012,6 +1012,8 @@ fn owner_or(person: &str) -> &str {
     if person.is_empty() { "owner" } else { person }
 }
 
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 #[path = "core_writer_tests.rs"]
 pub(crate) mod tests;

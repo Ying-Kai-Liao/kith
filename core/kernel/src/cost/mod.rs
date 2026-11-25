@@ -59,15 +59,15 @@ impl Paths {
     }
 
     fn projects(&self) -> PathBuf {
-        self.home.join(".claude/projects")
+        crate::paths::join_parts(&self.home, ".claude/projects")
     }
 
     fn accounts_claude(&self) -> PathBuf {
-        self.machine.join("accounts/claude")
+        crate::paths::join_parts(&self.machine, "accounts/claude")
     }
 
     fn bridge_state(&self) -> PathBuf {
-        self.machine.join("bridge/state.json")
+        crate::paths::join_parts(&self.machine, "bridge/state.json")
     }
 }
 
@@ -156,6 +156,14 @@ pub fn run(p: &Paths, env: &Env, args: &[String]) -> Out {
     if matches!(a[0], "-h" | "--help") {
         return Out::ok(format!("{USAGE}\n"));
     }
+    if cfg!(not(unix))
+        && let Some(what) = needs_kith_auth(&a)
+    {
+        return Out::fail(
+            format!("kith-cost: not on Windows yet: {what} (retire-python P3-1)\n"),
+            1,
+        );
+    }
     // A malformed KITH_COST_NOW stops only the verbs that read the clock: the hooks and the text reports never do.
     let now = || Now::from_env(env.now.as_deref()).map_err(|e| broken(&e.0));
     if a[0] == "limit" && a.len() > 1 {
@@ -236,6 +244,17 @@ pub fn run(p: &Paths, env: &Env, args: &[String]) -> Out {
     match said {
         Ok(text) => Out::ok(text),
         Err(e) => broken(&e),
+    }
+}
+
+/// What a line asks that is answered by running `kith-auth` (the Python), which Windows does not have: the per-person views.
+/// They are refused by name there until P3-1 puts people in the core; the ledger and the other reports never ask it.
+fn needs_kith_auth(a: &[&str]) -> Option<&'static str> {
+    match a[0] {
+        "people" => Some("cost by person"),
+        "members" if a.len() > 1 => Some("cost by member"),
+        "bots" if a.contains(&"--json") => Some("cost of bots"),
+        _ => None,
     }
 }
 

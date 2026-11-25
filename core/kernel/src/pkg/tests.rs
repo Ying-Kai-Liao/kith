@@ -153,6 +153,16 @@ fn vector_entries(names: &[(&str, &str)]) -> Vec<(Vec<u8>, u64, i128)> {
         .collect()
 }
 
+/// The entries as a file system reads them back: Windows keeps file times in 100 ns ticks.
+fn as_stored(mut entries: Vec<(Vec<u8>, u64, i128)>) -> Vec<(Vec<u8>, u64, i128)> {
+    if cfg!(not(unix)) {
+        for e in &mut entries {
+            e.2 -= e.2 % 100;
+        }
+    }
+    entries
+}
+
 const ROLE_FILES: [(&str, &str); 5] = [
     ("agents/echo/role/agent.md", "agent.md"),
     ("agents/echo/role/notes.md", "notes.md"),
@@ -193,17 +203,27 @@ fn fingerprint_walks_the_package_the_python_way() {
     }
     fs::create_dir_all(t.0.join("state")).unwrap();
     let ctx = t.ctx();
-    let root = t.0.display().to_string();
+    // where the role's life is; every part is joined on its own, so the spelling is the system's own
+    let role = t.0.join("agents").join("echo").join("role");
+    let echo_at = t.0.join("agents").join("echo").display().to_string();
+    let seen = super::fingerprint_inputs(&ctx, &role).unwrap();
+    let want = as_stored(vector_entries(&ROLE_FILES));
+    assert_eq!(seen.0, echo_at);
+    assert_eq!(seen.1, want, "entries as read from disk");
     assert_eq!(
-        fingerprint(&ctx, &t.0.join("agents/echo/role")).unwrap(),
-        super::fingerprint_of(&format!("{root}/agents/echo"), &vector_entries(&ROLE_FILES))
+        fingerprint(&ctx, &role).unwrap(),
+        super::fingerprint_of(&echo_at, &as_stored(vector_entries(&ROLE_FILES)))
     );
     assert_eq!(
         fingerprint(&ctx, &t.0.join("agents/plain")).unwrap(),
-        super::fingerprint_of(&format!("{root}/state"), &vector_entries(&PLAIN_FILES))
+        super::fingerprint_of(
+            &ctx.state.display().to_string(),
+            &as_stored(vector_entries(&PLAIN_FILES))
+        )
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_fetch_folder_is_private() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -212,6 +232,17 @@ fn a_fetch_folder_is_private() {
     assert_eq!(mode, 0o700);
 }
 
+#[cfg(windows)]
+#[test]
+fn a_fetch_folder_is_owner_only() {
+    let d = super::fetch::TempDir::new().unwrap();
+    assert_eq!(
+        kith_winsys::acl::check(&d.0).unwrap(),
+        kith_winsys::acl::Check::OwnerOnly
+    );
+}
+
+#[cfg(unix)]
 #[test]
 fn rmtree_leaves_a_link_alone() {
     let t = Tmp::new();
@@ -234,10 +265,11 @@ fn pids_read_as_python_ints_and_probe_like_os_kill() {
     }
     let t = Tmp::new();
     let me = std::process::id();
+    // a pid of zero names a process group where `kill(2)` has them; Windows has none, so it is nobody's
     let cases = [
         (format!("{me}.a"), true),
-        (" +1.b".to_owned(), true),
-        ("0.c".to_owned(), true),
+        (" +1.b".to_owned(), cfg!(unix)),
+        ("0.c".to_owned(), cfg!(unix)),
         ("999999.d".to_owned(), false),
         ("junk.e".to_owned(), false),
     ];
@@ -295,7 +327,7 @@ fn read_text_reads_lines_as_python_does() {
     );
     let e = read_text(&t.0.join("gone.md")).unwrap_err();
     assert!(
-        e.msg.starts_with("[Errno 2] No such file or directory: '"),
+        e.msg.starts_with("[Errno 2] ") && e.msg.contains(": '"),
         "{}",
         e.msg
     );
@@ -349,7 +381,7 @@ fn resolve_snapshots_once_and_follows_edits() {
     assert!(!dir.join("memory").exists());
     assert_eq!(
         fs::read_to_string(dir.join(".home")).unwrap(),
-        format!("{}\n", t.0.join("agents/echo").display())
+        format!("{}\n", t.0.join("agents").join("echo").display())
     );
     let meta: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(dir.join(".meta.json")).unwrap()).unwrap();
@@ -536,7 +568,7 @@ fn the_cli_prints_what_the_python_printed() {
     let dirs: Vec<&str> = out.stdout.lines().collect();
     assert_eq!(dirs.len(), 2);
     assert!(
-        dirs[0].contains("/alpha@") && dirs[1].contains("/echo@"),
+        dirs[0].contains("alpha@") && dirs[1].contains("echo@"),
         "{dirs:?}"
     );
     let out = cli::run(&ctx, &args(&["resolve", "echo", "--json"]));
@@ -554,6 +586,7 @@ fn the_cli_prints_what_the_python_printed() {
     assert_eq!(out.code, 2);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_snapshot_that_throws_runs_the_live_folder() {
     let t = Tmp::new();
@@ -575,4 +608,59 @@ fn a_snapshot_that_throws_runs_the_live_folder() {
             live.join("gone.md").display()
         )
     );
+}
+
+/// The copy `cp -R -p` makes where there is no `cp`: folders, files and their times.
+#[test]
+fn copy_all_copies_a_tree_with_its_times() {
+    let t = Tmp::new();
+    t.put("src/a.txt", "a");
+    t.put("src/sub/deep/b.txt", "b");
+    fs::create_dir_all(t.0.join("src/empty")).unwrap();
+    set_mtime(&t.0.join("src/a.txt"), 1_577_836_800, 0);
+    super::store::copy_all(&t.0.join("src"), &t.0.join("dst")).unwrap();
+    assert_eq!(fs::read_to_string(t.0.join("dst/a.txt")).unwrap(), "a");
+    assert_eq!(
+        fs::read_to_string(t.0.join("dst/sub/deep/b.txt")).unwrap(),
+        "b"
+    );
+    assert!(t.0.join("dst/empty").is_dir());
+    let at = fs::metadata(t.0.join("dst/a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(at, UNIX_EPOCH + Duration::new(1_577_836_800, 0));
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_all_refuses_a_link() {
+    let t = Tmp::new();
+    t.put("src/a.txt", "a");
+    std::os::unix::fs::symlink("a.txt", t.0.join("src/l")).unwrap();
+    assert!(super::store::copy_all(&t.0.join("src"), &t.0.join("dst")).is_err());
+}
+
+/// Locked snapshot files can still be removed, whatever the system calls read-only.
+#[test]
+fn a_locked_snapshot_can_be_removed() {
+    let t = Tmp::new();
+    t.put("snap/x.txt", "x");
+    t.put("snap/sub/y.txt", "y");
+    super::store::lock_files(&t.0.join("snap")).unwrap();
+    assert!(
+        fs::metadata(t.0.join("snap/sub/y.txt"))
+            .unwrap()
+            .permissions()
+            .readonly()
+    );
+    super::py::rmtree(&t.0.join("snap"));
+    assert!(!t.0.join("snap").exists());
+}
+
+/// Package files are labelled with `/` between names on every system, so one package has one fingerprint.
+#[test]
+fn fingerprint_labels_use_slashes() {
+    let label = super::label_bytes(&Path::new("sub").join("memory").join("keep.md"));
+    assert_eq!(label, b"sub/memory/keep.md");
 }

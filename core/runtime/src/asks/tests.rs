@@ -553,6 +553,7 @@ fn two_opens_of_one_id_on_two_connections_let_exactly_one_through() {
                         pid: None,
                         conversation: None,
                         claim_id: None,
+                        ledger: None,
                     };
                     let r = open_in(&tx, &m, &|_| None, &o, false, NOW);
                     if r.is_ok() {
@@ -594,6 +595,7 @@ fn open_waits_for_the_write_lock_as_claim_tx_does() {
             pid: None,
             conversation: None,
             claim_id: None,
+            ledger: None,
         };
         let r = super::open(&mut core, &machine, &|_| None, &o, false, NOW);
         done.send(()).unwrap();
@@ -641,6 +643,7 @@ fn open_refuses_a_claim_id_that_is_not_the_asks_own_run() {
             pid: Some(pid),
             conversation: Some(conv),
             claim_id: Some(claim),
+            ledger: None,
         };
         super::open(core, &machine, &|_| None, &o, false, NOW)
     };

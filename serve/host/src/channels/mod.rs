@@ -234,6 +234,7 @@ mod guard_tests {
         assert!(!opted_in(v("off")) && !opted_in(v("")) && !opted_in(None));
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlink_to_the_default_is_the_default() {
         let default = tmp("sym-default");
