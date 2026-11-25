@@ -49,7 +49,8 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    /// Removes the socket, as the host stops: nothing finds a file that nobody listens on.
+    #[cfg_attr(not(unix), allow(clippy::unused_self))]
+    pub fn close(&self) {
     pub fn close(&self) {
         #[cfg(unix)]
         let _ = std::fs::remove_file(&self.path);
