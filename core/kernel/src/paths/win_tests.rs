@@ -126,3 +126,19 @@ fn lower(p: Option<PathBuf>) -> Option<String> {
 fn want(d: &Path, name: &str) -> Option<String> {
     lower(Some(d.join(name)))
 }
+
+#[test]
+fn a_joined_path_has_only_the_systems_separator() {
+    let base = PathBuf::from(if cfg!(windows) {
+        r"C:\Users\k\.kith"
+    } else {
+        "/Users/k/.kith"
+    });
+    let p = join_parts(&base, "agents/echo/role");
+    assert_eq!(p, base.join("agents").join("echo").join("role"));
+    if cfg!(windows) {
+        assert!(!p.to_string_lossy().contains('/'), "{}", p.display());
+    }
+    // a leading, doubled or trailing slash adds no empty part
+    assert_eq!(join_parts(&base, "/a//b/"), base.join("a").join("b"));
+}

@@ -133,6 +133,17 @@ fn getenv(env: Env<'_>, name: &str) -> String {
         .unwrap_or_default()
 }
 
+/// `base` with each `/`-separated part of `rel` joined on in turn, so on Windows the result has `\` between every name and
+/// no `/` from the text. A string like `agents/echo` joined whole would leave one `/` in the middle, which a prefix check,
+/// a comparison or a message then sees as a different spelling of the same folder.
+pub fn join_parts(base: &Path, rel: &str) -> PathBuf {
+    let mut out = base.to_path_buf();
+    for part in rel.split('/').filter(|s| !s.is_empty()) {
+        out.push(part);
+    }
+    out
+}
+
 /// A path the way Python's `Path()` spells it: no `.` parts, no doubled or trailing slash.
 fn norm(p: &Path) -> PathBuf {
     let out: PathBuf = p.components().filter(|c| *c != Component::CurDir).collect();
@@ -357,13 +368,19 @@ pub fn paths(home: &Path, kernel: &Path, env: Env<'_>) -> Paths {
         cache = dot.join("cache");
         store = dot.join("store");
     } else {
-        let config = first([home.join(".config/kith"), home.join(".config/hq")]);
+        let config = first([
+            join_parts(home, ".config/kith"),
+            join_parts(home, ".config/hq"),
+        ]);
         secrets = config.clone();
         machine = config;
-        logs = first([home.join("Library/Logs/kith"), home.join("Library/Logs/hq")]);
+        logs = first([
+            join_parts(home, "Library/Logs/kith"),
+            join_parts(home, "Library/Logs/hq"),
+        ]);
         cache = first([
-            home.join("Library/Caches/kith"),
-            home.join("Library/Caches/hq"),
+            join_parts(home, "Library/Caches/kith"),
+            join_parts(home, "Library/Caches/hq"),
         ]);
         store = agents.join(".store");
     }

@@ -128,3 +128,16 @@ fn the_engine_does_not_get_the_runs_own_variables() {
     let names = ["KITH_RUN_PROMPT", "KITH_RUN_MCP", "KITH_MODEL", "PATH", "KITH_RUNNER"].map(str::to_owned);
     assert_eq!(run_vars(names.into_iter()), vec!["KITH_RUN_PROMPT", "KITH_RUN_MCP"]);
 }
+
+#[tokio::test]
+async fn an_agent_stored_on_the_dropped_dsh_engine_gets_a_clear_refusal() {
+    let args = Args {
+        engine: "dsh".into(),
+        json: false,
+        resume: None,
+        permission_mode: None,
+        interactive: false,
+        task: vec!["hi".into()],
+    };
+    assert!(run(args).await.is_err_and(|e| format!("{e:#}").contains("no engine called dsh")));
+}

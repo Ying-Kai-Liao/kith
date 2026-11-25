@@ -42,6 +42,13 @@ pub(crate) use model::{Answered, Item, Waiter};
 #[cfg(unix)]
 pub(crate) use store::counts;
 pub(crate) use store::{load, save};
+// What the ask ledger needs of the queue (P2-3): it owes a wake in its own transaction and takes one back, on the state the
+// caller loaded (`write_tx`, or the tick's).
+pub(crate) use outside::Outside;
+#[cfg(all(test, unix))]
+pub(crate) use outside::{Check, Civil, PrView, Transcripts};
+pub(crate) use queue::{New, enqueue};
+pub(crate) use turns::withdraw_in;
 
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -133,7 +140,7 @@ pub(crate) fn withdraw_owed_in(
     after.prune(now);
     let mut n = 0;
     for s in sessions {
-        n += turns::withdraw_in(tx, &mut after, now, s, None)?;
+        n += withdraw_in(tx, &mut after, now, s, None)?;
     }
     if !persons.is_empty() {
         n += turns::withdraw_person_in(tx, &mut after, now, persons)?;

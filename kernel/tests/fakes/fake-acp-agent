@@ -13,6 +13,8 @@ FAKE_ACP_LOAD   set: initialize says the agent loads sessions (loadSession); ses
                 one agent_message_chunk "old: replayed history" (a resumed run must not take it for its answer)
 FAKE_ACP_EFFORT comma-separated values of a thought_level config option session/new lists (session/set_config_option takes
                 only these)
+FAKE_ACP_ASK    JSON {"call": tool_call update (or null), "request": session/request_permission params}: the agent reports the
+                call, asks, and its answer is "asked: <the outcome the client sent>"
 FAKE_ACP_PIDFILE  file to write this process's pid to (a test checks nothing is left running)
 FAKE_ACP_LOG    file to append every request's method and params to, one JSON line each
 """
@@ -92,6 +94,24 @@ for line in sys.stdin:
         elif mode == 'depleted':
             reply(id, error={'code': -32603, 'message': 'Internal error',
                              'data': {'errorKind': 'rate_limit', 'resetsAt': 1790000000}})
+        elif os.environ.get('FAKE_ACP_ASK'):
+            ask = json.loads(os.environ['FAKE_ACP_ASK'])
+            if ask.get('call'):
+                send({'jsonrpc': '2.0', 'method': 'session/update', 'params': {
+                    'sessionId': params.get('sessionId'), 'update': {'sessionUpdate': 'tool_call', **ask['call']}}})
+            send({'jsonrpc': '2.0', 'id': 9001, 'method': 'session/request_permission',
+                  'params': {'sessionId': params.get('sessionId'), **ask['request']}})
+            answer = {}
+            for l in sys.stdin:
+                m = json.loads(l)
+                if m.get('id') == 9001:
+                    answer = m.get('result', {}).get('outcome', {})
+                    break
+            send({'jsonrpc': '2.0', 'method': 'session/update', 'params': {
+                'sessionId': params.get('sessionId'),
+                'update': {'sessionUpdate': 'agent_message_chunk',
+                           'content': {'type': 'text', 'text': 'asked: ' + json.dumps(answer, sort_keys=True)}}}})
+            reply(id, {'stopReason': 'end_turn'})
         else:
             for part in (('', os.environ['FAKE_ACP_ANSWER']) if os.environ.get('FAKE_ACP_ANSWER') else ('echo: ', task)):
                 send({'jsonrpc': '2.0', 'method': 'session/update', 'params': {
