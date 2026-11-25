@@ -3,6 +3,9 @@
 //! differential harness (`kernel/tests/difftest`) fails when they differ.
 
 pub mod accounts;
+// Not Unix-only: `kith ask` on a Mac with no Python (a Windows owner) is this thin client of the core's ask rows; what needs a Unix
+// program (a callee started from a bash entry, ssh) says so by name.
+pub mod ask;
 // On Windows the ledger (tag, record, sync) and the reports of one agent run; the verbs that ask `kith-auth` for people
 // (`people`, `members`, `bots`) are refused by name until retire-python P3-1.
 pub mod cost;
@@ -57,6 +60,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "accounts-main-id",
         "accounts-run-chain",
         "acp",
+        // `kernel ask`: `kith ask` as a client of the core's ask rows (the ledger). A token of its own, not a wider `asks`: `kith-ask`
+        // forwards here only on a program that lists it and a Mac whose `asks` module is switched.
+        "ask-ledger",
         "cost",
         "cost-ledger",
         "delegation",
@@ -99,6 +105,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "accounts-main-id",
         "accounts-run-chain",
         "acp",
+        "ask-ledger",
         // The ledger's writers; `cost` itself (the per-person views) waits for P3-1, which takes `kith-auth` out of them.
         "cost-ledger",
         "delegation",
@@ -129,7 +136,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","ask-ledger","cost","cost-ledger","delegation","engine-run","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
         );
     }
 }

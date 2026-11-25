@@ -13,6 +13,7 @@ mod account_store;
 mod agent;
 mod analytics;
 mod api;
+mod ask_cmd;
 mod background;
 mod calls;
 mod cards;
@@ -534,6 +535,17 @@ enum KernelCmd {
     // argparse's own usage and errors (exit 2) belong to the verb, so clap must not answer -h.
     #[command(disable_help_flag = true)]
     Lifecycle {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
+    /// `kith ask` as a client of the core's ask rows (retire-python P2-3): the verbs of `kernel/bin/kith-ask`, with its words and exit codes.
+    /// `kernel/bin/kith-ask` hands its command line here when this program lists `ask-ledger` and the `asks` module is switched.
+    // kith-ask's own usage errors belong to the verb, so clap must not answer -h.
+    #[command(disable_help_flag = true)]
+    Ask {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
@@ -1779,6 +1791,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Wake { args } = cmd {
                 std::process::exit(wake_cmd::main(&args));
             }
+            if let KernelCmd::Ask { kernel, args } = cmd {
+                std::process::exit(ask_cmd::main(kernel, &args));
+            }
             #[cfg(unix)]
             if let KernelCmd::ProjectId { kernel, args } = cmd {
                 std::process::exit(project_id_cmd(kernel, &args));
@@ -1887,6 +1902,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Threads { .. }
                     | KernelCmd::Lifecycle { .. }
                     | KernelCmd::Wake { .. }
+                    | KernelCmd::Ask { .. }
                     | KernelCmd::ProjectId { .. }
                     | KernelCmd::RoomLedger { .. }
                     | KernelCmd::Pkg { .. }
