@@ -6,6 +6,7 @@
 
 use super::change::{self, Change};
 use super::{Ctx, clock, in_family, pick_from, state};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -30,10 +31,15 @@ struct Attempt {
     stderr: String,
 }
 
-/// Runs `argv` with `KITH_CHAIN_CHILD=1` added, stdin as it is, stdout and stderr held.
-fn attempt(argv: &[String]) -> std::io::Result<Attempt> {
-    let o = Command::new(&argv[0])
-        .args(&argv[1..])
+/// Runs `argv` with `KITH_CHAIN_CHILD=1` added, stdin as it is, stdout and stderr held. `env`: the environment the attempt is
+/// given instead of this process's (a launch whose own environment was built for the run, such as a schedule's turn).
+fn attempt(argv: &[String], env: Option<&HashMap<String, String>>) -> std::io::Result<Attempt> {
+    let mut cmd = Command::new(&argv[0]);
+    cmd.args(&argv[1..]);
+    if let Some(env) = env {
+        cmd.env_clear().envs(env);
+    }
+    let o = cmd
         .env("KITH_CHAIN_CHILD", "1")
         .stdin(Stdio::inherit())
         .output()?;
@@ -69,12 +75,12 @@ pub fn run(
     err: &mut dyn Write,
 ) -> i32 {
     let base = [kith.to_string_lossy().into_owned()];
-    run_with(ctx, agent, agent_md, &base, &[], args, out, err)
+    run_with(ctx, agent, agent_md, &base, &[], args, None, out, err)
 }
 
 /// [`run`] with the child's own command line: each attempt is `BASE... AGENT TAIL... [--account ID] ARGS...` (a run here
-/// starts its attempts as `kith kernel launch-exec AGENT --kernel DIR ...`).
-#[allow(clippy::too_many_arguments)]
+/// starts its attempts as `kith kernel launch-exec AGENT --kernel DIR ...`), and optionally its own environment.
+#[allow(clippy::too_many_arguments, clippy::implicit_hasher)]
 pub fn run_with(
     ctx: &Ctx<'_>,
     agent: &str,
@@ -82,6 +88,7 @@ pub fn run_with(
     base: &[String],
     tail: &[String],
     args: &[String],
+    env: Option<&HashMap<String, String>>,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
@@ -114,7 +121,7 @@ pub fn run_with(
             cmd.extend(["--account".to_owned(), entry.clone()]);
         }
         cmd.extend(args.iter().cloned());
-        let a = match attempt(&cmd) {
+        let a = match attempt(&cmd, env) {
             Ok(a) => a,
             Err(e) => {
                 let _ = writeln!(err, "kith: can't run {}: {e}", cmd[0]);
@@ -159,7 +166,24 @@ pub fn run_with(
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::limited;
+    use super::{attempt, limited};
+    use std::collections::HashMap;
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn an_attempt_gets_the_given_environment_and_the_chain_mark_and_nothing_else() {
+        let env: HashMap<String, String> = [("KITH_VIA", "schedule"), ("PATH", "/usr/bin:/bin")]
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .into();
+        let argv = [
+            "/bin/sh",
+            "-c",
+            "echo via=$KITH_VIA chain=$KITH_CHAIN_CHILD home=${HOME-unset}",
+        ]
+        .map(str::to_owned);
+        let a = attempt(&argv, Some(&env)).expect("sh runs");
+        assert_eq!(a.stdout, "via=schedule chain=1 home=unset\n");
+    }
 
     #[test]
     fn a_short_failure_naming_a_limit_is_limited() {
