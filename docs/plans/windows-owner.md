@@ -17,7 +17,7 @@ Kai 2026-11-25 reversed Q1. Kai's answers to section 7 are recorded in section 7
 
 - **The desktop app is Electron, not Tauri.** `apps/desktop/package.json:44` (`electron ^44.5.1`), `:32` (`dist:win`),
   `apps/desktop/electron-builder.yml:1,109-129` (NSIS, x64, per-user). The plan keeps Electron.
-- **CI runner: `windows-2025`, not Server 2022** (default for Q4, pending Kai's confirmation). Reason: Windows 11 24H2 and Server 2025 share one base
+- **CI runner: `windows-2025`, not Server 2022** (Q4, answered "ok" 2026-11-25). Reason: Windows 11 24H2 and Server 2025 share one base
   (build 26100), so ConPTY, job objects and named pipes behave as they do on Kai's target. Today's job says
   `windows-latest` (`.github/workflows/ci.yml:766`). As far as I know (from memory, not checked this call) that label
   already resolves to 2025; the first run's "Runner Image" log line confirms it. Pin `windows-2025` and keep one
@@ -163,7 +163,7 @@ flowchart LR
   - The transcript reader must accept a torn last line, since a hard kill can cut one.
 - **D7. Bash and PowerShell in owner runs.** Claude Code's Bash tool on Windows runs in Git Bash (my understanding; W1 confirms
   it), so the bash judge stays the guard.
-  - Owner settings deny Claude Code's PowerShell tool (default for Q5, pending Kai's confirmation). Allowed, it would be an unguarded path around must-ask.
+  - Owner settings deny Claude Code's PowerShell tool (Q5, answered 2026-11-25). Allowed, it would be an unguarded path around must-ask.
     No PowerShell judge is planned.
 - **D8. Staging.** Kai asked for full functionality. It ships in three milestones so each one can be used:
   - **α: an owner runs agents on Windows.** App and channel chats, terminal runs, cards and permits, cost.
@@ -405,7 +405,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     no `kernel/bin`, no `kernel/lib`), `serve/host/src/update/release.rs:21-26`.
   - Unsigned here. W7s adds signing (Q2, answered 2026-11-25).
   - **Start after W2a.**
-- [x] **W7s. Signing in the release job (Azure Trusted Signing).** Owner: windows-owner-build. Status: PR #1191 open. S. Depends: W7.
+- [ ] **W7s. Signing in the release job (Azure Trusted Signing).** Owner: windows-owner-build. Status: PR #1191 open. S. Depends: W7.
   - Files: `release.yml` (a signing step on the Windows zip's exes). It skips cleanly without the signing secrets.
   - Service and setup: Q2, answered 2026-11-25. Kai's Azure setup steps are in `docs/windows-signing.md` (on #1191). The
     organisation validation in Australia takes 1-30 business days.
@@ -427,7 +427,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
 - [ ] **W10. Guard and cards for Windows owner runs.** Owner: unowned. Status: not started. M. Depends: W1, W5b.
   - Files: `core/kernel/src/launch/judge.rs` (Windows absolute paths, `/c/` mapping), `guard.rs` (Windows rows),
     `kernel/tests/difftest/golden-lib/guard-must-ask.json` (Windows rows added, frozen), and owner settings that deny the
-    PowerShell tool (D7, default for Q5, pending Kai's confirmation). W1 records the tool's exact name for the deny rule.
+    PowerShell tool (D7, Q5 answered 2026-11-25). W1 records the tool's exact name for the deny rule.
 - [ ] **W11. Service verbs and host timers.** Owner: unowned. Status: not started. M. Depends: W2a; the cost timer on W5a and W13; the backup timer on P4-14; the wake
   and ask timer on P2-2 and P2-3.
   - Files: `serve/host/src/kernel.rs:22` (on Windows, `serve start|stop|restart|status` are answered by the host);
@@ -529,7 +529,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     (`kith.exe` as the one program name), `host-controller.ts:176` (`ensureCli` on Windows runs the bundled installer verb,
     not `sh`), `:266` and `shared/host-service.ts:68` (a Windows restart path), `ci.yml` (a `desktop-win` job running
     `dist:win` on `windows-2025`), `release.yml` (`desktop-win` job, electron-updater NSIS).
-  - Unsigned for Kai's own use; signed before a public release (Q2).
+  - Signed with the same Azure account as W7s (Q2, answered 2026-11-25).
 - [ ] **W17. Windows router: every owner verb in Rust or a named refusal.** Owner: windows-owner-build. Status: #1182 open. M. Depends: W2a.
   - Files: `serve/host/src/kernel.rs:47-77,280-301`. On Windows, `Route::Kernel` answers from a table: a verb that is ported
     runs, and any other answers "not on Windows yet: <verb> (retire-python Pn-m)". There is no bash fallback on Windows.
@@ -591,9 +591,9 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     - antivirus holding a file during the update rename
     - Windows Terminal attach and resize
     - Ctrl-C in the trampoline
-  - It runs on a free UTM VM on the Mac with Windows 11 ARM, the x64 build under emulation (default for Q3, pending Kai's confirmation). A check that can't be
-    judged under emulation is marked as needing x64 hardware. It runs before any public Windows release, together with
-    signing (Q2).
+  - Q3 (answered 2026-11-25): the scripted checks run as a GitHub Actions e2e (W18) on free `windows-2025` runners, not on a local
+    VM. Only what truly needs a person stays in this list, and a person runs it on real x64 hardware before any public Windows
+    release, together with signing (Q2).
   - Additions (2026-11-25, architect): Defender and SmartScreen on `kith-boxsh.exe`; ACE propagation in a OneDrive folder; a
     non-English locale; Windows 11 Home.
   - Q3 and "CI is enough" (Kai, 2026-11-25): W18 scripts every check that CI can judge. This list keeps only what truly needs
@@ -903,17 +903,22 @@ W16, W15, W19 (run).
 W18 skeleton. None of them touches the bash launch or the Python, and none waits on a P item. The only overlap is cfg lines in
 serve/host (W2a) and the `kith-kernel` module list (W5a); retire-python managers should rebase over them, not rework them.
 
-## 7. Defaults pending Kai's confirmation (2026-11-24)
-- **Q1. Invited people on a Windows-hosted agent: refused for now.** WI6 stands. No Windows guest sandbox is planned in this
-  milestone. A Windows sandbox for guest runs (AppContainer or a restricted token plus a job object, with a TLA+
-  revoke-versus-start model like the doors') would be a later L-sized REDESIGN, opened only if Kai asks. W18 scenario (j)
-  checks the refusal.
-- **Q2. Signing: unsigned for Kai's own use, signed before any public Windows release.** W7 and W16 ship unsigned. Signing
-  (Azure Trusted Signing or an OV certificate; it costs money) is a gate on the first public Windows release, not a package
-  here.
-- **Q3. Manual checklist hardware: a free UTM VM on the Mac running Windows 11 ARM,** with the x64 build under emulation. W19
-  says so. A real x64 machine is needed only if a check can't be judged under emulation; W19 marks any such check.
-- **Q4. CI runner: `windows-2025`.** It shares Windows 11 24H2's base. The `windows-2022` row runs in the nightly e2e only.
-- **Q5. Claude Code's PowerShell tool is denied in owner runs.** D7 and W10 deny it. **The PowerShell judge REDESIGN is
-  dropped.** If W1 finds no PowerShell tool, the deny rule is harmless and stays, so a later Claude Code release that adds
-  one is closed from the start.
+## 7. Kai's answers (2026-11-25)
+- **Q1. Invited people and bot guests on a Windows host.** Kai: "no windows should work finely like mac". They work on a Windows
+  host as on a Mac. This reverses the old default (refusal, WI6). The work is W20-W28, and W18 (j) becomes a guest run.
+- **Q2. Signing.** Kai: "yeah but let sign it asap", and for the service "go fro your recommendation". Azure Trusted Signing (now
+  Azure Artifact Signing) signs in `release.yml` and skips cleanly without secrets: W7s, PR #1191. Kai's Azure setup steps are
+  in `docs/windows-signing.md`; from Australia that means organisation validation, 1-30 business days. W16 signs the installer
+  later with the same account.
+- **Q3. Hand checks.** Kai: "can you make it happen on gh?". They become a scripted GitHub Actions e2e (W18) on free
+  `windows-2025` runners. Only what truly needs a person stays in W19.
+- **Q4. CI runner.** Kai: "ok". `windows-2025`, plus `windows-2022` in the nightly.
+- **Q5. PowerShell tool.** Kai: "not sure about this but as long as it works, fine". The tool stays denied in owner runs (D7,
+  W10), the PowerShell judge REDESIGN stays dropped, and W18 checks that an agent works fully with Bash only. If W1 finds no
+  PowerShell tool, the deny rule is harmless and stays, so a later Claude Code release that adds one is closed from the start.
+- **Q6 (new). A guest box that can't reach a local proxy without admin (P-G7 fails).** One UAC prompt the first time the owner
+  allows guests on this PC, for a loopback exemption. Answered 2026-11-25 by standing answer (conservative default); Kai may
+  overturn.
+- **Q7 (new). The P3-12 doors.** Keep them and port them to Windows (W27). Answered 2026-11-25 by standing answer likewise; Kai
+  may overturn.
+- **Testing.** Kai: "CI is enough, reduce local runners and tests as much as posible". Windows is checked in CI only.
