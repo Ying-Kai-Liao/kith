@@ -57,6 +57,7 @@ mod usage;
 mod voice;
 mod voice_local;
 mod wake;
+mod wake_cmd;
 mod watchdog;
 
 use agent::backends;
@@ -536,6 +537,15 @@ enum KernelCmd {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
+    /// `kith wake` as a client of the core's wake rows, for a Mac whose wake queue is the core's (`kernel/bin/kith` routes it here
+    /// then; no Python): `enqueue`, `withdraw`, `withdraw-person`, `take`, `done`, `back`, `wait`, `status`, `ls` as `kernel/bin/kith-wake`
+    /// prints them; `drain` and `deliver` do nothing (the host ticks the queue).
+    // kith-wake's own usage errors (exit 2) belong to the verb, so clap must not answer -h.
+    #[command(disable_help_flag = true)]
+    Wake {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
@@ -1766,6 +1776,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Lifecycle { kernel, args } = cmd {
                 std::process::exit(lifecycle_cmd::run(kernel, &args));
             }
+            if let KernelCmd::Wake { args } = cmd {
+                std::process::exit(wake_cmd::main(&args));
+            }
             #[cfg(unix)]
             if let KernelCmd::ProjectId { kernel, args } = cmd {
                 std::process::exit(project_id_cmd(kernel, &args));
@@ -1873,6 +1886,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
                     | KernelCmd::Lifecycle { .. }
+                    | KernelCmd::Wake { .. }
                     | KernelCmd::ProjectId { .. }
                     | KernelCmd::RoomLedger { .. }
                     | KernelCmd::Pkg { .. }
