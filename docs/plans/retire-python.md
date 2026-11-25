@@ -112,13 +112,13 @@ assembled settings file, and the claim and lock path is already Rust.
 - [x] **P1-8. `kith_guard` must_ask into Rust.** Port `must_ask` into `core/kernel/src/launch/guard.rs` (the rules are mirrored already); `pkg/problems.rs` stops running `python3 -I` and `pkg::Ctx` loses its `python` field. Landed in `launch/judge.rs` + `pyport.rs` (not in `guard.rs`), with the Python's answers frozen in `golden-lib/guard-must-ask.json` and rechecked by `kernel/tests/kith-guard-golden-check`. The host's two readers of `kith_guard.py` (`serve/host/src/cards/access_tests.rs:15` and `:553`) were NOT repointed: P5-3 does it. `kith_guard.py` goes with its last user (P5-3). PORT AS-IS. S. Depends: none. Owner: retire-python-now-guard-2. #1111 (merge 0b6aa970b). Done 2026-11-21 (module `launch/judge.rs`, frozen golden `kernel/tests/difftest/golden-lib/guard-must-ask.json`).
 - [x] **P1-9. Route `kith-permit` to `kith kernel permit`.** Hooks `denied`/`once` (`launch/settings.rs:994-1002`), the `kithpermit` MCP (`launch/mcp.rs:14`), `issue` and `apply` (`assemble.rs:1458-1476`) and the calls in `bin/kith:1129,1352,1466,1590-1627`; `kernel permit` covers all of it (`core/kernel/src/permit/`) but nothing points at it. Its door and bug halves still shell to `kith_door` and `kith_bug` (`permit/door.rs:25,61`, `permit/bug.rs:26`); those go with P4-17 and the doors' removal (P3-12 dropped 2026-11-27). PORT AS-IS. M. Depends: none. Owner: retire-python-now-permit-2 (#1109). Status: done (#1109, merge e17e29d66; `permit` line in core-switched.txt is the switch and the rollback; `kernel/bin/kith-permit` stays the Python for kith-bug, the door and the guest-helper checks until P4-17 and the doors' removal).
 - [x] **P1-10. Delete the `kith-cost` stub, repoint its other callers, rewrite `dev.kith.cost`.** Write down the new plist by hand (`kith-uv run --no-project -- <kith> cost sync`, or the host's own timer) and apply it on both Macs. Repoint `kith cost` itself (`kernel/bin/kith:167` -> `kith-core.sh:119`, which execs `bin/kith-cost`) to `kith kernel cost`. Drop both cost-hook fallbacks to the stub (`kernel/bin/kith:945`, `core/kernel/src/launch/settings.rs:782`): the PR writes no cost hook when there is no program. This Mac's 02a1921 program lacks `cost-ledger`, so P0-9 comes first. Then delete `kernel/bin/kith-cost` and `kernel/tests/kith-cost-stub-check`. DELETE NOW after the plist. S. Depends: P1-4, P1-11, P0-9, P1-7. Owner: retire-python-now-cost-3 (#1112). Status: done in #1112 (merge after main rewrites the plist).
-- [ ] **P1-11. Test that `kith-uv` runs a plain program** with no Python. First half done: `uv run --no-project -- /bin/echo ok` printed `ok` with uv 0.13.0 on 2026-11-21. Still open: under launchd with Full Disk Access (the SSD case), on a Mac with no `python3` and `UV_PYTHON_DOWNLOADS=never`. `kith-uv run --no-project -- <kith> ...` is the shape P1-10 and P1-17 depend on. Do the open half before anything that rewrites a plist. PORT AS-IS (a test). S. Depends: none. Owner: unowned. Status: half done.
+- [ ] **P1-11. Test that `kith-uv` runs a plain program** with no Python. First half done: `uv run --no-project -- /bin/echo ok` printed `ok` with uv 0.13.0 on 2026-11-21. Still open: under launchd with Full Disk Access (the SSD case), on a Mac with no `python3` and `UV_PYTHON_DOWNLOADS=never`. `kith-uv run --no-project -- <kith> ...` is the shape P1-10 and P1-17 depend on. Do the open half before anything that rewrites a plist. PORT AS-IS (a test). S. Depends: none. Owner: unowned. Status: half done. S2 steps are in Kai's to-dos B. Open point for the architect: uv 0.13.0 `run --no-project` still looks for an interpreter, and exits 2 with "No interpreter found" when none exists, so "a Mac with no python3" can't pass as written.
 - [ ] **P1-12. One run path.** **REDESIGN**, design agreed (`/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-21-one-run-path/design.md`): R0 splits plan/emit_json; R1 moves the accounts chain into Rust; R2 adds terminal/run planning; R3 adds the `kith kernel launch --exec` executor, shipped off; R4 switches it on and main soaks it; R5 deletes the bash body. R0 waits for #1109, #1111 and #1112 to merge; R1 waits for #1108 and #1113; R4 depends on P1-15 M1. The terminal calls `kith kernel launch --interactive`, then `kernel threads run`; `bin/kith` keeps nothing but argv. The Rust launch already assembles the same settings (`launch/settings.rs`, `assemble.rs`); missing are the terminal-only parts: the backup-account walk, `--held`, the take-over note and the outbox env. Removes the bash launch body (`:372-1646`) and its inline Python: settings in one `python3 -I -c` (`:964-1170`), facets (`:670`), accounts launch-env (`:714-734`), runenv (`:1421`), uuid (`:1529`), realpath and the stub lookup (`:1544,:1548`). Also makes chat-platform turns and card resumes Rust. Folds in P1-13, P1-14 and P1-18 so they are not designed twice. L. Depends: P1-7, P1-9, P1-15 (M1). Owner: retire-python-now. Status: R3a/R3b done (R3a #1173, R3b #1196, both shipped off behind `launch-exec` / `launch-exec-term`); next R4 (switch on; gated on the thread-writers and revoke-access model re-sync), then R5 (delete the bash body).
 - [ ] **P1-13. `kith_settings.py` reads** (permission_mode, reads-others, call_model: `kernel/bin/kith:838,841,1373`) go to `kith kernel settings`, which answers every read; only the `set` verbs are routed today. The plugin's read (`register.tsx:127`) is P4-23. Folds into P1-12 (the bash launch body that reads them goes). PORT AS-IS. S. Depends: P1-12. Owner: with P1-12. Status: not started.
 - [ ] **P1-14. `kith_accounts.py` chain verbs** (launch-env, main-env, run-chain, `backups-json`, `accounts-json`: `kernel/bin/kith:342-343,596,609,714-734`; the host's `agent/hq.rs:972-1014`; `kith-pkg`, `kith-scratch`) onto `kith kernel account|chain`. Folds into P1-12. The module itself goes in P5-3 (its last users are `kith-pkg` and `kith-scratch`, P4). PORT AS-IS. M. Depends: P1-12. Owner: with P1-12. Status: not started.
-- [ ] **P1-15. `kith-auth mcp-config` and `exec` in process.** **REDESIGN**, design agreed (`/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-21-mcp-exec/design.md`): M0 is a failing-test check of guest launches on an authority tombstone (in progress); M1 is secrets Authority + mcp_config + exec in Rust; M2 is main's Keychain check on Kai's Mac; M3 adds a may() check in exec. Order: M1 comes after M0 and after core-lock PR 1 (both touch `secrets.rs`); M3 is a separate, optional PR. The Rust launch calls `people.mcpConfig` in process (a switched Mac's `kith-auth` already routes it to `people.*` at `:3477-3513`, but as a Python process); shared MCP servers start as `kith kernel secrets exec --for A SVC -- cmd`. This is the seed of "keys never in the agent, one check per call" (decisions 2026-11-21). M. Depends: none. Owner: retire-python-now. Status: M0 landed (#1119, merge f75be34c5: guest/room-person --launch-json on an authority tombstone, bug confirmed); M1 landed (#1150, merge a9127eb7f); M2 (main's Keychain check on Kai's Mac) open; M3 optional.
+- [ ] **P1-15. `kith-auth mcp-config` and `exec` in process.** **REDESIGN**, design agreed (`/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-21-mcp-exec/design.md`): M0 is a failing-test check of guest launches on an authority tombstone (in progress); M1 is secrets Authority + mcp_config + exec in Rust; M2 is main's Keychain check on Kai's Mac; M3 adds a may() check in exec. Order: M1 comes after M0 and after core-lock PR 1 (both touch `secrets.rs`); M3 is a separate, optional PR. The Rust launch calls `people.mcpConfig` in process (a switched Mac's `kith-auth` already routes it to `people.*` at `:3477-3513`, but as a Python process); shared MCP servers start as `kith kernel secrets exec --for A SVC -- cmd`. This is the seed of "keys never in the agent, one check per call" (decisions 2026-11-21). M. Depends: none. Owner: retire-python-now. Status: M0 landed (#1119, merge f75be34c5: guest/room-person --launch-json on an authority tombstone, bug confirmed); M1 landed (#1150, merge a9127eb7f); M2 (main's Keychain check on Kai's Mac) open, see Kai's to-dos A; M3 optional.
 - [ ] **P1-16. `adapters/harness.py` through the core's ACP engines.** **REDESIGN**, design agreed (`/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-21-harness-oneshots/design.md`): H0 = #1069; H1 is the new verb `kith kernel engine-run`, which runs `kith_acp::run_once` in process beside `runonce.rs`, has capability token `engine-run`, and falls back to harness.py on exit 78 until H3. One-shots (`bin/kith:1454`) go through it. Engine decision (Kai, 2026-11-21: "I use codex hermes and claude code"): Claude Code is not a harness.py engine (`bin/kith` runs it), so it belongs to P1-12. Codex runs over ACP through codex-acp (H1); H3 adds resume and interactive. Hermes runs over its own `hermes acp` (H2), with no Rust adapter: sessions resume, MCP is per run, session modes are accept_edits / dont_ask+--approve / default, and it is never started with --accept-hooks. H2 also proves codex and hermes on the real engines. opencode, qwen and other engines with an ACP mode stay behind the generic ACP path, one-shot only. pi, antigravity (alias agy), amp and vibe stay refused by #1069's rule. dsh is dropped in H3; its `kith-auth get` call goes with harness.py. H3 ports codex and hermes terminal argv, deletes harness.py, and makes exit 78 final. Gate: if codex-acp lacks resume or effort, H3 stops and goes back to the architect. M. Depends: H0 (#1069) and P1-10 (#1112); P1-12 only for H3, the interactive part. Owner: retire-python-now. Status: done through H3 (#1176: `engines::tui_argv`, `kernel engine-run --interactive`, harness.py and dsh deleted, exit 78 final, Codex MCP asks fix B) plus the Hermes refusal (#1210). Still open: Kai's terminal checklist A-D after his next CLI install (follow-up h). Left `[ ]` for that.
-- [ ] **P1-17. `kith-serve-launch` becomes `kith serve --supervise`.** **REDESIGN**, design agreed (`/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-21-serve-supervise/design.md`): S1 is the code, after #1117; S2 is main proving Full Disk Access and rewriting the plist; S3 deletes `kith-serve-launch`. The host binary takes the launcher role (child, signal forwarding, 20 s SIGKILL, ported from 60 lines) and starts behind `kith-uv` as a plain program; the `launcher` of `~/.kith/serve/config.json` and the `dev.kith.serve` plist change with it. S. Depends: P1-11. Owner: retire-python-now. Status: S1 landed (#1122, merge 63385c036; #1117, merge 808e06a69, first made the real dev.kith.serve job refuse a throwaway HOME); S2 and S3 open.
+- [ ] **P1-17. `kith-serve-launch` becomes `kith serve --supervise`.** **REDESIGN**, design agreed (`/Users/Kath/kith/agents/architect/files/kith/designs/2026-11-21-serve-supervise/design.md`): S1 is the code, after #1117; S2 is main proving Full Disk Access and rewriting the plist; S3 deletes `kith-serve-launch`. The host binary takes the launcher role (child, signal forwarding, 20 s SIGKILL, ported from 60 lines) and starts behind `kith-uv` as a plain program; the `launcher` of `~/.kith/serve/config.json` and the `dev.kith.serve` plist change with it. S. Depends: P1-11. Owner: retire-python-now. Status: S1 landed (#1122, merge 63385c036; #1117, merge 808e06a69, first made the real dev.kith.serve job refuse a throwaway HOME); S2 and S3 open; S2 steps are in Kai's to-dos B.
 - [ ] **P1-18. `kith_readfence.py`.** Delete with the bash launch: only `bin/kith:1306`'s guest fallback names it; the Rust launch always uses `kernel readfence` (`core/kernel/tests/readfence_parity.rs` runs `python3`: a golden replay). DELETE with P1-12. S. Depends: P1-12. Owner: with P1-12. Status: not started.
 - [ ] **P1-19. Delete `kith-sessions`.** Goes when the `KITH_CORE=python` fallbacks go: `bin/kith:1646`, `kith-core.sh:110`, the launch fallback hook (`launch/settings.rs:794`), `kith-auth:2550`; keep `transcripts_preflight.rs:85`'s check of a live old hook until both Macs run the head. `kith kernel threads` is the complete twin. Also deletes `kernel/lib/kith_lifecycle.py` (moved here from P0-8) and makes `kith rollback` for `claims` and `transcripts` refuse (rule 6). Replace its entries in the `thread-writers` and `writer-lock` models' `FILES`. DELETE. S. Depends: P0-8, P1-12. Owner: unowned. Status: not started.
 
@@ -152,7 +152,7 @@ in progress.**
 - [ ] **P3-9. `kith-memory ls|search`** (owner search; guest branch to the run socket) in the same PR as P3-8. PORT AS-IS. S. Depends: P3-8, and P3-10 if it deletes the file (`kith-info` loads `kith-memory` as a module, `:404,:423`). Owner: unowned. Status: not started.
 - [ ] **P3-10. `kith-info` answered by the host in Rust** from `pkg::resolve`, `schedule.jobs`, cost views, facets and the package: no subprocess, no 30 s cache; the JSON shape stays (`serve/docs/bot-info.md`). Callers `agent/hq.rs:701`, `bin/kith:337`. REDESIGN, needs architect design first. M. Depends: P2-5. Owner: architect design pending. Status: not started.
 - [ ] **P3-11. `kith-people`, `kith_people_access.py`, `kith_host.py`.** Route `kith people`/`invite` to `kernel people` (`main.rs:492`, exists unrouted; access goes to core `people.grant|revoke`). PORT AS-IS. S. Depends: none. Owner: unowned. Status: not started.
-- [x] **P3-12. DROPPED 2026-11-27.** Guest doors, process side (`kith-door`, `kith_door.py`, `kith_door_core.py`, `door-chrome`, `door-preload.mjs`).** Kai, 2026-11-27: "lets drop the sandbox thing for now. Its too complicated for now". Not ported, and no redesign. The Mac doors stay until their Python goes; then they are removed, not rewritten in Rust. The Windows doors (W27) are parked. This replaces the earlier "keep and port the doors" answer. L. Depends: P1-9. Status: dropped.
+- [x] **P3-12. DROPPED 2026-11-27.** Guest doors, process side (`kith-door`, `kith_door.py`, `kith_door_core.py`, `door-chrome`, `door-preload.mjs`). Kai, 2026-11-27: "lets drop the sandbox thing for now. Its too complicated for now". Not ported, and no redesign. The Mac doors stay until their Python goes; then they are removed, not rewritten in Rust. The Windows doors (W27) are parked. This replaces the earlier "keep and port the doors" answer. L. Depends: P1-9. Status: dropped.
 - [ ] **P3-13. Host `agent/gate/reclaim.rs:67` runs `python3 <agents>/resource-manager/role/tools/res.py`**: product code hard-wiring one agent's Python tool. REDESIGN into a declared package hook, or DROP. S. Depends: none. Owner: unowned. Status: not started (flag).
 
 ## Phase 4: operator tools (parallel, S-M each)
@@ -357,6 +357,126 @@ checkout (read the MacBookPro first, P0-10), pointing flow at main, and the `pyt
 
 Old text that code comments still cite: "rule 3" (the stub rule) is section 1's last bullet; "section 3.1" (the window and the
 three-layer gate) is the dropped Gates above; "R9" means P5.
+
+## Kai's to-dos (need his Mac and launchd)
+
+Run everything as the macOS user **Kath**. `id -un` should print `Kath`, and `id -u` should print `502`. launchd and the login Keychain belong to the account, so a step run as `kai` checks the wrong things. Don't run `kith serve start` or `restart`: they build from `~/.kith/hq-serve`. Don't run a local `kith-serve-check`: it takes over `dev.kith.serve`.
+
+### A. P1-15 M2: start a Keychain-backed MCP server through the program
+
+What M2 must prove (mcp-exec design §4, M2 row): one agent with a Keychain-backed service starts its server through `kith kernel secrets exec`, with no Keychain prompt, and an auth.log line appears. No step below prints a secret value.
+
+0. **Install a CLI that has #1150.**
+   - Main uses its usual local-build install (package-release, then `install.sh` with `KITH_INSTALL_CLI_ONLY=1`, then the new binary's `kith serve install`), from origin/main at or after `a9127eb7f`.
+   - Check: `~/.kith/cli/current/bin/kith kernel version | jq -e '.modules | index("secrets-exec")'`
+     - OK: it prints a number and exits 0. The token is listed at `core/kernel/src/lib.rs:98`.
+     - Fail: it prints `null` and exits 1. That is still the old build (today: `0.1.4-rust.8bb2d72`). Stop here.
+1. **Find the service, with no values shown.**
+   - Run: `kith auth keys --json | jq -c '.[] | select(.service=="jev-browser") | {profile, vars, agents}'`
+   - OK: `{"profile":"jev-browser/kai","vars":["TYPESAFE_API_KEY"],"agents":[...,"personal",...]}`. The verb never prints values (`kernel/bin/kith-auth:1510-1522`, routed from `kernel/bin/kith:196`).
+   - Open point: `keys` doesn't show the reference kind. Refs that cards and the import write are `keychain:` (`core/runtime/src/authority/secret_writes.rs:269`). An `env:` or `env-file:` ref would make this step test nothing.
+2. **The config a run gets names the program.**
+   - Run: `kith kernel launch mcp personal | jq '.mcp_servers["jev-browser"] | {command, args: .args[0:7]}'`
+   - OK: `command` is `/Users/Kath/.kith/cli/0.1.4-rust.<v>/bin/kith`, and `args` starts `["kernel","secrets","exec","--for","personal","jev-browser","--"]` (`core/kernel/src/secrets/mcp.rs:176-199`, `serve/host/src/launch_cmd.rs:279-317`). This step also does one Keychain read (`mcp.rs:142`), so no dialog may appear.
+   - Fail: `command` ends in `/bin/kith-auth`. Either the build lacks the token or `KITH_SECRETS_EXEC=python` is set (`mcp.rs:26-39`).
+   - Fail: stderr says `jev-browser skipped this run, its secrets don't resolve`. The key is missing.
+   - Fail: stderr says `no shared services this run (kith-auth: ...)`. Read that line; it is usually the core (see step 3).
+3. **Run exec directly, with a harmless command.**
+   - Run: `~/.kith/cli/current/bin/kith kernel secrets exec --for personal jev-browser -- /bin/sh -c 'test -n "$TYPESAFE_API_KEY" && echo "key found" || echo "key missing"'`
+   - OK: it prints `key found`, exits 0, and no Keychain dialog appears. Reads go through `/usr/bin/security find-generic-password` only (`core/kernel/src/secrets/grants.rs:138-158`). CMD replaces the process (`exec.rs:187-198`).
+   - Fail, a dialog appears ("... wants to use your confidential information ..."): click **Deny**, never "Always Allow". Note the program it names; that breaks invariant 6.
+   - Fail, exit 3 "authority moved to the core, and it gave no answer": the core is down (`core/kernel/src/secrets/authority.rs:119-120`). Check `kith kernel core-status` (`serve/host/src/main.rs:430`).
+   - Fail, exit 1 `jev-browser/kai: TYPESAFE_API_KEY does not resolve (...)`: the Keychain item is missing (`grants.rs:162-190`).
+4. **Find the audit line, with no values.**
+   - Run: `tail -n 2 ~/.kith/secrets/auth.log`
+   - OK: `<time>\texec\tjev-browser\tjev-browser/kai\tfor=personal\trun=-\tppid=<pid>\tperson=owner`. `run=` shows `KITH_AGENT` when one is set. Format: `core/kernel/src/secrets/exec.rs:153-165`. Same file: `exec.rs:176-185`.
+   - Fail: no new line, even though step 3 worked. The log isn't writable; check `ls -l ~/.kith/secrets/auth.log`.
+5. **The real run path: an app chat.**
+   - Send `personal` one message in the Kith app that uses a jev-browser tool. App runs use the Rust launch because `launch` is switched (`kernel/lib/core-switched.txt`, `kernel/bin/kith:388-396`, `core/kernel/src/launch/plan.rs:1236-1243`).
+   - The terminal `kith personal` still goes through bash and Python `kith-auth` (`kernel/bin/kith:1404`), so it doesn't count.
+   - OK: the tool works, no Keychain dialog appears, and `tail -n 1 ~/.kith/secrets/auth.log` shows a new `exec jev-browser ... for=personal run=personal ... person=owner` line, timed with the message.
+   - Fail: no tool and no line. Look at the host's launch note `kith: personal: ...` in `~/.kith/serve/host.log`.
+6. **Rollback, only if 3 or 5 failed.** Point `~/.kith/cli/current` back at the previous version and run that version's `kith serve install`. `KITH_SECRETS_EXEC=python` is the other way back (mcp-exec design §2.3), but the host only reads it from its own environment.
+
+Report to main: the outputs of steps 0, 2 and 4, and whether a dialog appeared. That note closes M2.
+
+### B. P1-17 S2: prove Full Disk Access, then rewrite `dev.kith.serve`
+
+Do this after A0. Installing a new CLI rewrites the plist, so the backup in step 4 must come after it.
+
+1. **P1-11 / P0a: uv starts a child; it doesn't exec.** (serve-supervise design §5, P0a)
+   - Run: `~/.kith/bin/kith-uv run --quiet --no-project -- /bin/sh -c 'ps -o ppid= -p $$ | xargs ps -o command= -p'`
+   - OK: it prints `/Users/Kath/.kith/bin/kith-uv run ...`.
+   - Fail: it prints `/bin/sh` or nothing. Stop: the host would lose the Full Disk Access credit.
+2. **P0b: uv forwards TERM.**
+   - Run: `~/.kith/bin/kith-uv run --quiet --no-project -- /bin/sleep 60 & UVPID=$!; sleep 2; kill -TERM $UVPID; sleep 1; pgrep -f '^/bin/sleep 60$' || echo gone`
+   - OK: `gone`.
+   - Fail: it prints a pid. uv doesn't forward TERM. Kill that pid, then stop and report.
+3. **P1-11 / P1: Full Disk Access under launchd, with a throwaway job.**
+   - The plist is kept in `/tmp` so it never loads at login. Write it:
+     ```sh
+     cat > /tmp/dev.kith.fdaprobe.plist <<'EOF'
+     <?xml version="1.0" encoding="UTF-8"?>
+     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+     <plist version="1.0"><dict>
+       <key>Label</key><string>dev.kith.fdaprobe</string>
+       <key>ProgramArguments</key><array><string>/Users/Kath/.kith/bin/kith-uv</string><string>run</string><string>--quiet</string><string>--no-project</string><string>--</string><string>/bin/ls</string><string>/Volumes/Macos 1TB/kith/agents</string></array>
+       <key>EnvironmentVariables</key><dict><key>UV_PYTHON_DOWNLOADS</key><string>never</string><key>PATH</key><string>/usr/bin:/bin</string></dict>
+       <key>RunAtLoad</key><true/>
+       <key>StandardOutPath</key><string>/tmp/dev.kith.fdaprobe.log</string>
+       <key>StandardErrorPath</key><string>/tmp/dev.kith.fdaprobe.log</string>
+     </dict></plist>
+     EOF
+     plutil -lint /tmp/dev.kith.fdaprobe.plist && launchctl bootstrap gui/$(id -u) /tmp/dev.kith.fdaprobe.plist; sleep 3; cat /tmp/dev.kith.fdaprobe.log
+     launchctl bootout gui/$(id -u)/dev.kith.fdaprobe
+     ```
+   - OK: the agent folder names are listed (`architect`, `devops`, ...).
+   - Fail, "Operation not permitted": `~/.kith/bin/kith-uv` has lost Full Disk Access. Re-grant it in System Settings › Privacy & Security › Full Disk Access (it shows as "kith-uv"), then run again.
+   - Fail, "No interpreter found": see the open point below.
+   - **Negative control.** Run the same thing again with only `<string>/bin/ls</string><string>/Volumes/Macos 1TB/kith/agents</string>` in `ProgramArguments`.
+     - Expected: `ls: /Volumes/Macos 1TB/kith/agents: Operation not permitted`.
+     - If it lists the folder, the proof is void (something other than kith-uv's grant gives access). Report that, and don't go on.
+   - Clean up: `rm /tmp/dev.kith.fdaprobe.plist /tmp/dev.kith.fdaprobe.log`
+   - **Open point (P1-11):** "no python3" can't be shown on this Mac: `/usr/bin/python3` exists, and so do uv's managed Pythons. In a shell with no interpreter at all, uv exits 2 (see the top of this note). The architect needs to decide whether the condition becomes "an interpreter exists, never run, never downloaded" or something else. Neither design says.
+4. **Back up.**
+   - Run: `B=~/.kith-s2-backup-$(date +%Y%m%d-%H%M%S); mkdir -p "$B" && cp -p ~/Library/LaunchAgents/dev.kith.serve.plist ~/.kith/serve/config.json "$B"/ && readlink ~/.kith/cli/current > "$B/current.was" && plutil -p "$B/dev.kith.serve.plist" | sed -n '/ProgramArguments/,/]/p'; echo "$B"`
+   - OK: today's arguments are printed, `kith-uv run --quiet --script .../kith-serve-launch <kith> serve --port 19224 --supervise`, followed by the backup folder's path. Keep that path.
+5. **Set the new launcher.** Only the `launcher` key changes; the other keys stay.
+   - Run: `jq '.launcher = ["/Users/Kath/.kith/bin/kith-uv","run","--quiet","--no-project","--"]' ~/.kith/serve/config.json > /tmp/kith-config.json && mv /tmp/kith-config.json ~/.kith/serve/config.json && jq -c .launcher ~/.kith/serve/config.json`
+   - OK: it prints the five words (serve-supervise design §5 P2; read at `unix.rs:147-160`).
+6. **Write the plist and reload.** One command does both: it boots out the job, writes the plist, bootstraps it and checks it loaded (`unix.rs:275-316`, `main.rs:1556-1578`).
+   - Run: `env -u KITH_KERNEL -u KITH_KERNEL_BIN -u HQ_BIN -u KITH_SERVE_LAUNCHER ~/.kith/cli/current/bin/kith serve install --port 19224`
+   - The `env -u` matters: the plist would otherwise pin a dev kernel (`unix.rs:280-282`). His shell's `PATH` goes into the plist as it is.
+   - OK: `Kith host installed and started on port 19224. ...` (it may also say Claude Code's status line settings were updated).
+   - Then: `plutil -p ~/Library/LaunchAgents/dev.kith.serve.plist | sed -n '/ProgramArguments/,/]/p'; plutil -p ~/Library/LaunchAgents/dev.kith.serve.plist | grep ExitTimeOut`
+   - OK: exactly `/Users/Kath/.kith/bin/kith-uv`, `run`, `--quiet`, `--no-project`, `--`, `/Users/Kath/.kith/cli/0.1.4-rust.<v>/bin/kith`, `serve`, `--port`, `19224`, `--supervise`, plus `"ExitTimeOut" => 30` (`unix.rs:176-187, 223`).
+   - Fail, "... is not loaded ... Load it by hand: launchctl bootstrap ...": run the command it prints.
+   - Fail, any other refusal (for example the HOME guard): go to step 9.
+7. **Check the host came back.**
+   - Process tree: `ps -axo pid,ppid,command | grep -E 'kith-uv run --quiet --no-project|kith serve --port 19224' | grep -v grep`. Four lines expected:
+     - kith-uv, with ppid 1;
+     - `kith serve --port 19224 --supervise`, whose parent is kith-uv;
+     - `kith serve --port 19224`, whose parent is the supervisor;
+     - no `kith-serve-launch` and no `python` anywhere.
+   - Health: `curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19224/health` → `200` (`main.rs:1640-1645`). Then `lsof -nP -iTCP:19224 -sTCP:LISTEN` should show the child's pid.
+   - Log: `ls -l ~/.kith/serve/host.log; tail -n 100 ~/.kith/serve/host.log | grep -iE 'operation not permitted|EPERM'`. The file's time should be now, and nothing should match. Check the time; old lines have fooled us before.
+   - Then confirm the phone app connects, and run `kith kernel cutover status`: no schedules-gate error about the program (design P2d; gate at `core/runtime/src/cutover/modules/schedules_gate.rs:165-172`).
+   - Fail: tree wrong, no 200, or EPERM. Go to step 9.
+8. **Restart and hang test.** (design P2c)
+   - Run: `launchctl kickstart -k gui/$(id -u)/dev.kith.serve`, then repeat step 7's `ps` and `curl`. OK: back within a few seconds.
+   - Hang test: `H=$(pgrep -f -x '/Users/Kath/.kith/cli/.*/bin/kith serve --port 19224'); kill -STOP $H; launchctl kickstart -k gui/$(id -u)/dev.kith.serve; sleep 30; ps -p $H || echo "old host gone"; lsof -nP -iTCP:19224 -sTCP:LISTEN`
+   - OK: `old host gone`, and a new pid is listening (supervisor grace 20 s, ExitTimeOut 30).
+   - Fail: the old pid is still there. Run `kill -KILL $H`, then go to step 9 and report.
+9. **Rollback.**
+   - Run: `cp -p "$B/config.json" ~/.kith/serve/config.json && env -u KITH_KERNEL -u KITH_KERNEL_BIN -u HQ_BIN -u KITH_SERVE_LAUNCHER ~/.kith/cli/current/bin/kith serve install --port 19224`
+   - This works because the old script still exists until S3, so the old launcher is written as is (`unix.rs:162-170`). Its plist still gets `--supervise`, as today.
+   - If install itself fails: `launchctl bootout gui/$(id -u)/dev.kith.serve; cp -p "$B/dev.kith.serve.plist" ~/Library/LaunchAgents/; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.kith.serve.plist`
+   - Then check with step 7's `ps` and `curl`.
+
+Notes for both lists:
+- `~/.kith/bin/kith-uv` is a fixed copy of uv (0.13.0), so `brew upgrade uv` doesn't break it. Never put bare `uv` in a plist. Re-run step B1 after any change to kith-uv.
+- S2 also owes P3, the same steps on the MacBookPro (design §5). Its state is unknown, and these lists don't cover it.
+- The prod cloud deploy (`npm run deploy:main`) doesn't come into either list.
 
 ## Log
 
