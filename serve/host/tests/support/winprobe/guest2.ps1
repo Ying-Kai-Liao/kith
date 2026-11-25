@@ -115,6 +115,17 @@ Try-Do 'fw-r' {
 Run-Guest 'net-r' 300000
 Try-Do 'fw-r cleanup' { Remove-NetFirewallRule -DisplayName 'kithbox-r-*' -ErrorAction SilentlyContinue }
 
+Section 'P-G14 R: raw persistent WFP filters (loopback is not filtered by Firewall rules): block the user except loopback to :18080, permit owner tokens (Authenticated Users enabled); the box has it disabled'
+Try-Do 'wfp-r' {
+  $guestSid = (Get-LocalUser kithguest).SID.Value
+  Log "kithguest SID: $guestSid"
+  & $bp wfp-install --sd "D:(A;;CC;;;$guestSid)" --permit-sd 'D:(A;;CC;;;S-1-5-11)' --port 18080 2>&1 | ForEach-Object { Log "$_" }
+  netsh wfp show filters file=C:\guest\out\wfp-raw-r.xml | Out-Null
+  Log ("raw filters in the WFP dump: " + (Select-String -Path C:\guest\out\wfp-raw-r.xml -Pattern 'kithbox-' -SimpleMatch | Measure-Object).Count)
+}
+Run-Guest 'net-wfp-r' 300000
+Try-Do 'wfp-r cleanup' { & $bp wfp-remove 2>&1 | ForEach-Object { Log "$_" } }
+
 Section 'P-G14 A (N2): one per-install AppContainer SID, loopback exemption + block rules keyed on the package'
 Try-Do 'fw-a' {
   $acSid = (& $bp acsid n2).Trim()
@@ -132,6 +143,18 @@ Try-Do 'fw-a' {
 Run-Guest 'net-a' 300000
 Try-Do 'fw-a cleanup' {
   Remove-NetFirewallRule -DisplayName 'kithbox-a-*' -ErrorAction SilentlyContinue
+}
+
+Section 'P-G14 A (N2): raw persistent WFP filters keyed on the package SID (loopback exemption kept)'
+Try-Do 'wfp-a' {
+  $acSid = (& $bp acsid n2).Trim()
+  & $bp wfp-install --sid $acSid --port 18080 2>&1 | ForEach-Object { Log "$_" }
+  netsh wfp show filters file=C:\guest\out\wfp-raw-a.xml | Out-Null
+  Log ("raw filters in the WFP dump: " + (Select-String -Path C:\guest\out\wfp-raw-a.xml -Pattern 'kithbox-' -SimpleMatch | Measure-Object).Count)
+}
+Run-Guest 'net-wfp-a' 300000
+Try-Do 'wfp-a cleanup' {
+  & $bp wfp-remove 2>&1 | ForEach-Object { Log "$_" }
   CheckNetIsolation.exe LoopbackExempt -c 2>&1 | Out-Null
 }
 

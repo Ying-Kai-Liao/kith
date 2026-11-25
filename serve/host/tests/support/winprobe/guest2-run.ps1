@@ -44,14 +44,28 @@ function Bx($name, $opts, $cmd, $timeout = 60, $more = @()) {
 }
 function Txt($name) { (Get-Content "$Out\$name.txt" -Raw -ErrorAction SilentlyContinue) }
 
+# icacls cannot name an arbitrary domain-style SID (R's run SIDs); .NET can. Rights are FileSystemRights names.
+function AclAdd($path, $sid, $rights, $type = 'Allow', $inh = 'ContainerInherit,ObjectInherit') {
+  $acl = Get-Acl -LiteralPath $path
+  $id = New-Object System.Security.Principal.SecurityIdentifier($sid)
+  if (-not (Test-Path -LiteralPath $path -PathType Container)) { $inh = 'None' }
+  $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($id, $rights, $inh, 'None', $type)))
+  Set-Acl -LiteralPath $path -AclObject $acl
+}
+function AclPurge($path, $sid) {
+  $acl = Get-Acl -LiteralPath $path
+  $acl.PurgeAccessRules((New-Object System.Security.Principal.SecurityIdentifier($sid)))
+  Set-Acl -LiteralPath $path -AclObject $acl
+}
 function Setup-Workspace {
   New-Item -ItemType Directory -Force $K, $W, $R, "$K\hosttmp" | Out-Null
   $env:TEMP = "$K\hosttmp"; $env:TMP = "$K\hosttmp"
   Log "run SIDs: A caps w=$capW r=$capR ; R arbitrary SIDs w=$rW r=$rR"
   Log ((icacls $W /grant "*${capW}:(OI)(CI)(M)") -join ' ')
-  Log ((icacls $W /grant "*${rW}:(OI)(CI)(M)") -join ' ')
+  AclAdd $W $rW 'Modify'
+  Log "R grant on W: $((Get-Acl $W).Sddl)"
   Log ((icacls $R /grant "*${capR}:(OI)(CI)(RX)") -join ' ')
-  Log ((icacls $R /grant "*${rR}:(OI)(CI)(RX)") -join ' ')
+  AclAdd $R $rR 'ReadAndExecute' 
   New-Item -ItemType Directory -Force "$W\tmp" | Out-Null
   Set-Content "$R\hello.txt" 'readable'
   Set-Content "$UP\secret.txt" 'SECRETDATA'
@@ -93,14 +107,33 @@ if ($Only -eq 'net-r') {
   $VRn = @('--kind', 'r', '--il', 'medium', '--run', 'kith.run.net') + $envW
   $VRnl = @('--kind', 'r', '--il', 'low', '--run', 'kith.run.net') + $envW
   $VRo = @('--kind', 'r', '--il', 'medium', '--run', 'kith.run.other') + $envW
-  Do-Net 'filtered' ([ordered]@{ 'R-medium-keyed-run-SID' = $VRn; 'R-low-keyed-run-SID' = $VRnl; 'R-medium-other-run-SID-control' = $VRo })
+  Do-Net 'fwrule' ([ordered]@{ 'R-medium-keyed-run-SID' = $VRn; 'R-low-keyed-run-SID' = $VRnl; 'R-medium-other-run-SID-control' = $VRo })
+  exit 0
+}
+if ($Only -eq 'net-wfp-r') {
+  Setup-Workspace
+  # the box has Authenticated Users (S-1-5-11) disabled (deny-only); the owner has it enabled: the permit filter matches owners
+  $VRd = @('--kind', 'r', '--il', 'medium', '--run', 'kith.run.wfp', '--disable-sid', 'S-1-5-11') + $envW
+  $VRdl = @('--kind', 'r', '--il', 'low', '--run', 'kith.run.wfp', '--disable-sid', 'S-1-5-11') + $envW
+  $VRe = @('--kind', 'r', '--il', 'medium', '--run', 'kith.run.wfp') + $envW
+  Do-Net 'wfp' ([ordered]@{ 'R-medium-AU-disabled' = $VRd; 'R-low-AU-disabled' = $VRdl; 'R-medium-AU-enabled-control' = $VRe })
   exit 0
 }
 if ($Only -eq 'net-a') {
   Setup-Workspace
   $VAn = @('--kind', 'a', '--ac', 'kithprobe.n2', '--cap', 'kith.run.n2x') + $envW
+  $VAi = @('--kind', 'a', '--ac', 'kithprobe.n2', '--cap', 'kith.run.n2x', '--wk', '85') + $envW
   $VAo = @('--kind', 'a', '--cap', 'kith.run.n2y') + $envW
-  Do-Net 'filtered' ([ordered]@{ 'A-n2-package-SID' = $VAn; 'A-other-package-control' = $VAo })
+  $VAoi = @('--kind', 'a', '--cap', 'kith.run.n2y', '--wk', '85') + $envW
+  Do-Net 'fwrule' ([ordered]@{ 'A-n2-package-SID' = $VAn; 'A-n2-package-SID-internetClient' = $VAi; 'A-other-package-control' = $VAo; 'A-other-package-internetClient-control' = $VAoi })
+  exit 0
+}
+if ($Only -eq 'net-wfp-a') {
+  Setup-Workspace
+  $VAn = @('--kind', 'a', '--ac', 'kithprobe.n2', '--cap', 'kith.run.n2x') + $envW
+  $VAi = @('--kind', 'a', '--ac', 'kithprobe.n2', '--cap', 'kith.run.n2x', '--wk', '85') + $envW
+  $VAoi = @('--kind', 'a', '--cap', 'kith.run.n2y', '--wk', '85') + $envW
+  Do-Net 'wfp' ([ordered]@{ 'A-n2-package-SID' = $VAn; 'A-n2-package-SID-internetClient' = $VAi; 'A-other-package-internetClient-control' = $VAoi })
   exit 0
 }
 
@@ -172,13 +205,13 @@ Section 'P-G13 a deny ACE for a restricting SID (does it block a write?) and one
 New-Item -ItemType Directory -Force "$W\dn" | Out-Null
 Set-Content "$W\dn\f.txt" 'x'
 Log ((icacls "$W\dn" /deny "*${capW}:(OI)(CI)(W)" /Q) -join ' ')
-Log ((icacls "$W\dn" /deny "*${rW}:(OI)(CI)(W)" /Q) -join ' ')
+AclAdd "$W\dn" $rW 'Write' 'Deny' 
 foreach ($k in $V.Keys) {
   Bx "deny-write-$k" $V[$k] @($bp, 'try-open', "$W\dn\f.txt", 'w') 30
   Bx "deny-read-$k" $V[$k] @($bp, 'try-open', "$W\dn\f.txt", 'r') 30
 }
 Log ((icacls "$W\dn" /remove:d "*${capW}" /Q) -join ' ')
-Log ((icacls "$W\dn" /remove:d "*${rW}" /Q) -join ' ')
+AclPurge "$W\dn" $rW
 
 Section 'P-G13/G12 can the box create a named pipe; anonymous pipes (P-G2f)'
 foreach ($k in $V.Keys) {
@@ -210,6 +243,22 @@ Try-Do 'pair' {
   Stop-Process -Id $m.Id -Force -ErrorAction SilentlyContinue
 }
 Bp pair-test --cap kith.r.probe
+
+Section 'P-G2 (R): why does MSYS fail with "couldn''t create signal pipe, Win32 error 5"? default DACL, nontsec, the user SID'
+$ddUser = "D:(A;;GA;;;$userSid)(A;;GA;;;SY)"
+$bm = [ordered]@{
+  'base'                = @()
+  'nontsec'             = @('--env', 'MSYS=nontsec')
+  'nodefaultdacl'       = @('--no-default-dacl')
+  'permissive-dd'       = @('--dd-sddl', "D:(A;;GA;;;WD)(A;;GA;;;SY)(A;;GA;;;$userSid)")
+  'user-in-restricting' = @('--user-sid')
+  'user+nontsec'        = @('--user-sid', '--env', 'MSYS=nontsec')
+}
+foreach ($k in $bm.Keys) {
+  Log "--- $k"
+  Bx "msys-Rm-$k" $VRm @($pgit, '-c', 'echo MSYS_UP_IN_BOX; echo a | cat; v=$(echo sub); echo $v') 30 $bm[$k]
+}
+Bx 'msys-A-nontsec' $VA @($pgit, '-c', 'echo MSYS_UP_IN_BOX') 30 @('--env', 'MSYS=nontsec')
 
 # ---- P-G2c / P-G2e (A): MSYS in an AppContainer --------------------------------------------------------------------------
 # ObjLoop: run boxed bash; each time it fails on NtCreateDirectoryObject(<path>) the host makes that directory (SD below) and holds it
@@ -323,22 +372,22 @@ foreach ($k in $V.Keys) {
     New-Item -ItemType Directory -Force "$T\a\b", "$T\a\d", "$T\leaf" | Out-Null
     foreach ($f in 'c.txt', 'a\x.txt', 'a\b\secret.txt', 'a\b\other.txt', 'a\d\y.txt') { Set-Content "$T\$f" 'data' }
     icacls "$T\c.txt" /grant "*${capW}:(R)" /Q | Out-Null
-    icacls "$T\c.txt" /grant "*${rW}:(R)" /Q | Out-Null
+    AclAdd "$T\c.txt" $rW 'Read' 
     icacls "$T\a\x.txt" /grant "*${capW}:(R)" /Q | Out-Null
-    icacls "$T\a\x.txt" /grant "*${rW}:(R)" /Q | Out-Null
+    AclAdd "$T\a\x.txt" $rW 'Read' 
     icacls "$T\a\b\other.txt" /grant "*${capW}:(R)" /Q | Out-Null
-    icacls "$T\a\b\other.txt" /grant "*${rW}:(R)" /Q | Out-Null
+    AclAdd "$T\a\b\other.txt" $rW 'Read' 
     icacls "$T\a\d" /grant "*${capW}:(OI)(CI)(R)" /Q | Out-Null
-    icacls "$T\a\d" /grant "*${rW}:(OI)(CI)(R)" /Q | Out-Null
+    AclAdd "$T\a\d" $rW 'Read' 
     icacls "$T\leaf" /grant "*${capW}:(OI)(CI)(M)" /Q | Out-Null
-    icacls "$T\leaf" /grant "*${rW}:(OI)(CI)(M)" /Q | Out-Null
+    AclAdd "$T\leaf" $rW 'Modify' 
     Log 'no ACE on the folders along the path to the carved file ($T, a, a\b):'
     foreach ($d in @($T, "$T\a", "$T\a\b")) { Log ("$d : " + ((icacls $d) -join ' ' | Select-String -Pattern 'S-1-15-3|S-1-5-21-' -Quiet)) }
     $o = $V[$k]
     $i = 0
-    foreach ($t in @(@('c.txt', 'r'), @('a\x.txt', 'r'), @('a\d\y.txt', 'r'), @('a\b\other.txt', 'r'), @('a\b\secret.txt', 'r'), @('a\b\secret.txt', 'w'), @('leaf\new.txt', 'c'), @('a\d\new.txt', 'c'))) {
+    foreach ($tc in @(@('c.txt', 'r'), @('a\x.txt', 'r'), @('a\d\y.txt', 'r'), @('a\b\other.txt', 'r'), @('a\b\secret.txt', 'r'), @('a\b\secret.txt', 'w'), @('leaf\new.txt', 'c'), @('a\d\new.txt', 'c'))) {
       $i++
-      Bx "carve-$k-$i" $o @($bp, 'try-open', "$T\$($t[0])", $t[1]) 30
+      Bx "carve-$k-$i" $o @($bp, 'try-open', "$T\$($tc[0])", $tc[1]) 30
     }
     Log 'a sibling created after the grant (new file in the carved folder and in a folder with no ACE):'
     Set-Content "$T\a\b\new.txt" 'late'; Set-Content "$T\a\new2.txt" 'late'

@@ -17,7 +17,7 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows_sys::Win32::System::Threading::{CreateMutexW, OpenMutexW, ResumeThread};
 
-unsafe fn sid_from(s: &str) -> Res<PSID> {
+pub(super) unsafe fn sid_from(s: &str) -> Res<PSID> {
     let mut sid: PSID = null_mut();
     if ConvertStringSidToSidW(wide(s).as_ptr(), &mut sid) == 0 {
         return Err(format!("ConvertStringSidToSid({s}) err {}", last()));
@@ -65,7 +65,7 @@ pub unsafe fn cmd_rsid(a: &[String]) -> Res<()> {
     Ok(())
 }
 
-unsafe fn sddl_to_sd(sddl: &str) -> Res<*mut c_void> {
+pub(super) unsafe fn sddl_to_sd(sddl: &str) -> Res<*mut c_void> {
     let mut sd = null_mut();
     if ConvertStringSecurityDescriptorToSecurityDescriptorW(wide(sddl).as_ptr(), 1, &mut sd, null_mut()) == 0 {
         return Err(format!("SDDL parse ({sddl}) err {}", last()));
@@ -89,16 +89,18 @@ unsafe fn set_default_dacl(token: HANDLE, sddl: &str) -> Res<()> {
 
 /// One restricted primary token of this process's token. `restrict` is the restricting-SID list; `il` is 0x1000 (Low) or
 /// 0x2000 (Medium).
-unsafe fn make_rtoken(restrict: &[PSID], il: u32, default_dacl: Option<&str>) -> Res<HANDLE> {
+unsafe fn make_rtoken(restrict: &[PSID], disable: &[PSID], il: u32, default_dacl: Option<&str>) -> Res<HANDLE> {
     let mut t: HANDLE = null_mut();
     // ASSIGN_PRIMARY | DUPLICATE | QUERY | ADJUST_DEFAULT
     if OpenProcessToken(GetCurrentProcess(), 0x1 | 0x2 | 0x8 | 0x80, &mut t) == 0 {
         return Err(format!("OpenProcessToken err {}", last()));
     }
     let rs: Vec<SID_AND_ATTRIBUTES> = restrict.iter().map(|s| SID_AND_ATTRIBUTES { Sid: *s, Attributes: 0 }).collect();
+    let ds: Vec<SID_AND_ATTRIBUTES> = disable.iter().map(|s| SID_AND_ATTRIBUTES { Sid: *s, Attributes: 0 }).collect();
     let mut nt: HANDLE = null_mut();
     // DISABLE_MAX_PRIVILEGE (1): drops every privilege but SeChangeNotify.
-    if CreateRestrictedToken(t, 1, 0, null(), 0, null(), rs.len() as u32, rs.as_ptr(), &mut nt) == 0 {
+    if CreateRestrictedToken(t, 1, ds.len() as u32, ds.as_ptr(), 0, null(), rs.len() as u32, rs.as_ptr(), &mut nt) == 0
+    {
         let e = last();
         let mut each = Vec::new();
         for s in restrict {
@@ -222,10 +224,13 @@ pub unsafe fn cmd_xbox(a: &[String]) -> Res<()> {
             names.push("USER(diagnostic only)".into());
         }
         let il = if opt(a, "--il").as_deref() == Some("low") { 0x1000 } else { 0x2000 };
-        let dd = (!flag(a, "--no-default-dacl")).then(|| {
-            format!("D:(A;;GA;;;{})(A;;GA;;;SY)(A;;GA;;;{})", sid_str(run), token_user_sid().unwrap_or_default())
+        let dd = opt(a, "--dd-sddl").or_else(|| {
+            (!flag(a, "--no-default-dacl")).then(|| {
+                format!("D:(A;;GA;;;{})(A;;GA;;;SY)(A;;GA;;;{})", sid_str(run), token_user_sid().unwrap_or_default())
+            })
         });
-        let tok = make_rtoken(&rs, il, dd.as_deref())?;
+        let disable: Vec<PSID> = opts(a, "--disable-sid").iter().map(|x| sid_from(x)).collect::<Res<_>>()?;
+        let tok = make_rtoken(&rs, &disable, il, dd.as_deref())?;
         r("xbox", format!("{name} kind=r il={il:#x} restricting={} total={}", names.join(","), rs.len()));
         sp.token = Some(tok);
     }
@@ -690,7 +695,7 @@ pub unsafe fn shim_box(real: &str, args: &[String]) -> Res<i32> {
     }
     let il = if env("KITH_BOX_IL").as_deref() == Some("low") { 0x1000 } else { 0x2000 };
     let dd = format!("D:(A;;GA;;;{})(A;;GA;;;SY)(A;;GA;;;{})", sid_str(run), token_user_sid()?);
-    let tok = make_rtoken(&rs, il, Some(&dd))?;
+    let tok = make_rtoken(&rs, &[], il, Some(&dd))?;
     let job = make_job(None)?;
     let mut cl = vec![real.to_string()];
     cl.extend(args.iter().cloned());

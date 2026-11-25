@@ -48,6 +48,8 @@ use windows_sys::Win32::System::Threading::{
 };
 
 mod rbox;
+#[cfg(feature = "wfp")]
+mod wfp;
 
 type Res<T> = Result<T, String>;
 
@@ -1119,6 +1121,17 @@ fn fakesh(args: &[String]) {
     }
 }
 
+#[cfg(feature = "wfp")]
+unsafe fn wfp_cmd(install: bool, a: &[String]) -> Res<()> {
+    if install { wfp::install(a) } else { wfp::remove() }
+}
+
+#[cfg(not(feature = "wfp"))]
+unsafe fn wfp_cmd(_install: bool, _a: &[String]) -> Res<()> {
+    r("wfp", "NOT BUILT: this boxprobe has no `wfp` feature");
+    Ok(())
+}
+
 // ---- dispatch -------------------------------------------------------------------------------------------------------
 
 pub fn main() {
@@ -1160,6 +1173,8 @@ pub fn main() {
         "pipe-anon",
         "sid-of",
         "rsid",
+        "wfp-install",
+        "wfp-remove",
         "kill-test",
     ];
     if !known.contains(&sub) {
@@ -1204,6 +1219,8 @@ pub fn main() {
             "pipe-anon" => rbox::cmd_pipe_anon(),
             "sid-of" => rbox::cmd_sid_of(a),
             "rsid" => rbox::cmd_rsid(a),
+            "wfp-install" => wfp_cmd(true, a),
+            "wfp-remove" => wfp_cmd(false, a),
             "kill-test" => rbox::cmd_kill_test(a),
             _ => Err("unknown".into()),
         }

@@ -109,6 +109,11 @@ jobs:
         shell: bash
         working-directory: serve
         run: cargo build --manifest-path host/Cargo.toml -p kith-boxprobe --locked
+      - name: Build boxprobe with the raw WFP filters (a failure here only skips P-G14's raw-filter part)
+        continue-on-error: true
+        shell: bash
+        working-directory: serve
+        run: cargo build --manifest-path host/Cargo.toml -p kith-boxprobe --features kith-boxprobe/wfp --locked
       - name: Guest box probe round 2 (A against R, as a standard user)
         shell: pwsh
         timeout-minutes: 75

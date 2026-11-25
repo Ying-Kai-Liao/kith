@@ -32,6 +32,10 @@ windows-sys = { version = "0.61", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 
+# The raw WFP filters (P-G14) are a feature so a mistake there cannot break the rest of the probe.
+[features]
+wfp = ["windows-sys/Win32_NetworkManagement_WindowsFilteringPlatform", "windows-sys/Win32_System_Rpc"]
+
 # A throwaway probe, never shipped: the unsafe Win32 calls are the point.
 [lints.rust]
 unsafe_code = "allow"
