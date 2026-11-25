@@ -235,9 +235,13 @@ pub(crate) fn settle_ask_in(
         Ended::Answered(c) => c.cost,
         Ended::Lost => 0.0,
     };
-    let fresh = spent > 0.0 && rows::count_cost_in(tx, id, turn.or(a.turn).unwrap_or(0))?;
+    let fresh = spent > 0.0 && rows::count_cost_in(tx, id, turn.unwrap_or(0))?;
     // Every settle goes by the ask's current turn: a run of an earlier turn (before a card's resume) settles nothing.
-    let current = turn.is_none_or(|t| a.turn == Some(t));
+    // No turn named: the run of an ask with no turn (a `fg` CLI's own first run), never the current turn of a resumed one.
+    let current = match turn {
+        Some(t) => a.turn == Some(t),
+        None => a.turn.is_none(),
+    };
     let live = a.state == "open" && a.ended_ms.is_none() && current;
     // A parked ask is waiting for its card: its run's end, with words or without, is not its answer (kith-ask lets park win).
     if !live || a.parked_card.is_some() {
@@ -441,6 +445,14 @@ pub(crate) fn unpark(
     let Some(mut a) = get(&tx, id)? else {
         return Err(Error::Refused(format!("kith-core: asks: no ask {id}")));
     };
+    let live = a.state == "open" && a.ended_ms.is_none();
+    // The card's answer is the resume's prompt: without it the parked turn would stay the ask's current one (and be settled
+    // by the next tick from its old out file).
+    if live && note.is_none_or(str::is_empty) {
+        return Err(Error::Refused(
+            "kith-core: asks: an unpark of an open ask needs the card's answer (note)".into(),
+        ));
+    }
     a.parked_card = None;
     a.parked_ms = None;
     if let Some(s) = session.filter(|s| !s.is_empty()) {
@@ -448,8 +460,7 @@ pub(crate) fn unpark(
     }
     let mut made = None;
     if let Some(note) = note.filter(|n| !n.is_empty())
-        && a.state == "open"
-        && a.ended_ms.is_none()
+        && live
     {
         let (turn, out, conversation) = new_turn_in(&tx, machine, &a, note, None, true, now)?;
         a.conversation = Some(conversation);

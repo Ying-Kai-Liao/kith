@@ -241,7 +241,19 @@ impl Rig {
     }
 
     fn finish(&self, id: &str, out: Option<&Value>) -> Value {
+        // The host's report names its turn: the ask's current one.
+        let turn: Option<i64> = self
+            .d
+            .shared()
+            .with_core(|c| {
+                Ok(c.conn()
+                    .query_row("SELECT turn FROM asks WHERE id = ?1", [id], |r| r.get(0))?)
+            })
+            .unwrap();
         let mut p = json!({"id": id});
+        if let Some(turn) = turn {
+            p["turn"] = json!(turn);
+        }
         if let Some(o) = out {
             p["out"] = json!(o.to_string());
         }
@@ -713,12 +725,13 @@ fn waiting_for_a_parked_grandchild_shows_on_the_root() {
         );
     }
     // The card's answer clears it up the chain.
-    r.owner("ask.unpark", &json!({"id": "grand"}));
+    let resumed = r.owner("ask.unpark", &json!({"id": "grand", "note": "ok"}));
+    let resume_turn = resumed["turn"].as_i64().unwrap();
     assert_eq!(waiting(&r, "root")["on"], json!("agent"));
     assert_eq!(waiting(&r, "grand"), Value::Null);
     // A parked ask whose run ended with no answer stays open (the card's answer resumes it).
     r.owner("ask.park", &json!({"id": "grand", "card": "card-2"}));
-    let held = r.owner("ask.finish", &json!({"id": "grand"}));
+    let held = r.owner("ask.finish", &json!({"id": "grand", "turn": resume_turn}));
     assert_eq!(
         (&held["settled"], &held["parked"]),
         (&json!(false), &json!(true))
@@ -937,4 +950,42 @@ fn only_an_open_ask_parks() {
     assert_eq!(said["parked"], json!(false));
     let parked: Option<String> = r.sql("SELECT parked_card FROM asks WHERE id = ?1", "a1");
     assert_eq!(parked, None);
+}
+
+#[test]
+fn a_report_that_names_no_turn_is_not_the_current_resumed_one() {
+    let r = Rig::new();
+    // The fg CLI never names a turn: the callee parks while running, the card is answered, then the CLI reports the parked run.
+    r.open("f1", "fg", &json!({"cliPid": 1, "cliStart": "x"}), &[]);
+    r.owner("ask.park", &json!({"id": "f1", "card": "c1"}));
+    let un = r.owner("ask.unpark", &json!({"id": "f1", "note": "approved"}));
+    let t2 = un["turn"].as_i64().unwrap();
+    let said = r.owner(
+        "ask.finish",
+        &json!({"id": "f1", "result": "waiting words", "cost": 0.5}),
+    );
+    assert_eq!(said["settled"], json!(false));
+    assert_eq!(r.ask_state("f1"), "open");
+    assert_eq!(r.rows("f1"), []);
+    // T2's own cost is still to be counted, once.
+    let done = r.owner(
+        "ask.finish",
+        &json!({"id": "f1", "turn": t2, "out": answer("real").to_string()}),
+    );
+    assert_eq!(done["state"], json!("answered"));
+    assert!((cost_of(&r, "f1") - 0.75).abs() < 1e-9);
+}
+
+#[test]
+fn an_unpark_with_no_note_of_an_open_ask_is_refused() {
+    let r = Rig::new();
+    r.open_bg("a1");
+    r.owner("ask.park", &json!({"id": "a1", "card": "c1"}));
+    let refused = r.call(Principal::Owner, "ask.unpark", &json!({"id": "a1"}));
+    assert!(matches!(refused, Err(Error::Refused(_))), "{refused:?}");
+    let parked: Option<String> = r.sql("SELECT parked_card FROM asks WHERE id = ?1", "a1");
+    assert_eq!(parked.as_deref(), Some("c1"));
+    // An ended ask only clears the card.
+    r.owner("ask.end", &json!({"roots": ["a1"]}));
+    r.owner("ask.unpark", &json!({"id": "a1"}));
 }
