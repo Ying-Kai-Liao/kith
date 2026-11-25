@@ -21,3 +21,7 @@ permit	permit
 # The same line sends the terminal run (`kith AGENT`, -r, -c, --resume ID) and `--held` to it when the program also lists `launch-exec-term` (R3b);
 # --print, --inspect and --launch-json stay on bash. One line is the whole rollback.
 #launch-exec	launch-exec
+# `kith ask`: `kernel/bin/kith-ask` hands its command line to `kith kernel ask` (the thin client of the core's ask rows, retire-python P2-3 A3) under `__main__` only,
+# when the program lists `ask-ledger` AND the `asks` cutover module is switched on the Mac (`<machine>/core/cutover/asks.switch`): the Python reads the switch itself,
+# not this file, so a line here would route nothing. Shipped off: the line stays commented out until A4 lands the module and its step.
+#ask	ask-ledger
