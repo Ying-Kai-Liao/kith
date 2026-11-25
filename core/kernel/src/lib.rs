@@ -2,6 +2,7 @@
 //! two answer the same question the same way. The Python kernel keeps its own copies while it moves; the
 //! differential harness (`kernel/tests/difftest`) fails when they differ.
 
+pub mod access;
 pub mod accounts;
 // On Windows the ledger (tag, record, sync) and the reports of one agent run; the verbs that ask `kith-auth` for people
 // (`people`, `members`, `bots`) are refused by name until retire-python P3-1.
@@ -31,7 +32,7 @@ pub mod readfence;
 pub mod room_ledger;
 pub mod schedule;
 // Unix only, whole: the access decision runs `kith-auth`, reads the password database and writes auth.json with modes. Windows
-// has just the pieces the other modules stand on (`pyjson`, the timeout helper): see `secrets_win.rs`.
+// has just the pieces the other modules stand on (`pyjson`, the timeout helper, the portable `access` re-export): see `secrets_win.rs`.
 #[cfg(unix)]
 pub mod secrets;
 #[cfg(not(unix))]
