@@ -1123,6 +1123,7 @@ pub fn plan(
     if perm_mode.is_empty() {
         perm_mode.clear();
     }
+    let owner_via_terminal = p_owner && !nested && get(&env, "KITH_VIA") == "terminal";
     let once_id = match random_hex() {
         Ok(id) => id,
         Err(m) => {
@@ -1156,10 +1157,8 @@ pub fn plan(
             threads_bin: threads_bin.as_deref(),
             plugins_json: &plugins_json,
             owner_terminal: is_terminal && claude,
-            typed_bypass: p_owner
-                && !nested
-                && get(&env, "KITH_VIA") == "terminal"
-                && a.perm_mode.as_deref() == Some("bypassPermissions"),
+            owner_via_terminal,
+            typed_bypass: owner_via_terminal && a.perm_mode.as_deref() == Some("bypassPermissions"),
             api_helper: &bget(&be, "backup_api_helper"),
             once_id: &once_id,
             developer_dir: &developer_dir,
