@@ -155,7 +155,14 @@ tty_run "$KITH" reader --bypass
 [[ $(mode env KITH_PERSON=guest "$KITH" reader --bypass "do it") == "acceptEdits " ]] && ok "reader: a guest's --bypass is the membership's mode" || bad "reader: a guest's --bypass is the membership's mode" "$(mode env KITH_PERSON=guest "$KITH" reader --bypass "do it")"
 [[ $(mode env KITH_PERMISSION_MODE=bypassPermissions "$KITH" reader "do it") == "auto " ]] && ok "reader: KITH_PERMISSION_MODE bypass held to auto" || bad "reader: KITH_PERMISSION_MODE bypass held to auto"
 "$KITH" reader set permission bypassPermissions >/dev/null 2>&1
-[[ $(mode "$KITH" reader "do it") == "auto " ]] && ok "reader: this Mac's bypass setting held to auto" || bad "reader: this Mac's bypass setting held to auto"
+[[ $(mode env KITH_PERSON=guest "$KITH" reader "do it") == "acceptEdits " ]] && ok "reader: a guest gets the membership's mode, not this Mac's bypass" || bad "reader: a guest gets the membership's mode, not this Mac's bypass"
+[[ $(mode "$KITH" reader "do it") == "bypassPermissions " ]] && ok "reader: this Mac's bypass kept for the owner's terminal launch" || bad "reader: this Mac's bypass kept for the owner's terminal launch" "$(mode "$KITH" reader "do it")"
+tty_run "$KITH" reader
+[[ $(args | grep -x -e 'bypassPermissions' -e 'auto' | tr '\n' ' ') == "bypassPermissions " ]] && ok "reader: this Mac's bypass kept in an interactive terminal" || bad "reader: this Mac's bypass kept in an interactive terminal" "$(args | tr '\n' ' ')"
+[[ $(mode env KITH_AGENT=parent "$KITH" reader "do it") == "auto " ]] && ok "reader: this Mac's bypass held to auto for a run another run started" || bad "reader: this Mac's bypass held to auto for a run another run started"
+[[ $(mode env KITH_VIA=ask "$KITH" reader "do it") == "auto " ]] && ok "reader: this Mac's bypass held to auto from kith ask" || bad "reader: this Mac's bypass held to auto from kith ask"
+[[ $(mode env KITH_VIA=schedule "$KITH" reader "do it") == "auto " ]] && ok "reader: this Mac's bypass held to auto for a schedule" || bad "reader: this Mac's bypass held to auto for a schedule"
+[[ $(mode env KITH_PERMISSION_MODE=bypassPermissions "$KITH" reader "do it") == "auto " ]] && ok "reader: KITH_PERMISSION_MODE bypass held to auto over this Mac's bypass" || bad "reader: KITH_PERMISSION_MODE bypass held to auto over this Mac's bypass"
 "$KITH" reader set permission '' >/dev/null 2>&1
 [[ $(setting 'd["permissions"]["defaultMode"]') == auto ]] && ok "reader: role defaultMode bypass held to auto" || bad "reader: role defaultMode bypass held to auto" "$(cat "$STUB_SETTINGS")"
 [[ $(setting '"Artifact" in d["permissions"]["allow"] and "ArtifactData" in d["permissions"]["allow"]') == True ]] && ok "reader: Artifact allow rules kept (architect publish)" || bad "reader: Artifact allow rules kept"

@@ -46,7 +46,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 
 pub const TOKEN_ENV: &str = "KITH_RUN_TOKEN";
@@ -60,6 +60,9 @@ pub const ASK_TOKEN_ENV: &str = "KITH_ASK_TOKEN";
 pub const ASK_SOCKET_ENV: &str = "KITH_ASK_SOCKET";
 /// An owner token handed out over the API lives this long at most (a run is far shorter).
 pub const ASK_TOKEN_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// The file in the host's data folder that keeps owner tokens handed out over the API across a restart.
+pub const ASK_TOKENS_FILE: &str = "ask-tokens.json";
 
 /// A request line longer than this is refused unread.
 const MAX_REQUEST: usize = 64 * 1024;
@@ -146,6 +149,10 @@ pub struct TokenTable {
     onces: Mutex<HashMap<(String, String), Instant>>,
     /// `(peer, ancestor)`: whether `peer` is `ancestor` or one of its descendants. Replaceable for tests.
     ancestry: fn(u32, u32) -> bool,
+    /// Where the tokens of [`Self::insert_ask`] are kept so a host restart does not end them ([`ASK_TOKENS_FILE`]): the
+    /// owner's runs that hold one outlive the host, and their next card would otherwise be refused "not authorized". The
+    /// file holds digests, never a token. `None`: memory only. The lock keeps writes in the order of their snapshots.
+    saved: Option<(PathBuf, Mutex<()>)>,
 }
 
 /// Whether a process is still there.
@@ -164,7 +171,47 @@ fn digest(token: &str) -> [u8; 32] {
 
 impl TokenTable {
     pub fn new() -> Self {
-        Self { entries: Mutex::new(HashMap::new()), onces: Mutex::new(HashMap::new()), ancestry: descends }
+        Self { entries: Mutex::new(HashMap::new()), onces: Mutex::new(HashMap::new()), ancestry: descends, saved: None }
+    }
+
+    /// A table that keeps its API-issued owner tokens in `path` and starts with the ones there that have not ended and
+    /// whose process is still `alive`.
+    pub fn persisted(path: PathBuf, alive: fn(u32) -> bool) -> Self {
+        let entries = load_saved(&path, alive);
+        Self { entries: Mutex::new(entries), saved: Some((path, Mutex::new(()))), ..Self::new() }
+    }
+
+    /// Writes the API-issued owner tokens to the file, if this table keeps one. A failed write is logged: the tokens
+    /// still work until the host restarts.
+    fn save(&self) {
+        let Some((path, order)) = &self.saved else { return };
+        let _order = order.locked();
+        let (now, wall) = (Instant::now(), SystemTime::now());
+        let records: Vec<Value> = self
+            .entries
+            .locked()
+            .iter()
+            .filter_map(|(key, e)| {
+                let (expires, pid) = (e.expires?, e.pid?);
+                (e.identity.scope == TokenScope::OwnerAsk).then(|| {
+                    let ends = wall + expires.saturating_duration_since(now);
+                    let reply = e.identity.reply.as_ref();
+                    json!({
+                        "digest": hex(key),
+                        "pid": pid,
+                        "expires": ends.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+                        "agent": e.identity.agent,
+                        "session": e.identity.session,
+                        "runId": e.identity.run_id,
+                        "replyTo": reply.map(|r| &r.to),
+                        "askedBy": reply.and_then(|r| r.asked_by.as_ref()),
+                    })
+                })
+            })
+            .collect();
+        if let Err(e) = write_saved(path, &Value::Array(records)) {
+            tracing::warn!(path = %path.display(), "keeping owner ask tokens: {e:#}");
+        }
     }
 
     /// Records the owner's yes to a blocked call of run `run_id`, for the retry of exactly that call (`key` is
@@ -187,17 +234,14 @@ impl TokenTable {
 
     #[cfg(test)]
     fn with_ancestry(ancestry: fn(u32, u32) -> bool) -> Self {
-        Self { entries: Mutex::new(HashMap::new()), onces: Mutex::new(HashMap::new()), ancestry }
+        Self { ancestry, ..Self::new() }
     }
 
     /// A fresh token for `identity`: 256 random bits as hex.
     fn insert(&self, identity: RunIdentity) -> Result<(String, [u8; 32])> {
         let mut raw = [0u8; 32];
         getrandom::fill(&mut raw).map_err(|_| anyhow::anyhow!("random bytes unavailable"))?;
-        let token = raw.iter().fold(String::with_capacity(64), |mut acc, b| {
-            let _ = write!(acc, "{b:02x}");
-            acc
-        });
+        let token = hex(&raw);
         let key = digest(&token);
         self.entries.locked().insert(key, Entry { identity, pid: None, expires: None });
         Ok((token, key))
@@ -229,6 +273,7 @@ impl TokenTable {
             e.pid = Some(pid);
             e.expires = Some(Instant::now() + ttl);
         }
+        self.save();
         Ok(token)
     }
 
@@ -238,6 +283,7 @@ impl TokenTable {
         let was_there = gone.is_some();
         if let Some(e) = gone {
             self.drop_onces(&e.identity.run_id);
+            self.save();
         }
         was_there
     }
@@ -265,6 +311,9 @@ impl TokenTable {
         for run in &reaped {
             self.drop_onces(run);
         }
+        if !reaped.is_empty() {
+            self.save();
+        }
         reaped
     }
 
@@ -287,6 +336,85 @@ impl TokenTable {
         let peer = peer.pid?;
         (self.ancestry)(peer, pid).then_some(identity)
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut acc, b| {
+        let _ = write!(acc, "{b:02x}");
+        acc
+    })
+}
+
+/// The owner tokens kept in `path` that have not ended and whose process is still `alive`, as table entries. A missing
+/// or unreadable file is an empty table: those runs are refused as before and get no card.
+fn load_saved(path: &Path, alive: fn(u32) -> bool) -> HashMap<[u8; 32], Entry> {
+    let Ok(text) = std::fs::read_to_string(path) else { return HashMap::new() };
+    let Ok(Value::Array(records)) = serde_json::from_str::<Value>(&text) else {
+        tracing::warn!(path = %path.display(), "owner ask tokens unreadable; starting without them");
+        return HashMap::new();
+    };
+    let (now, wall) = (Instant::now(), SystemTime::now());
+    let mut entries = HashMap::new();
+    for r in records {
+        let field = |name: &str| r[name].as_str().filter(|s| !s.is_empty()).map(str::to_owned);
+        let key: Option<[u8; 32]> = r["digest"].as_str().filter(|d| d.len() == 64).and_then(|d| {
+            let bytes: Option<Vec<u8>> =
+                (0..32).map(|i| d.get(i * 2..i * 2 + 2).and_then(|b| u8::from_str_radix(b, 16).ok())).collect();
+            bytes?.try_into().ok()
+        });
+        let pid = r["pid"].as_u64().and_then(|p| u32::try_from(p).ok()).filter(|p| *p > 1);
+        let left = r["expires"]
+            .as_u64()
+            .and_then(|s| (UNIX_EPOCH + Duration::from_secs(s)).duration_since(wall).ok())
+            .filter(|d| !d.is_zero() && *d <= ASK_TOKEN_TTL);
+        let (Some(key), Some(pid), Some(left), Some(agent), Some(session), Some(run_id)) =
+            (key, pid, left, field("agent"), field("session"), field("runId"))
+        else {
+            continue;
+        };
+        if !alive(pid) {
+            continue;
+        }
+        let reply = field("replyTo").and_then(|to| AskReply::parse(&to, r["askedBy"].as_str()));
+        let identity = RunIdentity {
+            person: String::new(),
+            agent,
+            room: None,
+            run_id,
+            scope: TokenScope::OwnerAsk,
+            session,
+            project: None,
+            reply,
+            members: Vec::new(),
+        };
+        entries.insert(key, Entry { identity, pid: Some(pid), expires: Some(now + left) });
+    }
+    entries
+}
+
+/// Replaces `path` with `value`, readable by this user only, through a temporary file so a reader never sees half of it.
+fn write_saved(path: &Path, value: &Value) -> Result<()> {
+    use std::io::Write as _;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        opts.mode(0o600);
+    }
+    let mut f = opts.open(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    f.write_all(value.to_string().as_bytes())?;
+    drop(f);
+    std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
 }
 
 impl Default for TokenTable {
@@ -410,7 +538,7 @@ pub fn socket() -> Option<&'static Path> {
 }
 
 pub fn table() -> &'static Arc<TokenTable> {
-    TABLE.get_or_init(|| Arc::new(TokenTable::new()))
+    TABLE.get_or_init(|| Arc::new(TokenTable::persisted(crate::service::data_dir().join(ASK_TOKENS_FILE), pid_alive)))
 }
 
 /// A grant for a run of `person` (an invited person's or a bot guest's id) on `agent`, with the environment to give
@@ -1286,6 +1414,71 @@ mod tests {
         assert_eq!(t.reap(|_| true), vec![b.run_id.clone()]);
         assert!(t.onces.locked().is_empty());
         let _ = tb;
+    }
+
+    fn saved_file() -> PathBuf {
+        std::env::temp_dir().join(format!("kith-ask-tokens-{}", uuid::Uuid::new_v4().simple())).join(ASK_TOKENS_FILE)
+    }
+
+    #[test]
+    fn an_owner_token_outlives_a_host_restart() {
+        let path = saved_file();
+        let me = std::process::id();
+        let reply = AskReply::parse("bg-20261124-abc", Some("designer"));
+        let ask = ask_identity("echo", "s1", reply);
+        let token = {
+            let before = TokenTable::persisted(path.clone(), |_| true);
+            before.insert_ask(ask.clone(), me, Duration::from_secs(60)).unwrap()
+        };
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains(&token), "the file holds a digest, never the token");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let after = TokenTable::persisted(path.clone(), |_| true);
+        assert_eq!(after.resolve(&token, PeerInfo { pid: Some(me) }), Some(ask.clone()));
+        // still bound to its process: a stranger holding the token gets nothing
+        assert_eq!(after.resolve(&token, PeerInfo { pid: Some(1) }), None);
+        // ended after the restart: gone from the file too
+        assert!(after.revoke_token(&token));
+        assert_eq!(TokenTable::persisted(path.clone(), |_| true).resolve(&token, PeerInfo { pid: Some(me) }), None);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_kept_token_whose_run_ended_or_expired_does_not_come_back() {
+        let path = saved_file();
+        let me = std::process::id();
+        let t = TokenTable::persisted(path.clone(), |_| true);
+        let gone = t.insert_ask(ask_identity("echo", "s1", None), me, Duration::from_secs(60)).unwrap();
+        // a run whose process ended while the host was down
+        assert_eq!(TokenTable::persisted(path.clone(), |_| false).len(), 0);
+        // a reaped token leaves the file
+        t.entries.locked().values_mut().for_each(|e| e.expires = Some(a_second_ago()));
+        assert_eq!(t.reap(|_| true).len(), 1);
+        assert_eq!(TokenTable::persisted(path.clone(), |_| true).resolve(&gone, PeerInfo { pid: Some(me) }), None);
+        // a record past its end, or garbage, is skipped
+        let ended = json!([{"digest": hex(&digest(&gone)), "pid": me, "expires": 1, "agent": "echo",
+            "session": "run:o:s1", "runId": "r1"}]);
+        std::fs::write(&path, ended.to_string()).unwrap();
+        assert_eq!(TokenTable::persisted(path.clone(), |_| true).len(), 0);
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(TokenTable::persisted(path.clone(), |_| true).len(), 0);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_run_owned_token_is_never_kept() {
+        let path = saved_file();
+        let t = Arc::new(TokenTable::persisted(path.clone(), |_| true));
+        let grant = RunGrant::issue(&t, ask_identity("echo", "s1", None)).unwrap();
+        grant.bind_local(std::process::id());
+        t.insert_ask(ask_identity("echo", "s2", None), std::process::id(), Duration::from_secs(60)).unwrap();
+        assert_eq!(TokenTable::persisted(path.clone(), |_| true).len(), 1);
+        drop(grant);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

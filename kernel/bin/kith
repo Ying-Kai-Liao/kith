@@ -897,15 +897,17 @@ if [[ $launch -eq 1 ]]; then
 fi
 # The agent's defaultMode is its author's suggestion: this Mac's choice for the agent (kith install asks; agents in
 # ~/.kith/settings.json) wins over it, and the caller's over both.
-[[ -z $perm_mode ]] && perm_mode=$(python3 "$KITH/lib/kith_settings.py" permission_mode "$agent")
+mac_mode=""
+[[ -z $perm_mode ]] && { perm_mode=$(python3 "$KITH/lib/kith_settings.py" permission_mode "$agent"); mac_mode=$perm_mode; }
 # An owner's run of an agent that reads other people's text never starts in bypass (capabilities.yaml reads_others: false
 # lifts that for agents on the owner's own files); the cap wins over the caller and this Mac, the conservative side.
 # Only the owner's own word at their own terminal wins over it: --bypass (or --permission-mode bypassPermissions) typed on
-# this command line, not one another run started (KITH_AGENT) nor an entry point's KITH_PERMISSION_MODE.
+# this command line, or this Mac's choice of bypass for the agent when nothing was typed; never for a run another run
+# started (KITH_AGENT), an entry point (KITH_VIA other than terminal) or an entry point's KITH_PERMISSION_MODE.
 reads_others=$(python3 "$KITH/lib/kith_settings.py" reads-others "$pkg/capabilities.yaml")
-typed_bypass=0
-[[ $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && $typed_mode == bypassPermissions ]] && typed_bypass=1
-[[ $p_owner == 1 && $perm_mode == bypassPermissions && $reads_others == 1 && $typed_bypass == 0 ]] && perm_mode=auto
+owner_word=0
+[[ $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && ( $typed_mode == bypassPermissions || $mac_mode == bypassPermissions ) ]] && owner_word=1
+[[ $p_owner == 1 && $perm_mode == bypassPermissions && $reads_others == 1 && $owner_word == 0 ]] && perm_mode=auto
 # For anyone but the owner the membership sets the permission mode, whatever the caller asked for, and deny rules
 # only Claude Code can enforce keep the run on Claude Code.
 if [[ $p_owner == 0 ]]; then
@@ -1096,11 +1098,11 @@ for lst, rules in ((s["permissions"]["deny"], must["deny"]), (ask, must["ask_fil
 auto = s.setdefault("autoMode", {})
 auto["soft_deny"] = list(dict.fromkeys(["$defaults"] + [x for x in auto.get("soft_deny") or [] if isinstance(x, str)] + must["soft_deny"]))
 # A package may declare its routine work as autoMode.allow sentences (kith-pkg check refuses one naming a must-ask
-# class); owner runs keep them next to the defaults of Claude Code and the kernel sentence OWNER_ALLOW (code the agent
-# wrote itself is routine), runs for anyone else have none.
+# class); owner runs keep them next to the defaults of Claude Code and the kernel sentences OWNER_ALLOW (code the agent
+# wrote itself is routine) and OWNER_WEB (reading a public page), runs for anyone else have none.
 declared = [x for x in auto.get("allow") or [] if isinstance(x, str)]
 if os.environ["P_OWNER"] == "1":
-    auto["allow"] = list(dict.fromkeys(["$defaults"] + declared + [kith_guard.OWNER_ALLOW]))
+    auto["allow"] = list(dict.fromkeys(["$defaults"] + declared + [kith_guard.OWNER_ALLOW, kith_guard.OWNER_WEB]))
 else:
     auto.pop("allow", None)
 # Anyone but the owner (an invited person, a bot): the OS sandbox of Claude Code (macOS seatbelt) around Bash and every
