@@ -1046,7 +1046,7 @@ def run(agent, cmd):
             asleep(eng or child)
         if not taken_note(agent, eng or child):
             resume_note(agent, eng or child)
-        wake_owed()
+        wake_owed(eng or child)
     except Exception as e:  # noqa: BLE001
         print(f'kith-sessions: {e}', file=sys.stderr)
     code = os.waitstatus_to_exitcode(st)   # a signal death comes back as -n
@@ -1072,12 +1072,25 @@ def stub_verdict(fd, code):
     return code
 
 
-def wake_owed():
+def wake_owed(pid):
     """A terminal held its session while wakes for it queued (a reply, a card, a waiter): now that it let go, the kernel's
     wake queue may deliver them without waiting for the next tick. A kith ask this session made and didn't read the
-    answer of becomes one of them first (kith-ask --sweep, M8)."""
+    answer of becomes one of them first (kith-ask --sweep, M8). With the queue the core's it is one call, `wake.released`,
+    and no shell: a lost call is caught by the core's next tick (R8)."""
     d = reg_dir()
     if not d:
+        return
+    lib = str(Path(__file__).resolve().parent.parent / 'lib')
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import kith_wake_core
+    if kith_wake_core.switched(os.environ.get('KITH_STATE')):
+        e = entry_of(pid)
+        if e:
+            try:
+                kith_wake_core.call('wake.released', {'session': e['sessionId']}, timeout=5)
+            except SystemExit:
+                pass
         return
     here = Path(__file__).resolve().parent
     script = '"$0" "$1" --sweep; ls "$3"/*.json >/dev/null 2>&1 && exec "$0" "$2" drain'

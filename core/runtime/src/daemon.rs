@@ -108,6 +108,24 @@ pub(crate) struct Shared {
     own: Paths,
     /// How long a call waits for the core lock: [`LOCK_WAIT`], shorter in tests.
     lock_wait: Duration,
+    /// A test's own world for `wake.tick` (its clock, processes, `gh` and transcripts).
+    #[cfg(test)]
+    wake_world: Mutex<Option<crate::wake::World>>,
+}
+
+/// The core for a call that takes the lock in more than one step (`wake.tick`): each step waits for the lock as long as a
+/// whole call would, since the slow part between the steps (`gh`) is not the lock's.
+struct TwoPhases<'a>(&'a Shared);
+
+impl crate::wake::CoreLock for TwoPhases<'_> {
+    fn with_core<R>(&self, f: impl FnOnce(&mut Core) -> Result<R>) -> Result<R> {
+        CALL.with(|c| {
+            if let Some((_, deadline)) = c.borrow_mut().as_mut() {
+                *deadline = Instant::now() + self.0.lock_wait;
+            }
+        });
+        self.0.with_core(f)
+    }
 }
 
 /// Who holds the core lock: the call's method (or the daemon's loop) and since when.
@@ -292,6 +310,31 @@ impl Shared {
         }
     }
 
+    /// The world `wake.tick` asks between its phases: the system's, or a test's own.
+    #[cfg(not(test))]
+    #[allow(clippy::unused_self)]
+    fn wake_world(&self) -> crate::wake::World {
+        crate::wake::system()
+    }
+
+    #[cfg(test)]
+    fn wake_world(&self) -> crate::wake::World {
+        self.wake_world
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(crate::wake::system)
+    }
+
+    /// A test gives `wake.tick` a world of its own.
+    #[cfg(all(test, unix))]
+    pub(crate) fn set_wake_world(&self, world: crate::wake::World) {
+        *self
+            .wake_world
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(world);
+    }
+
     /// Who has the core lock and for how long: `(call, seconds)`.
     fn holder_now(&self) -> Option<(String, u64)> {
         self.lock_holder
@@ -396,7 +439,7 @@ impl Shared {
         self.changed.notify_all();
     }
 
-    fn dispatch(&self, who: Principal, method: &str, params: &Value) -> Result<Value> {
+    pub(crate) fn dispatch(&self, who: Principal, method: &str, params: &Value) -> Result<Value> {
         let _call = begin_call(method, self.lock_wait);
         self.dispatch_in(who, method, params)
     }
@@ -577,6 +620,12 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        // The wake tick (S4 R2) takes the core lock twice and none while it asks `gh`, the process table and the transcripts.
+        if method == "wake.tick" {
+            let answer = crate::wake::tick(&TwoPhases(self), params, &self.wake_world())?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         // The wake queue (M3-7): nothing calls these until kith-wake is switched; the daemon runs no drain and fires no waiter.
         if crate::wake::serves(method) {
             let answer = self.with_core(|c| crate::wake::call(c, method, params))?;
@@ -584,13 +633,10 @@ impl Shared {
             return Ok(answer);
         }
         // The ask tree: open, settle and end are claim transactions (M3-8a).
-        #[cfg(unix)]
-        {
-            if crate::asks::serves(method) {
-                let answer = self.with_core(|c| crate::asks::call(c, method, params))?;
-                self.served.fetch_add(1, Ordering::SeqCst);
-                return Ok(answer);
-            }
+        if crate::asks::serves(method) {
+            let answer = self.with_core(|c| crate::asks::call(c, method, params))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
         }
         // Same for the sync lease: a change is a claim transaction.
         if method.starts_with("syncLease.") {
@@ -777,6 +823,8 @@ impl Daemon {
             packages: crate::packages::PackageCache::start(cfg.package_probe.clone()),
             own: paths.clone(),
             lock_wait: cfg.lock_wait,
+            #[cfg(test)]
+            wake_world: Mutex::new(None),
         });
         let (s, p) = (shared.clone(), paths.clone());
         let spawned = std::thread::Builder::new()

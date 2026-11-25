@@ -22,10 +22,8 @@ pub mod paths;
 // Unix only, like `cost` and `secrets`: it runs `kith-auth` through the secrets module's timeout helper.
 #[cfg(unix)]
 pub mod people;
-pub mod pkg;
-// Unix only: the run socket is a Unix socket and the one-shots are modes.
-#[cfg(unix)]
 pub mod permit;
+pub mod pkg;
 pub mod procstart;
 pub mod project;
 // Unix only in the module list below: the hook is written into a unix launch's settings.
@@ -42,6 +40,8 @@ pub mod secrets;
 pub mod settings;
 #[cfg(unix)]
 pub mod threads;
+// Not Unix-only: `kith wake` on a Mac with no Python (a Windows owner) is this thin client of the core's wake rows.
+pub mod wake;
 
 /// The version of the `kith kernel` interface the router in `kernel/bin/kith` speaks to.
 pub const ABI: u32 = 1;
@@ -90,6 +90,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         // `KITH_TURN_CLAIM`: the launch attaches the host's claim for its turn (`claim.attach`) before anything starts. The
         // router hands the variable only to a program that lists it (else exit 10); the host checks it before setting it.
         "turn-claim",
+        // `kernel wake VERB ...`: `kith wake` as a client of the core's wake rows, for a Mac whose queue is the core's (the tombstone
+        // in sessions/queue/). `kith_wake_exec` (lib/kith-core.sh) uses it only on a program that lists it, else kith-wake answers.
+        "wake",
     ]
 } else {
     &[
@@ -105,10 +108,14 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "engine-run",
         "engines",
         "paths",
+        // Owner runs only: the hooks, `issue`, and the MCP server's `approve` and key/access cards, over the host's named pipe.
+        // The guest halves (apply, door, helper, bug) are refused by name.
+        "permit",
         "pkg",
         "project",
         "room-ledger",
         "settings",
+        "wake",
     ]
 };
 
@@ -125,7 +132,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
         );
     }
 }
