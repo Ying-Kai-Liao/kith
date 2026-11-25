@@ -2274,6 +2274,7 @@ mod tests {
         drop(rig);
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn with_the_core_a_denial_tells_the_cloud_and_a_web_browser_is_never_the_owners_device() {
         let hub = temp_hub();

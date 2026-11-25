@@ -208,6 +208,7 @@ fn answers_are_their_fixtures(who: &str, answers: &BTreeMap<&str, (&str, Value)>
     }
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_member_methods_answer_as_the_contract_and_its_fixtures_say() {
     let r = Rig::new().await;
@@ -228,6 +229,7 @@ async fn the_bot_methods_answer_as_the_contract_and_its_fixtures_say() {
     answers_are_their_fixtures("bot", &answers);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_peer_methods_answer_as_the_contract_and_its_fixtures_say() {
     let r = Rig::new().await;

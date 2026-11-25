@@ -135,6 +135,7 @@ fn python_missing() -> bool {
     missing
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_thread_works_while_the_chat_does_and_stops_alone() {
     if python_missing() {

@@ -613,6 +613,7 @@ mod tests {
         (crypto::sas_code(Labels::Kith, &r.hub.identity.sign_pub(), &a.dk, &a.nd, &nh), nh)
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn a_computer_gets_in_only_by_the_code_typed_here() {
         let r = Rig::new().await;
@@ -652,6 +653,7 @@ mod tests {
         assert_eq!(principal(&r.hub.store, &g.caller()), Principal::Nobody);
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn a_request_the_cloud_changed_is_denied() {
         let r = Rig::new().await;
@@ -681,6 +683,7 @@ mod tests {
         assert_eq!(r.hub.store.peers_in().unwrap(), Vec::<PeerIn>::new());
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn auto_approval_never_pairs_and_pairing_has_its_own_guesses() {
         let r = Rig::new().await;
@@ -704,6 +707,7 @@ mod tests {
         assert_eq!(cloud::nonce_budget(&r.hub.store, "sas_nonces").len(), cloud::SAS_NONCES_PER_HOUR);
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn the_cloud_can_end_a_pairing_but_never_make_one() {
         let r = Rig::new().await;
@@ -734,6 +738,7 @@ mod tests {
         assert_eq!(principal(&r.hub.store, &a.caller()), Principal::Nobody);
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn another_owner_in_the_cloud_ends_every_pairing() {
         let r = Rig::new().await;
@@ -755,6 +760,7 @@ mod tests {
         assert!(decide(&r.hub, "preq_2", true, Some(&code)).await.is_err());
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn pairing_again_is_a_new_epoch() {
         let r = Rig::new().await;
@@ -768,6 +774,7 @@ mod tests {
         assert_ne!(r.hub.store.peer_in("cmp_a").unwrap().epoch, first, "same keys, new pairing");
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn the_asking_side_pins_the_key_it_computed_the_code_with() {
         let r = Rig::new().await;
