@@ -37,6 +37,11 @@ pub async fn sync(hub: &Hub, listed: Option<&[Listed]>) {
 }
 
 pub async fn apply(hub: &Hub, listed: &[Listed]) -> anyhow::Result<()> {
+    // No bot guest is admitted from the cloud's list on Windows; nothing is written.
+    if cfg!(windows) && !listed.is_empty() {
+        tracing::warn!("{}", kith_kernel::GUESTS_NOT_ON_WINDOWS);
+        return Ok(());
+    }
     let now = now_ms();
     for l in listed {
         let bound = hub.store.bot_guests()?.into_iter().find(|g| g.cloud_device.as_deref() == Some(&l.bot_device_id));

@@ -260,12 +260,32 @@ fn interactive(engine: &str, bypass: bool) -> Result<i32> {
     }
 }
 
+/// Prints the run's result: `--output json`'s object, or the text and the error.
+fn show(done: &Done, engine: &str, json: bool) {
+    if json {
+        println!("{}", done.json(engine));
+    } else {
+        if !done.text.is_empty() {
+            println!("{}", done.text);
+        }
+        if let Some(e) = &done.error {
+            eprintln!("kith: {engine}: {e}");
+        }
+    }
+}
+
 /// Runs it and returns the exit code.
 pub async fn run(a: Args) -> Result<i32> {
     let engine =
         engines::find(&a.engine).ok_or_else(|| anyhow!("no engine called {} (kith engines lists them)", a.engine))?;
     if a.interactive {
         return interactive(engine.id, a.permission_mode.as_deref() == Some("bypassPermissions"));
+    }
+    let approve = a.permission_mode.as_deref() == Some("bypassPermissions");
+    // Before anything starts: an engine that can't hold the run to its folders must not get the task.
+    if let Some(why) = runonce::cannot_hold(engine, approve) {
+        show(&Done::of(&a.engine, Err(anyhow!(why)), None), &a.engine, a.json);
+        return Ok(1);
     }
     let Some(command) = runonce::acp_command(engine, None).await? else {
         return Ok(runonce::NOT_AVAILABLE);
@@ -280,7 +300,6 @@ pub async fn run(a: Args) -> Result<i32> {
     let mcp = merge_mcp(&std::env::var("KITH_RUN_MCP").unwrap_or_default());
     let model = std::env::var("KITH_MODEL").unwrap_or_default();
     let effort = std::env::var("KITH_EFFORT").unwrap_or_default();
-    let approve = a.permission_mode.as_deref() == Some("bypassPermissions");
     let resume = resume_id(&a.engine, a.resume.as_deref());
     let cwd = std::env::current_dir()?.to_string_lossy().into_owned();
     let spec = RunSpec {
@@ -313,16 +332,7 @@ pub async fn run(a: Args) -> Result<i32> {
     if let Some(row) = done.row(&a.engine, model, &task, chrono::Utc::now()) {
         record(&row);
     }
-    if a.json {
-        println!("{}", done.json(&a.engine));
-    } else {
-        if !done.text.is_empty() {
-            println!("{}", done.text);
-        }
-        if let Some(e) = &done.error {
-            eprintln!("kith: {}: {e}", a.engine);
-        }
-    }
+    show(&done, &a.engine, a.json);
     Ok(i32::from(done.error.is_some()))
 }
 

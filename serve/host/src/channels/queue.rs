@@ -278,7 +278,22 @@ impl Core {
             // sweep that found nothing stoppable (or ran before this turn existed) can't be outrun. Asked in sync
             // with the Kith cloud (waiting up to `sync_hold`), as a revoke made on another computer may not be here
             // yet. The owner's own runs are never refused here.
-            let refused = if invitee { Some(self.access(&person, agent).await).filter(|a| !a.allowed) } else { None };
+            let refused = if invitee && !cfg!(windows) {
+                Some(self.access(&person, agent).await).filter(|a| !a.allowed)
+            } else {
+                None
+            };
+            // A guest's turn queued before this copy of the store moved to Windows never starts.
+            if cfg!(windows) && invitee {
+                tracing::info!(
+                    "{wk}: {person} is a guest; not starting the turn: {}",
+                    kith_kernel::GUESTS_NOT_ON_WINDOWS
+                );
+                self.with(|i| {
+                    i.st.inbox.insert(wk.to_owned(), Vec::new());
+                    i.save();
+                });
+            }
             if let Some(access) = refused {
                 tracing::info!("{wk}: {person} may not use {agent} now ({}); not starting the turn", access.why);
                 self.with(|i| {

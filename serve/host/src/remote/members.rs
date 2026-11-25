@@ -75,6 +75,11 @@ fn valid_user_id(id: &str) -> bool {
 }
 
 pub async fn apply(hub: &Hub, bin: Option<&Path>, listed: &[Listed], owner_uid: Option<&str>) -> Result<()> {
+    // No member is admitted from the cloud's list on Windows; nothing is written.
+    if cfg!(windows) && !listed.is_empty() {
+        tracing::warn!("{}", kith_kernel::GUESTS_NOT_ON_WINDOWS);
+        return Ok(());
+    }
     let known = hub.store.memberships()?;
     for m in listed.iter().filter(|m| !known.iter().any(|k| k.membership_id == m.membership_id)) {
         if !valid_user_id(&m.user_id) || owner_uid == Some(m.user_id.as_str()) {

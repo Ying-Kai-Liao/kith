@@ -9,7 +9,7 @@ FAKE_ACP_ANSWER  the answer, instead of echoing the task
 FAKE_ACP_DIRS   set: initialize says the agent takes session additionalDirectories
 FAKE_ACP_MODES  comma-separated session mode ids session/new lists (the first is current); session/set_mode takes only these
 FAKE_ACP_COST   dollars to report in the prompt result (default: none reported)
-FAKE_ACP_LOAD   set: initialize says the agent loads sessions (loadSession); session/load then answers and, first, replays
+FAKE_ACP_LOAD   set (`null` or `empty`: session/load answers null or {}, as Hermes does for a session it did not make over ACP: its python ACP library sends {} for None): initialize says the agent loads sessions (loadSession); session/load then answers and, first, replays
                 one agent_message_chunk "old: replayed history" (a resumed run must not take it for its answer)
 FAKE_ACP_EFFORT comma-separated values of a thought_level config option session/new lists (session/set_config_option takes
                 only these)
@@ -61,6 +61,10 @@ for line in sys.stdin:
                 result['configOptions'] = [{'id': 'effort', 'name': 'Effort', 'type': 'select', 'category': 'thought_level',
                                             'currentValue': efforts[0], 'options': [{'value': e, 'name': e} for e in efforts]}]
             reply(id, result)
+    elif method == 'session/load' and os.environ.get('FAKE_ACP_LOAD') == 'null':
+        reply(id, None)
+    elif method == 'session/load' and os.environ.get('FAKE_ACP_LOAD') == 'empty':
+        reply(id, {})
     elif method == 'session/load':
         send({'jsonrpc': '2.0', 'method': 'session/update', 'params': {
             'sessionId': params.get('sessionId'),
