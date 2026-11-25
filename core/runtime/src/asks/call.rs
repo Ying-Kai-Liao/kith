@@ -201,8 +201,6 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
             check_to(core.conn(), id)?;
             Ok(json!({ "id": id, "ok": true }))
         }
-        // The revoke order is Unix only (the authority tables it reads are).
-        #[cfg(unix)]
         "ask.revokeEverywhere" => {
             let out = crate::revoke_order::revoke_everywhere(
                 core,
