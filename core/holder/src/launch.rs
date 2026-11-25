@@ -43,6 +43,10 @@ pub fn ensure(exe: &Path, dir: &Path, secret: &str, idle: Duration) -> io::Resul
         Ok(_) => return Ok(()),
         // A socket path the system cannot hold: starting a holder would only fail later and silently.
         Err(e) if e.kind() == io::ErrorKind::InvalidInput => return Err(e),
+        // Windows: another account serves this pipe name. A new holder could not take the name, and waiting for one would
+        // only run out the clock.
+        #[cfg(windows)]
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return Err(e),
         Err(_) => {}
     }
     let log = std::fs::OpenOptions::new()

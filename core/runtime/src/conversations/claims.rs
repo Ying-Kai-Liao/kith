@@ -321,6 +321,8 @@ pub(crate) enum Fence {
     Stopped(String),
     /// The turn is a schedule's and its job is paused (level-triggered: pause wins over a turn that was already queued).
     Paused,
+    /// The turn is an ask from another computer whose pairing epoch has ended (`ask.endPeer`): nothing of it starts.
+    Cut(String),
     /// The person's revoke epoch moved after the caller's may check. The turn stays as it is for a fresh claim.
     Revoked,
 }
@@ -331,13 +333,14 @@ impl Fence {
         match self {
             Self::Stopped(_) => "stopped",
             Self::Paused => "paused",
+            Self::Cut(_) => "cut",
             Self::Revoked => "revoked",
         }
     }
 
     /// Whether the turn is cancelled for this fence (a stopped ask's, a paused job's).
     fn cancels(&self) -> bool {
-        matches!(self, Self::Stopped(_) | Self::Paused)
+        matches!(self, Self::Stopped(_) | Self::Paused | Self::Cut(_))
     }
 
     pub(crate) fn refusal(&self, req: &NewClaim<'_>) -> Error {
@@ -351,6 +354,9 @@ impl Fence {
             Self::Paused => Error::Refused(format!(
                 "kith-core: the job of turn {:?} is paused; the turn is cancelled",
                 req.turn
+            )),
+            Self::Cut(computer) => Error::Refused(format!(
+                "kith-core: the link to {computer} ended; the turn of its ask is cancelled"
             )),
             Self::Revoked => Error::Refused(format!(
                 "kith-core: {} was revoked after the may check",
@@ -399,6 +405,10 @@ fn fence_in(tx: &Transaction<'_>, req: &NewClaim<'_>) -> Result<Option<Fence>> {
 fn held_in(tx: &rusqlite::Connection, turn: i64) -> Result<Option<Fence>> {
     if let Some(ask) = stopped_in(tx, turn)? {
         return Ok(Some(Fence::Stopped(ask)));
+    }
+    // PeerFence: an ask from a computer whose pairing ended starts nothing (read in the claim's own transaction).
+    if let Some(computer) = crate::asks::cut_origin_in(tx, turn)? {
+        return Ok(Some(Fence::Cut(computer)));
     }
     Ok(super::sched_run::paused_in(tx, turn)?.then_some(Fence::Paused))
 }

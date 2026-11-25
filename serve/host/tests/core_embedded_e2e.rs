@@ -1,6 +1,7 @@
-//! The verbs already switched to Rust (paths, engines, launch) run inside an embedded kith-core: the real `kith`
-//! binary takes the lifetime lock and bumps the core's generation for each one. The difftest cannot show this (it
-//! compares the files a command leaves, and a core made on the side would differ), so it is proved here.
+//! The verbs already switched to Rust (paths, engines) run inside an embedded kith-core: the real `kith` binary takes
+//! the lifetime lock and bumps the core's generation for each one. The launch runs outside it (it asks the core
+//! itself, so it must not hold the lock). The difftest cannot show either (it compares the files a command leaves,
+//! and a core made on the side would differ), so both are proved here.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -79,10 +80,11 @@ fn without_run_ids(raw: &[u8]) -> String {
 }
 
 /// `kith AGENT --launch-json` is the hot path: its Rust verb (`kith kernel launch AGENT --launch-json`, what the router
-/// execs while `launch` is switched in lib/core-switched.txt) must answer the same through an embedded core as bare.
+/// execs while `launch` is switched in lib/core-switched.txt) must answer the same with a core as bare, and must not
+/// take the core's lock: the launch asks the core itself, which it could not do while its own process held the lock.
 /// (Tested through the Rust verb directly: the router script is bash and finds the program through the host install.)
 #[test]
-fn launch_json_passes_through_an_embedded_core_and_answers_the_same() {
+fn launch_json_runs_outside_the_core_and_answers_the_same() {
     use std::os::unix::fs::PermissionsExt as _;
     let h = home("launch");
     let p = paths(&h);
@@ -119,15 +121,14 @@ fn launch_json_passes_through_an_embedded_core_and_answers_the_same() {
     assert!(bare.status.success(), "{}", String::from_utf8_lossy(&bare.stderr));
     assert!(!p.machine.join("core").exists());
 
-    // With a core: the same answer, and the launch took the lock and bumped the generation (1 at start, 2 for the
-    // launch, 3 for this open).
+    // With a core: the same answer, and the launch never took the lock (1 at start, 2 for this open).
     drop(kith_core::start(&p).expect("start"));
-    let through = launch();
-    assert!(through.status.success(), "{}", String::from_utf8_lossy(&through.stderr));
-    assert_eq!(without_run_ids(&bare.stdout), without_run_ids(&through.stdout));
-    assert_eq!(bare.stderr, through.stderr);
+    let with_core = launch();
+    assert!(with_core.status.success(), "{}", String::from_utf8_lossy(&with_core.stderr));
+    assert_eq!(without_run_ids(&bare.stdout), without_run_ids(&with_core.stdout));
+    assert_eq!(bare.stderr, with_core.stderr);
     match kith_core::open_embedded(&p).expect("open") {
-        kith_core::Embedded::Open(core) => assert_eq!(core.generation(), 3),
+        kith_core::Embedded::Open(core) => assert_eq!(core.generation(), 2),
         kith_core::Embedded::DaemonRunning { .. } => panic!("the lock should be free"),
     }
     let _ = std::fs::remove_dir_all(&h);

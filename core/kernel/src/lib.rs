@@ -2,7 +2,11 @@
 //! two answer the same question the same way. The Python kernel keeps its own copies while it moves; the
 //! differential harness (`kernel/tests/difftest`) fails when they differ.
 
+pub mod access;
 pub mod accounts;
+// Not Unix-only: `kith ask` on a Mac with no Python (a Windows owner) is this thin client of the core's ask rows; what needs a Unix
+// program (a callee started from a bash entry, ssh) says so by name.
+pub mod ask;
 // On Windows the ledger (tag, record, sync) and the reports of one agent run; the verbs that ask `kith-auth` for people
 // (`people`, `members`, `bots`) are refused by name until retire-python P3-1.
 pub mod cost;
@@ -31,7 +35,7 @@ pub mod readfence;
 pub mod room_ledger;
 pub mod schedule;
 // Unix only, whole: the access decision runs `kith-auth`, reads the password database and writes auth.json with modes. Windows
-// has just the pieces the other modules stand on (`pyjson`, the timeout helper): see `secrets_win.rs`.
+// has just the pieces the other modules stand on (`pyjson`, the timeout helper, the portable `access` re-export): see `secrets_win.rs`.
 #[cfg(unix)]
 pub mod secrets;
 #[cfg(not(unix))]
@@ -40,12 +44,14 @@ pub mod secrets;
 pub mod settings;
 #[cfg(unix)]
 pub mod threads;
+// Not Unix-only: `kith wake` on a Mac with no Python (a Windows owner) is this thin client of the core's wake rows.
+pub mod wake;
 
 /// The version of the `kith kernel` interface the router in `kernel/bin/kith` speaks to.
 pub const ABI: u32 = 1;
 
 /// The modules this build has, as `kith kernel version` lists them. A verb in `kernel/lib/core-switched.txt` moves to
-/// the core only when its module is here (`threads-writer`: every `kith-sessions` verb but `run`, in Files and in Writer mode; `threads-run`: that `run`; the older `threads` is the Files-mode port and is not what `kernel/bin/kith` routes to; `acp`: the `run-once` verb, whose code lives in the kith-acp crate; `engine-run`: the non-Claude one-shot `kernel/bin/kith` runs through it (`kith kernel engine-run`); `launch`: `kith AGENT --launch-json`; `lifecycle`: `kith-lifecycle`, the sweep that compacts or ends sessions nobody runs).
+/// the core only when its module is here (`threads-writer`: every `kith-sessions` verb but `run`, in Files and in Writer mode; `threads-run`: that `run`; the older `threads` is the Files-mode port and is not what `kernel/bin/kith` routes to; `acp`: the `run-once` verb, whose code lives in the kith-acp crate; `engine-run`: the non-Claude one-shot `kernel/bin/kith` runs through it (`kith kernel engine-run`); `engine-run-tui`: its `--interactive`, the engine's own terminal session; `launch`: `kith AGENT --launch-json`; `lifecycle`: `kith-lifecycle`, the sweep that compacts or ends sessions nobody runs).
 pub const MODULES: &[&str] = if cfg!(unix) {
     &[
         "account",
@@ -55,10 +61,14 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "accounts-main-id",
         "accounts-run-chain",
         "acp",
+        // `kernel ask`: `kith ask` as a client of the core's ask rows (the ledger). A token of its own, not a wider `asks`: `kith-ask`
+        // forwards here only on a program that lists it and a Mac whose `asks` module is switched.
+        "ask-ledger",
         "cost",
         "cost-ledger",
         "delegation",
         "engine-run",
+        "engine-run-tui",
         "engines",
         "launch",
         // `kernel launch-exec`: a one-shot run in this process (the entry's one-shot branch). A token of its own: an older
@@ -73,6 +83,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "project-guest",
         "readfence",
         "room-ledger",
+        // `kernel launch AGENT --exec --kernel K --turn N --claim C`: the core's turn of a cron job, its spec on stdin; the launch attaches
+        // the claim before the engine. Listed only by a program whose `launch --exec` takes the flags (the host checks it).
+        "sched-turn",
         // `kernel secrets exec` (start a shared MCP server with its keys) and `kernel secrets mcp-config`: `mcp-config` names
         // this program as the server's command only when it lists the token, else `bin/kith-auth exec` (P1-15).
         "secrets-exec",
@@ -85,6 +98,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         // `KITH_TURN_CLAIM`: the launch attaches the host's claim for its turn (`claim.attach`) before anything starts. The
         // router hands the variable only to a program that lists it (else exit 10); the host checks it before setting it.
         "turn-claim",
+        // `kernel wake VERB ...`: `kith wake` as a client of the core's wake rows, for a Mac whose queue is the core's (the tombstone
+        // in sessions/queue/). `kith_wake_exec` (lib/kith-core.sh) uses it only on a program that lists it, else kith-wake answers.
+        "wake",
     ]
 } else {
     &[
@@ -94,10 +110,12 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "accounts-main-id",
         "accounts-run-chain",
         "acp",
+        "ask-ledger",
         // The ledger's writers; `cost` itself (the per-person views) waits for P3-1, which takes `kith-auth` out of them.
         "cost-ledger",
         "delegation",
         "engine-run",
+        "engine-run-tui",
         "engines",
         "paths",
         // Owner runs only: the hooks, `issue`, and the MCP server's `approve` and key/access cards, over the host's named pipe.
@@ -107,6 +125,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "project",
         "room-ledger",
         "settings",
+        "wake",
     ]
 };
 
@@ -123,7 +142,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","ask-ledger","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
         );
     }
 }
