@@ -151,6 +151,15 @@ fn start_with_in(
         "INSERT OR IGNORE INTO wake_turns (run, session, turn_id, revoke_seen) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params![run, session, id, claims::revoke_epoch_in(tx, person)?],
     )?;
+    // A row of an ask's mailbox that this run carries reaches the asker by the wake, so `--wait` finds it read (ask R5).
+    let ids: Vec<String> = turn
+        .get("ids")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|i| i.as_str().map(str::to_owned))
+        .collect();
+    crate::asks::mark_read_by_wake_in(tx, &ids)?;
     // The claim files are the writers until the switch (the Python's `writer_live`); the claim rows are what the core knows.
     let writer = sid.filter(|s| !s.is_empty()).unwrap_or(session);
     if files.is_some_and(|out| out.writer_live(writer))
