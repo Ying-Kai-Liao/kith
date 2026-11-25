@@ -67,7 +67,7 @@ Try-Do 'ffmpeg' {
   if ($real) { New-Item -ItemType Directory -Force C:\probe\ffmpeg | Out-Null; Copy-Item $real.FullName C:\probe\ffmpeg\ffmpeg.exe; Log "ffmpeg copied from $($real.FullName)" } else { Log 'no real ffmpeg.exe found' }
 }
 
-function Run-Guest($only) {
+function Run-Guest($only, $ms = 900000) {
   Section "run guest-run.ps1 as kithguest (-Only $only)"
   $sec = ConvertTo-SecureString $pw -AsPlainText -Force
   $cred = New-Object System.Management.Automation.PSCredential('.\kithguest', $sec)
@@ -77,7 +77,8 @@ function Run-Guest($only) {
     $p = Start-Process powershell.exe -Credential $cred -LoadUserProfile -WorkingDirectory C:\guest `
       -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\probe\bin\guest-run.ps1', '-Only', $only `
       -RedirectStandardOutput $o -RedirectStandardError $e -PassThru -WindowStyle Hidden
-    if (-not $p.WaitForExit(1500000)) { Log 'TIMEOUT: killing the guest run'; taskkill /T /F /PID $p.Id | Out-Null }
+    if (-not $p.WaitForExit($ms)) { Log 'TIMEOUT: killing the guest run'; taskkill /T /F /PID $p.Id | Out-Null; Get-Process boxprobe -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
+    Copy-Item 'C:\guest\out\*' $Out -Recurse -Force -ErrorAction SilentlyContinue
     Log "guest run exit code: $($p.ExitCode)"
   } catch { Log "Start-Process as kithguest FAILED: $($_ | Out-String)" }
   Log '--- guest stdout'; Log ((Get-Content $o -ErrorAction SilentlyContinue) -join "`n")
@@ -93,7 +94,7 @@ Try-Do 'loopback' {
   Log ("CheckNetIsolation LoopbackExempt -a: " + ((CheckNetIsolation.exe LoopbackExempt -a "-p=$sid" 2>&1) -join ' '))
   Log ("CheckNetIsolation LoopbackExempt -s: " + ((CheckNetIsolation.exe LoopbackExempt -s 2>&1) -join ' | '))
 }
-Run-Guest 'loopback2'
+Run-Guest 'loopback2' 300000
 Try-Do 'loopback cleanup' { CheckNetIsolation.exe LoopbackExempt -c 2>&1 | Out-Null }
 
 Section 'admin interlude: ALL APPLICATION PACKAGES read on the Python folder'
@@ -103,7 +104,7 @@ Try-Do 'python acl' {
     Log "granted on $(Split-Path $py)"
   }
 }
-Run-Guest 'python2'
+Run-Guest 'python2' 120000
 
 Section 'cleanup: leftovers, profiles, the user'
 Try-Do 'cleanup' {
