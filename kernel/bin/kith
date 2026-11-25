@@ -102,9 +102,9 @@
 # Model and effort: `model:` and `effort:` in agent.md's frontmatter (the same fields the kith:<name> subagent uses),
 # overridden by -m/-e or KITH_MODEL/KITH_EFFORT; unset means your global setting. Every session is tagged in the cost
 # ledger (kith-cost tag) with the agent, version, model and effort.
-# Harness: `harness:` in agent.md (claude, codex, pi, agy, hermes, qwen, dsh, opencode), overridden by -H or KITH_HARNESS;
+# Harness: `harness:` in agent.md (claude, codex, pi, agy, hermes, qwen, opencode), overridden by -H or KITH_HARNESS;
 # unset means claude. Every harness gets the same prompt, directories, granted MCP servers, model and effort
-# (adapters/harness.py turns them into its flags). Callers ask for JSON output, a session to resume and a permission
+# (kith kernel engine-run runs them over ACP). Callers ask for JSON output, a session to resume and a permission
 # mode with KITH_OUTPUT=json, KITH_RESUME and KITH_PERMISSION_MODE, the same for every harness.
 # Permission mode: --permission-mode MODE or --bypass (bypassPermissions), else KITH_PERMISSION_MODE (entry points set it
 # from their own KITH_BRIDGE_/KITH_SCHED_/KITH_ASK_PERMISSION_MODE), else this Mac's choice for the agent (~/.kith/settings.json
@@ -1526,21 +1526,24 @@ if [[ $harness != claude ]]; then
   [[ -n $out_format ]] && hargs=(--output "$out_format" "${hargs[@]}")
   [[ -n $resume ]] && hargs=(--resume "$resume" "${hargs[@]}")
   [[ -n $perm_mode ]] && hargs=(--permission-mode "$perm_mode" "${hargs[@]}")
+  # The kith program runs a non-Claude engine over ACP (a one-shot) or as the engine's own terminal session; it says 78 when
+  # the engine has neither (nothing was started).
+  if ! { kbin=$(kith_find_bin) && [[ -n $kbin ]] && "$kbin" kernel version 2>/dev/null | grep -q '"engine-run"'; }; then
+    echo "kith: $harness runs through the kith program (kernel engine-run), and this Mac has none that has it (install or update kith)" >&2
+    exit 1
+  fi
   if [[ $# -eq 0 ]]; then
+    "$kbin" kernel version 2>/dev/null | grep -q '"engine-run-tui"' || { echo "kith: this Mac's kith program has no terminal session for $harness (install or update kith)" >&2; exit 1; }
     [[ -t 0 && -t 1 ]] || { echo "kith: no terminal for an interactive session; give a task (kith $agent \"...\") or run it in a terminal" >&2; exit 1; }
-    exec python3 "$KITH/adapters/harness.py" "$harness" "${hargs[@]}"
+    exec "$kbin" kernel engine-run "$harness" --interactive "${hargs[@]}"
   fi
-  # A program that lists engine-run runs the task over ACP; exit 78 (no ACP one-shot for this engine, nothing started) and an
-  # older program go on to harness.py. It runs beside this script, not as it, so a TERM here is passed on to it.
-  if { kbin=$(kith_find_bin) && [[ -n $kbin ]] && "$kbin" kernel version 2>/dev/null | grep -q '"engine-run"'; }; then
-    "$kbin" kernel engine-run "$harness" "${hargs[@]}" "$*" & er_pid=$!
-    trap 'kill -TERM "$er_pid" 2>/dev/null' TERM INT HUP
-    er_rc=0; wait "$er_pid" || er_rc=$?   # (set -e: a non-zero wait must not end this script)
-    while kill -0 "$er_pid" 2>/dev/null; do er_rc=0; wait "$er_pid" || er_rc=$?; done
-    trap - TERM INT HUP
-    [[ $er_rc -eq 78 ]] || exit "$er_rc"
-  fi
-  exec python3 "$KITH/adapters/harness.py" "$harness" "${hargs[@]}" "$*"
+  # It runs beside this script, not as it, so a TERM here is passed on to it.
+  "$kbin" kernel engine-run "$harness" "${hargs[@]}" "$*" & er_pid=$!
+  trap 'kill -TERM "$er_pid" 2>/dev/null' TERM INT HUP
+  er_rc=0; wait "$er_pid" || er_rc=$?   # (set -e: a non-zero wait must not end this script)
+  while kill -0 "$er_pid" 2>/dev/null; do er_rc=0; wait "$er_pid" || er_rc=$?; done
+  trap - TERM INT HUP
+  exit "$er_rc"
 fi
 
 # launch-json hands the settings and the MCP servers over inline (--settings and --mcp-config take JSON as well as a file).

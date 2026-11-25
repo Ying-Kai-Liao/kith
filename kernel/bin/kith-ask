@@ -29,7 +29,7 @@
 
 Options: -c/--continue, --as NAME (a named conversation: -c --as NAME picks it up from anywhere, in its folder),
 -C/--dir DIR (work in DIR), -p PROJECT (its memory, and its folder unless -C says; the current one if it has none),
--m MODEL, -e EFFORT, -H HARNESS (claude, codex, pi, agy, hermes, qwen, dsh, opencode; default the agent's own),
+-m MODEL, -e EFFORT, -H HARNESS (claude, codex, pi, agy, hermes, qwen, opencode; default the agent's own),
 --json (the whole result: answer, session, cost, turns).
 
 The same run as `kith <agent> "task"`: its pinned package, own settings and services, memory and project, tagged
