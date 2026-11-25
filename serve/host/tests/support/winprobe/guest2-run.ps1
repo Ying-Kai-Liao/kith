@@ -7,7 +7,8 @@ param([string]$Only = 'main')
 $ErrorActionPreference = 'Continue'
 $bp = 'C:\probe\bin\boxprobe.exe'
 $Out = 'C:\guest\out'
-$UP = $env:USERPROFILE
+$UP = "$env:SystemDrive\Users\kithguest"
+$DD = '--'
 $K = "$UP\kw"
 $W = "$K\w"
 $R = "$K\r"
@@ -23,6 +24,8 @@ function Q($a) { $a | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } 
 $userSid = (& $bp usersid).Trim()
 $capW = (& $bp capsid kith.w.probe).Trim()
 $capR = (& $bp capsid kith.r.probe).Trim()
+$rW = (& $bp rsid kith.w.probe).Trim()
+$rR = (& $bp rsid kith.r.probe).Trim()
 $tools = @(Get-Content 'C:\probe\tools.txt' -ErrorAction SilentlyContinue)
 $py = $tools[0]; $node = $tools[1]
 $pgit = 'C:\probe\pgit\usr\bin\bash.exe'
@@ -37,14 +40,18 @@ $V = [ordered]@{ A = $VA; Rm = $VRm; Rl = $VRl }
 
 # Bx NAME OPTS CMD...: one boxed run; output of the box lands in $Out\NAME.txt and in the log
 function Bx($name, $opts, $cmd, $timeout = 60, $more = @()) {
-  Bp xbox --name $name @opts @more --timeout $timeout --out "$Out\$name.txt" -- @cmd
+  Bp xbox --name $name @opts @more --timeout $timeout --out "$Out\$name.txt" $DD @cmd
 }
 function Txt($name) { (Get-Content "$Out\$name.txt" -Raw -ErrorAction SilentlyContinue) }
 
 function Setup-Workspace {
-  New-Item -ItemType Directory -Force $K, $W, $R | Out-Null
+  New-Item -ItemType Directory -Force $K, $W, $R, "$K\hosttmp" | Out-Null
+  $env:TEMP = "$K\hosttmp"; $env:TMP = "$K\hosttmp"
+  Log "run SIDs: A caps w=$capW r=$capR ; R arbitrary SIDs w=$rW r=$rR"
   Log ((icacls $W /grant "*${capW}:(OI)(CI)(M)") -join ' ')
+  Log ((icacls $W /grant "*${rW}:(OI)(CI)(M)") -join ' ')
   Log ((icacls $R /grant "*${capR}:(OI)(CI)(RX)") -join ' ')
+  Log ((icacls $R /grant "*${rR}:(OI)(CI)(RX)") -join ' ')
   New-Item -ItemType Directory -Force "$W\tmp" | Out-Null
   Set-Content "$R\hello.txt" 'readable'
   Set-Content "$UP\secret.txt" 'SECRETDATA'
@@ -148,11 +155,13 @@ Section 'P-G13 a deny ACE for a restricting SID (does it block a write?) and one
 New-Item -ItemType Directory -Force "$W\dn" | Out-Null
 Set-Content "$W\dn\f.txt" 'x'
 Log ((icacls "$W\dn" /deny "*${capW}:(OI)(CI)(W)" /Q) -join ' ')
+Log ((icacls "$W\dn" /deny "*${rW}:(OI)(CI)(W)" /Q) -join ' ')
 foreach ($k in $V.Keys) {
   Bx "deny-write-$k" $V[$k] @($bp, 'try-open', "$W\dn\f.txt", 'w') 30
   Bx "deny-read-$k" $V[$k] @($bp, 'try-open', "$W\dn\f.txt", 'r') 30
 }
 Log ((icacls "$W\dn" /remove:d "*${capW}" /Q) -join ' ')
+Log ((icacls "$W\dn" /remove:d "*${rW}" /Q) -join ' ')
 
 Section 'P-G13/G12 can the box create a named pipe; anonymous pipes (P-G2f)'
 foreach ($k in $V.Keys) {
@@ -292,12 +301,17 @@ foreach ($k in $V.Keys) {
     New-Item -ItemType Directory -Force "$T\a\b", "$T\a\d", "$T\leaf" | Out-Null
     foreach ($f in 'c.txt', 'a\x.txt', 'a\b\secret.txt', 'a\b\other.txt', 'a\d\y.txt') { Set-Content "$T\$f" 'data' }
     icacls "$T\c.txt" /grant "*${capW}:(R)" /Q | Out-Null
+    icacls "$T\c.txt" /grant "*${rW}:(R)" /Q | Out-Null
     icacls "$T\a\x.txt" /grant "*${capW}:(R)" /Q | Out-Null
+    icacls "$T\a\x.txt" /grant "*${rW}:(R)" /Q | Out-Null
     icacls "$T\a\b\other.txt" /grant "*${capW}:(R)" /Q | Out-Null
+    icacls "$T\a\b\other.txt" /grant "*${rW}:(R)" /Q | Out-Null
     icacls "$T\a\d" /grant "*${capW}:(OI)(CI)(R)" /Q | Out-Null
+    icacls "$T\a\d" /grant "*${rW}:(OI)(CI)(R)" /Q | Out-Null
     icacls "$T\leaf" /grant "*${capW}:(OI)(CI)(M)" /Q | Out-Null
+    icacls "$T\leaf" /grant "*${rW}:(OI)(CI)(M)" /Q | Out-Null
     Log 'no ACE on the folders along the path to the carved file ($T, a, a\b):'
-    foreach ($d in @($T, "$T\a", "$T\a\b")) { Log ("$d : " + ((icacls $d) -join ' ' | Select-String -Pattern 'S-1-15-3' -SimpleMatch -Quiet)) }
+    foreach ($d in @($T, "$T\a", "$T\a\b")) { Log ("$d : " + ((icacls $d) -join ' ' | Select-String -Pattern 'S-1-15-3|S-1-5-21-' -Quiet)) }
     $o = $V[$k]
     $i = 0
     foreach ($t in @(@('c.txt', 'r'), @('a\x.txt', 'r'), @('a\d\y.txt', 'r'), @('a\b\other.txt', 'r'), @('a\b\secret.txt', 'r'), @('a\b\secret.txt', 'w'), @('leaf\new.txt', 'c'), @('a\d\new.txt', 'c'))) {
@@ -384,8 +398,11 @@ Try-Do 'g19' {
   Log "before: $($acl.Sddl)"
   Bx 'g19-before-A' $VA @($bp, 'reg-read') 30
   Bx 'g19-before-Rr' $VRr @($bp, 'reg-read') 30
-  $acl.SetAccessRuleProtection($true, $true)
-  foreach ($rule in @($acl.Access | Where-Object { $_.IdentityReference.Value -match 'APPLICATION PACKAGES|RESTRICTED' })) { [void]$acl.RemoveAccessRule($rule) }
+  $sd = $acl.Sddl
+  foreach ($ace in @('(A;OICI;KR;;;RC)', '(A;OICI;KR;;;AC)')) { $sd = $sd.Replace($ace, '') }
+  $sd = [regex]::Replace($sd, '\(A;OICI;KR;;;S-1-15-3-1024-[0-9-]+\)', '')
+  Log "new SDDL: $sd"
+  $acl.SetSecurityDescriptorSddlForm($sd)
   $key.SetAccessControl($acl)
   $key.Close()
   $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')

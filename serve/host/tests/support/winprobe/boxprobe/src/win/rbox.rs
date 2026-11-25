@@ -25,6 +25,25 @@ unsafe fn sid_from(s: &str) -> Res<PSID> {
     Ok(sid)
 }
 
+/// An arbitrary, stable SID for a run or a grant (a domain-style SID nobody owns): capability SIDs may not be accepted as
+/// restricting SIDs, and the restricting list takes any SID.
+unsafe fn run_sid(name: &str) -> Res<PSID> {
+    let fnv = |seed: u32| {
+        let mut h: u32 = 2_166_136_261 ^ seed.wrapping_mul(16_777_619);
+        for b in name.bytes() {
+            h ^= u32::from(b);
+            h = h.wrapping_mul(16_777_619);
+        }
+        h
+    };
+    sid_from(&format!("S-1-5-21-{}-{}-{}-{}", fnv(1), fnv(2), fnv(3), 1000 + fnv(4) % 100_000))
+}
+
+pub unsafe fn cmd_rsid(a: &[String]) -> Res<()> {
+    println!("{}", sid_str(run_sid(a.first().ok_or("name")?)?));
+    Ok(())
+}
+
 unsafe fn sddl_to_sd(sddl: &str) -> Res<*mut c_void> {
     let mut sd = null_mut();
     if ConvertStringSecurityDescriptorToSecurityDescriptorW(wide(sddl).as_ptr(), 1, &mut sd, null_mut()) == 0 {
@@ -59,7 +78,15 @@ unsafe fn make_rtoken(restrict: &[PSID], il: u32, default_dacl: Option<&str>) ->
     let mut nt: HANDLE = null_mut();
     // DISABLE_MAX_PRIVILEGE (1): drops every privilege but SeChangeNotify.
     if CreateRestrictedToken(t, 1, 0, null(), 0, null(), rs.len() as u32, rs.as_ptr(), &mut nt) == 0 {
-        return Err(format!("CreateRestrictedToken err {}", last()));
+        let e = last();
+        let mut each = Vec::new();
+        for s in restrict {
+            let one = [SID_AND_ATTRIBUTES { Sid: *s, Attributes: 0 }];
+            let mut x: HANDLE = null_mut();
+            let ok = CreateRestrictedToken(t, 1, 0, null(), 0, null(), 1, one.as_ptr(), &mut x);
+            each.push(format!("{}={}", sid_str(*s), if ok != 0 { "ok".to_string() } else { format!("err{}", last()) }));
+        }
+        return Err(format!("CreateRestrictedToken err {e}; each alone: {}", each.join(" ")));
     }
     let label = TOKEN_MANDATORY_LABEL {
         Label: SID_AND_ATTRIBUTES { Sid: sid_from(&format!("S-1-16-{il}"))?, Attributes: 0x20 },
@@ -145,11 +172,11 @@ pub unsafe fn cmd_xbox(a: &[String]) -> Res<()> {
         r("xbox", format!("{name} kind=a ac={} caps={}", sid_str(ac), caps.len()));
         sp.ac = Some((ac, caps));
     } else {
-        let run = cap_sid(&opt(a, "--run").unwrap_or_else(|| format!("kith.run.{name}")))?;
+        let run = run_sid(&opt(a, "--run").unwrap_or_else(|| format!("kith.run.{name}")))?;
         let mut rs = vec![run];
         let mut names = vec![format!("run={}", sid_str(run))];
         for g in opts(a, "--grant") {
-            rs.push(cap_sid(&g)?);
+            rs.push(run_sid(&g)?);
         }
         if !flag(a, "--no-sys") {
             rs.push(sid_from("S-1-1-0")?); // Everyone
@@ -611,10 +638,10 @@ pub unsafe fn cmd_kill_test(_a: &[String]) -> Res<()> {
 /// (comma list of capability names), KITH_BOX_IL (low|medium), KITH_BOX_RESTRICTED_SID=1.
 pub unsafe fn shim_box(real: &str, args: &[String]) -> Res<i32> {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-    let run = cap_sid(&env("KITH_BOX_RUN").unwrap_or_else(|| "kith.run.shim".into()))?;
+    let run = run_sid(&env("KITH_BOX_RUN").unwrap_or_else(|| "kith.run.shim".into()))?;
     let mut rs = vec![run, sid_from("S-1-1-0")?, sid_from("S-1-5-32-545")?];
     for g in env("KITH_BOX_GRANTS").unwrap_or_default().split(',').filter(|g| !g.is_empty()) {
-        rs.push(cap_sid(g)?);
+        rs.push(run_sid(g)?);
     }
     if env("KITH_BOX_RESTRICTED_SID").is_some() {
         rs.push(sid_from("S-1-5-12")?);

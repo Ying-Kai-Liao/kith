@@ -1158,6 +1158,7 @@ pub fn main() {
         "mutex-open",
         "pipe-anon",
         "sid-of",
+        "rsid",
         "kill-test",
     ];
     if !known.contains(&sub) {
@@ -1201,6 +1202,7 @@ pub fn main() {
             "mutex-open" => rbox::cmd_mutex_open(a),
             "pipe-anon" => rbox::cmd_pipe_anon(),
             "sid-of" => rbox::cmd_sid_of(a),
+            "rsid" => rbox::cmd_rsid(a),
             "kill-test" => rbox::cmd_kill_test(a),
             _ => Err("unknown".into()),
         }
