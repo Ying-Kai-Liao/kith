@@ -1,0 +1,70 @@
+/* The invite preview: what the invite opens, app first, browser second. */
+.web-preview {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  text-align: center;
+}
+.web-preview-items {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+.web-preview-items li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  align-items: center;
+}
+.web-preview-items li > .web-fine {
+  grid-column: 2;
+}
+.web-preview-name {
+  font-size: var(--text-callout);
+  font-weight: 600;
+}
+.web-preview-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-radius: 10px;
+  background: var(--accent, #0a84ff);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
+.web-skeleton {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.web-skeleton span {
+  height: 16px;
+  border-radius: 6px;
+  background: var(--tertiary);
+  opacity: 0.25;
+  animation: web-pulse 1.2s ease-in-out infinite;
+}
+.web-skeleton span:first-child {
+  height: 24px;
+  width: 80%;
+}
+@keyframes web-pulse {
+  50% {
+    opacity: 0.1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .web-skeleton span {
+    animation: none;
+  }
+}

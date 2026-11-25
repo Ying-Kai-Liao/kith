@@ -2,6 +2,8 @@
 
 use super::*;
 use serde_json::json;
+use std::process::Stdio;
+use std::time::Instant;
 
 /// A throwaway folder that goes away with the test.
 struct Tmp(PathBuf);
