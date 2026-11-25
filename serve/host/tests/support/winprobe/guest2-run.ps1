@@ -40,6 +40,12 @@ $VRr = $VRm + @('--restricted-sid')
 $VRu = $VRm + @('--user-sid')
 $VRul = $VRl + @('--user-sid')
 $V = [ordered]@{ A = $VA; Rm = $VRm; Rl = $VRl }
+$bashScript = "echo BASH_START `$BASH_VERSION; pwd; ls / | head -3; echo wrote > $(Msys $W)/bash-wrote.txt; cat $(Msys $W)/bash-wrote.txt; " +
+  "cat $(Msys $R)/hello.txt; echo x > $(Msys $R)/should-fail.txt && echo R_WRITABLE_BAD || echo r_is_readonly_ok; " +
+  "echo hi > /dev/null && echo DEVNULL_OK || echo DEVNULL_FAIL; echo a | cat | tr a b; echo PIPE_RC=`$?; v=`$(echo cmdsub); echo SUB=`$v; " +
+  "cat <(echo procsub); echo PS_RC=`$?; (echo subshell-ok); sleep 1 & wait; echo BG_OK; " +
+  "echo outside > $(Msys $UP)/should-fail.txt && echo OUTSIDE_WRITABLE_BAD || echo outside_denied_ok; " +
+  "cat $(Msys $UP)/secret.txt && echo PROFILE_READABLE_BAD || echo profile_denied_ok; echo BASH_END"
 
 # Bx NAME OPTS CMD...: one boxed run; output of the box lands in $Out\NAME.txt and in the log
 function Bx($name, $opts, $cmd, $timeout = 60, $more = @()) {
@@ -272,12 +278,7 @@ foreach ($k in $matrix.Keys) {
 }
 
 # ---- P-G13 (R) and the same checks in A -------------------------------------------------------------------------------
-$bashScript = "echo BASH_START `$BASH_VERSION; pwd; ls / | head -3; echo wrote > $(Msys $W)/bash-wrote.txt; cat $(Msys $W)/bash-wrote.txt; " +
-  "cat $(Msys $R)/hello.txt; echo x > $(Msys $R)/should-fail.txt && echo R_WRITABLE_BAD || echo r_is_readonly_ok; " +
-  "echo hi > /dev/null && echo DEVNULL_OK || echo DEVNULL_FAIL; echo a | cat | tr a b; echo PIPE_RC=`$?; v=`$(echo cmdsub); echo SUB=`$v; " +
-  "cat <(echo procsub); echo PS_RC=`$?; (echo subshell-ok); sleep 1 & wait; echo BG_OK; " +
-  "echo outside > $(Msys $UP)/should-fail.txt && echo OUTSIDE_WRITABLE_BAD || echo outside_denied_ok; " +
-  "cat $(Msys $UP)/secret.txt && echo PROFILE_READABLE_BAD || echo profile_denied_ok; echo BASH_END"
+
 foreach ($k in $V.Keys) {
   Section "P-G13/P-G2: pinned PortableGit bash in the box: $k"
   Try-Do "bash-$k" { Bx "bash-$k" $V[$k] @($pgit, '-c', $bashScript) 60 }
