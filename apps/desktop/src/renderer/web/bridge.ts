@@ -92,7 +92,7 @@ provideWebSession({
   pendingLink: async () => {
     if (support) return null
     const link = await keys.pending(currentUser()).catch(() => null)
-    return link ? { computerId: link.computerId, appLink: appInviteLink(webConfig.appScheme, link) } : null
+    return link ? { computerId: link.computerId, appLink: appInviteLink(webConfig.appScheme, link), link } : null
   },
   discardPending: () => keys.clearPending().catch(() => {}),
   signInAgain: () => account.endSession(),

@@ -465,3 +465,45 @@ fn members_says_when_the_budgets_cannot_be_read() {
     }
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn the_verbs_that_ask_kith_auth_are_the_per_person_ones() {
+    use super::needs_kith_auth;
+    assert_eq!(needs_kith_auth(&["people"]), Some("cost by person"));
+    assert_eq!(
+        needs_kith_auth(&["members", "alpha"]),
+        Some("cost by member")
+    );
+    assert_eq!(needs_kith_auth(&["bots", "--json"]), Some("cost of bots"));
+    for fine in [
+        &["week"][..],
+        &["agents"],
+        &["members"],
+        &["bots"],
+        &["tag"],
+        &["usage", "--json"],
+    ] {
+        assert_eq!(needs_kith_auth(fine), None, "{fine:?}");
+    }
+}
+
+/// Where there is no `kith-auth` the per-person views say so, by name, and never print an empty answer.
+#[cfg(not(unix))]
+#[test]
+fn the_per_person_views_are_refused_by_name_on_windows() {
+    let (p, root) = world("windows-refuses");
+    for line in [&["people"][..], &["members", "alpha"], &["bots", "--json"]] {
+        let out = run(&p, &fixed_clock(), &args(line));
+        assert_eq!(out.code, 1, "{line:?}");
+        assert_eq!(out.stdout, "", "{line:?}");
+        assert!(
+            out.stderr.contains("not on Windows yet: cost "),
+            "{}",
+            out.stderr
+        );
+    }
+    // the ledger itself works
+    let out = run(&p, &fixed_clock(), &args(&["sync"]));
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let _ = std::fs::remove_dir_all(root);
+}

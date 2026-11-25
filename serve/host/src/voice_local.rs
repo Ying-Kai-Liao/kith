@@ -546,7 +546,9 @@ pub async fn speak(text: &str, voice: Option<&str>) -> Result<Value> {
     local().speak(text, voice).await
 }
 
+// Fake `kith` shell scripts and chmod: Unix-only until windows-owner W2b.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use axum::{Router, routing::get};

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # kith-install-drain-check — after an upgrade swap, no old-code long-lived process can touch settings.json / auth.json:
 # a stale writer whose command line names neither kith-auth nor kith_settings is stopped, a loaded KeepAlive launchd job
-# is restarted with launchctl (not killed bare), a job that runs the installer itself is left alone, a process that
-# starts after the swap is left alone, and both locks are free afterwards. Throwaway HOME and PREFIX, a fake launchctl.
+# is restarted with launchctl (not killed bare), a job that runs the installer itself is left alone, an agent run's own
+# wrappers (kith ask --bg, run-chain, kith-sessions run, the harness adapter) are left alone but `kith ask --cap` is not,
+# a process that starts after the swap is left alone, and both locks are free afterwards. Throwaway HOME and PREFIX, a fake launchctl.
 #
 #   kernel/tests/kith-install-drain-check     about 10 seconds; prints each check, exits 1 when one fails
 set -uo pipefail
@@ -73,8 +74,23 @@ job=$(spawn old);   echo "$job" > "$T/ls/dev.kith.fake.pid"; pids+=("$job")     
 stale=$(spawn old); pids+=("$stale")                                                 # a stale writer launchd does not know
 # an agent run: the kernel path is in a late argument (its system prompt), not its program; it must survive
 python3 "$T/spawn.py" python3 -c "import time; time.sleep(300)" "see $K/bin/project-id" > "$T/agent.pid"; pids+=("$(cat "$T/agent.pid")")
+# an agent run's own wrappers, detached as `kith ask --bg` starts them: they must survive. `kith ask --cap 5` writes
+# settings.json: it is still an old writer. bin/kith is caught mid-launch (it waits for the swap) and then execs into the
+# session wrapper, as a launch does.
+mkdir -p "$K/lib" "$K/adapters"
+for f in bin/kith-ask lib/kith_accounts.py bin/kith-sessions adapters/harness.py; do printf 'import time\ntime.sleep(300)\n' > "$K/$f"; done
+cat > "$K/bin/kith" <<SH
+while [ ! -e "$T/swapped" ]; do sleep 0.05; done; sleep 0.3
+exec python3 "$K/bin/kith-sessions" run coder -- claude -p brief
+SH
+detach() { name=$1; shift; python3 "$T/spawn.py" "$@" > "$T/$name.pid"; pids+=("$(cat "$T/$name.pid")"); }
+detach ask python3 "$K/bin/kith-ask" coder "fix the drain, then check kith ask --cap 5"
+detach chain python3 "$K/lib/kith_accounts.py" run-chain coder "$K/agent.md" "$K/bin/kith" -- -p brief
+detach harness python3 "$K/adapters/harness.py" codex -p brief
+detach launch bash "$K/bin/kith" coder -p brief
+detach cap python3 "$K/bin/kith-ask" --cap 5
 sleep 1.5                                                                            # all of them started before the swap
-printf 'true\n' > "$T/swap.sh"
+printf 'touch "%s/swapped"\n' "$T" > "$T/swap.sh"
 before=$(grep -c old "$T/settings.json")
 check "before the upgrade the stale writers are writing" "[ $before -gt 5 ] && kill -0 $job && kill -0 $stale"
 
@@ -95,6 +111,11 @@ check "a job that is not loaded is not restarted" "! grep -q 'kickstart.*dev.kit
 check "a job the installer runs inside is not restarted" "! grep -q 'kickstart.*dev.kith.self' '$T/ls/calls'"
 check "that job is named in a note" "grep -q 'dev.kith.self runs this installer' '$T/err'"
 check "an agent run that only names the kernel in its arguments is left alone" "kill -0 \$(cat '$T/agent.pid')"
+check "a background kith-ask run is left alone" "kill -0 \$(cat '$T/ask.pid')"
+check "its kith_accounts.py run-chain is left alone" "kill -0 \$(cat '$T/chain.pid')"
+check "a run through the harness adapter is left alone" "kill -0 \$(cat '$T/harness.pid')"
+check "bin/kith that execs into kith-sessions run mid-drain is left alone" "kill -0 \$(cat '$T/launch.pid') && ps -o command= -p \$(cat '$T/launch.pid') | grep -q 'kith-sessions run'"
+check "kith-ask --cap, which writes settings.json, is still stopped" "! kill -0 \$(cat '$T/cap.pid')"
 wait "$wrapper"; sleep 2.5
 check "once the installer is done the job it ran inside is restarted" "grep -q 'kickstart.*dev.kith.self' '$T/ls/calls'"
 pids+=("$(cat "$T/ls/dev.kith.self.pid")")

@@ -407,20 +407,42 @@ fn fired(out: &dyn Outside, w: &mut Waiter, now: f64) -> Option<(String, String,
     })
 }
 
-/// `WaiterResult`: every waiter whose thing happened becomes one wake request. A waiter whose session's item belongs to
-/// someone else is dropped (the refusal is the Python's `wait-error`). Returns how many fired.
-pub(crate) fn poll(st: &mut State, out: &dyn Outside, now: f64) -> usize {
-    let mut fired_n = 0;
-    let ids: Vec<String> = st.waiters.keys().cloned().collect();
-    for id in ids {
-        let Some(mut w) = st.waiters.remove(&id) else {
-            continue;
+/// What one look at a waiter found: the row as it was read, as it is after the look (a CI waiter notes the head it saw), and
+/// what became of it. Made with `gh` and the process table, so with no lock held; [`Looked::apply`] decides later whether
+/// it still holds (R7).
+pub(crate) struct Looked {
+    before: Waiter,
+    after: Waiter,
+    fired: Option<(String, String, String)>,
+}
+
+/// Looks at one waiter.
+pub(crate) fn look(out: &dyn Outside, w: &Waiter, now: f64) -> Looked {
+    let mut after = w.clone();
+    let fired = fired(out, &mut after, now);
+    Looked {
+        before: w.clone(),
+        after,
+        fired,
+    }
+}
+
+impl Looked {
+    /// R7: writes what the look found only if the waiter's row is still the one that was looked at. A Stop that removed it
+    /// meanwhile, or a call that changed it, makes this do nothing (the next look starts over). A waiter whose thing
+    /// happened becomes one wake request. Returns whether it fired.
+    pub(crate) fn apply(self, st: &mut State, now: f64) -> bool {
+        if st.waiters.get(&self.before.id) != Some(&self.before) {
+            return false;
+        }
+        let Some((rid, why, mut text)) = self.fired else {
+            if self.after != self.before {
+                st.waiters.insert(self.after.id.clone(), self.after);
+            }
+            return false;
         };
-        let Some((rid, why, mut text)) = fired(out, &mut w, now) else {
-            st.waiters.insert(id, w);
-            continue;
-        };
-        fired_n += 1;
+        let w = self.after;
+        st.waiters.remove(&w.id);
         if !w.note.is_empty() {
             let _ = write!(text, "\nYour note when you set the wait: {}", w.note);
         }
@@ -438,6 +460,17 @@ pub(crate) fn poll(st: &mut State, out: &dyn Outside, now: f64) -> usize {
                 why: &why,
             },
         );
+        true
     }
-    fired_n
+}
+
+/// `WaiterResult`: every waiter whose thing happened becomes one wake request. A waiter whose session's item belongs to
+/// someone else is dropped (the refusal is the Python's `wait-error`). Returns how many fired.
+pub(crate) fn poll(st: &mut State, out: &dyn Outside, now: f64) -> usize {
+    let looks: Vec<Looked> = st.waiters.values().map(|w| look(out, w, now)).collect();
+    looks
+        .into_iter()
+        .map(|l| l.apply(st, now))
+        .filter(|fired| *fired)
+        .count()
 }

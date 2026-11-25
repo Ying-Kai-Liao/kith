@@ -677,13 +677,8 @@ def share_problems(home):
 
 
 def harness_names():
-    """claude plus the harnesses adapters/harness.py runs, read from its HARNESSES tuple (not imported: it runs on import)."""
-    import ast
-    src = (Path(__file__).resolve().parent.parent / 'adapters' / 'harness.py').read_text()
-    for node in ast.parse(src).body:
-        if isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', '') == 'HARNESSES':
-            return ('claude', *ast.literal_eval(node.value))
-    return ('claude',)
+    """claude plus the engines `kith kernel engine-run` runs (the kernel's rows in core/kernel/src/engines.rs)."""
+    return ('claude', 'codex', 'pi', 'agy', 'hermes', 'qwen', 'opencode')
 
 
 def set_result(agent, setting, value, previous, changed, as_json, text, **extra):
