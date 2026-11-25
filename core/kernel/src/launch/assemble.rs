@@ -26,7 +26,7 @@ use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
-use super::{machine, mcp, prompt};
+use super::{machine, mcp};
 use crate::secrets::pyjson;
 use crate::{paths, secrets};
 
@@ -541,6 +541,7 @@ pub fn ledger_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Opti
 /// `kith_paths.guest_tmp_ready`: the guest's Claude Code temp folder, made.
 #[cfg(unix)]
 pub(super) fn guest_tmp_ready(p: &paths::Paths, id: &str, uid: u32) -> Option<String> {
+    use super::prompt;
     use sha2::{Digest as _, Sha256};
     let hash = |x: &str| {
         use std::fmt::Write as _;

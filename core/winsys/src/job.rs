@@ -11,7 +11,7 @@
 
 use std::ffi::OsStr;
 use std::io;
-use std::os::windows::io::{AsRawHandle as _, BorrowedHandle};
+use std::os::windows::io::{AsRawHandle, BorrowedHandle};
 use std::path::Path;
 use std::ptr::{null, null_mut};
 use std::time::Duration;
@@ -249,7 +249,7 @@ fn create(job: &Job, l: &Launch<'_>, suspended: bool) -> io::Result<(Child, Hand
     let handles: Vec<HANDLE> = l
         .stdio
         .as_ref()
-        .map(|s| s.iter().map(|h| h.as_raw_handle()).collect())
+        .map(|s| s.iter().map(AsRawHandle::as_raw_handle).collect())
         .unwrap_or_default();
     // A handle list takes inheritable handles only; the three the caller named are made so (they stay so).
     for h in &handles {
@@ -335,7 +335,7 @@ fn create(job: &Job, l: &Launch<'_>, suspended: bool) -> io::Result<(Child, Hand
                 i32::from(!handles.is_empty()),
                 flags,
                 block.as_mut_ptr().cast(),
-                cwd.as_ref().map_or(null(), |c| c.as_ptr()),
+                cwd.as_ref().map_or(null(), Vec::as_ptr),
                 &raw const si.StartupInfo,
                 &raw mut pi,
             )
@@ -497,7 +497,9 @@ mod tests {
             stdio: None,
         };
         let child = spawn_in_job(&job, &launch).unwrap();
-        // Not kill-on-close: the host that made the job can go away and the run goes on.
+        // Not kill-on-close: the host that made the job can go away and the run goes on. A job with no open handle is
+        // gone, and a name finds nothing then (W12: something must keep a handle for `recorded_gone` to ask by name).
+        let _keeper = Job::open(&name).unwrap().unwrap();
         drop(job);
         assert!(
             child
