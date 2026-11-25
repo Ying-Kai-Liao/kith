@@ -11298,7 +11298,7 @@
     },
     {
       "name": "claim.attach",
-      "summary": "A detached run (a scheduled cron run or a wake's) records its own process on the claim the host made for its turn (`hostclaim.claim` kind `scheduleRun` or `wakeRun`), with a check-and-set: the claim must be `claimed` with no process yet. The claim becomes kind `external`, `running`, with this pid and start stamp, and its turn `running`; a claim whose turn belongs to another `conversation` than the one named is refused; the caller then starts the engine, and exits without running when this refuses. Answers `{attached: true}` (`again` for the same process), or `{refused: \"gone\", state}` when the claim was cancelled, ended, requeued or already has a process. Serves only once the claims are switched.",
+      "summary": "A detached run (a scheduled cron run, a wake's or a `--bg` ask's callee) records its own process on the claim the host made for its turn (`hostclaim.claim` kind `scheduleRun`, `wakeRun` or `askRun`), with a check-and-set: the claim must be `claimed` with no process yet. The claim becomes kind `external`, `running`, with this pid and start stamp, and its turn `running`; a claim whose turn belongs to another `conversation` than the one named is refused; the caller then starts the engine, and exits without running when this refuses. Answers `{attached: true}` (`again` for the same process), or `{refused: \"gone\", state}` when the claim was cancelled, ended, requeued or already has a process. Serves only once the claims are switched.",
       "params": [
         {
           "name": "claimId",
@@ -12822,8 +12822,71 @@
       }
     },
     {
+      "name": "wake.tick",
+      "summary": "The host's clock for the wake queue (every few seconds, and after a kick): fires the waiters whose thing happened, settles each finished run against its turn (answered, withdrawn or given back), unparks the wake turns of conversations nothing holds, takes what is due (both doors) as one run and one turn each, and settles the asks no one reported (a `--bg` ask whose turn ended, a `fg` ask whose caller process is gone: the ask design's R4) and forgets settled asks older than 31 days. `gh`, process probes and transcript reads run with no core lock held. Answers `fired`, `settled`, `unparked`, `taken` (the runs' turns, `queued` or `parked`) and `asks` (the asks settled).",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {},
+        "hidden": true
+      }
+    },
+    {
+      "name": "wake.released",
+      "summary": "A terminal let go of a conversation: its parked wake turns go back to queued when nothing else holds it. A lost call is caught by the next `wake.tick`. Answers `unparked`, the turns woken.",
+      "params": [
+        {
+          "name": "session",
+          "summary": "The conversation that was released.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "released"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "session": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
       "name": "ask.open",
-      "summary": "Opens an ask: the hop and cost-cap check and the insert of its record in ONE transaction, so no second ask passes the cap between them. Answers `{decision, record}` (the chain, hop and cross hops the record got). A cap that refuses it is an error with the words `kith ask` prints. With `--check-only` nothing is written (`record` is null).",
+      "summary": "Opens an ask: the hop and cost-cap check and the insert of its record in ONE transaction, so no second ask passes the cap between them. Answers `{decision, record}` (the chain, hop and cross hops the record got); a `bg` ask also answers `turn` (its turn's id) and `out` (the file the host's run writes the callee's answer to), and opening the same `bg` ask again answers the same turn with `replayed`. A cap that refuses it is an error with the words `kith ask` prints. With `--check-only` nothing is written (`record` is null).",
       "params": [
         {
           "name": "id",
@@ -12882,6 +12945,86 @@
           }
         },
         {
+          "name": "mode",
+          "summary": "`fg` (the caller's own process runs the callee), `bg` (a core turn, source `ask`, that the host starts; the open makes the turn in the same transaction) or `peer` (the agent lives on another computer: no local turn, the host sends it and follows its rows; only the owner's runs, and only to a computer that is paired). Without it the record is as before the ledger.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "task",
+          "summary": "What is asked, whole: the prompt of a `bg` ask's turn.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cliPid",
+          "summary": "`fg`: the caller's own process, so a caller killed with no handler is found by the tick.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cliStart",
+          "summary": "`fg`: the start stamp of that process.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "engine",
+          "summary": "`bg`: the callee's engine (default: its conversation's, else claude).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "peer",
+          "summary": "`peer`: the computer the agent lives on. Refused unless this computer is paired with it now.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cont",
+          "summary": "`peer`: the key (ask id) of the earlier ask on that computer whose session this one continues (`-c`).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "originComputer",
+          "summary": "`bg`, on the callee's computer: the computer that asked. With `originKey` and `originEpoch`. The open is refused (as a refused row it can read back) unless that pairing epoch is the live one; the same key again answers the row it made.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "originKey",
+          "summary": "`bg`, on the callee's computer: the asking computer's id for the ask.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "originEpoch",
+          "summary": "`bg`, on the callee's computer: the pairing epoch the ask was sent under.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "checkOnly",
           "summary": "Decide, write nothing.",
           "required": false,
@@ -12922,7 +13065,8 @@
         "schema": {}
       },
       "x-kith-principals": [
-        "owner"
+        "owner",
+        "host"
       ],
       "x-kith-stability": "experimental",
       "x-kith-served": "core",
@@ -12974,6 +13118,66 @@
             "kind": "flag",
             "spellings": [
               "--claim-id"
+            ]
+          },
+          "mode": {
+            "kind": "flag",
+            "spellings": [
+              "--mode"
+            ]
+          },
+          "task": {
+            "kind": "flag",
+            "spellings": [
+              "--task"
+            ]
+          },
+          "cliPid": {
+            "kind": "flag",
+            "spellings": [
+              "--cli-pid"
+            ]
+          },
+          "cliStart": {
+            "kind": "flag",
+            "spellings": [
+              "--cli-start"
+            ]
+          },
+          "engine": {
+            "kind": "flag",
+            "spellings": [
+              "--engine"
+            ]
+          },
+          "peer": {
+            "kind": "flag",
+            "spellings": [
+              "--peer"
+            ]
+          },
+          "cont": {
+            "kind": "flag",
+            "spellings": [
+              "--cont"
+            ]
+          },
+          "originComputer": {
+            "kind": "flag",
+            "spellings": [
+              "--origin-computer"
+            ]
+          },
+          "originKey": {
+            "kind": "flag",
+            "spellings": [
+              "--origin-key"
+            ]
+          },
+          "originEpoch": {
+            "kind": "flag",
+            "spellings": [
+              "--origin-epoch"
             ]
           },
           "checkOnly": {
@@ -13084,6 +13288,442 @@
             "kind": "flag",
             "spellings": [
               "--state"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.finish",
+      "summary": "The run behind an ask ended (the host's report, or a `fg` caller's own). An `open` ask that Stop did not end is settled in one transaction: with the callee's JSON answer it is `answered` (`stopped` when the callee failed, `capped` when its cost tipped the chain), without one `lost`; the cost joins the chain; and for a `bg` ask the answer (or the lost notice) becomes a mailbox row and the asker is owed the wake `ask:ID/N`, whether or not a writer holds its session. A `fg` ask prints its answer itself, so it gets no row and no wake. Anything settled already, or ended by `ask.end`, is left alone (the host's report and the tick settle once). An ask parked on a card stays open when its run ends, with an answer or without (answers `parked: true`; the cost still joins the chain, once per turn). A `turn` that is not the ask's current one settles nothing. Only a `fg` ask's own first report skips the row and wake. Answers `{id, settled, state, row}`.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "out",
+          "summary": "The text of the out file the host read; its callee JSON is the answer (the tick reads it the same way).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "result",
+          "summary": "The callee's answer text, when the caller has it already (a `fg` ask).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cost",
+          "summary": "US$ the run cost (a number), with `--result`.",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "isError",
+          "summary": "The callee said it failed, with `--result`.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "session",
+          "summary": "The callee's session, kept on the record so `-c` resumes it.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "turn",
+          "summary": "The turn whose run ended: the ask is settled only if it is the ask's current turn. Omitted: the run of an ask with no turn (a fg CLI's own first run). The host's report always names its turn.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (`KITH_ASK_ID`, `KITH_ASK_CHAIN`/`HOP`/`CROSS`/`COST`/`FROM`, `KITH_AGENT`, `KITH_PERSON`, `KITH_VIA`, `CLAUDE_CODE_SESSION_ID`); a daemon has its own.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "finish"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "out": {
+            "kind": "flag",
+            "spellings": [
+              "--out"
+            ]
+          },
+          "result": {
+            "kind": "flag",
+            "spellings": [
+              "--result"
+            ]
+          },
+          "cost": {
+            "kind": "flag",
+            "spellings": [
+              "--cost"
+            ]
+          },
+          "isError": {
+            "kind": "switch",
+            "spellings": [
+              "--is-error"
+            ]
+          },
+          "session": {
+            "kind": "flag",
+            "spellings": [
+              "--session"
+            ]
+          },
+          "turn": {
+            "kind": "flag",
+            "spellings": [
+              "--turn"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.post",
+      "summary": "One row for an ask's asker (`kith-send --to ask:ID`, `kith ask --answer`): appended to the mailbox; an `answer` also owes the asker the wake `ask:ID/N` (a `progress` report waits for `--wait`). The same row again is a duplicate and wakes no one twice. An ask that was stopped or ended keeps nothing: answers `{id, stopped: true}`. Answers `{id, row}` (`row` null for a duplicate).",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "text",
+          "summary": "What it says.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "as",
+          "summary": "Who says it (default: the agent asked).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kind",
+          "summary": "answer (default) or progress.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "post"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "text": {
+            "kind": "positional"
+          },
+          "as": {
+            "kind": "flag",
+            "spellings": [
+              "--as"
+            ]
+          },
+          "kind": {
+            "kind": "flag",
+            "spellings": [
+              "--kind"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.read",
+      "summary": "`kith ask --wait`: the rows of an ask's mailbox nobody has read, marked read, with the wakes owed for them withdrawn in the same transaction (a row reaches the asker by `--wait` or by its wake, never both). An ended ask gives nothing. Answers `{id, state, rows: [{n, as, kind, text, at}]}`.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "read"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.park",
+      "summary": "The ask waits on an approval card (replaces the `.parked` file): `ask.delegations` shows a waiting ask and every ask above it as `waiting {on: card}`. A parked ask is not settled by its run's end, with or without words (the run's cost still counts). Does nothing unless the ask is open and not ended. Answers `{id, parked}`.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "card",
+          "summary": "The card.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "park"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "card": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.unpark",
+      "summary": "The card's answer: the ask no longer waits on it, and the callee's resume becomes the ask's new turn (source `ask`, prompt the note, an out file of its own) in the same transaction, unless Stop ended the ask. Every later settle goes by that turn. Answers `{id, parked: false, turn, out}` (`turn` null when none was made).",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "note",
+          "summary": "What the card's answer says: the prompt of the resume turn.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "session",
+          "summary": "The callee's session to resume.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (`KITH_ASK_ID`, `KITH_ASK_CHAIN`/`HOP`/`CROSS`/`COST`/`FROM`, `KITH_AGENT`, `KITH_PERSON`, `KITH_VIA`, `CLAUDE_CODE_SESSION_ID`); a daemon has its own.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "unpark"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "note": {
+            "kind": "flag",
+            "spellings": [
+              "--note"
+            ]
+          },
+          "session": {
+            "kind": "flag",
+            "spellings": [
+              "--session"
             ]
           },
           "kernel": {
@@ -13316,7 +13956,7 @@
     },
     {
       "name": "ask.delegations",
-      "summary": "`kith ask delegations --json`: every ask record, newest first, as `{delegations}` (money in micro-dollars, times in ms).",
+      "summary": "`kith ask delegations --json`: every ask record, newest first, as `{delegations}` (money in micro-dollars, times in ms). An open ask that waits carries `waiting`: `{on: \"card\", card, since}` when it or an open ask below it is parked on a card, else `{on: \"agent\", agent, since}` when it has an open child.",
       "params": [
         {
           "name": "kernel",
@@ -13418,6 +14058,274 @@
             "kind": "positional"
           }
         }
+      }
+    },
+    {
+      "name": "ask.peerLink",
+      "summary": "A pairing with another computer starts (the host writes this before it writes the pairing): `epoch` is the live one for `computer` in `dir` (`in`: asks that computer sends here, the fence every open, claim and attach of such an ask reads; `out`: asks sent there). A different epoch than the live one ends it first, in the same transaction (as `ask.endPeer`); the live epoch again changes nothing; an epoch that was ended is refused, since it is never made live again. Epochs are the host's pairing ids and have no order. Answers `{computer, dir, epoch, linked, ended, sessions, kill}`.",
+      "params": [
+        {
+          "name": "computer",
+          "summary": "The other computer.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dir",
+          "summary": "`in` (asks that computer sends here) or `out` (asks sent there): the two directions are two pairings.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "epoch",
+          "summary": "The pairing epoch, as the host stores it (a hash: compared, never ordered).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "peer-link"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "computer": {
+            "kind": "positional"
+          },
+          "dir": {
+            "kind": "positional"
+          },
+          "epoch": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.endPeer",
+      "summary": "One pairing with a computer ends (the host calls it before it removes the pairing, and again from its level-triggered reconcile). In one transaction the fence of that direction is down, so nothing of that epoch opens, is claimed or attaches, and: for `in`, the asks that computer sent here are ended (running ones stopped, with the claims to kill, queued and claimed ones refused, each with a row it can read); for `out`, the asks sent there are cut off, each with one notice row and wake, and every stop owed to it is dropped. The other direction is left alone. Safe to repeat. Answers `{computer, dir, ended, sessions, kill}`.",
+      "params": [
+        {
+          "name": "computer",
+          "summary": "The other computer.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dir",
+          "summary": "`in` ends the asks that computer sent here; `out` cuts off the asks sent there.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "end-peer"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "computer": {
+            "kind": "positional"
+          },
+          "dir": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.peerApply",
+      "summary": "Copies what another computer says of an ask sent there, in one transaction: each row once (the same call again adds nothing), one owed wake per row, the ask's final state and its cost (booked once). Nothing is copied once the ask was stopped, cut off or final, and its computer's final row and a cut-off notice never both reach the asker; a final state clears the stop owed. The call is the computer answering: the send counts as made and the away wait starts over. An `epoch` other than the ask's is dropped. Answers `{id, applied, rows, state, fetched}`.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask on this computer.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "epoch",
+          "summary": "The pairing epoch the ask was sent under.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "rows",
+          "summary": "Its computer's rows after `fetched`: `[{n, as, kind, text, at}]`, `kind` answer, progress or lost.",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "state",
+          "summary": "The ask's state there: open, answered, capped, stopped, lost or refused. A final one ends the ask here.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cost",
+          "summary": "US$ the run and what it asked cost there, in total (read with a final state).",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (`KITH_ASK_ID`, `KITH_ASK_CHAIN`/`HOP`/`CROSS`/`COST`/`FROM`, `KITH_AGENT`, `KITH_PERSON`, `KITH_VIA`, `CLAUDE_CODE_SESSION_ID`); a daemon has its own.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "peer-apply"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "epoch": {
+            "kind": "positional"
+          },
+          "rows": {
+            "kind": "flag",
+            "spellings": [
+              "--rows"
+            ]
+          },
+          "state": {
+            "kind": "flag",
+            "spellings": [
+              "--state"
+            ]
+          },
+          "cost": {
+            "kind": "flag",
+            "spellings": [
+              "--cost"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.peerOwed",
+      "summary": "What the host owes the link, from the rows (nothing is written): `send` (asked here, not yet answered by its computer: id, key, computer, epoch, agent, task, cont, lineage), `follow` (sent and open: the last row copied, `after`) and `stop` (a stop its computer has not confirmed). Only asks whose pairing is live. Answers `{send, follow, stop}`.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "peer-owed"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
       }
     },
     {
@@ -14087,7 +14995,7 @@
     },
     {
       "name": "hostclaim.claim",
-      "summary": "A terminal or `external` writer claim (step 1), or a `scheduleRun` / `wakeRun`: the claim of a pulled schedule or wake turn for a run that has no process yet (`turn` required; the run attaches itself with `claim.attach`). Refused when a writer holds the conversation; `paused` when the turn's job is paused (the turn is cancelled). An `external` claim names its process. Answers `{claimId, generation}`.",
+      "summary": "A terminal or `external` writer claim (step 1), or a `scheduleRun` / `wakeRun` / `askRun`: the claim of a pulled schedule, wake or ask turn for a run that has no process yet (`turn` required; the run attaches itself with `claim.attach`). Refused when a writer holds the conversation; `paused` when the turn's job is paused (the turn is cancelled). An `external` claim names its process. Answers `{claimId, generation}`.",
       "params": [
         {
           "name": "conversation",
@@ -14099,7 +15007,7 @@
         },
         {
           "name": "kind",
-          "summary": "terminal, external, scheduleRun or wakeRun.",
+          "summary": "terminal, external, scheduleRun, wakeRun or askRun.",
           "required": true,
           "schema": {
             "type": "string"
@@ -14107,7 +15015,7 @@
         },
         {
           "name": "turn",
-          "summary": "The schedule or wake turn a `scheduleRun` / `wakeRun` claim runs.",
+          "summary": "The schedule, wake or ask turn a `scheduleRun` / `wakeRun` / `askRun` claim runs.",
           "required": false,
           "schema": {
             "type": "integer"
@@ -15086,11 +15994,11 @@
     },
     {
       "name": "hostclaim.queued",
-      "summary": "The turns the core queued that no host began (a schedule's fire or a wake's take: `enq_key` NULL, source `schedule` or `wake`) and that wait (queued or parked): `{turns: [{turn, source, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. A `wake` turn also carries `door` (`run` or `host`), `requestIds` (the requests it carries, in order) and `note`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed. `sources` (default `[\"schedule\"]`) picks which detached sources are listed: a host that runs only cron jobs never sees a wake's turn.",
+      "summary": "The turns the core queued that no host began (a schedule's fire, a wake's take or a `--bg` ask: `enq_key` NULL, source `schedule`, `wake` or `ask`) and that wait (queued or parked): `{turns: [{turn, source, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. An `ask` turn also carries `ask` (the ask's id) and `out` (the file its run gives the callee as stdout). A `wake` turn also carries `door` (`run` or `host`), `requestIds` (the requests it carries, in order) and `note`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed. `sources` (default `[\"schedule\"]`) picks which detached sources are listed: a host that runs only cron jobs never sees a wake's turn.",
       "params": [
         {
           "name": "sources",
-          "summary": "The turn sources to list: schedule, wake (default schedule).",
+          "summary": "The turn sources to list: schedule, wake, ask (default schedule).",
           "required": false,
           "schema": {
             "type": "array",

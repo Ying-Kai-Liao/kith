@@ -6,12 +6,16 @@ use std::path::Path;
 
 use serde_json::Value;
 
+#[cfg(unix)]
+use super::life;
 use super::py::{
     Kind, PyErr, R, exists, is_dir, is_file, is_word, loads, no_attr, read_text, repr, type_name,
 };
 use super::text::{frontmatter, has_needs, needs_list, placeholders, skill_refs, split_needs};
-use super::{Ctx, life, name_of};
+use super::{Ctx, name_of};
+#[cfg(unix)]
 use crate::launch::guard::Places;
+#[cfg(unix)]
 use crate::launch::judge::{must_ask_rule, sentence_class};
 
 const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
@@ -336,6 +340,24 @@ fn must_ask_problems(ctx: &Ctx, home: &Path) -> R<Vec<String>> {
     if !has_rules(&s) {
         return Ok(vec![]);
     }
+    must_ask_rules(ctx, home, &s)
+}
+
+/// The judge is the launch module's, which the Windows build does not have yet (W8): a package that has rules to judge is
+/// refused by name rather than passed unjudged.
+#[cfg(not(unix))]
+fn must_ask_rules(_ctx: &Ctx, home: &Path, _s: &Value) -> R<Vec<String>> {
+    Err(PyErr::new(
+        Kind::Other,
+        format!(
+            "not on Windows yet: the must-ask check of {} (it needs the launch module, W8)",
+            home.join("settings.json").display()
+        ),
+    ))
+}
+
+#[cfg(unix)]
+fn must_ask_rules(ctx: &Ctx, home: &Path, s: &Value) -> R<Vec<String>> {
     let agent = if name_of(home) == "role" {
         home.parent().map(name_of).unwrap_or_default()
     } else {
@@ -408,6 +430,7 @@ fn must_ask_problems(ctx: &Ctx, home: &Path) -> R<Vec<String>> {
 }
 
 /// `for x in value or []`: what Python iterates for a list, a string (its characters) or a mapping (its keys).
+#[cfg(unix)]
 fn iter_values(v: Option<&Value>) -> R<Vec<Value>> {
     match v {
         None | Some(Value::Null | Value::Bool(false)) => Ok(vec![]),

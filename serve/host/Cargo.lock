@@ -2147,6 +2147,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kith-boxprobe"
+version = "0.1.0"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "kith-core"
 version = "0.1.0"
 dependencies = [
@@ -2221,6 +2228,7 @@ dependencies = [
  "fs2",
  "junction",
  "kith-procstart",
+ "kith-winsys",
  "libc",
  "regex",
  "rusqlite",

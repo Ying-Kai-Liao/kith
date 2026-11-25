@@ -151,7 +151,16 @@ impl Write for Stream {
     }
 }
 
+#[path = "winverify.rs"]
+mod winverify;
+
+/// Opens the pipe at `path`. Refuses (`PermissionDenied`, before any byte is written) a pipe whose server is not this account:
+/// pipe names are machine-wide, so another account can have made the name first (`winverify`).
 pub fn connect(path: &Path) -> io::Result<Stream> {
+    connect_trusting(path, &winverify::Trust::this_account()?)
+}
+
+fn connect_trusting(path: &Path, trust: &winverify::Trust) -> io::Result<Stream> {
     let name = wide(path.as_os_str());
     for _ in 0..50 {
         let h = unsafe {
@@ -168,9 +177,11 @@ pub fn connect(path: &Path) -> io::Result<Stream> {
             )
         };
         if h != INVALID_HANDLE_VALUE {
-            return Ok(Stream(Arc::new(Pipe {
+            let pipe = Pipe {
                 handle: unsafe { OwnedHandle::from_raw_handle(h as RawHandle) },
-            })));
+            };
+            winverify::verify_server(pipe.raw(), trust)?;
+            return Ok(Stream(Arc::new(pipe)));
         }
         // Every instance busy: one frees up as soon as the server accepts.
         if unsafe { GetLastError() } != ERROR_PIPE_BUSY {

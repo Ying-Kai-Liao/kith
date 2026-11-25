@@ -14,6 +14,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
+mod fallback;
+
 const URL: &str = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 /// Upstream updates hourly; once a day is plenty for picking agents.
 const REFRESH_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -148,9 +150,17 @@ impl Cmd {
     }
 }
 
-/// Downloads the agent first if needed.
+/// Downloads the agent first if needed. When the registry's build can't be had (it can name a
+/// version npm doesn't have yet), falls back to the build that last ran here, then to a reviewed
+/// floor (see [`fallback`]).
 /// `progress` receives short status lines ("Downloading Cursor…").
 pub async fn command(agent: &Value, progress: impl Fn(&str)) -> Result<Cmd> {
+    let progress = &progress;
+    fallback::launch_best(agent, &fallback::store(), |entry| async move { launch(&entry, progress).await }).await
+}
+
+/// How to run this one registry entry, downloading it first if needed.
+async fn launch(agent: &Value, progress: &impl Fn(&str)) -> Result<Cmd> {
     let name = agent["name"].as_str().unwrap_or("agent");
     let d = &agent["distribution"];
     match launch_kind(agent) {
@@ -159,14 +169,14 @@ pub async fn command(agent: &Value, progress: impl Fn(&str)) -> Result<Cmd> {
             let target = &d["binary"][platform];
             let cmd =
                 target["cmd"].as_str().and_then(contained).ok_or_else(|| anyhow!("registry entry has a bad cmd"))?;
-            let dir = install_binary(agent, target, cmd, &progress).await?;
+            let dir = install_binary(agent, target, cmd, progress).await?;
             Ok(Cmd {
                 program: format!("{}{}", env_prefix(&target["env"]), shell::quote(&dir.join(cmd).to_string_lossy())),
                 args: args_of(target),
             })
         }
         Some(Launch::Npx) => {
-            prepare_npx(d["npx"]["package"].as_str().unwrap_or_default(), name, &progress).await?;
+            prepare_npx(d["npx"]["package"].as_str().unwrap_or_default(), name, progress).await?;
             Ok(npx_cmd(&d["npx"]))
         }
         Some(Launch::Uvx) => Ok(Cmd {
@@ -205,6 +215,10 @@ async fn prepare_npx(package: &str, name: &str, progress: &impl Fn(&str)) -> Res
     if tokio::fs::try_exists(dir.join("package.json")).await.unwrap_or(false) {
         return Ok(());
     }
+    // A registry entry npm lacks would otherwise cost an npm call on every start.
+    if let Some(why) = fallback::recent_failure(package) {
+        bail!("couldn't download {package} with npm (it failed a few minutes ago): {why}");
+    }
     let _ = tokio::fs::remove_dir_all(&dir).await;
     progress(&format!("Downloading {name}…"));
     let install = tokio::process::Command::new(shell::program("npm"))
@@ -216,19 +230,35 @@ async fn prepare_npx(package: &str, name: &str, progress: &impl Fn(&str)) -> Res
         .kill_on_drop(true)
         .output();
     let failure = match tokio::time::timeout(Duration::from_secs(20 * 60), install).await {
-        Ok(Ok(out)) if out.status.success() => return Ok(()),
-        Ok(Ok(out)) => npm_error(&String::from_utf8_lossy(&out.stderr)).to_owned(),
+        Ok(Ok(out)) if out.status.success() => {
+            fallback::forget_failure(package);
+            return Ok(());
+        }
+        Ok(Ok(out)) => npm_error(&String::from_utf8_lossy(&out.stderr)),
         Ok(Err(e)) => format!("{e}"),
         Err(_) => "timed out".to_owned(),
     };
     let _ = tokio::fs::remove_dir_all(&dir).await;
-    bail!("couldn't download {name} with npm: {failure}")
+    fallback::remember_failure(package, &failure);
+    bail!("couldn't download {package} with npm: {failure}")
 }
 
-/// The line of npm's stderr that says what went wrong: its own `npm notice` lines (a newer npm
-/// is out) come after the error.
-fn npm_error(stderr: &str) -> &str {
-    stderr.lines().map(str::trim).rfind(|l| !l.is_empty() && !l.starts_with("npm notice")).unwrap_or_default()
+/// What npm's stderr says went wrong, without its `npm notice` lines (a newer npm is out): the
+/// last 20 other lines and at most ~2 KB, since it ends up in the app's error text.
+fn npm_error(stderr: &str) -> String {
+    const LINES: usize = 20;
+    const BYTES: usize = 2048;
+    let lines: Vec<&str> =
+        stderr.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("npm notice")).collect();
+    let mut out = lines[lines.len().saturating_sub(LINES)..].join("\n");
+    if out.len() > BYTES {
+        let mut cut = out.len() - BYTES;
+        while !out.is_char_boundary(cut) {
+            cut += 1;
+        }
+        out.replace_range(..cut, "…");
+    }
+    out
 }
 
 /// `npm config get cache`, asked once.
@@ -390,6 +420,22 @@ mod tests {
                       npm notice To update run: npm install -g npm@11.6.2\n";
         assert_eq!(npm_error(stderr), "'true' is not recognized as an internal or external command");
         assert_eq!(npm_error(""), "");
+    }
+
+    #[test]
+    fn npm_errors_keep_every_line_of_a_404() {
+        let stderr = "npm error code E404\n\
+                      npm error 404 Not Found - GET https://registry.npmjs.org/@agentclientprotocol%2fcodex-acp\n\
+                      npm error 404  '@agentclientprotocol/codex-acp@2.12.0' is not in this registry.\n\
+                      npm error A complete log of this run can be found in: /x/debug.log\n\
+                      npm notice New minor version of npm available!\n";
+        let got = npm_error(stderr);
+        assert!(got.starts_with("npm error code E404\n"), "{got}");
+        assert!(got.contains("'@agentclientprotocol/codex-acp@2.12.0' is not in this registry."), "{got}");
+        assert!(!got.contains("npm notice"), "{got}");
+        assert_eq!(npm_error(&"npm error x\n".repeat(500)).lines().count(), 20);
+        let wide = format!("npm error {}", "é".repeat(3000));
+        assert!(npm_error(&wide).len() <= 2048 + "…".len());
     }
 
     #[test]

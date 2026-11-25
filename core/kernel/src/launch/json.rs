@@ -36,6 +36,14 @@ pub fn emit_json(plan: &Plan) -> String {
         launch: _,
         owner_terminal: _,
         pkg: _,
+        src_pkg: _,
+        person_id: _,
+        nested: _,
+        caller: _,
+        resume: _,
+        out_format: _,
+        permit_mcp: _,
+        granted: _,
     } = plan;
     let (claude, p_owner) = (*claude, *p_owner);
     let claude_args: Value = if claude {
