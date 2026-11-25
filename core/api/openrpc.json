@@ -12822,6 +12822,69 @@
       }
     },
     {
+      "name": "wake.tick",
+      "summary": "The host's clock for the wake queue (every few seconds, and after a kick): fires the waiters whose thing happened, settles each finished run against its turn (answered, withdrawn or given back), unparks the wake turns of conversations nothing holds, and takes what is due (both doors) as one run and one turn each. `gh`, process probes and transcript reads run with no core lock held. Answers `fired`, `settled`, `unparked` and `taken` (the runs' turns, `queued` or `parked`).",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {},
+        "hidden": true
+      }
+    },
+    {
+      "name": "wake.released",
+      "summary": "A terminal let go of a conversation: its parked wake turns go back to queued when nothing else holds it. A lost call is caught by the next `wake.tick`. Answers `unparked`, the turns woken.",
+      "params": [
+        {
+          "name": "session",
+          "summary": "The conversation that was released.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "released"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "session": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
       "name": "ask.open",
       "summary": "Opens an ask: the hop and cost-cap check and the insert of its record in ONE transaction, so no second ask passes the cap between them. Answers `{decision, record}` (the chain, hop and cross hops the record got). A cap that refuses it is an error with the words `kith ask` prints. With `--check-only` nothing is written (`record` is null).",
       "params": [
