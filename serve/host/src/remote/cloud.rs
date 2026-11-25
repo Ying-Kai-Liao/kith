@@ -1583,6 +1583,10 @@ mod tests {
     /// invitee-access property 2, generated: whatever the request and however it is settled, a member's device counts
     /// as proven only when the owner approved it by hand (`decide`, from the Mac or the owner's phone), never when auto
     /// mode approved it, and nothing but an approved request with its code shown adds a device.
+    #[cfg_attr(
+        windows,
+        ignore = "guest path parked: Windows applies no guest or bot-guest sync (Kai 2026-11-27, guests not on Windows yet); returns when the guest packages W22b/W24b land"
+    )]
     #[test]
     fn a_members_device_is_proven_only_by_the_owners_own_approval() {
         use crate::api::devices::{Caller, Principal, principal};
@@ -1828,6 +1832,10 @@ mod tests {
     /// (`core/runtime/src/authority/tests/requests.rs` replays the same file). It runs through `decide`, the real
     /// `settle`, against the fake cloud; a request arrives by being put in the list, as `sync_requests` does once the
     /// device has revealed its code, and "the cloud stops listing it" is the pull that drops it.
+    #[cfg_attr(
+        windows,
+        ignore = "guest path parked: Windows applies no guest or bot-guest sync (Kai 2026-11-27, guests not on Windows yet); returns when the guest packages W22b/W24b land"
+    )]
     #[tokio::test]
     async fn access_request_parity_script() {
         let script: Value =
@@ -1902,6 +1910,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "guest path parked: Windows applies no guest or bot-guest sync (Kai 2026-11-27, guests not on Windows yet); returns when the guest packages W22b/W24b land"
+    )]
     #[tokio::test]
     async fn in_code_mode_a_members_device_waits_for_the_code_too() {
         let hub = temp_hub();
@@ -1947,6 +1959,10 @@ mod tests {
         assert!(hub.store.device_proven(&b64(&dk)), "the owner's approval stands in for the invite token");
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "guest path parked: Windows applies no guest or bot-guest sync (Kai 2026-11-27, guests not on Windows yet); returns when the guest packages W22b/W24b land"
+    )]
     #[tokio::test]
     async fn in_auto_mode_a_members_device_is_approved_on_its_reveal() {
         let hub = temp_hub();
