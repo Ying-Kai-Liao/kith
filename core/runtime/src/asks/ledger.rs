@@ -177,7 +177,7 @@ pub(crate) enum Settled {
 
 /// The wake owed for row `n`: the asker's session is woken with the text, `door` as the old `hand_over` chose it. A session
 /// the wake queue refuses (it belongs to another agent or person) leaves the row for `--wait`, as before.
-fn owe_in(st: &mut State, now: i64, a: &Ask, n: i64, kind: Kind, text: &str) {
+pub(super) fn owe_in(st: &mut State, now: i64, a: &Ask, n: i64, kind: Kind, text: &str) {
     let (Some(session), Some(agent)) = (&a.reply_session, &a.caller_agent) else {
         return;
     };
@@ -234,6 +234,10 @@ pub(crate) fn settle_ask_in(
     let Some(a) = get(tx, id)? else {
         return Ok(Settled::Nothing);
     };
+    // A peer ask has no run here: its computer's rows settle it (`ask.peerApply`), never a run's end.
+    if a.mode.as_deref() == Some("peer") {
+        return Ok(Settled::Nothing);
+    }
     // The run's cost joins the chain once per turn, whatever became of the ask (parked, stopped, settled already).
     let spent = match ended {
         Ended::Answered(c) => c.cost,
@@ -388,6 +392,12 @@ pub(crate) fn post(
         };
         if a.state == "stopped" || a.ended_ms.is_some() {
             return Ok(json!({"id": id, "stopped": true}));
+        }
+        // The rows of a peer ask are its computer's, numbered there: a local row would take a number they need.
+        if a.mode.as_deref() == Some("peer") {
+            return Err(Error::Refused(format!(
+                "kith-core: asks: ask {id} runs on another computer; its rows come from there"
+            )));
         }
         let n = rows::add_in(tx, id, who.or(a.asked.as_deref()), kind, text, now)?;
         if let Some(n) = n {

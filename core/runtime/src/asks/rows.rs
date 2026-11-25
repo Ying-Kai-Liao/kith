@@ -91,6 +91,32 @@ pub(super) fn add_in(
     Ok(Some(n))
 }
 
+/// Row `n` of a peer ask, numbered by the computer that wrote it. True when it is new: a row copied twice is one row
+/// (unique on (ask, n)), so a repeated `ask.peerApply` adds nothing and wakes no one again.
+pub(super) fn add_numbered_in(
+    tx: &Connection,
+    ask: &str,
+    n: i64,
+    who: Option<&str>,
+    kind: Kind,
+    text: &str,
+    at_ms: i64,
+) -> Result<bool> {
+    Ok(tx.execute(
+        "INSERT OR IGNORE INTO ask_rows (ask, n, \"as\", kind, text, at_ms, read) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+        params![ask, n, who, kind.word(), text, at_ms],
+    )? == 1)
+}
+
+/// Whether the ask has an `answer` or a `lost` row: its asker was told how it ended.
+pub(super) fn has_final_in(tx: &Connection, ask: &str) -> Result<bool> {
+    Ok(tx.query_row(
+        "SELECT EXISTS (SELECT 1 FROM ask_rows WHERE ask = ?1 AND kind IN ('answer', 'lost'))",
+        [ask],
+        |r| r.get(0),
+    )?)
+}
+
 /// The rows nobody has read, in order.
 pub(super) fn unread_in(tx: &Connection, ask: &str) -> Result<Vec<Row>> {
     let mut st = tx.prepare(
