@@ -135,14 +135,24 @@ tty_run "$KITH" echo
 rm -f "$STUB_OUT"; (cd "$T/work" && "$KITH" echo "do it") >/dev/null 2>&1
 [[ $(setting 'd["enabledPlugins"].get("mine@elsewhere")') == False ]] && ok "owner one-shot: installed plugin off" || bad "owner one-shot: installed plugin off" "$(cat "$STUB_SETTINGS")"
 
-# Permission mode: a reader agent's owner run is held to auto whoever asked for bypass; reads_others: false lifts it.
+# Permission mode: a reader agent's owner run is held to auto whoever asked for bypass, except the owner's own --bypass
+# typed at their terminal; reads_others: false lifts it.
 mkdir -p "$KITH_HOME/agents/reader/role" "$KITH_HOME/agents/mine/role"
 printf -- '---\nname: reader\ndescription: test agent\n---\nYou read.\n' > "$KITH_HOME/agents/reader/role/agent.md"
 printf -- '---\nname: mine\ndescription: test agent\n---\nYou work on my files.\n' > "$KITH_HOME/agents/mine/role/agent.md"
 printf 'reads_others: false\n' > "$KITH_HOME/agents/mine/role/capabilities.yaml"
 printf '{"permissions": {"defaultMode": "bypassPermissions", "allow": ["Artifact", "ArtifactComments", "ArtifactData"]}}\n' > "$KITH_HOME/agents/reader/role/settings.json"
 mode() { rm -f "$STUB_OUT"; (cd "$T/work" && "$@") >/dev/null 2>&1; args | grep -x -e 'bypassPermissions' -e 'auto' -e 'acceptEdits' | tr '\n' ' '; }
-[[ $(mode "$KITH" reader --bypass "do it") == "auto " ]] && ok "reader: --bypass held to auto" || bad "reader: --bypass held to auto" "$(mode "$KITH" reader --bypass "do it")"
+[[ $(mode "$KITH" reader --bypass "do it") == "bypassPermissions " ]] && ok "reader: owner's --bypass at the terminal kept" || bad "reader: owner's --bypass at the terminal kept" "$(mode "$KITH" reader --bypass "do it")"
+[[ $(mode "$KITH" reader --permission-mode bypassPermissions "do it") == "bypassPermissions " ]] && ok "reader: owner's --permission-mode bypassPermissions kept" || bad "reader: owner's --permission-mode bypassPermissions kept"
+tty_run "$KITH" reader --bypass
+[[ $(args | grep -x -e 'bypassPermissions' -e 'auto' | tr '\n' ' ') == "bypassPermissions " ]] && ok "reader: owner's --bypass in an interactive terminal kept" || bad "reader: owner's --bypass in an interactive terminal kept" "$(args | tr '\n' ' ')"
+[[ $(mode "$KITH" reader --bypass --permission-mode acceptEdits "do it") == "acceptEdits " ]] && ok "reader: the last mode typed wins" || bad "reader: the last mode typed wins"
+[[ $(mode env KITH_VIA=ask "$KITH" reader --bypass "do it") == "auto " ]] && ok "reader: --bypass from kith ask held to auto" || bad "reader: --bypass from kith ask held to auto"
+[[ $(mode env KITH_VIA=schedule KITH_PERMISSION_MODE=bypassPermissions "$KITH" reader "do it") == "auto " ]] && ok "reader: a schedule's bypass held to auto" || bad "reader: a schedule's bypass held to auto"
+[[ $(mode env KITH_AGENT=parent "$KITH" reader --bypass "do it") == "auto " ]] && ok "reader: --bypass from another run held to auto" || bad "reader: --bypass from another run held to auto"
+"$KERNEL/bin/kith-auth" member reader guest mode=acceptEdits >/dev/null 2>&1
+[[ $(mode env KITH_PERSON=guest "$KITH" reader --bypass "do it") == "acceptEdits " ]] && ok "reader: a guest's --bypass is the membership's mode" || bad "reader: a guest's --bypass is the membership's mode" "$(mode env KITH_PERSON=guest "$KITH" reader --bypass "do it")"
 [[ $(mode env KITH_PERMISSION_MODE=bypassPermissions "$KITH" reader "do it") == "auto " ]] && ok "reader: KITH_PERMISSION_MODE bypass held to auto" || bad "reader: KITH_PERMISSION_MODE bypass held to auto"
 "$KITH" reader set permission bypassPermissions >/dev/null 2>&1
 [[ $(mode "$KITH" reader "do it") == "auto " ]] && ok "reader: this Mac's bypass setting held to auto" || bad "reader: this Mac's bypass setting held to auto"

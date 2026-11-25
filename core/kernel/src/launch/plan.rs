@@ -1150,6 +1150,10 @@ pub fn plan(
             threads_bin: threads_bin.as_deref(),
             plugins_json: &plugins_json,
             owner_terminal: is_terminal && claude,
+            typed_bypass: p_owner
+                && !nested
+                && get(&env, "KITH_VIA") == "terminal"
+                && a.perm_mode.as_deref() == Some("bypassPermissions"),
             api_helper: &bget(&be, "backup_api_helper"),
             once_id: &once_id,
             developer_dir: &developer_dir,
