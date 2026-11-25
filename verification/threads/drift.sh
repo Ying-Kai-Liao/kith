@@ -13,7 +13,7 @@ set -euo pipefail
 # the claim files as before (#324) and the core writer (CoreWriter in Threads.tla: the claim is a core row, the stub's lock the
 # second layer); the Rust takers (R5) and the one-shot in one process (R3a) are the same steps. What that read did not cover is
 # in the skill ("Re-sync 2026-11-25 (R3a)").
-SYNC=32226509ebc6d05757f4f90ec327dfcf181f23f0
+SYNC=a8465ad5c020e4996a26b8fa852eb995cb96127e
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
