@@ -4,12 +4,17 @@
 
 use super::Env;
 use super::access::{request_access, request_secret};
+#[cfg(unix)]
 use super::bug::report_bug;
 use super::decide::{decide, deny};
+#[cfg(unix)]
 use super::door::run_door;
+#[cfg(unix)]
 use super::helper::ask_helper;
 use super::host::credentials;
 use super::pyval::{truthy, type_name};
+#[cfg(windows)]
+use super::refused::{ask_helper, report_bug, run_door};
 use crate::secrets::pyjson::dumps;
 use serde_json::{Map, Value, json};
 use std::io::{BufRead, Write};
@@ -91,6 +96,7 @@ fn bug_def() -> Value {
     )
 }
 
+#[cfg(unix)]
 fn helper_def() -> Value {
     tool(
         "ask_helper",
@@ -103,6 +109,7 @@ fn helper_def() -> Value {
     )
 }
 
+#[cfg(unix)]
 fn door_def() -> Value {
     tool(
         "run_door",
@@ -142,6 +149,8 @@ pub fn handle(msg: &Map<String, Value>, env: &Env, kernel: &Path) -> Result<Opti
             if credentials(env).is_some() {
                 tools.push(secret_def());
             }
+            // a guest's tools: guests are refused on Windows, so no run there is offered them
+            #[cfg(unix)]
             if let Some(person) = env.get("KITH_PERSON") {
                 if !crate::launch::room::is_room_person(person) {
                     tools.push(helper_def());

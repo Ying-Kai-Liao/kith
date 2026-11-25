@@ -59,15 +59,15 @@ impl Paths {
     }
 
     fn projects(&self) -> PathBuf {
-        self.home.join(".claude/projects")
+        crate::paths::join_parts(&self.home, ".claude/projects")
     }
 
     fn accounts_claude(&self) -> PathBuf {
-        self.machine.join("accounts/claude")
+        crate::paths::join_parts(&self.machine, "accounts/claude")
     }
 
     fn bridge_state(&self) -> PathBuf {
-        self.machine.join("bridge/state.json")
+        crate::paths::join_parts(&self.machine, "bridge/state.json")
     }
 }
 
