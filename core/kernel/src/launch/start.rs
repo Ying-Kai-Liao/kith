@@ -224,7 +224,7 @@ fn code_of(s: std::process::ExitStatus) -> i32 {
 }
 
 /// Another engine's one-shot: the same run handed to `kernel engine-run` (the prompt in a file, directories and MCP configs as lists).
-pub struct Adapter<'a> {
+pub struct Adapter {
     pub env: Env,
     pub harness: String,
     /// The engine run's flags before the task: `--permission-mode`, `--resume`, `--output`, then `--`.
@@ -246,7 +246,7 @@ fn run_engine(cmd: &mut Command) -> std::io::Result<std::process::ExitStatus> {
 
 /// Runs the task over ACP (`kith kernel engine-run`); its exit code is final, 78 (no ACP one-shot for this engine, nothing
 /// started) included: there is no adapter script behind it any more. A program without the module cannot run the engine at all.
-pub fn other(a: Adapter<'_>) -> i32 {
+pub fn other(a: Adapter) -> i32 {
     let me = if crate::MODULES.contains(&"engine-run") {
         std::env::current_exe().ok()
     } else {
@@ -259,13 +259,9 @@ pub fn other(a: Adapter<'_>) -> i32 {
         );
         return 1;
     };
-    let mut args = vec![
-        "kernel".to_owned(),
-        "engine-run".to_owned(),
-        a.harness.clone(),
-    ];
-    args.extend(a.flags.iter().cloned());
-    args.push(a.task.clone());
+    let mut args = vec!["kernel".to_owned(), "engine-run".to_owned(), a.harness];
+    args.extend(a.flags);
+    args.push(a.task);
     let mut cmd = Command::new(me);
     cmd.args(&args).env_clear().envs(&a.env);
     match run_engine(&mut cmd) {
