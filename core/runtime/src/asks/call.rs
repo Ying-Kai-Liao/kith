@@ -5,10 +5,11 @@
 use serde_json::{Value, json};
 
 use super::ledger::{self, Callee, Finish};
+use super::peer::{self, Apply, InRow};
 use super::rows::Kind;
 use super::{
-    EndReq, LedgerOpen, Open, cap_told, check_to, delegations, end_tree, limits, open, record,
-    settle,
+    EndReq, LedgerOpen, Open, Origin, cap_told, check_to, delegations, end_tree, limits, open,
+    record, settle,
 };
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -31,6 +32,10 @@ pub(crate) fn serves(method: &str) -> bool {
             | "ask.delegations"
             | "ask.record"
             | "ask.limits"
+            | "ask.peerLink"
+            | "ask.endPeer"
+            | "ask.peerApply"
+            | "ask.peerOwed"
     )
 }
 
@@ -52,6 +57,19 @@ fn need<'a>(params: &'a Value, key: &str) -> Result<&'a str> {
     word(params, key)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| bad(&format!("{key} is required")))
+}
+
+fn need_epoch(params: &Value) -> Result<i64> {
+    params
+        .get("epoch")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| bad("epoch is required"))
+}
+
+fn kills(kill: &[crate::conversations::claims::Kill]) -> Vec<Value> {
+    kill.iter()
+        .map(|k| json!({"claimId": k.claim_id, "pid": k.pid, "started": k.started}))
+        .collect()
 }
 
 fn flag(params: &Value, key: &str) -> bool {
@@ -84,6 +102,23 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             };
+            let origin = match (
+                word(params, "originComputer"),
+                word(params, "originKey"),
+                params.get("originEpoch").and_then(Value::as_i64),
+            ) {
+                (Some(computer), Some(key), Some(epoch))
+                    if !computer.is_empty() && !key.is_empty() =>
+                {
+                    Some(Origin {
+                        computer,
+                        key,
+                        epoch,
+                    })
+                }
+                (None, None, None) => None,
+                _ => return Err(bad("originComputer, originKey and originEpoch go together")),
+            };
             let o = Open {
                 id: need(params, "id")?,
                 asked: word(params, "asked").unwrap_or_default(),
@@ -98,12 +133,23 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                     cli_pid: params.get("cliPid").and_then(Value::as_i64),
                     cli_start: word(params, "cliStart"),
                     engine: word(params, "engine"),
+                    peer: word(params, "peer"),
+                    cont: word(params, "cont"),
+                    origin,
                 }),
             };
-            if let Some(l) = &o.ledger
-                && !matches!(l.mode, "fg" | "bg")
-            {
-                return Err(bad("mode is fg or bg"));
+            if let Some(l) = &o.ledger {
+                if !matches!(l.mode, "fg" | "bg" | "peer") {
+                    return Err(bad("mode is fg, bg or peer"));
+                }
+                if (l.mode == "peer") != l.peer.is_some() {
+                    return Err(bad("peer goes with mode peer, and only with it"));
+                }
+                if l.origin.is_some() && l.mode != "bg" {
+                    return Err(bad("an ask from another computer is a bg ask"));
+                }
+            } else if origin.is_some() || word(params, "peer").is_some() {
+                return Err(bad("peer and origin need a mode"));
             }
             open(
                 core,
@@ -196,6 +242,67 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                 .collect();
             Ok(json!({ "ended": ended.ids, "sessions": ended.sessions, "kill": kill }))
         }
+        "ask.peerLink" => {
+            let (linked, ended) =
+                peer::link(core, need(params, "computer")?, need_epoch(params)?, now)?;
+            Ok(json!({
+                "computer": need(params, "computer")?,
+                "epoch": need_epoch(params)?,
+                "linked": linked,
+                "ended": ended.ids,
+                "sessions": ended.sessions,
+                "kill": kills(&ended.kill),
+            }))
+        }
+        "ask.endPeer" => {
+            let computer = need(params, "computer")?;
+            let ended = peer::end(core, computer, now)?;
+            Ok(json!({
+                "computer": computer,
+                "ended": ended.ids,
+                "sessions": ended.sessions,
+                "kill": kills(&ended.kill),
+            }))
+        }
+        "ask.peerApply" => {
+            let (folders, _) = core.folders_for(params)?;
+            let mut rows = Vec::new();
+            for r in params
+                .get("rows")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let kind = word(r, "kind").and_then(Kind::parse);
+                let (Some(n), Some(kind), Some(text)) =
+                    (r.get("n").and_then(Value::as_i64), kind, word(r, "text"))
+                else {
+                    return Err(bad(
+                        "a row needs n, kind (answer, progress or lost) and text",
+                    ));
+                };
+                rows.push(InRow {
+                    n,
+                    who: word(r, "as").map(str::to_owned),
+                    kind,
+                    text: text.to_owned(),
+                    at_ms: r.get("at").and_then(Value::as_i64),
+                });
+            }
+            peer::apply(
+                core,
+                &folders.machine,
+                &Apply {
+                    id: need(params, "id")?,
+                    epoch: need_epoch(params)?,
+                    rows,
+                    state: word(params, "state"),
+                    cost: params.get("cost").and_then(Value::as_f64),
+                },
+                now,
+            )
+        }
+        "ask.peerOwed" => peer::owed(core),
         "ask.to" => {
             let id = need(params, "id")?;
             check_to(core.conn(), id)?;

@@ -129,7 +129,10 @@ pub(crate) fn attach(
              WHERE claim_id = ?1 AND kind = 'turn' AND state = 'claimed' AND pid IS NULL AND account IS NULL
                AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = ?1 AND t.source IN {} AND t.state = 'claimed'
                            AND (?5 IS NULL OR t.conversation = ?5)
-                           AND (?5 IS NOT NULL OR t.source = 'schedule'))",
+                           AND (?5 IS NOT NULL OR t.source = 'schedule')
+                           AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.turn = t.id AND a.origin_computer IS NOT NULL
+                                           AND NOT EXISTS (SELECT 1 FROM ask_peers p WHERE p.computer = a.origin_computer
+                                                           AND p.epoch = a.origin_epoch AND p.live = 1)))",
             super::detached::sources_sql()
         ),
         params![claim_id, now, pid, started, conversation],
@@ -148,6 +151,27 @@ pub(crate) fn attach(
         )?;
         tx.commit()?;
         return Ok(json!({ "attached": true }));
+    }
+    // The fence on attach (PeerFence `FenceAttach`): the claim of an ask whose pairing ended is ended and its turn
+    // cancelled in this transaction, so the run is refused and its engine is never started.
+    let cut: Option<i64> = tx
+        .query_row(
+            "SELECT t.id FROM turns t WHERE t.claim_id = ?1 AND t.state = 'claimed'",
+            [claim_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(turn) = cut
+        && crate::asks::cut_origin_in(&tx, turn)?.is_some()
+    {
+        claims::cancel_turn(&tx, claim_id, now)?;
+        tx.execute(
+            "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = 'cut'
+             WHERE claim_id = ?1 AND state = 'claimed' AND pid IS NULL",
+            params![claim_id, now],
+        )?;
+        tx.commit()?;
+        return Ok(json!({ "refused": "gone", "state": "ended" }));
     }
     refusal(&tx, claim_id, pid, started)
 }

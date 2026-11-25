@@ -30,6 +30,9 @@ pub(crate) mod call;
 mod ledger;
 #[cfg(all(test, unix))]
 mod ledger_tests;
+mod peer;
+#[cfg(all(test, unix))]
+mod peer_tests;
 mod rows;
 mod sweep;
 mod waiting;
@@ -38,6 +41,7 @@ mod waiting;
 mod tests;
 
 pub(crate) use call::{call, serves};
+pub(crate) use peer::cut_origin_in;
 pub(crate) use rows::mark_read_by_wake_in;
 pub(crate) use sweep::{Looked, Seen, look, seen_in, settle_in as sweep_in};
 
@@ -47,7 +51,8 @@ const BRIEF_MAX: usize = 2000;
 const COLS: &str = "id, chain, parent, reply_session, hop, cross_hops, crossed, asked, caller_agent, caller_person, \
 caller_via, conversation, cost, cost_base, cap_usd, state, at_ms, answered_ms, capped_ms, cap_card_ms, ended_ms, pid, \
 pid_at_ms, brief, done, delivered, woke_answer, extra, claim_id, mode, task, out_path, parked_card, parked_ms, turn, \
-cli_pid, cli_start, session";
+cli_pid, cli_start, session, peer, peer_epoch, sent, fetched, stop_owed, peer_seen_ms, origin_computer, origin_key, \
+origin_epoch";
 
 /// One row of `asks`: the record of one `kith ask`.
 #[derive(Clone, Debug, PartialEq)]
@@ -101,6 +106,19 @@ pub(crate) struct Ask {
     pub cli_start: Option<String>,
     /// The callee's session, written when its run attaches.
     pub session: Option<String>,
+    /// Across computers (migration 103, design §9). The caller's end (`mode` `peer`): the computer asked and the pairing
+    /// epoch the ask was opened under; whether the computer answered the send; the last of its rows copied here; a stop it
+    /// has not confirmed; and when it last answered (the away wait runs from it).
+    pub peer: Option<String>,
+    pub peer_epoch: Option<i64>,
+    pub sent: bool,
+    pub fetched: i64,
+    pub stop_owed: bool,
+    pub peer_seen_ms: Option<i64>,
+    /// The callee's end (an ordinary `bg` ask): who asked it, under which of their ask ids and pairing epoch.
+    pub origin_computer: Option<String>,
+    pub origin_key: Option<String>,
+    pub origin_epoch: Option<i64>,
 }
 
 // TODO(A4): `lost` (migration 102) is not here: the import reads files that never held it; add it with the cutover.
@@ -212,6 +230,15 @@ impl Ask {
             cli_pid: None,
             cli_start: None,
             session: None,
+            peer: None,
+            peer_epoch: None,
+            sent: false,
+            fetched: 0,
+            stop_owed: false,
+            peer_seen_ms: None,
+            origin_computer: None,
+            origin_key: None,
+            origin_epoch: None,
         };
         Some(Self {
             extra: (!rest.is_empty()).then_some(rest),
@@ -326,6 +353,15 @@ impl Ask {
             cli_pid: r.get(35)?,
             cli_start: r.get(36)?,
             session: r.get(37)?,
+            peer: r.get(38)?,
+            peer_epoch: r.get(39)?,
+            sent: r.get::<_, i64>(40)? != 0,
+            fetched: r.get(41)?,
+            stop_owed: r.get::<_, i64>(42)? != 0,
+            peer_seen_ms: r.get(43)?,
+            origin_computer: r.get(44)?,
+            origin_key: r.get(45)?,
+            origin_epoch: r.get(46)?,
         })
     }
 
@@ -334,7 +370,8 @@ impl Ask {
         conn.execute(
             &format!(
                 "INSERT OR REPLACE INTO asks ({COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
-                 ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38)"
+                 ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, \
+                 ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47)"
             ),
             params![
                 self.id,
@@ -377,6 +414,15 @@ impl Ask {
                 self.cli_pid,
                 self.cli_start,
                 self.session,
+                self.peer,
+                self.peer_epoch,
+                i64::from(self.sent),
+                self.fetched,
+                i64::from(self.stop_owed),
+                self.peer_seen_ms,
+                self.origin_computer,
+                self.origin_key,
+                self.origin_epoch,
             ],
         )?;
         Ok(())
@@ -434,6 +480,19 @@ pub(crate) struct LedgerOpen<'a> {
     pub cli_start: Option<&'a str>,
     /// `bg`: the callee's engine, when the caller knows it (else the conversation's own, else claude).
     pub engine: Option<&'a str>,
+    /// `peer` (A5a): the computer asked, and the previous ask's key when `-c` continues one there.
+    pub peer: Option<&'a str>,
+    pub cont: Option<&'a str>,
+    /// `bg`, on the callee's computer: who asked it. The pairing epoch is checked against `ask_peers` in this transaction.
+    pub origin: Option<Origin<'a>>,
+}
+
+/// Who asked a `bg` ask from another computer: its name, the caller's ask id (the key) and the pairing epoch it was sent under.
+#[derive(Clone, Copy)]
+pub(crate) struct Origin<'a> {
+    pub computer: &'a str,
+    pub key: &'a str,
+    pub epoch: i64,
 }
 
 /// Opens ask `o.id`: the cap check and the insert as one transaction (`open_record` under the box lock). `env` is the
@@ -464,10 +523,46 @@ pub(crate) fn open_in(
     check_only: bool,
     now: i64,
 ) -> Result<Value> {
+    match open_checked_in(tx, machine, env, o, check_only, now) {
+        // Every refusal of an ask that came from another computer is a row it can read back (MacLink2 repair 1).
+        Err(Error::Refused(why))
+            if !check_only && o.ledger.as_ref().is_some_and(|l| l.origin.is_some()) =>
+        {
+            peer::refused_origin_in(tx, o, &why, now)
+        }
+        other => other,
+    }
+}
+
+fn open_checked_in(
+    tx: &rusqlite::Transaction<'_>,
+    machine: &Path,
+    env: &dyn Fn(&str) -> Option<String>,
+    o: &Open<'_>,
+    check_only: bool,
+    now: i64,
+) -> Result<Value> {
     if !d::safe_id(o.id) {
         return Err(Error::BadParams(format!(
             "kith-core: asks: {:?} is not an ask id",
             o.id
+        )));
+    }
+    let origin = o.ledger.as_ref().and_then(|l| l.origin);
+    let peering = o.ledger.as_ref().is_some_and(|l| l.mode == "peer");
+    // A send that is made again finds the row it made (L1: the key is unique per computer), whatever epoch it names now.
+    if let Some(og) = origin
+        && let Some(old) = peer::by_origin_in(tx, og.computer, og.key)?
+    {
+        return Ok(peer::replayed(&old));
+    }
+    // The fence on opening (PeerFence `FenceOpen`): the pairing it came under is the live one, read in this transaction.
+    if let Some(og) = origin
+        && !peer::live_in(tx, og.computer, og.epoch)?
+    {
+        return Err(Error::Refused(format!(
+            "kith-core: asks: {} is not paired with this computer at epoch {}; the ask is refused",
+            og.computer, og.epoch
         )));
     }
     // A `bg` open that is made again (a retry after a lost answer) finds its ask and its one turn, and makes no second.
@@ -484,8 +579,19 @@ pub(crate) fn open_in(
         );
     }
     let asks = load_all(tx)?;
+    if let (true, Some(old)) = (peering, get(tx, o.id)?)
+        && let Some(l) = &o.ledger
+        && old.mode.as_deref() == Some("peer")
+        && old.peer.as_deref() == l.peer
+        && old.task.as_deref() == l.task
+        && old.asked.as_deref() == Some(o.asked)
+    {
+        return Ok(peer::replayed(&old));
+    }
     let by_id = regs(&asks);
-    let place = d::lineage_with(&|id| by_id.get(id).cloned(), env, o.crossing).map_err(refuse)?;
+    // An ask that crosses to another computer (either end of it) is a crossing hop.
+    let crossing = o.crossing || peering || origin.is_some();
+    let place = d::lineage_with(&|id| by_id.get(id).cloned(), env, crossing).map_err(refuse)?;
     // Under a stopped ask, at any depth, nothing new may open: its tree is ended (an open that won the race is ended with
     // it). The check answers what an open would.
     let mut up = place.ask.as_deref();
@@ -508,6 +614,11 @@ pub(crate) fn open_in(
     };
     d::decide(&place, &costs, d::chain_cost_cap(machine)).map_err(refuse)?;
     let decision = d::decision_json(&place, o.id);
+    // Only the owner's runs cross (D5): neither the caller nor anyone up its chain is a guest.
+    let peer_epoch = match o.ledger.as_ref().filter(|_| peering) {
+        Some(l) => Some(peer::open_peer_check_in(tx, &asks, &place, env, l)?),
+        None => None,
+    };
     if check_only {
         return Ok(json!({"decision": decision, "record": null}));
     }
@@ -554,8 +665,9 @@ pub(crate) fn open_in(
     let ask = Ask {
         id: o.id.to_owned(),
         chain: place.chain.clone().unwrap_or_else(|| o.id.to_owned()),
-        parent: place.ask.clone(),
-        reply_session: get("CLAUDE_CODE_SESSION_ID"),
+        // The caller's ask lives on another computer: nothing here to walk up to, and nobody here to wake.
+        parent: place.ask.clone().filter(|_| origin.is_none()),
+        reply_session: get("CLAUDE_CODE_SESSION_ID").filter(|_| origin.is_none()),
         hop: place.hop,
         cross_hops: place.cross_hops,
         crossed: place.crossed,
@@ -596,6 +708,26 @@ pub(crate) fn open_in(
             .as_ref()
             .and_then(|l| l.cli_start.map(str::to_owned)),
         session: None,
+        peer: o
+            .ledger
+            .as_ref()
+            .filter(|_| peering)
+            .and_then(|l| l.peer.map(str::to_owned)),
+        peer_epoch,
+        sent: false,
+        fetched: 0,
+        stop_owed: false,
+        peer_seen_ms: peering.then_some(now),
+        origin_computer: origin.map(|og| og.computer.to_owned()),
+        origin_key: origin.map(|og| og.key.to_owned()),
+        origin_epoch: origin.map(|og| og.epoch),
+    };
+    let ask = match o.ledger.as_ref().and_then(|l| l.cont).filter(|_| peering) {
+        Some(c) => Ask {
+            extra: Some(Map::from_iter([("cont".to_owned(), json!(c))])),
+            ..ask
+        },
+        None => ask,
     };
     // A `bg` open is one step with its turn: the host starts the callee from it (R1).
     let ask = match &o.ledger {
@@ -725,9 +857,23 @@ pub(crate) struct EndReq<'a> {
 /// the child inherits `KITH_PERSON` from the run that opened the record, so nothing is lost by not storing it.
 pub(crate) fn end_tree(core: &mut Core, req: &EndReq<'_>, now: i64) -> Result<Ended> {
     let tx = core.claim_tx()?;
+    let out = end_tree_in(&tx, req, now)?;
+    // The wakes go in the same step as the records and the claims: no window where a stopped ask's answer wakes its caller.
+    wake::withdraw_owed_in(&tx, now, &out.sessions, req.persons)?;
+    tx.commit()?;
+    Ok(out)
+}
+
+/// [`end_tree`] without its wake withdrawal and commit, inside the caller's transaction: the caller withdraws the wakes of
+/// `Ended::sessions` (`ask.endPeer` does it with the wake state it already holds).
+pub(crate) fn end_tree_in(
+    tx: &rusqlite::Transaction<'_>,
+    req: &EndReq<'_>,
+    now: i64,
+) -> Result<Ended> {
     let mut out = Ended::default();
     let mut owed: std::collections::BTreeSet<String> = req.sessions.iter().cloned().collect();
-    let asks = load_all(&tx)?;
+    let asks = load_all(tx)?;
     let mut hit: std::collections::BTreeSet<&str> = asks
         .iter()
         .filter(|a| {
@@ -761,6 +907,10 @@ pub(crate) fn end_tree(core: &mut Core, req: &EndReq<'_>, now: i64) -> Result<En
         // record is marked ended, so nothing opens under it or starts its conversation again.
         let history = a.delivered || a.woke_answer;
         if a.ended_ms.is_none() {
+            // A stop of an ask that waits on another computer is owed to it until it says the run is over.
+            if a.state == "open" && a.peer.is_some() {
+                a.stop_owed = true;
+            }
             if !history {
                 "stopped".clone_into(&mut a.state);
                 a.done = true;
@@ -768,7 +918,7 @@ pub(crate) fn end_tree(core: &mut Core, req: &EndReq<'_>, now: i64) -> Result<En
                 out.ids.push(a.id.clone());
             }
             a.ended_ms = Some(now);
-            a.put(&tx)?;
+            a.put(tx)?;
         }
         if !history {
             owed.extend(a.reply_session.clone());
@@ -786,7 +936,7 @@ pub(crate) fn end_tree(core: &mut Core, req: &EndReq<'_>, now: i64) -> Result<En
     }
     for (c, run) in conversations.iter().filter(|(c, _)| !c.is_empty()) {
         out.kill.extend(claims::stop_conversation_in(
-            &tx,
+            tx,
             c,
             *run,
             "ask stopped",
@@ -796,9 +946,6 @@ pub(crate) fn end_tree(core: &mut Core, req: &EndReq<'_>, now: i64) -> Result<En
     out.ids.sort();
     owed.remove("");
     out.sessions = owed.into_iter().collect();
-    // The wakes go in the same step as the records and the claims: no window where a stopped ask's answer wakes its caller.
-    wake::withdraw_owed_in(&tx, now, &out.sessions, req.persons)?;
-    tx.commit()?;
     Ok(out)
 }
 
@@ -845,6 +992,13 @@ fn view(a: &Ask, costs: &HashMap<String, f64>, cap: Option<f64>, all: &[Ask]) ->
         "brief": a.brief.as_ref().filter(|b| !b.is_empty()),
         "session": a.conversation.as_ref().filter(|s| !s.is_empty()),
     });
+    // Across computers (A5b lists them as `agent@computer`, and "asked from computer" on the callee's end).
+    if let Some(p) = &a.peer {
+        v["peer"] = json!(p);
+    }
+    if let Some(c) = &a.origin_computer {
+        v["origin"] = json!({"computer": c, "key": a.origin_key});
+    }
     // R7: only an ask that waits says so, so a record that waits on nothing reads as the contract's own.
     if let Some(w) = waiting::of(a, all) {
         v["waiting"] = w;
