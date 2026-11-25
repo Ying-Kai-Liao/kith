@@ -31,6 +31,10 @@ impl Core {
         let folders = crate::kernel::folders(&home);
         let daemon = serve_for_test(&folders);
         daemon.reconciled();
+        // The claims are the core's (a callee attaches its claim through `claim.attach`, which serves only then).
+        let cutover = folders.machine.join("core/cutover");
+        std::fs::create_dir_all(&cutover).expect("cutover dir");
+        std::fs::write(cutover.join("claims.switch"), "state=switched\nat=1\n").expect("switch record");
         let writer = Arc::new(CoreWriter::with_instance(folders.clone(), "test-host".to_owned()));
         Self { home, folders, daemon: Some(daemon), writer }
     }
@@ -51,6 +55,14 @@ impl Core {
             p[k] = v.clone();
         }
         self.call("ask.open", &p)
+    }
+
+    /// A row only the host may call.
+    fn call_host_row(&self, method: &str, params: &Value) -> Value {
+        match call_host(&self.folders, method, params) {
+            Answer::Done(v) => v,
+            _ => panic!("{method}: the core did not answer"),
+        }
     }
 
     fn queued(&self) -> Vec<Value> {
@@ -81,11 +93,18 @@ fn stub(dir: &Path) -> PathBuf {
     std::fs::create_dir_all(dir).unwrap();
     let file = dir.join("kith");
     let script = format!(
-        "#!/bin/sh\necho \"$KITH_TURN_CLAIM|$PWD|$KITH_OUTPUT|$KITH_RESUME|$*\" >> {log}\necho $$ > {pid}\n\
+        "#!/bin/sh\necho \"$KITH_TURN_CLAIM|$PWD|$KITH_OUTPUT|$KITH_RESUME|$*\" >> {log}\necho $$ > {pid}\necho $$ >> {pids}\n\
+         if [ -e {hold} ]; then until [ -e {go} ]; do sleep 0.1; done; [ -e {ok}.$$ ] || exit 10; fi\n\
+         echo engine >> {engines}\n\
          case \"$*\" in *SLEEP*) exec sleep 60;; esac\n\
          echo '{{\"result\":\"hi there\",\"total_cost_usd\":0.25,\"session_id\":\"sess-x\"}}'\n",
         log = dir.join("log").display(),
-        pid = dir.join("pid").display()
+        pid = dir.join("pid").display(),
+        pids = dir.join("pids").display(),
+        hold = dir.join("hold").display(),
+        go = dir.join("go").display(),
+        ok = dir.join("ok").display(),
+        engines = dir.join("engines").display()
     );
     std::fs::write(&file, script).unwrap();
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -112,13 +131,17 @@ fn alive(pid: i32) -> bool {
 }
 
 fn pull(core: &Core, dir: &Path, harness: &'static str) {
+    pull_as(&core.writer, core, dir, harness);
+}
+
+fn pull_as(writer: &Arc<CoreWriter>, core: &Core, dir: &Path, harness: &'static str) {
     let world = World {
         bin: Some(dir.join("kith")),
         kernel: Some(dir.join("kernel")),
         harness: &move |_| Some(harness.to_owned()),
         runtime: None,
     };
-    take(&core.writer, &core.queued(), &world);
+    take(writer, &core.queued(), &world);
 }
 
 fn scratch() -> PathBuf {
@@ -218,5 +241,102 @@ fn a_turn_that_cannot_start_is_cancelled_and_never_runs_unattached() {
     // The tick settles the ask: its turn ended with no answer.
     assert!(matches!(call_host(&core.folders, "wake.tick", &json!({})), Answer::Done(_)));
     assert_eq!(core.state("a4"), "lost");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The pids the stand-in `kith` ran as, in the order it started.
+fn pids(dir: &Path) -> Vec<i32> {
+    std::fs::read_to_string(dir.join("pids"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .collect()
+}
+
+fn engines(dir: &Path) -> usize {
+    std::fs::read_to_string(dir.join("engines")).unwrap_or_default().lines().count()
+}
+
+/// What a callee's launch does first: records its own process on the claim of its turn (`claim.attach`, a check-and-set), and
+/// lets the engine start only when that was granted. `claim` is the claim the callee was handed (`KITH_TURN_CLAIM`).
+fn attach(core: &Core, dir: &Path, claim: i64, conversation: &str, pid: i32) -> Value {
+    let started =
+        kith_kernel::procstart::start_stamp(u32::try_from(pid).unwrap()).expect("the process has a start stamp");
+    let said = core
+        .call("claim.attach", &json!({"claimId": claim, "pid": pid, "started": started, "conversation": conversation}));
+    if said["attached"] == true {
+        std::fs::write(dir.join(format!("ok.{pid}")), "").unwrap();
+    }
+    said
+}
+
+/// The claim ids the callees were handed, in order.
+fn claims_given(dir: &Path) -> Vec<i64> {
+    lines(dir).iter().filter_map(|l| l.split('|').next()?.parse().ok()).collect()
+}
+
+fn hold(dir: &Path) {
+    std::fs::write(dir.join("hold"), "").unwrap();
+}
+
+fn release(dir: &Path) {
+    std::fs::write(dir.join("go"), "").unwrap();
+}
+
+#[test]
+fn a_host_restarted_between_claim_and_attach_requeues_the_turn_and_the_task_runs_once() {
+    let core = Core::start();
+    let dir = scratch();
+    stub(&dir);
+    hold(&dir);
+    core.open("a5", "once only", &json!({}));
+    pull(&core, &dir, "claude");
+    until("the first callee started", || pids(&dir).len() == 1);
+    let first = claims_given(&dir)[0];
+    // The host is restarted before the callee attached: the next host's adopt gives the turn back.
+    core.call_host_row("hostclaim.adopt", &json!({"instance": "host-2"}));
+    until("the turn is queued again", || core.queued().len() == 1);
+    let second_writer = Arc::new(CoreWriter::with_instance(core.folders.clone(), "host-2".to_owned()));
+    pull_as(&second_writer, &core, &dir, "claude");
+    until("the second callee started", || pids(&dir).len() == 2);
+    let given = claims_given(&dir);
+    assert_ne!(given[1], first, "a new claim for the requeued turn");
+    // The first callee wakes up late and tries to attach: refused, so its engine never starts. Only the second attaches.
+    let old = attach(&core, &dir, first, "ask:a5", pids(&dir)[0]);
+    assert_eq!(old["refused"], "gone", "{old}");
+    let new = attach(&core, &dir, given[1], "ask:a5", pids(&dir)[1]);
+    assert_eq!(new["attached"], true, "{new}");
+    release(&dir);
+    until("the ask is answered", || core.state("a5") == "answered");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(engines(&dir), 1, "PromptOnce: the task reached an engine once");
+    assert_eq!(core.rows("a5").len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_host_restarted_mid_run_leaves_the_callee_running_and_its_answer_is_told_once() {
+    let core = Core::start();
+    let dir = scratch();
+    stub(&dir);
+    hold(&dir);
+    core.open("a6", "keep going", &json!({}));
+    pull(&core, &dir, "claude");
+    until("the callee started", || pids(&dir).len() == 1);
+    let pid = pids(&dir)[0];
+    let claim = claims_given(&dir)[0];
+    assert_eq!(attach(&core, &dir, claim, "ask:a6", pid)["attached"], true);
+    // The host is restarted: the attached claim is a run of its own and the callee goes on; nothing is requeued.
+    core.call_host_row("hostclaim.adopt", &json!({"instance": "host-2"}));
+    assert!(alive(pid), "the callee keeps running");
+    assert!(core.queued().is_empty(), "nothing is given back: the prompt is out");
+    let shown = core.call_host_row("hostclaim.show", &json!({"claimId": claim}));
+    assert_eq!(shown["claim"]["state"], "running", "{shown}");
+    release(&dir);
+    until("the ask is answered", || core.state("a6") == "answered");
+    // The core's tick finds nothing left to settle: the answer was told once, from the out file.
+    assert!(matches!(call_host(&core.folders, "wake.tick", &json!({})), Answer::Done(_)));
+    assert_eq!(core.rows("a6").len(), 1);
+    assert_eq!(engines(&dir), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }

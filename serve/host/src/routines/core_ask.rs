@@ -290,7 +290,8 @@ fn finish(writer: &Arc<CoreWriter>, ask: &str, turn: i64, out: &Path) {
 
 /// The `harness:` of the agent's pinned snapshot (`kith-pkg resolve`, what the launch reads: `$pkg/agent.md`), `claude` when it names
 /// none; `None` when the snapshot cannot be read. Blocking (a process and the agents folder). The wake door reads it the same way
-/// (`cards/resume/wake_clock.rs`); one of the two goes when `WK4c` moves that door.
+/// (`cards/resume/wake_clock.rs`).
+// TODO(WK4c, #1221): the wake door's copy and this one are the same function; keep one when WK4c lands.
 pub(super) fn harness_of_agent(agent: &str) -> Option<String> {
     let kernel = crate::kernel::current_kernel()?;
     let out = Command::new(kernel.join("bin/kith-pkg")).args(["resolve", agent]).stdin(Stdio::null()).output().ok()?;
