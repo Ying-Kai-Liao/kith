@@ -79,6 +79,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "project-guest",
         "readfence",
         "room-ledger",
+        // `kernel launch AGENT --exec --kernel K --turn N --claim C`: the core's turn of a cron job, its spec on stdin; the launch attaches
+        // the claim before the engine. Listed only by a program whose `launch --exec` takes the flags (the host checks it).
+        "sched-turn",
         // `kernel secrets exec` (start a shared MCP server with its keys) and `kernel secrets mcp-config`: `mcp-config` names
         // this program as the server's command only when it lists the token, else `bin/kith-auth exec` (P1-15).
         "secrets-exec",
@@ -134,7 +137,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","launch-exec-term","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","launch-exec-term","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
         );
     }
 }
