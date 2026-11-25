@@ -81,10 +81,10 @@ pub(crate) fn modes(engine: &engines::Engine, approve: bool) -> Vec<String> {
         .collect()
 }
 
-/// Why a run without `approve` must not start on `engine`, if it can't be held to its folders (see [`engines::holds`]):
+/// Why a run without `approve` must not start on `engine` (see [`engines::refuses_unbypassed`], the one switch):
 /// refused before the engine is spawned, never started in its own mode.
 pub(crate) fn cannot_hold(engine: &engines::Engine, approve: bool) -> Option<String> {
-    (!approve && !engines::holds(engine.id, Reach::Workspace)).then(|| engines::cannot_hold(engine.id))
+    (!approve && engines::refuses_unbypassed(engine.id)).then(|| engines::refusal(engine.id))
 }
 
 /// Runs it and returns the exit code.
@@ -214,12 +214,15 @@ mod tests {
     fn hermes_runs_over_its_own_acp_in_dont_ask_and_has_no_mode_for_a_run_without_bypass() {
         let hermes = engines::find("hermes").unwrap();
         assert!(hermes.local.is_some() && matches!(hermes.oneshot, Oneshot::Acp));
-        assert!(modes(hermes, false).is_empty());
+        assert_eq!(modes(hermes, false).is_empty(), engines::HERMES_REFUSES_WITHOUT_BYPASS);
         assert_eq!(modes(hermes, true), ["dont_ask"]);
     }
 
     #[tokio::test]
     async fn a_hermes_run_without_bypass_is_refused_before_the_engine_starts() {
+        if !engines::HERMES_REFUSES_WITHOUT_BYPASS {
+            return;
+        }
         // A command that leaves a mark if it is ever started: the refusal must come first.
         let dir = std::env::temp_dir().join(format!("kith-hermes-refuse-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

@@ -136,27 +136,36 @@ pub fn session_modes(engine: &str, reach: Reach) -> &'static [&'static str] {
         ("codex", Reach::ReadOnly) => &["read-only"],
         ("codex", Reach::Workspace) => &["workspace-write", "auto"],
         ("codex", Reach::Full) => &["agent-full-access", "full-access"],
-        // `hermes acp`: its modes (default, accept_edits, dont_ask) are edit-approval policies only. Shell commands go
-        // through `approvals.mode`, which defaults to "smart" (a guardian model approves what it judges safe before the
-        // client is asked) and which only ~/.hermes/config.yaml sets. So no mode holds a run to its folders: only
-        // dont_ask, the mode that asks for nothing, is used (see `holds`).
+        // `hermes acp`: its modes (default, accept_edits, dont_ask) are edit-approval policies only, not a fence for shell
+        // commands (see [`refuses_unbypassed`]). So while that refuses, only dont_ask is used.
+        ("hermes", Reach::ReadOnly) if !HERMES_REFUSES_WITHOUT_BYPASS => &["default"],
+        ("hermes", Reach::Workspace) if !HERMES_REFUSES_WITHOUT_BYPASS => &["accept_edits"],
         ("hermes", Reach::Full) => &["dont_ask"],
         _ => &[],
     }
 }
 
-/// Whether `engine` can hold a run to `reach` at all. False: no mode or sandbox Kith can set does it, so such a run is
-/// refused instead of started in the engine's own mode (an empty [`session_modes`] means "leave it", for engines Kith
-/// has no modes for). Hermes: its modes gate file edits only, and its shell approval is a config file Kith leaves alone.
-pub fn holds(engine: &str, reach: Reach) -> bool {
-    !(engine == "hermes" && reach != Reach::Full)
+/// THE switch for refusing Hermes runs that are not in bypass mode. Flip it to `false` to get Hermes as it was before
+/// (such runs start in `accept_edits` / `default`); nothing else needs to change but the Hermes tests that pin the refusal
+/// (here and in serve/host/src/runonce.rs).
+///
+/// Why true: Hermes's ACP modes only gate file edits. Shell approval follows `approvals.mode` in `~/.hermes/config.yaml`
+/// (default "smart": a guardian model approves flagged commands before any ACP ask), which Kith leaves alone and no
+/// env or ACP call overrides. A non-bypass run once ran `rm -rf` unasked.
+pub const HERMES_REFUSES_WITHOUT_BYPASS: bool = true;
+
+/// Whether a run without bypass must be refused on `engine` before it is spawned, because no mode or sandbox Kith can
+/// set holds it to its folders. Every caller (run-once, engine-run) asks here; an empty [`session_modes`] alone would
+/// not do, since an empty list means "leave the engine's own mode". Interactive terminal sessions never ask.
+pub fn refuses_unbypassed(engine: &str) -> bool {
+    HERMES_REFUSES_WITHOUT_BYPASS && engine == "hermes"
 }
 
-/// What to tell the person when `engine` can't hold a run to a reach below full (see [`holds`]).
-pub fn cannot_hold(engine: &str) -> String {
+/// What to tell the person when [`refuses_unbypassed`] stops a run.
+pub fn refusal(engine: &str) -> String {
     format!(
         "{engine} can't be held to its folders unless the agent is in bypass mode: its permission modes cover file edits, \
-         not shell commands, so this run was not started. Put the agent in bypass mode, or use another engine."
+         not shell commands, so this run was not started. Run the agent in bypass mode, or use another engine."
     )
 }
 
@@ -1021,17 +1030,19 @@ mod tests {
         assert_eq!(h.enforces.role_prompt, RolePrompt::FirstMessage);
         assert_eq!(session_modes("hermes", Reach::Full), ["dont_ask"]);
         // Its modes gate edits, not shell commands: only the run that asks for nothing is held to anything.
-        assert!(session_modes("hermes", Reach::Workspace).is_empty());
-        assert!(session_modes("hermes", Reach::ReadOnly).is_empty());
-        assert!(
-            holds("hermes", Reach::Full)
-                && !holds("hermes", Reach::Workspace)
-                && !holds("hermes", Reach::ReadOnly)
+        assert_eq!(
+            session_modes("hermes", Reach::Workspace).is_empty(),
+            HERMES_REFUSES_WITHOUT_BYPASS
         );
+        assert_eq!(
+            session_modes("hermes", Reach::ReadOnly).is_empty(),
+            HERMES_REFUSES_WITHOUT_BYPASS
+        );
+        assert_eq!(refuses_unbypassed("hermes"), HERMES_REFUSES_WITHOUT_BYPASS);
         assert!(
-            holds("codex", Reach::Workspace)
-                && holds("claude", Reach::Workspace)
-                && holds("pi", Reach::ReadOnly)
+            !refuses_unbypassed("codex")
+                && !refuses_unbypassed("claude")
+                && !refuses_unbypassed("pi")
         );
     }
 

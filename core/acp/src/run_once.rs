@@ -290,10 +290,14 @@ async fn session(
         }
         // Only calls made in this run count towards an ask, not the ones the history replay reported.
         asks.servers.clear();
-        if answer.is_object() {
+        // Hermes's python ACP library sends `{}` for the null it means. An empty answer only counts as "unknown" when
+        // modes are wanted: with none to pick, an agent that loads a session and says nothing about it is fine.
+        let unknown = answer.is_null()
+            || (!spec.modes.is_empty() && answer.as_object().is_some_and(|o| o.is_empty()));
+        if answer.is_object() && !unknown {
             loaded = Some(answer);
         } else {
-            // Null: the agent does not know the session (Hermes only loads the ones it made over ACP, not a native
+            // Null or `{}`: the agent does not know the session (Hermes only loads the ones it made over ACP, not a native
             // `hermes chat` one). It would list no modes either, so say so and start over instead of failing on that.
             eprintln!(
                 "kith: this agent cannot resume session {id} (it was not started over ACP); starting a new session"
