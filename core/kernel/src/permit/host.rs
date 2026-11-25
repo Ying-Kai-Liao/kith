@@ -1,14 +1,21 @@
-//! Reaching the host: the run socket (a JSON line each way, `call_host`) and its local API over loopback (`host_call`,
-//! with the serve token), the host's port (`endpoint`, `host_up`) and its launchd job (`restart_host`).
+//! Reaching the host: the run socket (a JSON line each way, `call_host`; on Windows a named pipe only this account can open,
+//! `kith_winsys::pipe`) and its local API over loopback (`host_call`, with the serve token), the host's port (`endpoint`,
+//! `host_up`) and its launchd job (`restart_host`; on Windows it is refused by name until the service exists, W11).
 
 use super::Env;
 use serde_json::{Map, Value};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs as _};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 /// How long a restarted host gets to open its port before the ask token is asked for again.
 pub const HOST_START_S: u64 = 15;
@@ -47,12 +54,28 @@ pub fn call_host(
 
 /// One request line over a Unix socket and its one-line answer as JSON of any shape. `None` when the socket can't be reached,
 /// the answer can't be read in time or is no JSON (Python's `OSError`, `ValueError`, `UnicodeDecodeError`).
+#[cfg(unix)]
 pub fn exchange(path: &str, line: &str, timeout: Duration) -> Option<Value> {
-    let mut line = line.as_bytes().to_vec();
-    line.push(b'\n');
     let mut s = UnixStream::connect(path).ok()?;
     s.set_read_timeout(Some(timeout)).ok()?;
     s.set_write_timeout(Some(timeout)).ok()?;
+    ask(&mut s, line)
+}
+
+/// The same over the host's named pipe (`path` is its `\\.\pipe\...` name). The pipe is owner-only, made so by the host when
+/// it creates it; the client opens with identification-level impersonation, so a host that is not ours cannot act as us.
+#[cfg(windows)]
+pub fn exchange(path: &str, line: &str, timeout: Duration) -> Option<Value> {
+    let mut s = kith_winsys::pipe::connect(path, timeout).ok()?;
+    s.set_read_timeout(Some(timeout));
+    s.set_write_timeout(Some(timeout));
+    ask(&mut s, line)
+}
+
+/// One request line out and the one-line answer back, on a connection whose timeouts are set.
+fn ask<S: Read + Write>(s: &mut S, line: &str) -> Option<Value> {
+    let mut line = line.as_bytes().to_vec();
+    line.push(b'\n');
     s.write_all(&line).ok()?;
     let mut buf = Vec::new();
     let mut chunk = vec![0u8; 65536];
@@ -72,6 +95,12 @@ pub fn endpoint(env: &Env, kernel: &Path) -> Option<(String, String)> {
     if let (Some(d), Some(p)) = (data, port) {
         return Some((d.to_owned(), p.to_owned()));
     }
+    asked(kernel, data, port)
+}
+
+/// What `kith-serve endpoint` says, for the half the run's variables left out.
+#[cfg(unix)]
+fn asked(kernel: &Path, data: Option<&str>, port: Option<&str>) -> Option<(String, String)> {
     let mut cmd = Command::new(kernel.join("bin/kith-serve"));
     cmd.arg("endpoint");
     let out = crate::secrets::run_command_with_timeout(cmd, Duration::from_secs(4))?;
@@ -82,6 +111,17 @@ pub fn endpoint(env: &Env, kernel: &Path) -> Option<(String, String)> {
     }
     Some((data.unwrap_or(d).to_owned(), port.unwrap_or(p).to_owned()))
 }
+
+/// `kith-serve endpoint` is a script (windows-owner WI2): on Windows only the run's own `KITH_SERVE_DIR` and `KITH_SERVE_PORT`
+/// name the host, and a run without both has none to ask. [`ENDPOINT_UNKNOWN`] says so.
+#[cfg(windows)]
+fn asked(_: &Path, _: Option<&str>, _: Option<&str>) -> Option<(String, String)> {
+    None
+}
+
+/// Why a Windows run with no `KITH_SERVE_DIR` and `KITH_SERVE_PORT` cannot reach the host (named, never silent).
+#[cfg(windows)]
+pub const ENDPOINT_UNKNOWN: &str = "not on Windows yet: looking up the host's endpoint (this run has no KITH_SERVE_DIR and KITH_SERVE_PORT)";
 
 /// The host's local API over loopback with the serve token. `None` when it can't be reached or doesn't say 2xx with JSON.
 pub fn host_call(
@@ -211,9 +251,21 @@ pub fn host_up(env: &Env, kernel: &Path) -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_ok()
 }
 
+/// Why the host cannot be restarted: on Windows it is the service's job (W11), which is not built yet. Never a fall back to
+/// launchctl and never a quiet skip: the caller says this to the person.
+#[cfg(windows)]
+pub const RESTART_REFUSED: &str = "not on Windows yet: host restart (W11)";
+
+/// The host is not restarted from here on Windows: [`RESTART_REFUSED`] is the answer, and this says no.
+#[cfg(windows)]
+pub fn restart_host(_: &Env, _: &Path, _: bool, _: Duration) -> bool {
+    false
+}
+
 /// Restarts the host's launchd job as the Mac app does (apps/desktop host-service.ts): a job that was stopped is loaded
 /// from its plist first, then kickstarted. Then waits for its port. False when that didn't bring it up, and on any system
 /// but macOS (`mac`).
+#[cfg(unix)]
 pub fn restart_host(env: &Env, kernel: &Path, mac: bool, wait: Duration) -> bool {
     if !mac {
         return false;

@@ -106,7 +106,7 @@ impl Outside for System {
         if agent.is_empty() {
             return Vec::new();
         }
-        let auth = self.kernel.join("bin/kith-auth");
+        let auth = self.kernel.join("bin").join("kith-auth");
         match run_with_timeout(
             &[&auth.to_string_lossy(), "granted", "--for", agent, service],
             &[],
@@ -711,7 +711,7 @@ pub fn main_json(ctx: &Ctx<'_>, agent: &str) -> J {
 
 /// The apiKeyHelper command: prints the key on demand, run by Claude Code, so the key never passes through us.
 fn api_helper(ctx: &Ctx<'_>, agent: &str, name: &str) -> String {
-    let auth = ctx.kernel.join("bin/kith-auth");
+    let auth = ctx.kernel.join("bin").join("kith-auth");
     let profile = format!("anthropic/{name}");
     [
         auth.to_string_lossy().as_ref(),

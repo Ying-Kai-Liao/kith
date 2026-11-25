@@ -22,10 +22,8 @@ pub mod paths;
 // Unix only, like `cost` and `secrets`: it runs `kith-auth` through the secrets module's timeout helper.
 #[cfg(unix)]
 pub mod people;
-pub mod pkg;
-// Unix only: the run socket is a Unix socket and the one-shots are modes.
-#[cfg(unix)]
 pub mod permit;
+pub mod pkg;
 pub mod procstart;
 pub mod project;
 // Unix only in the module list below: the hook is written into a unix launch's settings.
@@ -102,6 +100,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "engine-run",
         "engines",
         "paths",
+        // Owner runs only: the hooks, `issue`, and the MCP server's `approve` and key/access cards, over the host's named pipe.
+        // The guest halves (apply, door, helper, bug) are refused by name.
+        "permit",
         "pkg",
         "project",
         "room-ledger",

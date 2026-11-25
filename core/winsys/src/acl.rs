@@ -268,11 +268,12 @@ mod tests {
     use super::*;
     use std::process::Command;
 
-    /// Adds a read entry for a SID with `icacls`, whose `*S-...` form takes a SID, so it is language-free.
-    fn grant(path: &Path, sid: &str) {
+    /// Adds a read entry for a SID with `icacls`, whose `*S-...` form takes a SID, so it is language-free. `rights` is the
+    /// part after the colon: `(R)` for the folder alone, `(OI)(CI)(R)` for what it will hold too.
+    fn grant_with(path: &Path, sid: &str, rights: &str) {
         let out = Command::new("icacls")
             .arg(path)
-            .args(["/grant", &format!("*{sid}:(R)")])
+            .args(["/grant", &format!("*{sid}:{rights}")])
             .output()
             .unwrap();
         assert!(
@@ -280,6 +281,10 @@ mod tests {
             "icacls: {}",
             String::from_utf8_lossy(&out.stdout)
         );
+    }
+
+    fn grant(path: &Path, sid: &str) {
+        grant_with(path, sid, "(R)");
     }
 
     #[test]
@@ -327,8 +332,9 @@ mod tests {
     #[test]
     fn a_folder_made_private_is_owner_only_from_the_first_moment() {
         let tmp = tempfile::tempdir().unwrap();
-        // the parent lets Users in, as a shared temp folder may
-        grant(tmp.path(), "S-1-5-32-545");
+        // the parent lets Users in, and the entry is inherited by what is made inside it, as a shared temp folder may: so
+        // the folder is owner-only only if it blocks inheritance (an entry for the parent alone would prove nothing)
+        grant_with(tmp.path(), "S-1-5-32-545", "(OI)(CI)(R)");
         let dir = tmp.path().join("fresh");
         create_dir_private(&dir, true).unwrap();
         assert_eq!(check(&dir).unwrap(), Check::OwnerOnly);

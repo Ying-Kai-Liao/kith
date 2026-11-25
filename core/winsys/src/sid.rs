@@ -74,9 +74,15 @@ impl Sid {
 /// The user of this process's token: the owner SID, whatever the account is called and however the console is
 /// localised. Elevated or not, the token's user is the same account.
 pub(crate) fn current_user() -> io::Result<Sid> {
+    // SAFETY: the pseudo handle of this process needs no close.
+    process_user(unsafe { GetCurrentProcess() })
+}
+
+/// The user of the token of the process `process` (a handle opened with at least `PROCESS_QUERY_LIMITED_INFORMATION`).
+pub(crate) fn process_user(process: HANDLE) -> io::Result<Sid> {
     let mut token: HANDLE = std::ptr::null_mut();
-    // SAFETY: the pseudo handle of this process needs no close; `token` is an out-pointer.
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) } == 0 {
+    // SAFETY: `process` is a handle the caller holds open; `token` is an out-pointer.
+    if unsafe { OpenProcessToken(process, TOKEN_QUERY, &raw mut token) } == 0 {
         return Err(last_err());
     }
     let token = Handle(token);
