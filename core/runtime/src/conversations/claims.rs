@@ -266,16 +266,6 @@ pub(crate) fn is_reconciled(core: &Core) -> Result<bool> {
     Ok(text.and_then(|t| t.parse::<i64>().ok()) == Some(core.generation()))
 }
 
-/// Marks this core's generation reconciled with no holder to list anything, as the holder's first hello does, so a host test
-/// that runs a core without one can claim. Not a way to reconcile a live core (nothing is released).
-pub(crate) fn mark_reconciled(core: &Core) -> Result<()> {
-    core.conn().execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
-        params![RECONCILED, core.generation().to_string()],
-    )?;
-    Ok(())
-}
-
 pub(super) fn kill_of(claim_id: i64, pid: Option<i64>, started: Option<String>) -> Kill {
     Kill {
         claim_id: Some(claim_id),
