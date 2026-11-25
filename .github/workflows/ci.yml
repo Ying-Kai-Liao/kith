@@ -239,6 +239,9 @@ jobs:
               - 'core/kernel/src/secrets/authority.rs'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
+              # the access rules (cut_off, held, may, take_once) the core and the Rust kith-auth both call
+              - 'core/kernel/src/access.rs'
+              - 'core/kernel/src/access/**'
             # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).
             secrets:
               - 'verification/secrets/**'
