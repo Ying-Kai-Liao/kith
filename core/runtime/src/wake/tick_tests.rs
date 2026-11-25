@@ -1115,7 +1115,10 @@ fn gh_is_found_on_path_then_where_the_installers_put_it() {
     let name = if cfg!(windows) { "gh.exe" } else { "gh" };
     std::fs::write(bin.join(name), "").unwrap();
     let path = std::env::join_paths([&bin]).unwrap();
-    assert_eq!(super::outside::gh_in(Some(&path), None), bin.join(name));
+    assert_eq!(
+        super::outside::gh_in(Some(&path), None, &[]),
+        bin.join(name)
+    );
     // Nothing on PATH: `%ProgramFiles%\GitHub CLI` is looked in.
     let pf = t.path().join("Program Files");
     let cli = pf.join("GitHub CLI");
@@ -1123,8 +1126,15 @@ fn gh_is_found_on_path_then_where_the_installers_put_it() {
     std::fs::write(cli.join("gh.exe"), "").unwrap();
     let empty = std::env::join_paths([t.path().join("nothing")]).unwrap();
     assert_eq!(
-        super::outside::gh_in(Some(&empty), Some(pf.as_os_str())),
+        super::outside::gh_in(Some(&empty), Some(pf.as_os_str()), &[]),
         cli.join("gh.exe")
+    );
+    // Then the fixed places (Homebrew's, in the system's own use); a test names its own.
+    let fixed = t.path().join("fixed-gh");
+    std::fs::write(&fixed, "").unwrap();
+    assert_eq!(
+        super::outside::gh_in(Some(&empty), None, &[fixed.to_str().unwrap()]),
+        fixed
     );
 }
 
