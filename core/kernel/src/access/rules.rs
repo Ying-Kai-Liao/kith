@@ -1,5 +1,7 @@
 //! The rules over one auth.json snapshot: [`Rules`] answers `may`, `resolve` and the questions the core and the CLI ask.
 
+// The rules use most of the module's items (Ctx, R, die, the table names); the glob is the same one they had inside secrets.
+#[allow(clippy::wildcard_imports)]
 use super::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;

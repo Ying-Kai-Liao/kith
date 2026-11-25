@@ -78,7 +78,6 @@ pub(crate) fn rules<'a>(c: &'a Ctx, a: &'a Value) -> Rules<'a> {
 }
 
 #[test]
-#[test]
 fn canonical_follows_an_old_id() {
     let a = people();
     assert_eq!(canonical(&a, "samuel"), "sam");

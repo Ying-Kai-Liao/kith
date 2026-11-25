@@ -6,6 +6,7 @@ use serde_json::json;
 use std::process::Stdio;
 use std::time::Instant;
 
+#[test]
 fn a_missing_file_is_empty_with_every_table() {
     let t = Tmp::new("missing");
     let a = load_auth(&ctx(&t)).unwrap();
