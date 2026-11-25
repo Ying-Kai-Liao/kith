@@ -41,12 +41,14 @@ pub mod secrets;
 pub mod settings;
 #[cfg(unix)]
 pub mod threads;
+// Not Unix-only: `kith wake` on a Mac with no Python (a Windows owner) is this thin client of the core's wake rows.
+pub mod wake;
 
 /// The version of the `kith kernel` interface the router in `kernel/bin/kith` speaks to.
 pub const ABI: u32 = 1;
 
 /// The modules this build has, as `kith kernel version` lists them. A verb in `kernel/lib/core-switched.txt` moves to
-/// the core only when its module is here (`threads-writer`: every `kith-sessions` verb but `run`, in Files and in Writer mode; `threads-run`: that `run`; the older `threads` is the Files-mode port and is not what `kernel/bin/kith` routes to; `acp`: the `run-once` verb, whose code lives in the kith-acp crate; `engine-run`: the non-Claude one-shot `kernel/bin/kith` runs through it (`kith kernel engine-run`); `launch`: `kith AGENT --launch-json`; `lifecycle`: `kith-lifecycle`, the sweep that compacts or ends sessions nobody runs).
+/// the core only when its module is here (`threads-writer`: every `kith-sessions` verb but `run`, in Files and in Writer mode; `threads-run`: that `run`; the older `threads` is the Files-mode port and is not what `kernel/bin/kith` routes to; `acp`: the `run-once` verb, whose code lives in the kith-acp crate; `engine-run`: the non-Claude one-shot `kernel/bin/kith` runs through it (`kith kernel engine-run`); `engine-run-tui`: its `--interactive`, the engine's own terminal session; `launch`: `kith AGENT --launch-json`; `lifecycle`: `kith-lifecycle`, the sweep that compacts or ends sessions nobody runs).
 pub const MODULES: &[&str] = if cfg!(unix) {
     &[
         "account",
@@ -60,6 +62,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "cost-ledger",
         "delegation",
         "engine-run",
+        "engine-run-tui",
         "engines",
         "launch",
         // `kernel launch-exec`: a one-shot run in this process (the entry's one-shot branch). A token of its own: an older
@@ -86,6 +89,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         // `KITH_TURN_CLAIM`: the launch attaches the host's claim for its turn (`claim.attach`) before anything starts. The
         // router hands the variable only to a program that lists it (else exit 10); the host checks it before setting it.
         "turn-claim",
+        // `kernel wake VERB ...`: `kith wake` as a client of the core's wake rows, for a Mac whose queue is the core's (the tombstone
+        // in sessions/queue/). `kith_wake_exec` (lib/kith-core.sh) uses it only on a program that lists it, else kith-wake answers.
+        "wake",
     ]
 } else {
     &[
@@ -99,6 +105,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "cost-ledger",
         "delegation",
         "engine-run",
+        "engine-run-tui",
         "engines",
         "paths",
         // Owner runs only: the hooks, `issue`, and the MCP server's `approve` and key/access cards, over the host's named pipe.
@@ -108,6 +115,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "project",
         "room-ledger",
         "settings",
+        "wake",
     ]
 };
 
@@ -124,7 +132,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
         );
     }
 }
