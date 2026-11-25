@@ -342,6 +342,30 @@ pub fn spawn(f: impl FnOnce() + Send + 'static) {
     }
 }
 
+/// Whether the `wake` module is switched for `state`: the queue is the core's, so the host drives its clock ([`tick`]) and runs
+/// its turns by id. A switched module whose switch record cannot be read counts as switched (nothing then goes to the files).
+pub fn module_switched(state: &Path) -> bool {
+    !matches!(via(state), Ok(None))
+}
+
+/// One `wake.tick`, the core's clock for the queue (design 2026-11-21-wake-s4 R1/R2). An error is a tick not made (the core
+/// refused, was `Busy` or did not answer): the next one is the retry.
+pub fn tick(state: &Path) -> anyhow::Result<serde_json::Value> {
+    match via(state) {
+        Ok(Some(f)) => via_core::tick(&f),
+        Err(why) => anyhow::bail!(why),
+        Ok(None) => anyhow::bail!("the wake queue at {} is not the core's", state.display()),
+    }
+}
+
+/// The turn the core's run `run` is (its session, agent, person, the requests it carries), read from the queue's item: a pulled
+/// wake turn (`hostclaim.queued`) lists only its request ids and its note. `None`: the queue has no such run (a Stop took it) or
+/// could not be read.
+pub fn turn_of(state: &Path, run: &str, note: &str) -> Option<Turn> {
+    let Ok(Some(f)) = via(state) else { return None };
+    via_core::turn_of(&f, run, note)
+}
+
 /// What the queue holds, as `kith-wake ls --json` says it.
 #[cfg(test)]
 pub fn ls(state: &Path) -> Vec<serde_json::Value> {

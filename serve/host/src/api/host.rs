@@ -99,6 +99,9 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             if native > 0 {
                 hello["nativeBots"] = native.into();
             }
+            // This host drives the wake queue's clock and runs its turns by id (`cards/resume/wake_clock.rs`) with the ask bridge
+            // after each tick: the `wake` module's step reads it (design 2026-11-21-wake-s4 section 4).
+            hello["wakeRunner"] = true.into();
             hello
         }
         "refreshBackends" => {
