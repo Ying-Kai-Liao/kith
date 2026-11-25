@@ -17,12 +17,13 @@ use std::path::{Path, PathBuf};
 use super::args::{Files, run_args};
 use super::assemble::{Env, get, pj_indent1, sync_env};
 use super::plan::{self, ExecHooks, ExecOpts, Hooks, Mode, Resumed};
+use super::sched_turn::{self, Sched};
 use super::session;
 use super::start::{self, Adapter, Engine, Go};
 use crate::secrets::pyjson;
 use crate::threads::core::Core;
 use crate::threads::resolve::{Host, resolve_taking};
-use crate::threads::writer::{ProcErr, TURN_CLAIM_EXIT, Taker};
+use crate::threads::writer::{ProcErr, Taker};
 use crate::threads::{self, Ctx, claim_wait};
 use crate::{accounts, paths};
 
@@ -94,8 +95,8 @@ impl Flags {
                     f.resume = Some(Pick::Latest);
                     1
                 }
-                "--hold" | "--account" | "--backup" | "-p" | "--project" | "-m" | "--model"
-                | "-e" | "--effort" | "-H" | "--harness" | "--permission-mode" => 2,
+                "--hold" | "--account" | "--backup" | "-p" | "--project" | "-m" | "--model" | "-e" | "--effort"
+                | "-H" | "--harness" | "--permission-mode" => 2,
                 "--bypass" => 1,
                 "--" => {
                     // The plan needs it too: what follows is a task even when it starts like a flag.
@@ -106,8 +107,7 @@ impl Flags {
                 _ => break,
             };
             if !matches!(x, "--held" | "--direct") {
-                f.plan_argv
-                    .extend(argv[i..(i + step).min(argv.len())].iter().cloned());
+                f.plan_argv.extend(argv[i..(i + step).min(argv.len())].iter().cloned());
             }
             i += step;
         }
@@ -136,6 +136,8 @@ struct Steps<'a> {
     accounts_ctx: accounts::Ctx<'a>,
     /// The resumed session was claimed under a core that gave no answer.
     alone: RefCell<bool>,
+    /// A schedule's turn: its claim is attached before the walk starts any attempt.
+    sched: Option<&'a Sched>,
 }
 
 impl ExecHooks for Steps<'_> {
@@ -159,11 +161,7 @@ impl ExecHooks for Steps<'_> {
             let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
             let out = threads::cli::run_with(self.ctx, host, core, &args, &stdin, &ask);
             eprint!("{}", out.stderr);
-            if out.code == 0 {
-                Ok(out.stdout.trim().to_owned())
-            } else {
-                Err(1)
-            }
+            if out.code == 0 { Ok(out.stdout.trim().to_owned()) } else { Err(1) }
         };
         let thread = match &self.flags.resume {
             Some(Pick::Id(id)) => id.clone(),
@@ -180,12 +178,7 @@ impl ExecHooks for Steps<'_> {
                 eprint!("{}", t.said);
                 *self.alone.borrow_mut() = t.alone;
                 let run = accounts::session_run(&self.machine, &t.resolved.sid);
-                Ok(Resumed {
-                    sid: t.resolved.sid,
-                    cwd: t.resolved.cwd,
-                    thread,
-                    run,
-                })
+                Ok(Resumed { sid: t.resolved.sid, cwd: t.resolved.cwd, thread, run })
             }
             Err(m) => {
                 eprintln!("kith: {m}");
@@ -195,19 +188,18 @@ impl ExecHooks for Steps<'_> {
     }
 
     fn walk(&self, agent: &str, agent_md: &Path, argv: &[String]) -> i32 {
+        // The attempts are runs of their own that send the prompt: the claim is this process's before the first one.
+        if let Some(s) = self.sched
+            && let Err(code) = s.attach(&Taker::new(self.ctx, self.deps.core), self.pid)
+        {
+            return code;
+        }
         let Ok(me) = std::env::current_exe() else {
             eprintln!("kith: can't find this program to start the attempts");
             return 1;
         };
-        let base = [
-            me.to_string_lossy().into_owned(),
-            "kernel".to_owned(),
-            "launch-exec".to_owned(),
-        ];
-        let tail = [
-            "--kernel".to_owned(),
-            self.kernel.to_string_lossy().into_owned(),
-        ];
+        let base = [me.to_string_lossy().into_owned(), "kernel".to_owned(), "launch-exec".to_owned()];
+        let tail = ["--kernel".to_owned(), self.kernel.to_string_lossy().into_owned()];
         accounts::chain::run_with(
             &self.accounts_ctx,
             agent,
@@ -221,60 +213,48 @@ impl ExecHooks for Steps<'_> {
     }
 }
 
-/// The exit for a run handed a turn claim that this launch cannot attach: `TURN_CLAIM_EXIT`, as the script's own refusals.
-fn turn_claim_refusal(env: &Env) -> Option<i32> {
-    (!get(env, "KITH_TURN_CLAIM").is_empty()).then_some(TURN_CLAIM_EXIT)
-}
-
 /// `kith kernel launch-exec AGENT [--kernel DIR] ARGS...`: the exit code (only returned when the run did not start or, off Unix, ended).
 pub fn run(argv: &[String], kernel: &Path, env0: Env, deps: &Deps<'_>) -> i32 {
     run_with(argv, kernel, env0, deps, Engine::native())
 }
 
 /// [`run`], with the way the engine starts named (the tests wait for it).
-pub fn run_with(
-    argv: &[String],
-    kernel: &Path,
-    mut env0: Env,
-    deps: &Deps<'_>,
-    how: Engine,
-) -> i32 {
+pub fn run_with(argv: &[String], kernel: &Path, mut env0: Env, deps: &Deps<'_>, how: Engine) -> i32 {
     let Some((agent, rest)) = argv.split_first() else {
         eprintln!("usage: kith kernel launch-exec AGENT [--kernel DIR] ARGS...");
         return 2;
     };
     sync_env(&mut env0);
-    // The host's claim on a chat turn is attached by the bash body (and later by sched-turn S1); this run would start the turn
-    // without it, which delivers twice. Nothing started.
-    if let Some(code) = turn_claim_refusal(&env0) {
-        eprintln!(
-            "kith: --exec does not carry a turn claim yet (KITH_TURN_CLAIM is set); the script's run takes it"
-        );
-        return code;
-    }
+    // `--turn N --claim C`: the core's turn of a cron job, which this launch attaches to its claim and runs (sched-turn).
+    let (sched, argv) = match Sched::prepare(agent, rest, kernel, &mut env0) {
+        Ok(Some((s, task))) => (Some(s), [std::slice::from_ref(agent), &task].concat()),
+        Ok(None) => (None, argv.to_vec()),
+        Err(code) => return code,
+    };
+    let code = run_one(&argv, kernel, &env0, deps, how, sched.as_ref());
+    sched.map_or(code, |s| s.finish(code))
+}
+
+fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Engine, sched: Option<&Sched>) -> i32 {
+    let Some((agent, rest)) = argv.split_first() else {
+        return 2;
+    };
     let flags = Flags::parse(rest);
     if flags.no_run || flags.task.is_empty() {
-        eprintln!(
-            "kith: --exec runs a task (kith {agent} \"...\"); --print and --launch-json answer elsewhere"
-        );
+        eprintln!("kith: --exec runs a task (kith {agent} \"...\"); --print and --launch-json answer elsewhere");
         return 2;
     }
     let person = get(&env0, "KITH_PERSON").to_owned();
     // A room person (the meet of everyone in a room with people) has no row in auth.json: only the Rust launch builds its grant, and
     // it is the host's launch that starts those runs, not this one.
     if super::room::is_room_person(&person) {
-        eprintln!(
-            "kith: {person} is a room person; it only launches through the Rust launch, not this script"
-        );
+        eprintln!("kith: {person} is a room person; it only launches through the Rust launch, not this script");
         return 3;
     }
     let home_dir = PathBuf::from(get(&env0, "HOME"));
     let p = {
         let mut e = env0.clone();
-        e.insert(
-            "KITH_ROOT".to_owned(),
-            kernel.to_string_lossy().into_owned(),
-        );
+        e.insert("KITH_ROOT".to_owned(), kernel.to_string_lossy().into_owned());
         paths::paths(&home_dir, kernel, &move |k| e.get(k).cloned())
     };
     let seen = RefCell::new(String::new());
@@ -284,12 +264,8 @@ pub fn run_with(
         }
         env0.get(k).cloned()
     };
-    let ctx = Ctx {
-        state: Some(p.state.clone()),
-        machine: Some(p.machine.clone()),
-        home: home_dir.clone(),
-        env: &lookup,
-    };
+    let ctx =
+        Ctx { state: Some(p.state.clone()), machine: Some(p.machine.clone()), home: home_dir.clone(), env: &lookup };
     let taker = Taker::new(&ctx, deps.core);
     let pid = i64::from(std::process::id());
     // I1: a person's revoke epoch is read BEFORE the plan decides they may run, and travels with every claim of this run
@@ -304,9 +280,7 @@ pub fn run_with(
             }
         }
     }
-    let system = accounts::System {
-        kernel: kernel.to_path_buf(),
-    };
+    let system = accounts::System { kernel: kernel.to_path_buf() };
     let steps = Steps {
         ctx: &ctx,
         deps,
@@ -317,9 +291,7 @@ pub fn run_with(
         pwd: {
             let cwd = std::env::current_dir().unwrap_or_default();
             match env0.get("PWD").filter(|d| !d.is_empty()) {
-                Some(d) if std::fs::canonicalize(d).ok() == std::fs::canonicalize(&cwd).ok() => {
-                    d.clone()
-                }
+                Some(d) if std::fs::canonicalize(d).ok() == std::fs::canonicalize(&cwd).ok() => d.clone(),
                 _ => cwd.to_string_lossy().into_owned(),
             }
         },
@@ -333,6 +305,7 @@ pub fn run_with(
             out: &system,
         },
         alone: RefCell::new(false),
+        sched,
     };
     // What the plan takes out of the environment and this run still needs (names of the caller's, for this run only).
     let launch_kind = get(&env0, "KITH_LAUNCH_KIND").to_owned();
@@ -340,26 +313,21 @@ pub fn run_with(
     let ask_id = get(&env0, "KITH_LAUNCH_ASK_ID").to_owned();
     let sid_file = get(&env0, "KITH_LAUNCH_SID_FILE").to_owned();
     let claude_args = get(&env0, "KITH_CLAUDE_ARGS").to_owned();
-    let via = if get(&env0, "KITH_VIA").is_empty() {
-        "terminal".to_owned()
-    } else {
-        get(&env0, "KITH_VIA").to_owned()
-    };
-    let opts = ExecOpts {
-        hooks: Hooks(Some(&steps)),
-        ..ExecOpts::from_process(true, flags.held, "")
-    };
-    let plan = match plan::plan(
-        agent,
-        &flags.plan_argv,
-        kernel,
-        env0.clone(),
-        &Mode::Exec(opts),
-    ) {
+    let via = if get(&env0, "KITH_VIA").is_empty() { "terminal".to_owned() } else { get(&env0, "KITH_VIA").to_owned() };
+    let opts = ExecOpts { hooks: Hooks(Some(&steps)), ..ExecOpts::from_process(true, flags.held, "") };
+    let plan = match plan::plan(agent, &flags.plan_argv, kernel, env0.clone(), &Mode::Exec(opts)) {
         Ok(p) => p,
         Err(code) => return code,
     };
     let mut env = plan.env.clone();
+    // The host's claim is this launch's to attach; the engine and a nested `kith` never see it.
+    env.remove("KITH_TURN_CLAIM");
+    env.remove("HQ_TURN_CLAIM");
+    if let Some(s) = sched
+        && let Err(code) = s.attach(&taker, pid)
+    {
+        return code;
+    }
     // The plan names the origin `terminal` for its cost tag when none was said; the run's own environment keeps what it was given.
     if get(&env0, "KITH_VIA").is_empty() {
         env.remove("KITH_VIA");
@@ -411,10 +379,7 @@ pub fn run_with(
             return 1;
         }
     };
-    let (settings_file, mcp_file) = (
-        runs.join(format!("{pid}.settings.json")),
-        runs.join(format!("{pid}.mcp.json")),
-    );
+    let (settings_file, mcp_file) = (runs.join(format!("{pid}.settings.json")), runs.join(format!("{pid}.mcp.json")));
     // Run files: in the snapshot (so cleanup sees the run), or a temp dir when running the live folder.
     let _ = std::fs::write(&mcp_file, format!("{}\n", pyjson::dumps(&plan.granted)));
     let task = flags.task_text();
@@ -423,11 +388,12 @@ pub fn run_with(
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok());
     if !plan.claude {
+        // Claude's claim step attaches a host-claimed turn; another engine has none, so it is attached here.
+        if let Some(code) = sched_turn::attach_env_claim(env0, &taker, pid) {
+            return code;
+        }
         if flags.held {
-            eprintln!(
-                "kith: --held holds claude sessions only; {} runs here (--direct)",
-                plan.harness
-            );
+            eprintln!("kith: --held holds claude sessions only; {} runs here (--direct)", plan.harness);
         }
         return other_engine(&plan, kernel, env, &runs, pid, task, how);
     }
@@ -437,10 +403,7 @@ pub fn run_with(
     if let Some(s) = &plan.settings {
         let _ = std::fs::write(&settings_file, pj_indent1(s));
     }
-    let files = Files {
-        settings: &settings_file.to_string_lossy(),
-        mcp: &mcp_file.to_string_lossy(),
-    };
+    let files = Files { settings: &settings_file.to_string_lossy(), mcp: &mcp_file.to_string_lossy() };
     let mut engine_args = run_args(&plan, &files);
     // Extra claude flags from a caller such as kith serve (e.g. --output-format json --resume <session>); for them only.
     engine_args.extend(session::extra_args(&claude_args, owner));
@@ -505,54 +468,22 @@ fn other_engine(
         mcp.push('\n');
         mcp.push_str(&own.to_string_lossy());
     }
-    env.insert(
-        "KITH_RUN_PROMPT".to_owned(),
-        prompt_file.to_string_lossy().into_owned(),
-    );
+    env.insert("KITH_RUN_PROMPT".to_owned(), prompt_file.to_string_lossy().into_owned());
     env.insert("KITH_RUN_DIRS".to_owned(), dirs.join("\n"));
     env.insert("KITH_RUN_MCP".to_owned(), mcp);
     // Global skills load unless the role turned them off.
-    env.insert(
-        "KITH_RUN_GLOBAL_SKILLS".to_owned(),
-        if plan.out.disable_slash_commands {
-            "0"
-        } else {
-            "1"
-        }
-        .to_owned(),
-    );
+    env.insert("KITH_RUN_GLOBAL_SKILLS".to_owned(), if plan.out.disable_slash_commands { "0" } else { "1" }.to_owned());
     let mut flags = vec!["--".to_owned()];
     if !plan.out_format.is_empty() {
-        flags = ["--output", plan.out_format.as_str()]
-            .into_iter()
-            .map(str::to_owned)
-            .chain(flags)
-            .collect();
+        flags = ["--output", plan.out_format.as_str()].into_iter().map(str::to_owned).chain(flags).collect();
     }
     if !plan.resume.is_empty() {
-        flags = ["--resume", plan.resume.as_str()]
-            .into_iter()
-            .map(str::to_owned)
-            .chain(flags)
-            .collect();
+        flags = ["--resume", plan.resume.as_str()].into_iter().map(str::to_owned).chain(flags).collect();
     }
     if !plan.out.mode_arg.is_empty() {
-        flags = ["--permission-mode", plan.out.mode_arg.as_str()]
-            .into_iter()
-            .map(str::to_owned)
-            .chain(flags)
-            .collect();
+        flags = ["--permission-mode", plan.out.mode_arg.as_str()].into_iter().map(str::to_owned).chain(flags).collect();
     }
-    start::other(
-        Adapter {
-            kernel,
-            env,
-            harness: plan.harness.clone(),
-            flags,
-            task,
-        },
-        how,
-    )
+    start::other(Adapter { kernel, env, harness: plan.harness.clone(), flags, task }, how)
 }
 
 #[cfg(test)]
@@ -562,14 +493,6 @@ mod tests {
 
     fn v(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| (*s).to_owned()).collect()
-    }
-
-    #[test]
-    fn a_turn_claim_is_refused_with_the_turn_claim_exit() {
-        let mut env = Env::new();
-        assert_eq!(turn_claim_refusal(&env), None);
-        env.insert("KITH_TURN_CLAIM".to_owned(), "c1".to_owned());
-        assert_eq!(turn_claim_refusal(&env), Some(10));
     }
 
     #[test]
@@ -584,11 +507,7 @@ mod tests {
     #[test]
     fn the_chat_turn_argv_ends_its_flags_at_the_dashes() {
         let f = Flags::parse(&v(&["--backup", "acct", "--", "-r", "text"]));
-        assert_eq!(
-            f.task,
-            v(&["-r", "text"]),
-            "a task may start with a flag's name"
-        );
+        assert_eq!(f.task, v(&["-r", "text"]), "a task may start with a flag's name");
         assert!(f.resume.is_none());
         assert_eq!(f.plan_argv, v(&["--backup", "acct", "--", "-r", "text"]));
         assert_eq!(f.task_text(), "-r text");
@@ -599,10 +518,7 @@ mod tests {
         let f = Flags::parse(&v(&["--resume", "sid1", "note"]));
         assert_eq!(f.resume, Some(Pick::Id("sid1".to_owned())));
         assert_eq!(f.task, v(&["note"]));
-        assert_eq!(
-            Flags::parse(&v(&["-r", "sid2", "x"])).resume,
-            Some(Pick::Id("sid2".to_owned()))
-        );
+        assert_eq!(Flags::parse(&v(&["-r", "sid2", "x"])).resume, Some(Pick::Id("sid2".to_owned())));
         // `-r` followed by a flag picks.
         let f = Flags::parse(&v(&["-r", "-m", "opus", "x"]));
         assert_eq!(f.resume, Some(Pick::Choose));

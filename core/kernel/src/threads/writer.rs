@@ -18,8 +18,8 @@ use serde_json::{Value, json};
 use super::core::{Core, CoreErr, claims_switched, lockable};
 use super::resolve::truthy;
 use super::{
-    Claim, Ctx, Outcome, Take, claim_path, claim_wait, intent, os, proc_claim, read_claim,
-    release_claims, sweep_persons, take_claim_checked,
+    Claim, Ctx, Outcome, Take, claim_path, claim_wait, intent, os, proc_claim, read_claim, release_claims,
+    sweep_persons, take_claim_checked,
 };
 
 /// Who holds a session the taker could not claim.
@@ -34,8 +34,7 @@ pub struct Holder {
 
 impl Holder {
     pub fn pid_text(&self) -> String {
-        self.pid
-            .map_or_else(|| "None".to_owned(), |p| p.to_string())
+        self.pid.map_or_else(|| "None".to_owned(), |p| p.to_string())
     }
 }
 
@@ -43,6 +42,14 @@ impl Holder {
 /// [`TURN_CLAIM_EXIT`] for it, so the host can tell "the turn is no longer this run's" from any other refusal.
 pub const TURN_CLAIM_REFUSED: &str = "the turn claim was refused";
 pub const TURN_CLAIM_EXIT: i32 = 10;
+
+/// Why [`Taker::attach_run`] did not attach: the claim is no longer this run's (cancelled, adopted, attached by another), or the
+/// core could not say.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AttachErr {
+    Gone(String),
+    Down(String),
+}
 
 /// Why a `proc` claim was not made. `Core` is exit 9: the launcher stops a person's run for it.
 #[derive(Debug, PartialEq, Eq)]
@@ -64,12 +71,7 @@ pub struct Taker<'a> {
 
 impl<'a> Taker<'a> {
     pub fn new(c: &'a Ctx<'a>, core: Option<&'a dyn Core>) -> Self {
-        Self {
-            c,
-            core,
-            alone: Cell::new(false),
-            said: RefCell::new(String::new()),
-        }
+        Self { c, core, alone: Cell::new(false), said: RefCell::new(String::new()) }
     }
 
     pub fn alone(&self) -> bool {
@@ -114,11 +116,7 @@ impl<'a> Taker<'a> {
         match take_claim_checked(self.c, sid, pid, how, &|| self.writer()) {
             Err(e) => Err(e.to_string()),
             Ok(Outcome::Taken) => Ok(None),
-            Ok(Outcome::Held(h)) => Ok(Some(Holder {
-                pid: h.0.pid,
-                kind: h.0.kind,
-                waiting: false,
-            })),
+            Ok(Outcome::Held(h)) => Ok(Some(Holder { pid: h.0.pid, kind: h.0.kind, waiting: false })),
             // The step put its marker down after the mode was read: the file just linked was taken back, and the core
             // refuses until the switch has finished.
             Ok(Outcome::Switched) => self.core_take(sid, pid, how, None, how.lifecycle_owner),
@@ -144,9 +142,7 @@ impl<'a> Taker<'a> {
         if lockable(sid) {
             started = os::proc_start(pid);
             if started.is_none() {
-                unclaimable = Some(format!(
-                    "cannot read the start time of pid {pid}, so its claim cannot be made"
-                ));
+                unclaimable = Some(format!("cannot read the start time of pid {pid}, so its claim cannot be made"));
             }
         } else {
             unclaimable = Some(format!(
@@ -156,10 +152,7 @@ impl<'a> Taker<'a> {
         let turn_claim = self.turn_claim()?;
         if let Some(why) = unclaimable {
             // A host-claimed turn is never run unclaimed: the host reads its claim's state to know the run is alive.
-            if person.is_some()
-                || turn_claim.is_some()
-                || (self.c.env)("KITH_REQUIRE_STUB").as_deref() == Some("1")
-            {
+            if person.is_some() || turn_claim.is_some() || (self.c.env)("KITH_REQUIRE_STUB").as_deref() == Some("1") {
                 return Err(why);
             }
             self.say(&format!("kith: {why}; this run is not claimed"));
@@ -227,25 +220,15 @@ impl<'a> Taker<'a> {
                 let field = |k: &str| h.and_then(|h| h.get(k)).filter(|v| truthy(v));
                 return Ok(Some(Holder {
                     pid: Some(field("pid").and_then(Value::as_i64).unwrap_or(0)),
-                    kind: field("kind")
-                        .and_then(Value::as_str)
-                        .unwrap_or("terminal")
-                        .to_owned(),
+                    kind: field("kind").and_then(Value::as_str).unwrap_or("terminal").to_owned(),
                     waiting: false,
                 }));
             }
             Some("waiting") => {
-                return Ok(Some(Holder {
-                    pid: Some(0),
-                    kind: "the app's idle agent".to_owned(),
-                    waiting: true,
-                }));
+                return Ok(Some(Holder { pid: Some(0), kind: "the app's idle agent".to_owned(), waiting: true }));
             }
             Some("takeover") => {
-                return Err(
-                    "that session is being taken over in the app right now; try again in a moment"
-                        .to_owned(),
-                );
+                return Err("that session is being taken over in the app right now; try again in a moment".to_owned());
             }
             _ => {}
         }
@@ -277,9 +260,7 @@ impl<'a> Taker<'a> {
             .ok()
             .filter(|id| *id > 0)
             .map(Some)
-            .ok_or_else(|| {
-                format!("{TURN_CLAIM_REFUSED}: KITH_TURN_CLAIM \"{raw}\" is not a claim id")
-            })
+            .ok_or_else(|| format!("{TURN_CLAIM_REFUSED}: KITH_TURN_CLAIM \"{raw}\" is not a claim id"))
     }
 
     /// `claim.attach`: the launch's own process takes the host's claim for this turn before anything starts. The core's
@@ -296,21 +277,33 @@ impl<'a> Taker<'a> {
                 ))
             }
             Err(CoreErr::Refused(e)) => Err(format!("{TURN_CLAIM_REFUSED}: {e}")),
-            Err(CoreErr::NoAnswer(why)) => Err(format!(
-                "{TURN_CLAIM_REFUSED}: the Kith core is not answering ({why}); nothing was started"
-            )),
+            Err(CoreErr::NoAnswer(why)) => {
+                Err(format!("{TURN_CLAIM_REFUSED}: the Kith core is not answering ({why}); nothing was started"))
+            }
+        }
+    }
+
+    /// `claim.attach` for a run the host claimed without a conversation of its own to name (a schedule's turn, a non-Claude
+    /// one-shot): this process takes the claim before anything starts, as `kith-sched run-turn` did. The same check-and-set.
+    pub fn attach_run(&self, claim: i64, pid: i64) -> Result<(), AttachErr> {
+        let Some(started) = os::proc_start(pid) else {
+            return Err(AttachErr::Down(format!("cannot read the start time of pid {pid}")));
+        };
+        let params = json!({"claimId": claim, "pid": pid, "started": started});
+        match self.ask("claim.attach", &params) {
+            Ok(a) if a.get("attached").is_some_and(truthy) => Ok(()),
+            Ok(a) => {
+                let why = a.get("state").or_else(|| a.get("refused")).and_then(Value::as_str).unwrap_or("unknown");
+                Err(AttachErr::Gone(why.to_owned()))
+            }
+            Err(CoreErr::Refused(e)) => Err(AttachErr::Down(format!("the core refused: {e}"))),
+            Err(CoreErr::NoAnswer(why)) => Err(AttachErr::Down(format!("the core did not answer: {why}"))),
         }
     }
 
     /// [`Self::take`], retried for up to `wait` while a live writer holds the session. `None` when taken (also when `pid`
     /// already holds it), else the live claim that still holds it.
-    pub fn claim_waiting(
-        &self,
-        sid: &str,
-        pid: i64,
-        how: &Take,
-        wait: Duration,
-    ) -> Result<Option<Holder>, String> {
+    pub fn claim_waiting(&self, sid: &str, pid: i64, how: &Take, wait: Duration) -> Result<Option<Holder>, String> {
         let began = Instant::now();
         let mut end = began + wait;
         loop {
@@ -344,34 +337,18 @@ impl<'a> Taker<'a> {
         let Some(dir) = self.c.reg_dir() else {
             return Err("KITH_STATE is not set, so the session cannot be claimed".to_owned());
         };
-        let how = Take {
-            person,
-            agent,
-            ..Take::new(kind)
-        };
+        let how = Take { person, agent, ..Take::new(kind) };
         if let Some(held) = self.claim_waiting(sid, pid, &how, wait)? {
             return Err(if held.waiting {
-                "that session is busy: the app's idle agent is still stopping; try again in a moment"
-                    .to_owned()
+                "that session is busy: the app's idle agent is still stopping; try again in a moment".to_owned()
             } else {
-                format!(
-                    "that session is busy: held by {} (pid {}); try again in a moment",
-                    held.kind,
-                    held.pid_text()
-                )
+                format!("that session is busy: held by {} (pid {}); try again in a moment", held.kind, held.pid_text())
             });
         }
         // Writer mode: a take-over is a queued claim, answered above.
-        if !self.writer()
-            && read_claim(&claim_path(&dir, sid, true))
-                .as_ref()
-                .is_some_and(Claim::is_live)
-        {
+        if !self.writer() && read_claim(&claim_path(&dir, sid, true)).as_ref().is_some_and(Claim::is_live) {
             self.release_claims(pid);
-            return Err(
-                "that session is being taken over in the app right now; try again in a moment"
-                    .to_owned(),
-            );
+            return Err("that session is being taken over in the app right now; try again in a moment".to_owned());
         }
         Ok(())
     }
@@ -386,8 +363,7 @@ impl<'a> Taker<'a> {
         if let Some(s) = sid.filter(|s| !s.is_empty()) {
             params["conversation"] = json!(s);
         }
-        self.ask("claim.release", &params)
-            .is_ok_and(|a| a.get("ended").is_some_and(truthy))
+        self.ask("claim.release", &params).is_ok_and(|a| a.get("ended").is_some_and(truthy))
     }
 
     /// Gives back every claim `pid` holds (the terminal's own run ended).
@@ -444,15 +420,8 @@ impl<'a> Taker<'a> {
         // session (-c) is still a claim the core's revoke finds. Its engine is `proc`: readers of conversations skip those.
         // A person's run the core cannot claim must not go on: exit 9 tells the launcher.
         let started = os::proc_start(pid).unwrap_or_default();
-        let key = format!("proc-{pid}-{started}")
-            .to_lowercase()
-            .replace(':', ".");
-        let how = Take {
-            person: Some(person),
-            agent: Some(agent),
-            lifecycle_owner: true,
-            ..Take::new("app")
-        };
+        let key = format!("proc-{pid}-{started}").to_lowercase().replace(':', ".");
+        let how = Take { person: Some(person), agent: Some(agent), lifecycle_owner: true, ..Take::new("app") };
         self.core_take(&key, pid, &how, Some("proc"), false)
             .map(|_| ())
             .map_err(|m| ProcErr::Core(format!("kith: {m}")))
@@ -497,17 +466,9 @@ impl<'a> Taker<'a> {
                 )
             })?;
         let mut holders = Vec::new();
-        for kill in ans
-            .get("kill")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
+        for kill in ans.get("kill").and_then(Value::as_array).into_iter().flatten() {
             let pid = kill.get("pid").and_then(Value::as_i64);
-            let started = kill
-                .get("started")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty());
+            let started = kill.get("started").and_then(Value::as_str).filter(|s| !s.is_empty());
             if let (Some(pid), Some(started)) = (pid, started)
                 && pid > 1
                 && (Claim {
