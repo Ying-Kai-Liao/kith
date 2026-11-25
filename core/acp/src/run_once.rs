@@ -282,7 +282,9 @@ async fn session(
         let answer = acp.request("session/load", new_session.clone()).await?;
         // The agent replays the session's history before it answers: none of it is this run's answer or cost.
         let (mut old_text, mut old_cost) = (String::new(), None);
+        let mut replayed = false;
         while let Ok(inc) = rx.try_recv() {
+            replayed = true;
             if matches!(inc, Incoming::Closed { .. }) {
                 break;
             }
@@ -292,16 +294,16 @@ async fn session(
         asks.servers.clear();
         // Hermes's python ACP library sends `{}` for the null it means. An empty answer only counts as "unknown" when
         // modes are wanted: with none to pick, an agent that loads a session and says nothing about it is fine.
-        let unknown = answer.is_null()
-            || (!spec.modes.is_empty() && answer.as_object().is_some_and(|o| o.is_empty()));
-        if answer.is_object() && !unknown {
+        // An agent that replayed history knew the session, whatever it answers.
+        let unknown = !replayed
+            && (answer.is_null()
+                || (!spec.modes.is_empty() && answer.as_object().is_some_and(|o| o.is_empty())));
+        if !unknown {
             loaded = Some(answer);
         } else {
             // Null or `{}`: the agent does not know the session (Hermes only loads the ones it made over ACP, not a native
-            // `hermes chat` one). It would list no modes either, so say so and start over instead of failing on that.
-            eprintln!(
-                "kith: this agent cannot resume session {id} (it was not started over ACP); starting a new session"
-            );
+            // `hermes chat` one; it replays nothing for one it does not know). It would list no modes either, so say so and start over instead of failing on that.
+            eprintln!("kith: this agent does not know session {id}; starting a new session");
             if let Some(o) = new_session.as_object_mut() {
                 o.remove("sessionId");
             }

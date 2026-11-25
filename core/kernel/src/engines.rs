@@ -145,7 +145,7 @@ pub fn session_modes(engine: &str, reach: Reach) -> &'static [&'static str] {
     }
 }
 
-/// THE switch for refusing Hermes runs that are not in bypass mode. Flip it to `false` to get Hermes as it was before
+/// THE switch for refusing Hermes runs that are not in bypass mode. Kai's decision (2026-11-27: "Refuse"), not a default. Flip it to `false` to get Hermes as it was before
 /// (such runs start in `accept_edits` / `default`); nothing else needs to change but the Hermes tests that pin the refusal
 /// (here and in serve/host/src/runonce.rs).
 ///

@@ -296,6 +296,22 @@ impl Actor {
         }
     }
 
+    /// A bypass session on an engine that refuses runs without bypass (Hermes) asks for the mode that asks for nothing,
+    /// as the one-shots do. Left as it is when the adapter doesn't offer it.
+    pub(super) async fn set_unbypassed_engine_mode(&mut self, engine: &str, sid: &str, res: &Value) {
+        let listed = res["modes"]["availableModes"].as_array();
+        let Some(mode) = engines::session_modes(engine, Reach::Full)
+            .iter()
+            .copied()
+            .find(|m| listed.is_some_and(|l| l.iter().any(|x| x["id"] == *m)))
+        else {
+            return;
+        };
+        if let Err(error) = self.session_request("session/set_mode", json!({"sessionId": sid, "modeId": mode})).await {
+            tracing::warn!(mode, error = format!("{error:#}"), "couldn't set the session's mode");
+        }
+    }
+
     /// A Claude session starts in the mode kith launched the agent with. The adapter starts in "default" (or in the
     /// mode its transcript ended in) and ignores the `defaultMode` the launch carries as a setting, so the host asks
     /// for the mode once the session exists. An invited person's launch has already been confined, so this is never
@@ -512,6 +528,13 @@ impl Actor {
                 Err(error) => return Err(error),
             }
         };
+        // An engine no mode can hold to its folders (see `engines::refuses_unbypassed`) does not start for a launch
+        // without bypass: the chat shows why, as the one-shots do.
+        if let Some(engine) = launch.other_engine().filter(|e| engines::refuses_unbypassed(e))
+            && launch.permission_mode != Some(hq::PermissionMode::BypassPermissions)
+        {
+            return Err(anyhow!(engines::refusal(engine)));
+        }
         // Only the agent's own Claude run on the owner's behalf switches models for a call.
         self.call_models = (backup.is_none() && person.is_none() && launch.other_engine().is_none()).then(|| {
             super::call_model::CallModels { own: launch.model.clone(), launch_call: launch.call_model.clone() }
@@ -686,6 +709,8 @@ impl Actor {
                         if launch.other_engine().is_none() {
                             self.set_claude_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str))
                                 .await;
+                        } else if let Some(engine) = launch.other_engine().filter(|e| engines::refuses_unbypassed(e)) {
+                            self.set_unbypassed_engine_mode(engine, &sid, &res).await;
                         }
                         self.turn_session = Some(sid);
                         // The agent's own account came back to a session that missed what a backup answered.
@@ -729,6 +754,8 @@ impl Actor {
         self.hq_set_session(slot, &sid);
         if launch.is_codex() {
             self.set_codex_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str)).await;
+        } else if let Some(engine) = launch.other_engine().filter(|e| engines::refuses_unbypassed(e)) {
+            self.set_unbypassed_engine_mode(engine, &sid, &res).await;
         } else if launch.other_engine().is_none() {
             let mode = self.set_claude_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str)).await;
             if let Some(entry) = &backup {
