@@ -214,7 +214,7 @@ mod tests {
     fn hermes_runs_over_its_own_acp_in_dont_ask_and_has_no_mode_for_a_run_without_bypass() {
         let hermes = engines::find("hermes").unwrap();
         assert!(hermes.local.is_some() && matches!(hermes.oneshot, Oneshot::Acp));
-        assert_eq!(modes(hermes, false).len(), 0);
+        assert!(modes(hermes, false).is_empty());
         assert_eq!(modes(hermes, true), ["dont_ask"]);
     }
 
