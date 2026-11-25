@@ -36,11 +36,19 @@ impl Fake {
 }
 
 fn go(fake: &Fake, args: &[&str]) -> (i32, String, String) {
+    go_in(fake, args, &scratch("plain"))
+}
+
+/// A folder of this test's own, so no test reads what another left in `ask.json`.
+fn scratch(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("kith-ask-unit-{}-{name}", std::process::id()))
+}
+
+fn go_in(fake: &Fake, args: &[&str], dir: &std::path::Path) -> (i32, String, String) {
     let call = |m: &str, p: &Value| fake.call(m, p);
     let terminated = || false;
     let watch = || ();
     let settings = |_: &[String]| (0, String::new(), String::new());
-    let dir = std::env::temp_dir().join("kith-ask-unit");
     let host = Host {
         call: &call,
         kernel: dir.join("kernel"),
@@ -250,14 +258,16 @@ fn bg_refuses_the_options_the_row_cannot_carry_by_name() {
 
 #[test]
 fn bg_continuing_a_conversation_that_kept_a_project_is_refused() {
-    let dir = std::env::temp_dir().join("kith-ask-unit").join("machine");
+    let root = scratch("kept");
+    let dir = root.join("machine");
     std::fs::create_dir_all(&dir).expect("folder");
     let key = format!("coder|{}", std::env::current_dir().expect("cwd").display());
     let kept =
         json!({ key: {"agent": "coder", "session_id": "s1", "opts": {"-p": "kith"}, "dir": "/"} });
     std::fs::write(dir.join("ask.json"), kept.to_string()).expect("file");
     let none = Fake::new(vec![]);
-    let (code, _, err) = go(&none, &["--bg", "coder", "-c", "next"]);
+    let (code, _, err) = go_in(&none, &["--bg", "coder", "-c", "next"], &root);
+    let _ = std::fs::remove_dir_all(&root);
     assert_eq!(code, 1);
     assert_eq!(
         err,
