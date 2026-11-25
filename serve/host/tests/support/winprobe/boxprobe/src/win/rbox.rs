@@ -25,6 +25,27 @@ unsafe fn sid_from(s: &str) -> Res<PSID> {
     Ok(sid)
 }
 
+/// This process's logon SID (the desktop, window station and BaseNamedObjects directory grant it; a restricted token that
+/// leaves it out may not even initialise).
+unsafe fn logon_sid() -> Res<PSID> {
+    let mut t: HANDLE = null_mut();
+    if OpenProcessToken(GetCurrentProcess(), 8, &mut t) == 0 {
+        return Err(format!("OpenProcessToken err {}", last()));
+    }
+    let mut buf = vec![0u64; 128];
+    let mut n = 0u32;
+    if GetTokenInformation(t, 28, buf.as_mut_ptr().cast(), 1024, &mut n) == 0 {
+        return Err(format!("GetTokenInformation(TokenLogonSid) err {}", last()));
+    }
+    // TOKEN_GROUPS: u32 count (padded to 8), then SID_AND_ATTRIBUTES[]; the first Sid pointer sits at offset 8.
+    let sid = *buf.as_ptr().cast::<u8>().add(8).cast::<PSID>();
+    // the SID lives in `buf`: copy it out so it outlives this call
+    let len = windows_sys::Win32::Security::GetLengthSid(sid) as usize;
+    let keep = Box::leak(vec![0u8; len].into_boxed_slice());
+    std::ptr::copy_nonoverlapping(sid.cast::<u8>(), keep.as_mut_ptr(), len);
+    Ok(keep.as_mut_ptr().cast())
+}
+
 /// An arbitrary, stable SID for a run or a grant (a domain-style SID nobody owns): capability SIDs may not be accepted as
 /// restricting SIDs, and the restricting list takes any SID.
 unsafe fn run_sid(name: &str) -> Res<PSID> {
@@ -183,9 +204,22 @@ pub unsafe fn cmd_xbox(a: &[String]) -> Res<()> {
             rs.push(sid_from("S-1-5-32-545")?); // Users
             names.push("Everyone,Users".into());
         }
+        if !flag(a, "--no-logon-sid") {
+            let l = logon_sid()?;
+            names.push(format!("logon={}", sid_str(l)));
+            rs.push(l);
+        }
         if flag(a, "--restricted-sid") {
             rs.push(sid_from("S-1-5-12")?);
             names.push("RESTRICTED".into());
+        }
+        if flag(a, "--auth-users") {
+            rs.push(sid_from("S-1-5-11")?);
+            names.push("AuthenticatedUsers".into());
+        }
+        if flag(a, "--user-sid") {
+            rs.push(sid_from(&token_user_sid()?)?);
+            names.push("USER(diagnostic only)".into());
         }
         let il = if opt(a, "--il").as_deref() == Some("low") { 0x1000 } else { 0x2000 };
         let dd = (!flag(a, "--no-default-dacl")).then(|| {
@@ -346,18 +380,26 @@ pub unsafe fn cmd_g3n_box(a: &[String]) -> Res<()> {
         Err(e) => lg(&dir, &format!("52 cmd start FAILED {e}")),
     }
     for (n, verb) in [(53u32, "open"), (54, "runas")] {
-        let mut sei: windows_sys::Win32::UI::Shell::SHELLEXECUTEINFOW = std::mem::zeroed();
-        sei.cbSize = std::mem::size_of_val(&sei) as u32;
-        sei.fMask = 0x40; // SEE_MASK_NOCLOSEPROCESS
-        let v = wide(verb);
-        let f = wide("ping.exe");
-        let p = wide(&format!("-n {n} 127.0.0.1"));
-        sei.lpVerb = v.as_ptr();
-        sei.lpFile = f.as_ptr();
-        sei.lpParameters = p.as_ptr();
-        sei.nShow = 0;
-        let ok = windows_sys::Win32::UI::Shell::ShellExecuteExW(&mut sei);
-        lg(&dir, &format!("{n} ShellExecuteEx {verb} ok={ok} err={} hInstApp={:?}", last(), sei.hInstApp));
+        let d = dir.clone();
+        // runas can wait forever for a consent prompt nobody sees: never block the rest on it
+        let h = std::thread::spawn(move || {
+            let mut sei: windows_sys::Win32::UI::Shell::SHELLEXECUTEINFOW = std::mem::zeroed();
+            sei.cbSize = std::mem::size_of_val(&sei) as u32;
+            sei.fMask = 0x40 | 0x400; // NOCLOSEPROCESS | FLAG_NO_UI
+            let v = wide(verb);
+            let f = wide("ping.exe");
+            let p = wide(&format!("-n {n} 127.0.0.1"));
+            sei.lpVerb = v.as_ptr();
+            sei.lpFile = f.as_ptr();
+            sei.lpParameters = p.as_ptr();
+            sei.nShow = 0;
+            let ok = windows_sys::Win32::UI::Shell::ShellExecuteExW(&mut sei);
+            lg(&d, &format!("{n} ShellExecuteEx {verb} ok={ok} err={} hInstApp={:?}", last(), sei.hInstApp));
+        });
+        std::thread::sleep(Duration::from_secs(4));
+        if !h.is_finished() {
+            lg(&dir, &format!("{n} ShellExecuteEx {verb} still blocked after 4 s (left running)"));
+        }
     }
     let o = std::process::Command::new("cscript.exe").args(["//nologo", &js, &format!("{dir}\\g3n.log")]).output();
     lg(&dir, &format!("55-57,60 cscript g3n.js: {:?}", o.map(|o| String::from_utf8_lossy(&o.stdout).to_string())));

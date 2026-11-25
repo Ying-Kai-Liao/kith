@@ -117,6 +117,23 @@ Section 'tokens: what each box process is'
 foreach ($k in $V.Keys) { Bx "tok-$k" $V[$k] @($bp, 'ac-info') 30 }
 Bx 'tok-Rr' $VRr @($bp, 'ac-info') 30
 Bp ac-info
+Section 'P-G13: which restricting SIDs does a process need to start at all (0xC0000142 = DLL init failed)?'
+$matrix = [ordered]@{
+  'run+Everyone+Users'              = @('--no-logon-sid')
+  '+logon'                          = @()
+  '+RESTRICTED'                     = @('--no-logon-sid', '--restricted-sid')
+  '+logon+RESTRICTED'               = @('--restricted-sid')
+  '+logon+AuthenticatedUsers'       = @('--auth-users')
+  '+user(diagnostic only)'          = @('--no-logon-sid', '--user-sid')
+  'Low:+logon'                      = @('--il', 'low')
+  'Low:+logon+RESTRICTED'           = @('--il', 'low', '--restricted-sid')
+}
+$mi = 0
+foreach ($k in $matrix.Keys) {
+  $mi++
+  Log "--- restricting list: $k"
+  Bx "matrix-$mi" (@('--kind', 'r', '--run', 'kith.run.x') + $matrix[$k]) @($bp, 'ac-info') 30
+}
 
 # ---- P-G13 (R) and the same checks in A -------------------------------------------------------------------------------
 $bashScript = "echo BASH_START `$BASH_VERSION; pwd; ls / | head -3; echo wrote > $(Msys $W)/bash-wrote.txt; cat $(Msys $W)/bash-wrote.txt; " +
@@ -195,25 +212,30 @@ Try-Do 'pair' {
 Bp pair-test --cap kith.r.probe
 
 # ---- P-G2c / P-G2e (A): MSYS in an AppContainer --------------------------------------------------------------------------
-Section 'P-G2c (A): host-made MSYS object directory'
-Try-Do 'g2c' {
-  Bx 'g2c-0' $VA @($pgit, '-c', 'echo X') 30 @()
-  $txt = Txt 'g2c-0'
-  $key = [regex]::Match($txt, 'msys-2\.0S5-[0-9a-f]+').Value
-  Log "MSYS object directory name seen in the failure: '$key'"
-  if ($key) {
-    $acSid = (& $bp acsid g2c).Trim()
-    Log "AppContainer SID of box g2c: $acSid"
-    foreach ($sd in @("D:(A;;GA;;;$acSid)(A;;GA;;;$userSid)", "D:(A;;GA;;;WD)(A;;GA;;;S-1-15-2-1)(A;;GA;;;$userSid)")) {
-      Log "--- object directory SD: $sd"
-      $od = Start-Process $bp -ArgumentList 'objdir-hold', "\BaseNamedObjects\$key", '--sddl', $sd, '--hold', '25' -PassThru -WindowStyle Hidden -RedirectStandardOutput "$Out\g2c-od.txt"
-      Start-Sleep -Seconds 2
-      Log ((Get-Content "$Out\g2c-od.txt" -ErrorAction SilentlyContinue) -join "`n")
-      Bx 'g2c-0' $VA @($pgit, '-c', 'echo MSYS_UP_IN_BOX; echo a | cat; echo done') 30
-      $od.WaitForExit(40000) | Out-Null
-    }
+# ObjLoop: run boxed bash; each time it fails on NtCreateDirectoryObject(<path>) the host makes that directory (SD below) and holds it
+function ObjLoop($tag, $opts, $extraSids) {
+  Section "P-G2c ($tag): host-made MSYS object directories, one per failure, until bash starts or stops moving"
+  $held = @()
+  $made = @()
+  $sd = "D:(A;;GA;;;WD)(A;;GA;;;S-1-15-2-1)(A;;GA;;;$userSid)" + (($extraSids | ForEach-Object { "(A;;GA;;;$_)" }) -join '')
+  Log "object directory SD: $sd"
+  for ($it = 0; $it -lt 8; $it++) {
+    Bx "g2c-$tag-$it" $opts @($pgit, '-c', 'echo MSYS_UP_IN_BOX; echo a | cat; v=$(echo sub); echo $v; echo done') 30
+    $txt = Txt "g2c-$tag-$it"
+    $m = [regex]::Match($txt, 'NtCreateDirectoryObject\(([^)]+)\): 0x([0-9A-Fa-f]+)')
+    if (-not $m.Success) { Log "no NtCreateDirectoryObject failure after $it object directories: $(($txt -replace "`r?`n", ' | ').Substring(0, [Math]::Min(300, $txt.Length)))"; break }
+    $path = $m.Groups[1].Value
+    if ($made -contains $path) { Log "the same path failed again after the host made it: $path (0x$($m.Groups[2].Value))"; break }
+    $made += $path
+    Log "host makes $path"
+    $held += Start-Process $bp -ArgumentList (Q @('objdir-hold', $path, '--sddl', $sd, '--hold', '100')) -PassThru -WindowStyle Hidden -RedirectStandardOutput "$Out\g2c-$tag-od$it.txt"
+    Start-Sleep -Seconds 1
+    Log ((Get-Content "$Out\g2c-$tag-od$it.txt" -ErrorAction SilentlyContinue) -join "`n")
   }
+  $held | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
 }
+Try-Do 'g2c-A' { ObjLoop 'A' ($VA + @('--ac', 'kithprobe.g2cA')) @((& $bp acsid g2cA).Trim()) }
+Try-Do 'g2c-Rm' { ObjLoop 'Rm' $VRm @((& $bp rsid kith.run.x).Trim(), (& $bp rsid kith.w.probe).Trim()) }
 
 Section 'P-G2e (A): do a junction and a copy of PortableGit get a different MSYS key?'
 foreach ($p in @('C:\probe\pgit\usr\bin\bash.exe', 'C:\probe\pgitj\usr\bin\bash.exe', 'C:\probe\pgit-copy\usr\bin\bash.exe')) {

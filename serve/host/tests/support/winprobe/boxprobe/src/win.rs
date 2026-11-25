@@ -885,16 +885,17 @@ fn cmd_loop_two() -> Res<()> {
     let l = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| format!("bind {e}"))?;
     let port = l.local_addr().map_err(|e| e.to_string())?.port();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // `status`, not `output`: a box cannot open NUL or make the named pipe Rust's piped stdio uses
     let child = std::process::Command::new(exe)
         .arg("connect")
         .arg(format!("127.0.0.1:{port}"))
-        .output()
+        .status()
         .map_err(|e| e.to_string())?;
+    r("looptwo", format!("child process (same box) exited {child}"));
     let (mut s, peer) = l.accept().map_err(|e| e.to_string())?;
     let mut b = [0u8; 4];
     let _ = s.read(&mut b);
     r("looptwo", format!("parent accepted from {peer}"));
-    println!("{}", String::from_utf8_lossy(&child.stdout).trim_end());
     Ok(())
 }
 
