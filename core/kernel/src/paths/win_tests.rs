@@ -76,3 +76,53 @@ fn windows_forms_resolve() {
     );
     assert_eq!(expanduser(home, "~"), PathBuf::from(r"C:\Users\k"));
 }
+
+#[cfg(windows)]
+fn scratch(name: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("kith-which-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+// `which_with(.., windows = true)` runs on every OS, but the files it needs only count as runnable without mode bits on Windows.
+#[cfg(windows)]
+#[test]
+fn which_tries_pathext_in_order_and_skips_the_bare_shim() {
+    let d = scratch("ext");
+    for f in ["claude", "claude.cmd", "claude.ps1", "tool.exe"] {
+        std::fs::write(d.join(f), b"").unwrap();
+    }
+    let path = std::env::join_paths([&d]).unwrap();
+    let w = |p: &str, ext: Option<&str>| lower(which_with(p, &path, ext, true));
+    // the extensionless sh shim is never picked: .cmd wins
+    assert_eq!(w("claude", None), want(&d, "claude.cmd"));
+    assert_eq!(w("claude", Some(".exe;.CMD")), want(&d, "claude.cmd"));
+    assert_eq!(w("tool", Some(".cmd;.exe")), want(&d, "tool.exe"));
+    // a name with an extension is tried as is
+    assert_eq!(w("tool.exe", None), want(&d, "tool.exe"));
+    assert_eq!(w("claude.ps1", None), want(&d, "claude.ps1"));
+    assert_eq!(w("nothing", None), None);
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn which_strips_quotes_and_ignores_empty_path_entries() {
+    let d = scratch("q x");
+    std::fs::write(d.join("a.exe"), b"").unwrap();
+    let path = OsString::from(format!(";\"{}\"", d.display()));
+    assert_eq!(lower(which_with("a", &path, None, true)), want(&d, "a.exe"));
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+// Windows paths are case-insensitive, and the extension comes back in the case PATHEXT spells it.
+#[cfg(windows)]
+fn lower(p: Option<PathBuf>) -> Option<String> {
+    p.map(|p| p.to_string_lossy().to_lowercase())
+}
+
+#[cfg(windows)]
+fn want(d: &Path, name: &str) -> Option<String> {
+    lower(Some(d.join(name)))
+}

@@ -543,6 +543,8 @@ pub async fn owed_loop(hub: std::sync::Arc<Hub>) {
     }
 }
 
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 #[path = "core_holders_tests.rs"]
 mod tests;

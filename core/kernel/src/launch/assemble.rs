@@ -358,9 +358,7 @@ fn is_exec(p: &Path) -> bool {
 }
 
 pub(super) fn which_in(env: &Env, program: &str) -> Option<PathBuf> {
-    std::env::split_paths(get(env, "PATH"))
-        .map(|d| d.join(program))
-        .find(|p| is_exec(p))
+    paths::which_on(program, std::ffi::OsStr::new(get(env, "PATH")))
 }
 
 /// Whether this process is inside the guest sandbox: the account's home folder (by the OS, not `$HOME`, and by absolute

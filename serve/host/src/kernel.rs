@@ -163,7 +163,7 @@ pub fn current_kernel() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok();
     // The machine folder is found without a kernel (`folders` asks `current_kernel` for its last fallback, which
     // would loop back here), as `folders` itself does when there is none.
-    let machine = dirs::home_dir()
+    let machine = kith_kernel::paths::known_home()
         .map(|h| kith_kernel::paths::paths(&h, &h.join("kith/kernel"), &kith_kernel::paths::process_env).machine);
     find_kernel(std::env::var_os(KERNEL_ENV), exe.as_deref(), machine.as_deref())
 }
@@ -226,7 +226,7 @@ impl Cli {
 /// [`cli_status`] for this process and this machine.
 pub fn current_cli() -> Cli {
     let exe = std::env::current_exe().ok();
-    let machine = dirs::home_dir().map(|h| machine_dir(&h));
+    let machine = kith_kernel::paths::known_home().map(|h| machine_dir(&h));
     cli_status(std::env::var_os(KERNEL_ENV), exe.as_deref(), machine.as_deref())
 }
 
@@ -401,6 +401,7 @@ mod tests {
         assert_eq!(route(&v(&["kith", "kernel", "version"])), Route::Host(v(&["kith serve", "kernel", "version"])));
     }
 
+    #[cfg(unix)]
     #[test]
     fn machine_folder_follows_the_migration_marker() {
         let t = std::env::temp_dir().join(format!("kith-machine-test-{}", std::process::id()));
@@ -446,6 +447,7 @@ mod tests {
     }
 
     /// Old link layout (`~/.hq` links elsewhere): the state is `<home>/state`, the machine's own things `~/.config/kith`.
+    #[cfg(unix)]
     #[test]
     fn machine_is_not_state_in_the_old_link_layout() {
         let t = std::env::temp_dir().join(format!("kith-oldlink-test-{}", std::process::id()));
