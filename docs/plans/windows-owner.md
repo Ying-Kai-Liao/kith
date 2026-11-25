@@ -957,3 +957,6 @@ Status as of 2026-11-27:
 - Merged: W5b (#1189), W5c (#1200), W17 (#1182), W18a (#1192), W20 (#1197, facts F11-F23), W22a (#1195), signing via SSL.com (#1204).
 - W20b: #1206 closed, parked. Its findings F24-F38 stay on branch `flow/windows-owner-build-2-w20b`.
 - Open: W8 (#1198), W2b (#1177), W22b (#1205).
+
+Must fix before guests return to Windows (recorded 2026-11-26; not fixed now):
+- `remote/members.rs` `apply` (serve/host): on Windows it returns before its removal loop when the cloud list is non-empty, so a membership the cloud dropped is never removed from the local store. Why it is safe today: guests are refused on Windows, so nobody gains reach. Fix when guests return: run the removal loop first, or remove the early return, and add a test where the cloud drops a member. Source: the architect on #1190, relayed by main.

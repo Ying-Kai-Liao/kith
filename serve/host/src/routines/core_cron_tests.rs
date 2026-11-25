@@ -4,7 +4,8 @@
 
 #![allow(clippy::unwrap_used)]
 
-use super::{PERMISSION_MODE, command_with, spawn_cmd};
+use super::{PERMISSION_MODE, command_with};
+use crate::routines::run_door::spawn_cmd;
 use serde_json::json;
 use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;

@@ -1,7 +1,9 @@
 kith-cost — what Claude Code usage costs, at API prices, kept over time.
 
   kith-cost [today|week|month|all]   totals, by day, by project and the top sessions (syncs first)
-  kith-cost agents [period]          kith agents side by side: cost, runs, cost per run, models (default: month)
+                                   week and month are rolling windows (the last 7 and 30 days) and the headers say so;
+                                   the --json views below use the calendar month instead
+  kith-cost agents [period]          kith agents side by side: cost, runs, cost per run, models (default: month = last 30 days)
   kith-cost agent <name> [period]    one kith agent: by day, by version, by model and effort, its costliest runs
   kith-cost people [period]          what each person's runs cost (KITH_PERSON; the owner's own runs as owner), by agent;
                                    a bot's runs count on its owner's line, with a sub-line per bot

@@ -1129,6 +1129,10 @@ async fn decide_in_core_until(
     if approve && held.code.is_none() {
         return Err(Conflict(NEEDS_CODE).into());
     }
+    // As in `settle_here`: before anything is decided in the core or the cloud.
+    if cfg!(windows) && approve && held.person.is_some() {
+        bail!(kith_kernel::GUESTS_NOT_ON_WINDOWS);
+    }
     if approve
         && let Some(person) = &held.person
         && !hub.store.memberships()?.iter().any(|m| &m.person_id == person)
@@ -1267,6 +1271,10 @@ async fn settle_here(hub: &Hub, id: &str, approve: bool, by_owner: bool) -> Resu
         hub.cloud.requests.locked().iter().find(|r| r.id == id).cloned().ok_or_else(|| anyhow!("unknown request"))?;
     if approve && r.code.is_none() {
         return Err(Conflict("The device hasn't shown its code yet.").into());
+    }
+    // A person's device is a guest's: not admitted on Windows. The request stays open (a deny still works).
+    if cfg!(windows) && approve && r.person.is_some() {
+        bail!(kith_kernel::GUESTS_NOT_ON_WINDOWS);
     }
     if approve && r.person.is_none() && is_web(&r.platform) {
         drop(decision(hub, &base, id, false).await);

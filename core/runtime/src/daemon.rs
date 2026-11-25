@@ -845,6 +845,19 @@ impl Daemon {
         Daemon { shared }
     }
 
+    /// The holder's first hello for a daemon that runs with no holder (a host test): the claims wait for it otherwise. It is
+    /// the real reconcile with nothing listed (it ends nothing on a fresh core), not a second writer of the mark. Behind
+    /// `test-support`, which only the host's dev-dependencies turn on.
+    #[cfg(feature = "test-support")]
+    pub fn mark_reconciled_without_holder(&self) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+        self.shared.with_core(|c| {
+            crate::conversations::claims::reconcile(c, &[], &[], i64::MAX, now).map(|_| ())
+        })
+    }
+
     /// Waits until the daemon serves, or says why it will not.
     pub fn ready(&self, timeout: Duration) -> Result<()> {
         let end = Instant::now() + timeout;
