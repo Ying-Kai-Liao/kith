@@ -22,6 +22,7 @@ use std::time::Duration;
 
 /// The folder of the socket, inside the serve data folder.
 const DIR: &str = "owner";
+#[cfg(unix)]
 const SOCKET: &str = "host.sock";
 /// Longest path `sockaddr_un` takes on macOS (104 with the NUL); Linux has 108.
 const MAX_SOCKET_PATH: usize = 103;

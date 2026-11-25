@@ -163,6 +163,7 @@ pub fn host_status(env: &Env, kernel: &Path) -> hostlocal::Status {
 }
 
 /// The host's local endpoint takes a connection.
+#[cfg(unix)]
 pub fn host_up(env: &Env, kernel: &Path) -> bool {
     host_status(env, kernel) == hostlocal::Status::Up
 }
