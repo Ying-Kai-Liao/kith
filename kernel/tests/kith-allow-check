@@ -347,11 +347,12 @@ class H(http.server.BaseHTTPRequestHandler):
         out = json.dumps({'env': {'KITH_ASK_TOKEN': 'term-tok', 'KITH_ASK_SOCKET': '/tmp/x.sock'}}).encode()
         self.send_response(200); self.send_header('Content-Length', str(len(out))); self.end_headers(); self.wfile.write(out)
     def log_message(self, *a): pass
-http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+import fakehost
+fakehost.UnixHTTPServer(fakehost.sock_path(sys.argv[1]), H).serve_forever()
 PY
-PORT=$((20000 + $$ % 20000))
-python3 "$T/fakehost.py" "$PORT" "$T/issued" & PIDS+=($!)
-for _ in $(seq 50); do python3 -c "import socket; socket.create_connection(('127.0.0.1', $PORT), 1)" 2>/dev/null && break; sleep 0.1; done
+PORT=1
+PYTHONPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)${PYTHONPATH:+:$PYTHONPATH}" python3 "$T/fakehost.py" "$T/serve" "$T/issued" & PIDS+=($!)
+for _ in $(seq 50); do [[ -S $T/serve/owner/host.sock ]] && break; sleep 0.1; done
 cat > "$T/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 [[ $1 == --version ]] && { echo "2.1.309 (Claude Code)"; exit 0; }
@@ -385,6 +386,6 @@ term KITH_PERMISSION_MODE=default
 is "terminal, another mode: no token asked for" "$(grep -c issueAskToken "$T/issued")" "0"
 term KITH_PERMISSION_MODE=auto KITH_AGENT=parent
 is "nested (started by another run): no token" "$(grep -c issueAskToken "$T/issued")" "0"
-term KITH_PERMISSION_MODE=auto KITH_SERVE_PORT=1
+term KITH_PERMISSION_MODE=auto KITH_SERVE_PORT=1 KITH_SERVE_DIR="$T/nohost"
 has "no host: the run still starts" "$(cat "$STUB_OUT")" "TOKEN="
 exit $((fails > 0))

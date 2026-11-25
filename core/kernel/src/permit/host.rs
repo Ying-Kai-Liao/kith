@@ -3,9 +3,9 @@
 //! `host_up`) and its launchd job (`restart_host`; on Windows it is refused by name until the service exists, W11).
 
 use super::Env;
+use crate::hostlocal;
 use serde_json::{Map, Value};
 use std::io::{Read, Write};
-use std::net::{Shutdown, TcpStream, ToSocketAddrs as _};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -123,7 +123,8 @@ fn asked(_: &Path, _: Option<&str>, _: Option<&str>) -> Option<(String, String)>
 #[cfg(windows)]
 pub const ENDPOINT_UNKNOWN: &str = "not on Windows yet: looking up the host's endpoint (this run has no KITH_SERVE_DIR and KITH_SERVE_PORT)";
 
-/// The host's local API over loopback with the serve token. `None` when it can't be reached or doesn't say 2xx with JSON.
+/// The host's local API over its local endpoint with the serve token (`kith_kernel::hostlocal`: never loopback TCP). `None` when
+/// it can't be reached or doesn't say 2xx with JSON.
 pub fn host_call(
     env: &Env,
     kernel: &Path,
@@ -131,124 +132,39 @@ pub fn host_call(
     body: &Value,
     timeout: Duration,
 ) -> Option<Value> {
-    let (data, port) = endpoint(env, kernel)?;
+    let (data, _) = endpoint(env, kernel)?;
     let token = std::fs::read_to_string(Path::new(&data).join("token")).ok()?;
     let token = super::pyval::strip(&token);
-    let port: u16 = port.trim().parse().ok()?;
     let body = crate::secrets::pyjson::dumps(body);
-    post(port, &format!("/api/{method}"), token, &body, timeout)
-}
-
-/// `POST` over a fresh connection; the JSON of a 2xx answer.
-fn post(port: u16, path: &str, token: &str, body: &str, timeout: Duration) -> Option<Value> {
-    let addr = ("127.0.0.1", port).to_socket_addrs().ok()?.next()?;
-    let mut s = TcpStream::connect_timeout(&addr, timeout).ok()?;
-    s.set_read_timeout(Some(timeout)).ok()?;
-    s.set_write_timeout(Some(timeout)).ok()?;
-    let req = format!(
-        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept-Encoding: identity\r\nAuthorization: Bearer {token}\r\n\
-         Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    s.write_all(req.as_bytes()).ok()?;
-    let (status, payload) = read_response(&mut s)?;
-    let _ = s.shutdown(Shutdown::Both);
-    if !(200..300).contains(&status) {
+    let reply = hostlocal::post(
+        Path::new(&data),
+        &format!("/api/{method}"),
+        token,
+        &body,
+        timeout,
+    )
+    .ok()?;
+    if !(200..300).contains(&reply.status) {
         return None;
     }
-    serde_json::from_slice(&payload).ok()
+    serde_json::from_slice(&reply.body).ok()
 }
 
-/// `(status, body)` of an HTTP/1.x answer: by Content-Length, chunked, or to the end of the stream.
-fn read_response(s: &mut TcpStream) -> Option<(u16, Vec<u8>)> {
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 8192];
-    let head_end = loop {
-        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-            break i;
-        }
-        let n = s.read(&mut chunk).ok()?;
-        if n == 0 {
-            return None;
-        }
-        buf.extend_from_slice(&chunk[..n]);
-    };
-    let head = String::from_utf8_lossy(&buf[..head_end]).into_owned();
-    let mut lines = head.split("\r\n");
-    let status: u16 = lines.next()?.split_whitespace().nth(1)?.parse().ok()?;
-    let header = |name: &str| {
-        lines.clone().find_map(|l| {
-            let (k, v) = l.split_once(':')?;
-            k.trim()
-                .eq_ignore_ascii_case(name)
-                .then(|| v.trim().to_owned())
-        })
-    };
-    let length: Option<usize> = header("content-length").and_then(|v| v.parse().ok());
-    let chunked = header("transfer-encoding").is_some_and(|v| v.to_lowercase().contains("chunked"));
-    let mut body = buf[head_end + 4..].to_vec();
-    if chunked {
-        loop {
-            if let Some(out) = dechunk(&body) {
-                return Some((status, out));
-            }
-            let n = s.read(&mut chunk).ok()?;
-            if n == 0 {
-                return None;
-            }
-            body.extend_from_slice(&chunk[..n]);
-        }
-    }
-    loop {
-        if length.is_some_and(|l| body.len() >= l) {
-            body.truncate(length.unwrap_or(0));
-            return Some((status, body));
-        }
-        let n = s.read(&mut chunk).ok()?;
-        if n == 0 {
-            // a short body is an error for Python's client; no length means "to the end"
-            return length.is_none().then_some((status, body));
-        }
-        body.extend_from_slice(&chunk[..n]);
-    }
-}
-
-/// The payload of a complete chunked body, `None` while chunks are still missing.
-fn dechunk(raw: &[u8]) -> Option<Vec<u8>> {
-    let mut out = Vec::new();
-    let mut at = 0;
-    loop {
-        let eol = raw[at..].windows(2).position(|w| w == b"\r\n")? + at;
-        let size = std::str::from_utf8(&raw[at..eol]).ok()?;
-        let size = usize::from_str_radix(size.split(';').next()?.trim(), 16).ok()?;
-        at = eol + 2;
-        if size == 0 {
-            return Some(out);
-        }
-        out.extend_from_slice(raw.get(at..at + size)?);
-        at += size + 2;
-        if at > raw.len() {
-            return None;
-        }
-    }
-}
-
-/// The host's port takes a connection (a host that answers no to a request is up).
-pub fn host_up(env: &Env, kernel: &Path) -> bool {
-    let Some((_, port)) = endpoint(env, kernel) else {
-        return false;
+/// What can be said of the host: its local endpoint takes a connection ([`hostlocal::Status::Up`], a host that answers no to a
+/// request is up), it is a host older than this command that has none, or it is down.
+pub fn host_status(env: &Env, kernel: &Path) -> hostlocal::Status {
+    let Some((data, port)) = endpoint(env, kernel) else {
+        return hostlocal::Status::Down;
     };
     let Ok(port) = port.trim().parse::<u16>() else {
-        return false;
+        return hostlocal::Status::Down;
     };
-    let Some(addr) = ("127.0.0.1", port)
-        .to_socket_addrs()
-        .ok()
-        .and_then(|mut a| a.next())
-    else {
-        return false;
-    };
-    TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_ok()
+    hostlocal::status(Path::new(&data), port)
+}
+
+/// The host's local endpoint takes a connection.
+pub fn host_up(env: &Env, kernel: &Path) -> bool {
+    host_status(env, kernel) == hostlocal::Status::Up
 }
 
 /// Why the host cannot be restarted: on Windows it is the service's job (W11), which is not built yet. Never a fall back to

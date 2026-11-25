@@ -1,11 +1,10 @@
-//! The real backend: `kith-auth people --json` for who is invited, the host's loopback API for invites.
+//! The real backend: `kith-auth people --json` for who is invited, the host's local endpoint for invites.
 
 use super::Backend;
+use crate::hostlocal;
 use crate::secrets::pyjson;
 use serde_json::Value;
-use std::io::{Read as _, Write as _};
-use std::net::{SocketAddr, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -102,6 +101,7 @@ impl Backend for System {
             return Err(unreachable("ValueError"));
         }
         let reply = post(
+            &dir,
             &port,
             &format!("/api/{method}"),
             &token,
@@ -137,85 +137,28 @@ fn os_error_name(e: &std::io::Error) -> String {
     .to_owned()
 }
 
-struct Reply {
-    status: u16,
-    body: Vec<u8>,
-}
-
-/// One `POST` over loopback HTTP/1.1, `Connection: close`. The `Err` is the Python exception's name.
-fn post(port: &str, path: &str, token: &str, body: &str) -> Result<Reply, String> {
-    let port: u16 = port.parse().map_err(|_| "ValueError".to_owned())?;
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut s = TcpStream::connect_timeout(&addr, HOST_WAIT).map_err(|_| "URLError".to_owned())?;
-    let timed_out = |e: &std::io::Error| {
-        if matches!(
-            e.kind(),
-            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-        ) {
-            "TimeoutError"
-        } else {
-            "URLError"
+/// One `POST` over the host's local endpoint (`hostlocal`, never loopback TCP). The `Err` is the Python exception's name, or
+/// why the host cannot be trusted or is older than this command.
+fn post(
+    data: &Path,
+    port: &str,
+    path: &str,
+    token: &str,
+    body: &str,
+) -> Result<hostlocal::Reply, String> {
+    hostlocal::post(data, path, token, body, HOST_WAIT).map_err(|e| match e {
+        hostlocal::LocalErr::Down => {
+            let older = port
+                .parse()
+                .is_ok_and(|p| hostlocal::status(data, p) == hostlocal::Status::Older);
+            if older {
+                hostlocal::OLDER_HOST.to_owned()
+            } else {
+                "URLError".to_owned()
+            }
         }
-        .to_owned()
-    };
-    s.set_read_timeout(Some(HOST_WAIT))
-        .map_err(|e| timed_out(&e))?;
-    s.set_write_timeout(Some(HOST_WAIT))
-        .map_err(|e| timed_out(&e))?;
-    let head = format!(
-        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    s.write_all(head.as_bytes())
-        .and_then(|()| s.write_all(body.as_bytes()))
-        .map_err(|e| timed_out(&e))?;
-    let mut raw = Vec::new();
-    s.read_to_end(&mut raw).map_err(|e| timed_out(&e))?;
-    parse_reply(&raw).ok_or_else(|| "RemoteDisconnected".to_owned())
-}
-
-fn parse_reply(raw: &[u8]) -> Option<Reply> {
-    let split = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
-    let head = std::str::from_utf8(&raw[..split]).ok()?;
-    let mut lines = head.split("\r\n");
-    let status: u16 = lines.next()?.split_whitespace().nth(1)?.parse().ok()?;
-    let mut chunked = false;
-    let mut length = None;
-    for l in lines {
-        let (k, v) = l.split_once(':')?;
-        match k.trim().to_ascii_lowercase().as_str() {
-            "transfer-encoding" => chunked = v.to_ascii_lowercase().contains("chunked"),
-            "content-length" => length = v.trim().parse::<usize>().ok(),
-            _ => {}
-        }
-    }
-    let rest = &raw[split + 4..];
-    let body = if chunked {
-        dechunk(rest)?
-    } else {
-        rest[..length.map_or(rest.len(), |n| n.min(rest.len()))].to_vec()
-    };
-    Some(Reply { status, body })
-}
-
-fn dechunk(mut rest: &[u8]) -> Option<Vec<u8>> {
-    let mut body = Vec::new();
-    loop {
-        let eol = rest.windows(2).position(|w| w == b"\r\n")?;
-        let size = usize::from_str_radix(
-            std::str::from_utf8(&rest[..eol])
-                .ok()?
-                .split(';')
-                .next()?
-                .trim(),
-            16,
-        )
-        .ok()?;
-        rest = &rest[eol + 2..];
-        if size == 0 {
-            return Some(body);
-        }
-        body.extend_from_slice(rest.get(..size)?);
-        rest = rest.get(size + 2..)?;
-    }
+        hostlocal::LocalErr::TimedOut => "TimeoutError".to_owned(),
+        hostlocal::LocalErr::Untrusted(why) => format!("not this account's: {why}"),
+        hostlocal::LocalErr::Io(_) => "URLError".to_owned(),
+    })
 }

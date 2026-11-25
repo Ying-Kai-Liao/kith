@@ -1,15 +1,15 @@
 //! `kith kernel threads <verb>`: the writer claim and the session registry (`kernel/bin/kith-sessions`) from the
-//! `kith-kernel` crate. This is the one place that asks a running host (`resolveThread` over loopback, the way
+//! `kith-kernel` crate. This is the one place that asks a running host (`resolveThread` over its local endpoint, the way
 //! `kith-sessions host_call` does) and the one that asks the core (`claim.*`, `session.record`, through
 //! `kith kernel core-call`, the way `kith_claims.call` does), because the crate never calls either itself. `kernel/bin/kith`
 //! routes its `kith-sessions` calls here while `threads` is in `lib/core-switched.txt`; the host's own claims
 //! (`terminal/claim.rs`) do not go through the crate: the host never switches ahead of the CLI.
 
-use std::io::{Read as _, Write as _};
-use std::net::{SocketAddr, TcpStream};
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use kith_kernel::hostlocal;
 use kith_kernel::paths::{process_env, process_home};
 use kith_kernel::threads::core::{Core, CoreErr};
 use kith_kernel::threads::{self, Ctx, Host, cli};
@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use crate::core_front::{self, CallEnd};
 use crate::kernel;
 
-/// The host on this Mac, if one answers on loopback with the owner token.
+/// The host on this Mac, if one answers on its local endpoint with the owner token.
 pub(crate) struct Loopback {
     pub(crate) kernel: PathBuf,
     pub(crate) home: PathBuf,
@@ -66,9 +66,9 @@ impl Core for Loopback {
 
 impl Host for Loopback {
     fn resolve_thread(&self, thread: &str) -> Option<Value> {
-        let (data, port) = self.endpoint();
+        let (data, _) = self.endpoint();
         let token = std::fs::read_to_string(data.join("token")).ok()?.trim().to_owned();
-        let (status, body) = post(&port, "resolveThread", &token, &json!({ "thread": thread }).to_string())?;
+        let (status, body) = post(&data, "resolveThread", &token, &json!({ "thread": thread }).to_string())?;
         // A refusal with a body is an answer ("unknown thread"); a 404 is an older host.
         if status == 404 {
             return Some(json!({"error": "unknown method", "unknownMethod": true}));
@@ -77,43 +77,11 @@ impl Host for Loopback {
     }
 }
 
-/// One POST to `/api/<method>` on 127.0.0.1, with the owner token; `(status, body)`. Four seconds for all of it.
-fn post(port: &str, method: &str, token: &str, body: &str) -> Option<(u16, Vec<u8>)> {
-    let limit = Duration::from_secs(4);
-    let addr: SocketAddr = format!("127.0.0.1:{port}").parse().ok()?;
-    let mut s = TcpStream::connect_timeout(&addr, limit).ok()?;
-    s.set_read_timeout(Some(limit)).ok()?;
-    s.set_write_timeout(Some(limit)).ok()?;
-    let req = format!(
-        "POST /api/{method} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    s.write_all(req.as_bytes()).ok()?;
-    let mut raw = Vec::new();
-    s.read_to_end(&mut raw).ok()?;
-    parse_response(&raw)
-}
-
-fn parse_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
-    let split = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
-    let head = String::from_utf8_lossy(&raw[..split]).to_ascii_lowercase();
-    let status = head.lines().next()?.split_whitespace().nth(1)?.parse().ok()?;
-    let rest = &raw[split + 4..];
-    if !head.lines().any(|l| l.starts_with("transfer-encoding:") && l.contains("chunked")) {
-        return Some((status, rest.to_vec()));
-    }
-    let (mut body, mut at) = (Vec::new(), 0);
-    loop {
-        let line_end = rest[at..].windows(2).position(|w| w == b"\r\n")? + at;
-        let size =
-            usize::from_str_radix(String::from_utf8_lossy(&rest[at..line_end]).split(';').next()?.trim(), 16).ok()?;
-        if size == 0 {
-            return Some((status, body));
-        }
-        let chunk = rest.get(line_end + 2..line_end + 2 + size)?;
-        body.extend_from_slice(chunk);
-        at = line_end + 2 + size + 2;
-    }
+/// One POST to `/api/<method>` on the host's local endpoint (never loopback TCP), with the owner token; `(status, body)`. Four
+/// seconds for each step of it. `None` when the host is down, is not this account's or is older than this command.
+fn post(data: &Path, method: &str, token: &str, body: &str) -> Option<(u16, Vec<u8>)> {
+    let reply = hostlocal::post(data, &format!("/api/{method}"), token, body, Duration::from_secs(4)).ok()?;
+    Some((reply.status, reply.body))
 }
 
 /// `kith kernel threads <verb> ...`; returns the exit code.
@@ -165,19 +133,4 @@ pub fn run(kernel_dir: Option<PathBuf>, args: &[String]) -> i32 {
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();
     out.code
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_response;
-
-    #[test]
-    fn a_plain_and_a_chunked_response_both_read() {
-        let plain = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}";
-        assert_eq!(parse_response(plain), Some((200, b"{}".to_vec())));
-        let chunked =
-            b"HTTP/1.1 404 Not Found\r\nTransfer-Encoding: chunked\r\n\r\n3\r\n{\"a\r\n4;x=1\r\n\":1}\r\n0\r\n\r\n";
-        assert_eq!(parse_response(chunked), Some((404, b"{\"a\":1}".to_vec())));
-        assert_eq!(parse_response(b"garbage"), None);
-    }
 }
