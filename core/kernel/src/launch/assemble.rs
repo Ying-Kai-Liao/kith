@@ -621,6 +621,8 @@ pub(super) fn plain_number(t: &str) -> bool {
 
 /// `uuid4().hex`. An unreadable random source is an error: an all-zero id would be shared by every run, and a run's
 /// id and temp file names must not collide.
+// Off Unix the random source cannot fail, and the callers match on the Unix signature.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 pub(super) fn random_hex() -> Result<String, String> {
     let mut b = [0u8; 16];
     #[cfg(unix)]

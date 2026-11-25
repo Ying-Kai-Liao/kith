@@ -83,6 +83,7 @@ pub fn exec_program(
 }
 
 /// The shared services need the keys (`kith-auth`'s store), which Windows has no reader for yet: the run goes on with none.
+#[allow(clippy::implicit_hasher)] // the same signature as the Unix build's
 pub fn mcp_config(
     _c: &Ctx,
     _env: &HashMap<String, String>,
