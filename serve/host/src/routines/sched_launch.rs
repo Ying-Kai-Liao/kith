@@ -16,6 +16,9 @@ use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// Set to `off`, the host runs a cron job's turn as `kith-sched run-turn` even on a program that lists the token.
+pub(crate) const OFF_ENV: &str = "KITH_SCHED_LAUNCH";
+
 /// The capability token of a program whose `launch --exec` takes `--turn N --claim C`.
 const TOKEN: &str = "sched-turn";
 
@@ -41,6 +44,10 @@ pub(crate) static TEST_ENV: std::sync::Mutex<Option<Vec<(String, String)>>> = st
 
 /// The program to start the launch from when it lists `sched-turn` (`kernel version`), else `None`: the run is `run-turn`'s.
 pub(super) fn program() -> Option<PathBuf> {
+    // The host's own rollback: `KITH_SCHED_LAUNCH=off` keeps `kith-sched run-turn` whatever the program lists.
+    if std::env::var_os(OFF_ENV).is_some_and(|v| v == "off") {
+        return None;
+    }
     let program = program_here()?;
     let out = Command::new(&program)
         .args(["kernel", "version"])

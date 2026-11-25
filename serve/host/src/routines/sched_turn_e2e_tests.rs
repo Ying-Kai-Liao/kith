@@ -129,6 +129,7 @@ exit 0
             ("REC".to_owned(), p(&rec)),
             ("HOLD".to_owned(), p(&dir.join("hold"))),
             ("KITH_AUTH".to_owned(), p(&auth)),
+            ("KITH_KERNEL".to_owned(), p(&kernel)),
             ("KITH_BIN".to_owned(), p(&built_kith())),
             // No host here: nothing is asked of one.
             ("KITH_SERVE_DIR".to_owned(), p(&dir.join("serve"))),
