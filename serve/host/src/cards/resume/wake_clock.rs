@@ -431,3 +431,7 @@ fn ask_command() -> Option<Command> {
         cmd
     })
 }
+
+#[cfg(all(test, unix))]
+#[path = "wake_clock_core_tests.rs"]
+mod core_tests;

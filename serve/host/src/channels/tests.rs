@@ -327,6 +327,13 @@ async fn a_claimed_wake_is_a_batch_of_its_own_that_is_never_saved_and_no_message
     assert!(!saved.contains("staging box"), "the wake batch is memory only: {saved}");
     assert!(saved.contains("and the lights?"), "an ordinary message still is saved: {saved}");
     assert!(!r.core.with(|i| i.st.wakes.contains_key(wk)), "not among the card wake notes either");
+    // A restart loads what was saved: no batch of it comes back to replay the note.
+    let reloaded = super::state::State::load(&r.dir.join("data/state.json"));
+    assert!(
+        !reloaded.inbox.values().flatten().flatten().any(|m| m.contains("staging box")),
+        "a saved inbox never holds the wake batch: {:?}",
+        reloaded.inbox
+    );
     until("both turns", || r.fake.posts().len() == 3).await;
     assert_eq!(r.fake.posts()[1].1, echo(note), "the wake alone");
     assert!(r.fake.posts()[2].1.contains("and the lights?") && !r.fake.posts()[2].1.contains("staging box"));

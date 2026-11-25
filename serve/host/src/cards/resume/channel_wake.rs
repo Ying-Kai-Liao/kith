@@ -37,6 +37,9 @@ pub struct ChannelWake {
     pub ids: Vec<String>,
     /// An attempt attached the claim, or it ended: no later attempt carries it.
     settled: AtomicBool,
+    /// An attempt exited 10 (the launch refused the attach) with the claim still unattached: an older launch that attaches with the
+    /// session's id meets the core's refusal of a wake that names the work key. The wake is requeued, never dropped.
+    refused: AtomicBool,
     /// The session the attempts run, for the writer check when none attached.
     sid: Mutex<Option<String>>,
 }
@@ -53,6 +56,7 @@ impl ChannelWake {
             cards: Vec::new(),
             ids: Vec::new(),
             settled: AtomicBool::new(false),
+            refused: AtomicBool::new(false),
             sid: Mutex::new(None),
         })
     }
@@ -108,6 +112,7 @@ pub(super) async fn door(hub: &Arc<Hub>, pull: &Pull<'_>, turn: &wake::Turn, gro
         cards: group.iter().map(|c| c.id.clone()).collect(),
         ids: turn.ids.clone(),
         settled: AtomicBool::new(false),
+        refused: AtomicBool::new(false),
         sid: Mutex::new(None),
     });
     match crate::channels::wake_claimed(wk, note, w) {
@@ -171,7 +176,10 @@ pub async fn attempt_over(hub: &Arc<Hub>, w: &ChannelWake, seen: &Seen) -> bool 
     };
     let state = row.as_ref().and_then(|r| r["state"].as_str()).unwrap_or("none");
     match (&row, state) {
-        (Some(r), "claimed") if r["pid"].is_null() => false,
+        (Some(r), "claimed") if r["pid"].is_null() => {
+            w.refused.store(seen.code == Some(10), Ordering::Release);
+            false
+        }
         (Some(r), "running" | "ending") if attached_by(r, pid) => {
             let clean = seen.code == Some(0);
             let why =
@@ -221,6 +229,13 @@ pub async fn unattached(hub: &Arc<Hub>, w: &ChannelWake, stopped: bool) {
             set_held(hub, &card, Some((&sid, &h)));
         }
         requeue(core, w.claim, "a writer holds the session");
+        super::wake_clock::later(&w.run);
+        return;
+    }
+    // The launch refused the claim (exit 10): a launch too old for `KITH_TURN_CONVERSATION` attaches with the session's id and the
+    // core refuses the mismatch. The wake is not dropped: the claim goes back and the turn waits for the program to be updated.
+    if w.refused.load(Ordering::Acquire) {
+        requeue(core, w.claim, "the launch refused the claim");
         super::wake_clock::later(&w.run);
         return;
     }

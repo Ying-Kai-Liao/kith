@@ -97,6 +97,7 @@ fn claimed() -> ChannelWake {
         cards: Vec::new(),
         ids: vec!["card:c1".to_owned()],
         settled: AtomicBool::new(false),
+        refused: AtomicBool::new(false),
         sid: Mutex::new(Some("sess-a".to_owned())),
     }
 }
@@ -223,4 +224,18 @@ async fn a_wake_nobody_attached_and_no_writer_holds_is_freed_and_after_a_stop_wi
     for m in ["hostclaim.cancel", "hostclaim.stop", "hostclaim.report"] {
         assert!(calls(&log, m).is_empty(), "{m}");
     }
+}
+
+#[tokio::test]
+async fn a_launch_too_old_to_name_the_work_key_is_refused_by_the_core_and_the_wake_is_requeued_not_dropped() {
+    let r = rig().await;
+    let (_core, log) = scripted(&r, |m, _| {
+        (m == "hostclaim.show")
+            .then(|| Answer::Done(json!({"claim": {"claimId": 41, "state": "claimed", "kind": "turn", "pid": null}})))
+    });
+    let w = claimed();
+    assert!(!attempt_over(&r.hub, &w, &Seen { pid: Some(4242), code: Some(10) }).await);
+    unattached(&r.hub, &w, false).await;
+    until("the requeue", || !calls(&log, "hostclaim.stop").is_empty()).await;
+    assert!(calls(&log, "hostclaim.cancel").is_empty(), "never freed: that would count a failed try for ever");
 }
