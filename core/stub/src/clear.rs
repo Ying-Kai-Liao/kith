@@ -1,7 +1,8 @@
 //! The lock-alone clear (design 2026-11-16-offturn-lock-alone, rule L-clear): a one-shot stub whose run goes on under the lock
 //! alone (no core answered its claim, `--lock-alone`) takes the lock, then, **holding it and before the engine starts**, clears
 //! every warm engine marked as having the conversation loaded (`loaded`):
-//! - a marker whose pid is gone, or runs with another start, is stale: removed;
+//! - a marker whose pid is gone, or runs with another start, is stale: removed, unless the gone stub's group is still held
+//!   (`orphan_group`: an engine whose stub died alone): that group is killed as below first;
 //! - a marked stub that holds another key's lock is running a host turn: the run is refused ([`Cleared::HostTurn`], exit 75);
 //!   the other keys' locks this probe takes are held through the kill, so no host turn begins on one of them in between;
 //! - any other is SIGKILLed with its process group (a resident stub leads its group, engine and children in it) and waited
@@ -18,7 +19,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use kith_procstart::{Probe, comparable, probe};
+use kith_procstart::{Probe, Sig, comparable, orphan_group, probe, signal_group};
 
 use crate::{Error, Taken, loaded, take};
 
@@ -40,14 +41,17 @@ pub fn clear(folder: &Path, key: &str, within: Duration) -> Result<Cleared, Erro
         if pid == me {
             continue;
         }
-        match same(pid, &start) {
+        // A stub that died alone leaves its engine running in its group (macOS has no parent-death signal): that group is
+        // killed as a live stub's is.
+        let orphan = match same(pid, &start) {
+            Some(true) => false,
+            Some(false) if orphan_group(pid, &start).is_some() => true,
             Some(false) => {
                 loaded::unmark(folder, key, &name)?;
                 continue;
             }
             None => return Ok(Cleared::NotGone(pid)),
-            Some(true) => {}
-        }
+        };
         // The probe locks are held through the kill: the stub cannot begin a host turn on one of them in between.
         let mut probed = Vec::new();
         for other in loaded::keys_of(folder, &name)? {
@@ -59,7 +63,11 @@ pub fn clear(folder: &Path, key: &str, within: Duration) -> Result<Cleared, Erro
                 Taken::Busy => return Ok(Cleared::HostTurn(pid)),
             }
         }
-        let gone = kill_group(pid, &start, within);
+        let gone = if orphan {
+            kill_orphan(pid, &start, within)
+        } else {
+            kill_group(pid, &start, within)
+        };
         drop(probed);
         if !gone {
             return Ok(Cleared::NotGone(pid));
@@ -98,6 +106,29 @@ fn kill_group(pid: u32, start: &str, within: Duration) -> bool {
     let until = Instant::now() + within;
     loop {
         if probe(pid) == Probe::Gone && group_runs(group) == Some(false) {
+            return true;
+        }
+        if Instant::now() >= until {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// SIGKILL to the group of a marked stub that is gone ([`orphan_group`]: its start from this boot, the group id still held,
+/// so the group is the stub's and not a stranger's at a reused id), then waits until nothing of it runs. True when
+/// confirmed gone within `within`.
+fn kill_orphan(pid: u32, start: &str, within: Duration) -> bool {
+    let Some(group) = orphan_group(pid, start) else {
+        return true;
+    };
+    signal_group(group, Sig::Kill);
+    let Ok(id) = libc::pid_t::try_from(group) else {
+        return false;
+    };
+    let until = Instant::now() + within;
+    loop {
+        if orphan_group(pid, start).is_none() || group_runs(id) == Some(false) {
             return true;
         }
         if Instant::now() >= until {

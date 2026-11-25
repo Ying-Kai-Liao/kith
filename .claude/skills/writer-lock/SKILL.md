@@ -293,3 +293,12 @@ Park and wake (q217/q218): `r4-edge`, `r4-parkclaim-*`, `c4-fix-*` (`P3`). Take-
 stand-in kernel, `tests/fixtures/kernel_agents.py`) instead of native bots; its claims assert the agent's name. The claim
 transaction, the stub's lock and the holder are untouched, and no row of `checks.tsv` reads the agent's name. Drift was read for
 `writer.rs`; SYNC not moved.
+
+## A warm stub killed alone, the host up (2026-11-25) - prose only, no model row
+`Claims4`'s `StubDies` makes an orphan only with the holder down (`~hUp`): a live holder sweeps the group before it records the
+stub's exit, so a report never ends a claim under a live engine. The host plays the holder for its warm stubs and did not: a stub
+SIGKILLed alone on macOS (no parent-death signal) left its engine in the group and the host reported `exit` with the stub's pid,
+so `apply` ended the claim. `core_writer.rs` `retry_end` (every end report goes through it) now calls `reap_orphan` first: while
+`procstart::orphan_group` names the group, SIGTERM, a grace, SIGKILL; a group that outlives both makes the report name no pid,
+which `apply` turns into `ending` for `end_gone`. That is the sweep the model assumes, so no action changed. The stub's L-clear
+(`clear.rs`) also kills the `orphan_group` of a gone marked stub before it removes the marker. Drift read for both; SYNC not moved.

@@ -198,6 +198,90 @@ fn a_warm_process_whose_stub_holds_another_key_refuses_the_run_and_nothing_is_ki
     let _ = stub.wait();
 }
 
+/// SIGKILL to `pid` alone and its reap (`Child::wait` would close the stdin the engine reads, and end it by itself).
+fn kill_alone(pid: u32) {
+    let id = i32::try_from(pid).unwrap();
+    // SAFETY: a signal to a child this test started, and its reap.
+    unsafe {
+        libc::kill(id, libc::SIGKILL);
+        libc::waitpid(id, std::ptr::null_mut(), 0);
+    }
+}
+
+#[test]
+fn a_lock_alone_run_kills_the_engine_of_a_marked_stub_that_died_alone() {
+    let dir = scratch("orphan");
+    let (stub, mut c, engine) = resident(&dir, true);
+    assert_eq!(c.say("loaded conv1"), "marked conv1");
+    let m = marker(&dir, "conv1", stub.id());
+    kill_alone(stub.id());
+    if cfg!(target_os = "macos") {
+        assert!(
+            runs(engine),
+            "macOS: the engine outlives its stub, in its group"
+        );
+    }
+    let out = one_shot(&dir, "conv1", true, engine);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "gone",
+        "the orphaned engine was gone before the run's engine started"
+    );
+    wait_until("the engine to be reaped", || !runs(engine));
+    assert!(!m.exists(), "the dead stub's marker is removed");
+}
+
+#[test]
+fn a_gone_stubs_marker_from_another_boot_leaves_the_group_at_its_pid_alone() {
+    let dir = scratch("stranger");
+    // A group whose leader is gone and whose member lives: the shape of an orphaned engine, but the marker names a start from
+    // before this boot, so the group at that id is a stranger's.
+    let mut leader = Command::new("sh")
+        .args(["-c", "sleep 600 & echo $!; wait"])
+        .process_group(0)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(leader.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let member: u32 = line.trim().parse().unwrap();
+    let group = leader.id();
+    leader.kill().unwrap();
+    leader.wait().unwrap();
+    assert!(runs(member));
+    let own = kith_procstart::start_stamp(std::process::id()).expect("this test's start");
+    let old = match own.rsplit_once(':') {
+        Some(_) => "b00000000-0000-0000-0000-000000000000:1".to_owned(),
+        None => "e1".to_owned(),
+    };
+    assert!(!kith_procstart::from_this_boot(&old));
+    let folder = dir.join("conv1.loaded");
+    std::fs::create_dir_all(&folder).unwrap();
+    let m = folder.join(format!("{group}-{old}"));
+    std::fs::write(&m, b"").unwrap();
+    let out = one_shot(&dir, "conv1", true, member);
+    let alive = runs(member);
+    // SAFETY: the group this test made.
+    unsafe { libc::killpg(i32::try_from(group).unwrap(), libc::SIGKILL) };
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "alive");
+    assert!(alive, "a stranger's group is not signalled");
+    assert!(!m.exists(), "the stale marker is removed");
+}
+
 #[test]
 fn a_stale_marker_is_removed_and_nobody_is_signalled() {
     let dir = scratch("stale");

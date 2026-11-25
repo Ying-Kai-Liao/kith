@@ -17,8 +17,8 @@ use std::path::Path;
 use serde_json::{Map, Value, json};
 
 use super::guard::{
-    self, OWNER_ALLOW, SECRET_RULES, SOFT_DENY, both, dedup, edit_rules, rule_w, secret_paths,
-    valid_domain,
+    self, OWNER_ALLOW, OWNER_WEB, SECRET_RULES, SOFT_DENY, both, dedup, edit_rules, rule_w,
+    secret_paths, valid_domain,
 };
 use super::machine;
 use super::prompt::Registry;
@@ -116,6 +116,8 @@ fn truthy(v: &Value) -> bool {
 }
 
 /// Everything the settings read that is not a file under the agent's folders.
+// Each bool is an independent launch fact the caller reports, not one state: an enum would only rename them.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Input<'a> {
     pub agent: &'a str,
     pub paths: &'a Paths,
@@ -157,6 +159,12 @@ pub struct Input<'a> {
     pub plugins_json: &'a str,
     /// The owner at their own terminal: their plugins stay as their settings have them.
     pub owner_terminal: bool,
+    /// The owner's own launch at their terminal (`KITH_VIA` terminal, not started by another run), interactive or a
+    /// one-shot: this Mac's choice of bypass for the agent is kept for an agent that reads other people's text too.
+    pub owner_via_terminal: bool,
+    /// `owner_via_terminal`, and the owner typed `--bypass` (or `--permission-mode bypassPermissions`) on the command line:
+    /// kept for an agent that reads other people's text too.
+    pub typed_bypass: bool,
     /// The `apiKeyHelper` of a claude-api backup (`""` for none).
     pub api_helper: &'a str,
     /// A fresh id for the folder of a once-allowed retry (`uuid4().hex`).
@@ -476,13 +484,18 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     let mut warnings: Vec<String> = vec![];
 
     // The agent's defaultMode is its author's suggestion: this Mac's choice wins over it, the caller's over both. An owner's
-    // run of an agent that reads other people's text never starts in bypass; anyone else's mode is the membership's.
+    // run of an agent that reads other people's text never starts in bypass unless the owner typed it at their terminal,
+    // or, with nothing typed, this Mac chose it for the agent and the owner launched it there; anyone else's mode is the
+    // membership's.
     let mut perm = i.caller_mode.to_owned();
+    let mut macs = false;
     if perm.is_empty() {
         perm = machine::agent_permission_mode(&p.machine, i.agent);
+        macs = true;
     }
     let reads_others = machine::reads_others(&i.pkg.join("capabilities.yaml"));
-    if owner && perm == "bypassPermissions" && reads_others {
+    let owners_word = i.typed_bypass || (i.owner_via_terminal && macs);
+    if owner && perm == "bypassPermissions" && reads_others && !owners_word {
         perm = "auto".to_owned();
     }
     if !owner {
@@ -902,7 +915,7 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         );
         auto.insert("soft_deny".to_owned(), strings(&soft));
         // A package may declare its routine work as autoMode.allow sentences; owner runs keep them and the kernel's own
-        // sentence (code the agent wrote itself is routine), others have none.
+        // sentences (code the agent wrote itself, reading a public page), others have none.
         let declared: Vec<String> = auto
             .get("allow")
             .and_then(Value::as_array)
@@ -916,7 +929,7 @@ pub fn build(i: &Input<'_>) -> R<Output> {
             let all = dedup(
                 std::iter::once("$defaults".to_owned())
                     .chain(declared)
-                    .chain(std::iter::once(OWNER_ALLOW.to_owned())),
+                    .chain([OWNER_ALLOW, OWNER_WEB].map(str::to_owned)),
             );
             auto.insert("allow".to_owned(), strings(&all));
         } else {

@@ -10,7 +10,7 @@ ROOT="$(cd "$KERNEL/.." && pwd)"
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-c2.XXXXXX"); T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 export KITH_AUTH=$T/auth.json HOME=$T/home KITH_HOME=$T/kith
-unset KITH_STATE HQ_STATE KITH_PERSON KITH_AGENT HQ_HOME
+unset KITH_STATE HQ_STATE KITH_PERSON KITH_AGENT HQ_HOME KITH_QUIESCE_ROOTS KITH_QUIESCE_PIDS
 mkdir -p "$HOME" "$KITH_HOME/agents/house/role"
 printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
 A() { python3 "$KERNEL/bin/kith-auth" "$@"; }

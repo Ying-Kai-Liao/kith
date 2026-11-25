@@ -168,19 +168,21 @@ fn with_the_package_disk_stuck_a_new_id_is_refused_and_the_narrowings_commit_and
     );
     assert_eq!(rows_named(&d, "zed"), 0);
     // the narrowings and the readers don't wait on a folder
-    let began = Instant::now();
     assert_eq!(
         lines(write(&m, "people.suspend", &json!({"id": "sam"}))).len(),
         1
     );
-    // The removal commits (and its revoke takes effect) well before the answer: only the kept line waits for the folders.
+    // The removal commits (and its revoke takes effect) before the answer: only the kept line waits for the folders.
+    // Measured against the stuck reader, not a share of it: the commit lands before the folder wait (REFRESH_WAIT) runs
+    // out, and the answer is still waiting then. A tighter wall-clock bound flaked on a slow CI runner (1.02 s > 0.75 s).
+    let began = Instant::now();
     let asked = {
         let m = m.clone();
         std::thread::spawn(move || write(&m, "people.removePerson", &json!({"id": "amy"})))
     };
     until("the removal to commit", || rows_named(&d, "amy") == 0);
     assert!(
-        began.elapsed() < crate::packages::REFRESH_WAIT / 2,
+        began.elapsed() < crate::packages::REFRESH_WAIT,
         "the commit waited for the disk: {:?}",
         began.elapsed()
     );
