@@ -5,16 +5,11 @@
 //! the answer is a message and exit 1, never the owner's data. Nothing here reads a Kith folder, and `run`
 //! calls it before it opens the registry, so a guest can never fall through to `projects.json`.
 
-use std::ffi::{OsStr, OsString};
-use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
-use std::path::Path;
-use std::time::Duration;
+use std::ffi::OsString;
 
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 
 use super::Out;
-use crate::secrets::pyjson;
 
 /// The token and the core's run socket of a guest run (the socket is empty when the run has none).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,10 +30,6 @@ impl Guest {
     }
 }
 
-/// How long one read or write may wait (`settimeout(40)` of the Python client).
-const WAIT: Duration = Duration::from_secs(40);
-/// A reply past this is no core's (`1 << 20` of the Python client).
-const MAX_REPLY: usize = 1 << 20;
 const UNREACHABLE: &str = "project-id: the Kith core could not be reached from this run";
 
 /// Python's truthiness of a JSON value, for `not reply.get('ok')` and `reply.get('error') or ...`.
@@ -53,31 +44,64 @@ fn truthy(v: Option<&Value>) -> bool {
     }
 }
 
-fn exchange(guest: &Guest, args: &[String]) -> Option<Map<String, Value>> {
-    if guest.socket.is_empty() {
-        return None;
+/// The request over the core's run socket: a Unix socket. Guests are refused on a Windows host (WI6), so there it is no
+/// answer, and `ask` says why.
+#[cfg(unix)]
+mod wire {
+    use std::ffi::OsStr;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use std::path::Path;
+    use std::time::Duration;
+
+    use serde_json::{Map, Value, json};
+
+    use super::Guest;
+    use crate::secrets::pyjson;
+
+    /// How long one read or write may wait (`settimeout(40)` of the Python client).
+    const WAIT: Duration = Duration::from_secs(40);
+    /// A reply past this is no core's (`1 << 20` of the Python client).
+    const MAX_REPLY: usize = 1 << 20;
+
+    pub(super) fn exchange(guest: &Guest, args: &[String]) -> Option<Map<String, Value>> {
+        if guest.socket.is_empty() {
+            return None;
+        }
+        let mut stream = UnixStream::connect(Path::new(&guest.socket)).ok()?;
+        stream.set_read_timeout(Some(WAIT)).ok()?;
+        stream.set_write_timeout(Some(WAIT)).ok()?;
+        let token: &OsStr = &guest.token;
+        let request =
+            json!({"token": token.to_string_lossy(), "method": "projectId", "args": args});
+        let mut line = pyjson::dumps(&request).into_bytes();
+        line.push(b'\n');
+        stream.write_all(&line).ok()?;
+        stream.shutdown(std::net::Shutdown::Write).ok()?;
+        let mut data = Vec::new();
+        // One byte past the limit is enough to know the reply is too large.
+        stream
+            .take(MAX_REPLY as u64 + 1)
+            .read_to_end(&mut data)
+            .ok()?;
+        if data.len() > MAX_REPLY {
+            return None;
+        }
+        match serde_json::from_str::<Value>(std::str::from_utf8(&data).ok()?).ok()? {
+            Value::Object(m) => Some(m),
+            _ => None,
+        }
     }
-    let mut stream = UnixStream::connect(Path::new(&guest.socket)).ok()?;
-    stream.set_read_timeout(Some(WAIT)).ok()?;
-    stream.set_write_timeout(Some(WAIT)).ok()?;
-    let token: &OsStr = &guest.token;
-    let request = json!({"token": token.to_string_lossy(), "method": "projectId", "args": args});
-    let mut line = pyjson::dumps(&request).into_bytes();
-    line.push(b'\n');
-    stream.write_all(&line).ok()?;
-    stream.shutdown(std::net::Shutdown::Write).ok()?;
-    let mut data = Vec::new();
-    // One byte past the limit is enough to know the reply is too large.
-    stream
-        .take(MAX_REPLY as u64 + 1)
-        .read_to_end(&mut data)
-        .ok()?;
-    if data.len() > MAX_REPLY {
-        return None;
-    }
-    match serde_json::from_str::<Value>(std::str::from_utf8(&data).ok()?).ok()? {
-        Value::Object(m) => Some(m),
-        _ => None,
+}
+
+#[cfg(not(unix))]
+mod wire {
+    use serde_json::{Map, Value};
+
+    use super::Guest;
+
+    pub(super) fn exchange(_guest: &Guest, _args: &[String]) -> Option<Map<String, Value>> {
+        None
     }
 }
 
@@ -85,8 +109,13 @@ fn exchange(guest: &Guest, args: &[String]) -> Option<Map<String, Value>> {
 /// method or says no is a message and a non-zero code. No socket is the same message.
 pub fn ask(guest: &Guest, args: &[String]) -> Out {
     let mut out = Out::default();
-    let Some(reply) = exchange(guest, args) else {
+    let Some(reply) = wire::exchange(guest, args) else {
         out.err(UNREACHABLE);
+        if cfg!(not(unix)) {
+            out.err(
+                "project-id: not on Windows yet: guest runs (a guest is refused on a Windows host)",
+            );
+        }
         out.code = 1;
         return out;
     };

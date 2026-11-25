@@ -25,7 +25,11 @@ pub(super) fn kill(pid: u32) {
 }
 
 #[cfg(not(unix))]
-pub(super) fn kill(_pid: u32) {}
+pub(super) fn kill(pid: u32) {
+    // Stopping a channel run needs the Windows port's job objects (windows-owner W12); say so rather than answering
+    // the Stop as if it had worked (WI1).
+    tracing::warn!(pid, "channel Stop can't end the run: not on Windows yet (windows-owner W12)");
+}
 
 /// What a card's wake came to (see [`Core::wake`]).
 #[derive(Debug, PartialEq, Eq)]

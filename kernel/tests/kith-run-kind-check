@@ -4,6 +4,10 @@
 # for the host's own runs (KITH_VIA=serve). The names are never inherited further. A stub claude logs its env in a throwaway
 # HOME/KITH_HOME/KITH_STATE (never the real ~/.kith).
 #
+# Twice when a kith program is here (KITH_DIFFTEST_BIN, else a build under $CARGO_TARGET_DIR / serve/host/target): as the script runs
+# a one-shot, and with the `launch-exec` line switched on in a copy of the kernel folder, where the program runs it in one process
+# (`kith kernel launch-exec`). The same answers either way.
+#
 #   kernel/tests/kith-run-kind-check     a few seconds; exits 1 when a check fails
 set -uo pipefail
 
@@ -11,7 +15,7 @@ KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-run-kind-check.XXXXXX"); T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 fails=0
-expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (got '$2', want '$3')"; fails=$((fails + 1)); fi; }
+expect() { if [ "$2" = "$3" ]; then echo "ok   $P$1"; else echo "FAIL $P$1 (got '$2', want '$3')"; fails=$((fails + 1)); fi; }
 export HOME=$T/home KITH_HOME=$T/root KITH_AUTH=$T/auth.json KITH_STATE=$T/state
 unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR HQ_HOME KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_VIA KITH_RESUME
 mkdir -p "$HOME" "$T/bin" "$KITH_HOME/agents/echo/role" "$KITH_STATE/projects" "$KITH_STATE/logs"
@@ -27,20 +31,74 @@ chmod +x "$T/bin/claude"
 printf '#!/bin/sh\nexit 0\n' > "$T/bin/kith-stub"; chmod +x "$T/bin/kith-stub"
 export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH ENV_LOG=$T/env
 
+BIN=${KITH_DIFFTEST_BIN:-}
+if [[ -z $BIN ]]; then
+  for t in "${CARGO_TARGET_DIR:-}" "$KERNEL/../serve/host/target"; do
+    for k in debug release; do [[ -n $t && -x $t/$k/kith ]] && { BIN=$t/$k/kith; break 2; }; done
+  done
+fi
+
+K=$KERNEL P=""
 run() {   # run VAR=value ... — one `kith echo hi`, prints what claude saw
   : > "$ENV_LOG"
-  (cd "$KITH_HOME/agents/echo" && env "$@" "$KERNEL/bin/kith" echo hi >/dev/null 2>"$T/err")
+  (cd "$KITH_HOME/agents/echo" && env "$@" "$K/bin/kith" echo hi >/dev/null 2>"$T/err")
   cat "$ENV_LOG"
 }
 
-expect "a plain terminal one-shot is not listed" "$(run)" ""
-expect "kith ask: kind and who asked" "$(run KITH_LAUNCH_KIND=ask KITH_LAUNCH_LABEL=architect KITH_VIA=ask)" "KITH_RUN_KIND=ask KITH_RUN_LABEL=architect "
-expect "kith sched: kind and job" "$(run KITH_LAUNCH_KIND=schedule KITH_LAUNCH_LABEL=daily KITH_VIA=schedule)" "KITH_RUN_KIND=schedule KITH_RUN_LABEL=daily "
-expect "kith ask -c: joins the session it resumes" "$(run KITH_LAUNCH_KIND=ask KITH_LAUNCH_LABEL=architect KITH_VIA=ask KITH_RESUME=abc-123)" "KITH_RESUMED_FROM=abc-123 KITH_RUN_KIND=ask KITH_RUN_LABEL=architect "
-expect "helper of a terminal session" "$(run KITH_AGENT=architect KITH_VIA=terminal)" "KITH_RUN_KIND=helper KITH_RUN_LABEL=architect "
-expect "helper of a scheduled run" "$(run KITH_AGENT=architect KITH_VIA=schedule)" "KITH_RUN_KIND=helper KITH_RUN_LABEL=architect "
-expect "a run the host started is not listed (the app shows it)" "$(run KITH_AGENT=architect KITH_VIA=serve)" ""
-expect "a channel run is not listed" "$(run KITH_AGENT=architect KITH_VIA=telegram)" ""
-expect "the kind is not inherited by the run's own helper" "$(run KITH_AGENT=architect KITH_VIA=ask KITH_RUN_KIND=ask KITH_RUN_LABEL=zed)" "KITH_RUN_KIND=helper KITH_RUN_LABEL=architect "
+suite() {
+  expect "a plain terminal one-shot is not listed" "$(run)" ""
+  expect "kith ask: kind and who asked" "$(run KITH_LAUNCH_KIND=ask KITH_LAUNCH_LABEL=architect KITH_VIA=ask)" "KITH_RUN_KIND=ask KITH_RUN_LABEL=architect "
+  expect "kith sched: kind and job" "$(run KITH_LAUNCH_KIND=schedule KITH_LAUNCH_LABEL=daily KITH_VIA=schedule)" "KITH_RUN_KIND=schedule KITH_RUN_LABEL=daily "
+  expect "kith ask -c: joins the session it resumes" "$(run KITH_LAUNCH_KIND=ask KITH_LAUNCH_LABEL=architect KITH_VIA=ask KITH_RESUME=abc-123)" "KITH_RESUMED_FROM=abc-123 KITH_RUN_KIND=ask KITH_RUN_LABEL=architect "
+  expect "helper of a terminal session" "$(run KITH_AGENT=architect KITH_VIA=terminal)" "KITH_RUN_KIND=helper KITH_RUN_LABEL=architect "
+  expect "helper of a scheduled run" "$(run KITH_AGENT=architect KITH_VIA=schedule)" "KITH_RUN_KIND=helper KITH_RUN_LABEL=architect "
+  expect "a run the host started is not listed (the app shows it)" "$(run KITH_AGENT=architect KITH_VIA=serve)" ""
+  expect "a channel run is not listed" "$(run KITH_AGENT=architect KITH_VIA=telegram)" ""
+  expect "the kind is not inherited by the run's own helper" "$(run KITH_AGENT=architect KITH_VIA=ask KITH_RUN_KIND=ask KITH_RUN_LABEL=zed)" "KITH_RUN_KIND=helper KITH_RUN_LABEL=architect "
+}
+
+suite
+
+if [[ -n $BIN ]]; then
+  # The same, with the one-shot run by the program: a copy of the kernel folder with the line switched on.
+  cp -R "$KERNEL" "$T/kernel-on"
+  printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt"
+  K=$T/kernel-on P="launch-exec on: "
+  export KITH_BIN=$BIN KITH_STUB_BIN=$T/none
+  expect "the program lists the token" "$("$BIN" kernel version | grep -c '"launch-exec"')" 1
+  suite
+  # A turn the host claimed stays on the script's body (which attaches the claim); the program itself refuses it with 10.
+  rc=0; env KITH_TURN_CLAIM=x HOME="$HOME" "$BIN" kernel launch-exec echo --kernel "$K" hi >/dev/null 2>&1 || rc=$?
+  expect "launch-exec refuses a claimed turn (exit 10)" "$rc" 10
+  # Through the entry: the script must keep the claimed turn on its own body (which attaches the claim, or refuses it with 10 when
+  # there is no threads program), never hand it to launch-exec, whose refusal is the message checked for here.
+  rc=0; (cd "$KITH_HOME/agents/echo" && env KITH_TURN_CLAIM=x "$K/bin/kith" echo hi >/dev/null 2>"$T/err") || rc=$?
+  expect "a claimed turn through the entry is not handed to launch-exec" "$(grep -c 'does not carry a turn claim' "$T/err")" 0
+else
+  echo "skip launch-exec on (no kith program: KITH_DIFFTEST_BIN)"
+fi
+
+# Which command lines the entry hands to the program as a one-shot (kith_oneshot_flag): a task after the flags, and nothing else.
+P="oneshot flag: "
+KITH=$KERNEL . "$KERNEL/lib/kith-core.sh"
+oneshot() { if kith_oneshot_flag "$@"; then echo yes; else echo no; fi; }
+expect "a task" "$(oneshot do it)" yes
+expect "no arguments is a terminal" "$(oneshot)" no
+expect "flags alone are a terminal" "$(oneshot --account a -m opus)" no
+expect "flags then a task" "$(oneshot --account a -m opus -e low --bypass do it)" yes
+expect "the chat turn: --backup ID -- -r text" "$(oneshot --backup a -- -r text)" yes
+expect "dashes and nothing after" "$(oneshot --)" no
+expect "-r ID then a task" "$(oneshot -r abc-123 do it)" yes
+expect "-r then a flag is a pick, and a terminal with nothing after" "$(oneshot -r -m opus)" no
+expect "--resume ID is a terminal without a task, a one-shot with one" "$(oneshot --resume abc)$(oneshot --resume abc note)" noyes
+expect "-c with a task" "$(oneshot -c do it)" yes
+expect "--held with a task" "$(oneshot --held do it)" yes
+expect "--print stays with the script" "$(oneshot --print do it)" no
+expect "--launch-json stays with the script" "$(oneshot --launch-json)" no
+expect "--inspect and --render stay with the script" "$(oneshot --inspect)$(oneshot --render)" nono
+expect "an unknown flag is the script's to refuse" "$(oneshot --nope do it)" no
+expect "a flag with no value is the script's to refuse" "$(oneshot -m)" no
+expect "a task that starts with a dash and holds a blank" "$(oneshot '- one thing')" yes
+expect "a task word after a flag value" "$(oneshot -p proj --hold 12 go)" yes
 
 exit $((fails > 0))

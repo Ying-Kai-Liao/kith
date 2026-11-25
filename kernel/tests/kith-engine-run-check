@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# kith-engine-run-check — a non-Claude agent's one-shot through the real `kith AGENT -- task`: bin/kith runs
+# `kith kernel engine-run`, which runs the engine over ACP (the fake, kernel/tests/fakes/fake-acp-agent, as `opencode acp`).
+# The JSON on stdout, one ledger row, resume over session/load (and without it), another engine's session, a TERM that
+# stops the engine, and exit 78 handing an engine with no ACP path to harness.py (dsh, until H3 removes it).
+# Needs the Rust kith program (KITH_BIN, else a build under CARGO_TARGET_DIR / serve/host/target); skips without one.
+#
+#   kernel/tests/kith-engine-run-check     a few seconds; exits 1 when a check fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+BIN=$(KITH_DEV_BIN=1 KITH_CORE=rust python3 "$KERNEL/lib/kith_paths.py" --bin)
+if [ -z "$BIN" ]; then
+  # Under CI a missing binary means the build step moved: fail, never pass by skipping.
+  if [ -n "${CI:-}" ]; then echo "FAIL no Rust kith program under CI (build serve/host or set KITH_BIN)"; exit 1; fi
+  echo "skip: no Rust kith program (build serve/host or set KITH_BIN)"; exit 0
+fi
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-engine-run-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap '[ -n "${KEEP:-}" ] || rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json KITH_BIN=$BIN KITH_CORE=rust
+unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_HARNESS KITH_MODEL KITH_EFFORT KITH_PERMISSION_MODE HQ_HOME CODEX_HOME
+A=$KITH_HOME/agents/echo/role
+mkdir -p "$HOME" "$KITH_HOME/state" "$A" "$T/bin"
+export KITH_STATE=$KITH_HOME/state
+printf -- '---\nname: echo\ndescription: test agent\nharness: opencode\n---\nYou echo.\n' > "$A/agent.md"
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+git -C "$A" init -q && git -C "$A" commit -qm init --allow-empty
+
+# `opencode acp` is the fake ACP agent; `dsh` has no ACP path, so its run is harness.py's own (a fake that answers JSON).
+mkdir -p "$T/fakes" && cp "$KERNEL/tests/fakes/fake-acp-agent" "$T/fakes/"
+printf '#!/bin/sh\nexec python3 "%s/fakes/fake-acp-agent"\n' "$T" > "$T/bin/opencode"
+printf '#!/bin/sh\ncat >/dev/null\nprintf %s\n' "'{\"type\":\"session\",\"sessionId\":\"d1\"}\n{\"type\":\"final\",\"text\":\"dsh-native\"}\n'" > "$T/bin/dsh"
+chmod +x "$T/bin/opencode" "$T/bin/dsh"
+export PATH=$T/bin:$PATH
+
+KITH=$KERNEL/bin/kith
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; tail -n 3 "$T/err" "$T/out" 2>/dev/null | cut -c1-300; fails=$((fails + 1)); fi; }
+# one field of the run's JSON (the last line of $T/out)
+field() { python3 -c 'import json,sys; d=json.loads(open(sys.argv[1]).read().splitlines()[-1]); v=d.get(sys.argv[2]); print(json.dumps(v) if isinstance(v,(dict,list,bool)) or v is None else v)' "$T/out" "$1"; }
+# the prompts the fake saw, one per line
+prompts() { python3 -c 'import json,sys
+for l in open(sys.argv[1]):
+    m = json.loads(l)
+    if m["method"] == "session/prompt": print(json.dumps("".join(b["text"] for b in m["params"]["prompt"])))' "$T/acp.log"; }
+methods() { python3 -c 'import json,sys; print(" ".join(json.loads(l)["method"] for l in open(sys.argv[1])))' "$T/acp.log"; }
+ledger() { python3 -c 'import glob,sqlite3,sys
+rows = [r for f in glob.glob(sys.argv[1] + "/**/cost.db", recursive=True) for r in sqlite3.connect(f).execute("select session, model from req")]
+print(len(rows), *sorted({r[0] for r in rows}), *sorted({r[1] for r in rows}))' "$T"; }
+run() { rm -f "$T/acp.log"; FAKE_ACP_LOG=$T/acp.log "$KITH" echo "$@" >"$T/out" 2>"$T/err"; }
+
+KITH_OUTPUT=json run -- hello
+check "one-shot: the answer, an opencode: session id, no error" "[ \"\$(field is_error)\" = false ] && [ \"\$(field session_id)\" = opencode:fake-session-1 ] && field result | grep -q hello"
+check "one-shot: the agent's instructions went in front of the task" "prompts | grep -q 'hq-agent-instructions.*You echo.*The task:.*hello'"
+check "one-shot: the claude -p keys" "python3 -c 'import json; d=json.loads(open(\"$T/out\").read().splitlines()[-1]); assert d[\"type\"] == \"result\" and d[\"harness\"] == \"opencode\" and d[\"num_turns\"] == 1 and d[\"usage\"] == {\"input\": 10, \"output\": 5, \"cache_read\": 2}, d'"
+check "one-shot: one ledger row for the session" "[ \"\$(ledger)\" = '1 opencode:fake-session-1 opencode' ]"
+
+FAKE_ACP_LOAD=1 KITH_OUTPUT=json KITH_RESUME=opencode:fake-session-1 run -- "what did I say?"
+check "resume: session/load of the id, no new session" "[ \"\$(methods)\" = 'initialize session/load session/prompt' ] && grep -q '\"sessionId\": \"fake-session-1\"' '$T/acp.log'"
+check "resume: the note alone, no instructions" "[ \"\$(prompts)\" = '\"what did I say?\"' ]"
+check "resume: the answer, not the replayed history" "[ \"\$(field result)\" = 'echo: what did I say?' ] && [ \"\$(field session_id)\" = opencode:fake-session-1 ]"
+check "resume: a second ledger row on the same session" "[ \"\$(ledger | cut -d' ' -f1)\" = 2 ]"
+FAKE_ACP_LOAD=1 KITH_OUTPUT=json KITH_RESUME=opencode:fake-session-1 run -- "and again"
+check "resume twice: another turn on the same session" "[ \"\$(methods)\" = 'initialize session/load session/prompt' ] && [ \"\$(field result)\" = 'echo: and again' ]"
+
+KITH_OUTPUT=json KITH_RESUME=opencode:fake-session-1 run -- "no load"
+check "resume without loadSession: a new session, with the instructions, and the note" "[ \"\$(methods)\" = 'initialize session/new session/prompt' ] && prompts | grep -q 'hq-agent-instructions' && grep -q 'cannot resume session fake-session-1' '$T/err'"
+FAKE_ACP_LOAD=1 KITH_OUTPUT=json KITH_RESUME=codex:abc run -- "other engine"
+check "resume of another engine's session: a new session, with the note" "[ \"\$(methods)\" = 'initialize session/new session/prompt' ] && grep -q 'session codex:abc is not a opencode session; starting a new one' '$T/err' && [ \"\$(field is_error)\" = false ]"
+FAKE_ACP_LOAD=1 KITH_OUTPUT=json KITH_RESUME=fake-session-1 run -- "bare id"
+check "resume of a bare (Claude) id: a new session" "[ \"\$(methods)\" = 'initialize session/new session/prompt' ]"
+
+FAKE_ACP_EFFORT=low,medium,high,xhigh KITH_EFFORT=max KITH_OUTPUT=json run -- hi
+check "effort: max goes as xhigh through the thought_level option" "grep -q '\"value\": \"xhigh\"' '$T/acp.log' && grep -q set_config_option '$T/acp.log'"
+KITH_EFFORT=high KITH_OUTPUT=json run -- hi
+check "effort: an agent with no thought_level option gets a note, the run goes on" "grep -q 'takes no effort per run over ACP' '$T/err' && [ \"\$(field is_error)\" = false ]"
+
+FAKE_ACP_MODE=crash FAKE_ACP_COST=0.25 KITH_OUTPUT=json run -- hi; rc=$?
+check "a crash after 0.25 spent: exit 1, an error that carries the cost, no session" "[ $rc = 1 ] && [ \"\$(field is_error)\" = true ] && [ \"\$(field total_cost_usd)\" = 0.25 ] && [ \"\$(field session_id)\" = null ]"
+FAKE_ACP_MODE=depleted KITH_OUTPUT=json run -- hi
+check "a spent plan: usage_limit with when it renews" "[ \"\$(field is_error)\" = true ] && [ \"\$(field usage_limit)\" = '{\"resets_at\": 1790000000}' ]"
+run -- plain
+check "text mode: the answer alone on stdout" "grep -q '^echo: ' '$T/out' && ! grep -q '{' '$T/out'"
+
+# KITH_RUN_* are the run's own: the engine does not get them.
+printf '#!/bin/sh\nenv > "%s/engine-env"\nexec python3 "%s/fakes/fake-acp-agent"\n' "$T" "$T" > "$T/bin/opencode"
+KITH_OUTPUT=json run -- hi
+check "the engine's environment has no KITH_RUN_*" "[ -s '$T/engine-env' ] && ! grep -q '^KITH_RUN_' '$T/engine-env'"
+printf '#!/bin/sh\nexec python3 "%s/fakes/fake-acp-agent"\n' "$T" > "$T/bin/opencode"
+
+# A TERM to the run stops the engine (positive control: without it the hung engine is still there). Twice: through the script's
+# trap, and with `launch-exec` switched on in a copy of the kernel folder, where the program passes the TERM on itself.
+term_rows() {   # term_rows LABEL KITH_PROGRAM
+  local P=$1 K=$2 run_pid engine_pid
+  rm -f "$T/pid"
+  FAKE_ACP_MODE=hang FAKE_ACP_PIDFILE=$T/pid KITH_OUTPUT=json "$K" echo -- hang >"$T/out" 2>"$T/err" & run_pid=$!
+  for _ in $(seq 1 100); do [ -s "$T/pid" ] && break; sleep 0.1; done
+  engine_pid=$(cat "$T/pid" 2>/dev/null || echo 0)
+  sleep 1
+  check "${P}TERM control: the hung engine is alive while the run waits" "[ '$engine_pid' != 0 ] && kill -0 $engine_pid 2>/dev/null && kill -0 $run_pid 2>/dev/null"
+  kill -TERM "$run_pid" 2>/dev/null
+  for _ in $(seq 1 100); do kill -0 "$engine_pid" 2>/dev/null || break; sleep 0.1; done
+  wait "$run_pid" 2>/dev/null
+  check "${P}TERM: the engine is gone" "! kill -0 $engine_pid 2>/dev/null"
+  [ "$engine_pid" = 0 ] || kill -KILL "$engine_pid" 2>/dev/null || true
+}
+term_rows "" "$KITH"
+cp -R "$KERNEL" "$T/kernel-on"
+printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt"
+term_rows "launch-exec on: " "$T/kernel-on/bin/kith"
+
+# dsh has no ACP path: engine-run exits 78 before it starts anything, and bin/kith runs harness.py.
+printf -- '---\nname: echo\ndescription: test agent, dsh\nharness: dsh\n---\nYou echo.\n' > "$A/agent.md"
+git -C "$A" commit -qam dsh
+DEEPSEEK_API_KEY=x KITH_OUTPUT=json run -- hi
+check "dsh: engine-run says 78 and harness.py runs it" "[ \"\$(field result)\" = dsh-native ] && [ \"\$(field harness)\" = dsh ]"
+check "dsh: nothing was started over ACP" "[ ! -e '$T/acp.log' ]"
+
+[ "$fails" = 0 ] && echo "all engine-run checks passed" || { echo "$fails check(s) failed"; exit 1; }

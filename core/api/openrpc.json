@@ -11298,7 +11298,7 @@
     },
     {
       "name": "claim.attach",
-      "summary": "A scheduled cron run records its own process on the claim the host made for its turn (`hostclaim.claim` kind `scheduleRun`), with a check-and-set: the claim must be `claimed` with no process yet. The claim becomes kind `external`, `running`, with this pid and start stamp, and its turn `running`; the caller then starts the engine, and exits without running when this refuses. Answers `{attached: true}` (`again` for the same process), or `{refused: \"gone\", state}` when the claim was cancelled, ended, requeued or already has a process. Serves only once the claims are switched.",
+      "summary": "A detached run (a scheduled cron run or a wake's) records its own process on the claim the host made for its turn (`hostclaim.claim` kind `scheduleRun` or `wakeRun`), with a check-and-set: the claim must be `claimed` with no process yet. The claim becomes kind `external`, `running`, with this pid and start stamp, and its turn `running`; a claim whose turn belongs to another `conversation` than the one named is refused; the caller then starts the engine, and exits without running when this refuses. Answers `{attached: true}` (`again` for the same process), or `{refused: \"gone\", state}` when the claim was cancelled, ended, requeued or already has a process. Serves only once the claims are switched.",
       "params": [
         {
           "name": "claimId",
@@ -11319,6 +11319,14 @@
         {
           "name": "started",
           "summary": "That process's start stamp.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "The conversation the run is for: a claim whose turn is another's is refused.",
           "required": false,
           "schema": {
             "type": "string"
@@ -11348,6 +11356,9 @@
             "kind": "caller"
           },
           "started": {
+            "kind": "caller"
+          },
+          "conversation": {
             "kind": "caller"
           }
         },
@@ -12811,6 +12822,69 @@
       }
     },
     {
+      "name": "wake.tick",
+      "summary": "The host's clock for the wake queue (every few seconds, and after a kick): fires the waiters whose thing happened, settles each finished run against its turn (answered, withdrawn or given back), unparks the wake turns of conversations nothing holds, and takes what is due (both doors) as one run and one turn each. `gh`, process probes and transcript reads run with no core lock held. Answers `fired`, `settled`, `unparked` and `taken` (the runs' turns, `queued` or `parked`).",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {},
+        "hidden": true
+      }
+    },
+    {
+      "name": "wake.released",
+      "summary": "A terminal let go of a conversation: its parked wake turns go back to queued when nothing else holds it. A lost call is caught by the next `wake.tick`. Answers `unparked`, the turns woken.",
+      "params": [
+        {
+          "name": "session",
+          "summary": "The conversation that was released.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "released"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "session": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
       "name": "ask.open",
       "summary": "Opens an ask: the hop and cost-cap check and the insert of its record in ONE transaction, so no second ask passes the cap between them. Answers `{decision, record}` (the chain, hop and cross hops the record got). A cap that refuses it is an error with the words `kith ask` prints. With `--check-only` nothing is written (`record` is null).",
       "params": [
@@ -14076,7 +14150,7 @@
     },
     {
       "name": "hostclaim.claim",
-      "summary": "A terminal or `external` writer claim (step 1), or a `scheduleRun`: the claim of a pulled schedule turn for a run that has no process yet (`turn` required; the run attaches itself with `claim.attach`). Refused when a writer holds the conversation; `paused` when the turn's job is paused (the turn is cancelled). An `external` claim names its process. Answers `{claimId, generation}`.",
+      "summary": "A terminal or `external` writer claim (step 1), or a `scheduleRun` / `wakeRun`: the claim of a pulled schedule or wake turn for a run that has no process yet (`turn` required; the run attaches itself with `claim.attach`). Refused when a writer holds the conversation; `paused` when the turn's job is paused (the turn is cancelled). An `external` claim names its process. Answers `{claimId, generation}`.",
       "params": [
         {
           "name": "conversation",
@@ -14088,7 +14162,7 @@
         },
         {
           "name": "kind",
-          "summary": "terminal, external or scheduleRun.",
+          "summary": "terminal, external, scheduleRun or wakeRun.",
           "required": true,
           "schema": {
             "type": "string"
@@ -14096,7 +14170,7 @@
         },
         {
           "name": "turn",
-          "summary": "The schedule turn a `scheduleRun` claim runs.",
+          "summary": "The schedule or wake turn a `scheduleRun` / `wakeRun` claim runs.",
           "required": false,
           "schema": {
             "type": "integer"
@@ -15075,8 +15149,20 @@
     },
     {
       "name": "hostclaim.queued",
-      "summary": "The turns the core queued that no host began (a schedule's fire: `enq_key` NULL, source `schedule`) and that wait (queued or parked): `{turns: [{turn, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed.",
-      "params": [],
+      "summary": "The turns the core queued that no host began (a schedule's fire or a wake's take: `enq_key` NULL, source `schedule` or `wake`) and that wait (queued or parked): `{turns: [{turn, source, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. A `wake` turn also carries `door` (`run` or `host`), `requestIds` (the requests it carries, in order) and `note`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed. `sources` (default `[\"schedule\"]`) picks which detached sources are listed: a host that runs only cron jobs never sees a wake's turn.",
+      "params": [
+        {
+          "name": "sources",
+          "summary": "The turn sources to list: schedule, wake (default schedule).",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
       "result": {
         "name": "result",
         "schema": {}
@@ -15091,7 +15177,11 @@
         "aliases": [],
         "formats": [],
         "requires": [],
-        "args": {},
+        "args": {
+          "sources": {
+            "kind": "caller"
+          }
+        },
         "hidden": true
       }
     },

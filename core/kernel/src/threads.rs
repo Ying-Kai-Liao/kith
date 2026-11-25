@@ -34,6 +34,8 @@ mod tests;
 pub mod writer;
 #[cfg(test)]
 mod writer_tests;
+#[cfg(test)]
+mod writer_turn_tests;
 
 use std::fs::File;
 use std::io::Write as _;

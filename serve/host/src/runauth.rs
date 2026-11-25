@@ -37,6 +37,19 @@
 //! process's environment (`ps eww` shows a Python or Node child's), so a token alone could be lifted from a
 //! neighbouring run. The peer pid of the connection must descend from the pid the run's process was started as.
 
+#[cfg(unix)]
+use kith_kernel::permit;
+/// kith-kernel's `permit` is Unix-only until windows-owner W5b. Without it a yes to a blocked call cannot be remembered
+/// for the retry (no once-key), which is the answer `host_once_key` already gives for a call it cannot key.
+#[cfg(not(unix))]
+mod permit {
+    pub const ONCE_KEEP_S: f64 = 24.0 * 3600.0;
+    pub const SHORT_ONCE_S: f64 = 600.0;
+    pub const NO_VERDICT: [&str; 2] = ["Auto mode could not evaluate", "Classifier unavailable"];
+    pub fn host_once_key(_tool: &str, _input: &serde_json::Value) -> Option<String> {
+        None
+    }
+}
 use crate::LockExt as _;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -166,11 +179,11 @@ impl TokenTable {
     }
 
     /// Records the owner's yes to a blocked call of run `run_id`, for the retry of exactly that call (`key` is
-    /// `kith_kernel::permit::host_once_key`). A yes to a call the classifier gave no verdict on is only good for the next
+    /// `permit::host_once_key`). A yes to a call the classifier gave no verdict on is only good for the next
     /// few minutes: Claude Code never retries those. Yeses past their end are dropped on the way.
     pub fn keep_once(&self, run_id: &str, key: String, short: bool) {
         let now = Instant::now();
-        let keep = if short { kith_kernel::permit::SHORT_ONCE_S } else { kith_kernel::permit::ONCE_KEEP_S };
+        let keep = if short { permit::SHORT_ONCE_S } else { permit::ONCE_KEEP_S };
         let mut onces = self.onces.locked();
         onces.retain(|_, end| *end > now);
         onces.insert((run_id.to_owned(), key), now + Duration::from_secs_f64(keep));
@@ -554,7 +567,7 @@ pub async fn grant_for_env_async(
 /// ~/.kith on this Mac's own layout, ~/.config/kith under the old link layout. Read in process by the kernel's rules
 /// (`kith-kernel` paths, what `kith kernel paths` prints).
 pub fn socket_path() -> PathBuf {
-    crate::kernel::machine_dir(&dirs::home_dir().unwrap_or_default()).join("run").join("host.sock")
+    crate::kernel::machine_dir(&kith_kernel::paths::known_home().unwrap_or_default()).join("run").join("host.sock")
 }
 
 // ---- requests
@@ -735,7 +748,7 @@ pub fn authorize_with(
             if tool.len() > MAX_ARG_LEN || !input.is_object() {
                 return Err(Response::refused("bad request"));
             }
-            let key = kith_kernel::permit::host_once_key(tool, input);
+            let key = permit::host_once_key(tool, input);
             Ok(Authorized { identity, ask: None, access: Some(AccessCall::ConsumeOnce(key)) })
         }
         "cardsHistory" => {
@@ -773,9 +786,9 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
                 };
                 if d.allow
                     && let Some(reason) = &ask.auto_denied
-                    && let Some(key) = kith_kernel::permit::host_once_key(&ask.tool, &ask.input)
+                    && let Some(key) = permit::host_once_key(&ask.tool, &ask.input)
                 {
-                    let short = kith_kernel::permit::NO_VERDICT.iter().any(|p| reason.starts_with(p));
+                    let short = permit::NO_VERDICT.iter().any(|p| reason.starts_with(p));
                     table.keep_once(&identity.run_id, key, short);
                 }
                 // The card had a live window, long enough for a revoke to land in it: a guest's yes counts only if the core
@@ -866,6 +879,7 @@ pub(crate) async fn guest_identity(
 
 // ---- the socket
 
+#[cfg(unix)]
 async fn serve_one(table: Arc<TokenTable>, stream: tokio::net::UnixStream) {
     let peer = PeerInfo { pid: stream.peer_cred().ok().and_then(|c| c.pid()).and_then(|p| u32::try_from(p).ok()) };
     let (read, mut write) = stream.into_split();
@@ -889,6 +903,7 @@ async fn serve_one(table: Arc<TokenTable>, stream: tokio::net::UnixStream) {
 
 /// Binds the socket (`dir` 0700, the socket 0600, a stale file from an earlier host removed) and answers requests in
 /// the background. A failure leaves the host running and runs without tokens (see [`grant_for`]).
+#[cfg(unix)]
 pub fn start() {
     let path = socket_path();
     match bind(&path) {
@@ -916,6 +931,7 @@ pub fn start() {
     }
 }
 
+#[cfg(unix)]
 fn bind(path: &Path) -> Result<tokio::net::UnixListener> {
     use std::os::unix::fs::PermissionsExt as _;
     let dir = path.parent().context("socket path has no folder")?;
@@ -926,6 +942,13 @@ fn bind(path: &Path) -> Result<tokio::net::UnixListener> {
     let listener = tokio::net::UnixListener::bind(path).with_context(|| format!("binding {}", path.display()))?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     Ok(listener)
+}
+
+/// host.sock is a Unix socket, and guests are refused on a Windows host (windows-owner WI6), so there is no run socket
+/// to bind: the host says so by name and runs without tokens, which is what [`grant_for`] already does with no socket.
+#[cfg(not(unix))]
+pub fn start() {
+    tracing::warn!("run socket not started: not on Windows (guests are refused there; windows-owner WI6)");
 }
 
 // ---- process ancestry
@@ -1117,7 +1140,7 @@ mod tests {
             t.insert_ask(a.clone(), 5, Duration::from_secs(60)).unwrap(),
             t.insert_ask(b, 5, Duration::from_secs(60)).unwrap(),
         );
-        let key = |c: &str| kith_kernel::permit::host_once_key("Bash", &json!({"command": c})).unwrap();
+        let key = |c: &str| permit::host_once_key("Bash", &json!({"command": c})).unwrap();
         // no yes yet: a hint file or a guess gets nothing
         assert_eq!(allowed(&handle_request(&t, &consume_line(&ta, "rm x"), peer(5)).await), Some(false));
         t.keep_once(&a.run_id, key("rm x"), false);
@@ -1140,11 +1163,7 @@ mod tests {
         assert_eq!(handle_request(&t, &line, peer(5)).await, Response::refused("not authorized"));
         let owner = ask_identity("echo", "s1", None);
         let token = t.insert_ask(owner.clone(), 5, Duration::from_secs(60)).unwrap();
-        t.keep_once(
-            &owner.run_id,
-            kith_kernel::permit::host_once_key("Bash", &json!({"command": "ls"})).unwrap(),
-            false,
-        );
+        t.keep_once(&owner.run_id, permit::host_once_key("Bash", &json!({"command": "ls"})).unwrap(), false);
         // a neighbour process holding the token gets nothing, and does not use the yes up
         assert!(authorize(&t, &consume_line(&token, "ls"), peer(6)).is_err());
         assert_eq!(allowed(&handle_request(&t, &consume_line(&token, "ls"), peer(5)).await), Some(true));
@@ -1367,6 +1386,8 @@ mod tests {
         assert!(!guest.iter().any(|(k, _)| k == TOKEN_ENV));
     }
 
+    // host.sock is a Unix socket; Windows has no run socket (WI6).
+    #[cfg(unix)]
     #[tokio::test]
     async fn socket_round_trip_refuses_a_forged_token() {
         let dir = std::env::temp_dir().join(format!("kr-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));

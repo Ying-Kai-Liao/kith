@@ -20,8 +20,8 @@ use serde_json::{Value, json};
 
 use crate::conversations::basis::{self, Basis, Chain, Level};
 use crate::conversations::claims::{self, Kind, NewClaim, NewTurn, Redeemed, Reported};
-use crate::conversations::sched_run;
 use crate::conversations::warm::{self, WarmProc};
+use crate::conversations::{detached, sched_run};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -229,7 +229,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
             }))
         }
         "hostclaim.epoch" => Ok(json!({ "epoch": claims::revoke_epoch(core, person(p)?)? })),
-        "hostclaim.claim" if word(p, "kind") == Some("scheduleRun") => {
+        "hostclaim.claim" if matches!(word(p, "kind"), Some("scheduleRun" | "wakeRun")) => {
             // A cron job's turn run by `kith-sched run-turn` (`conversations::sched_run`): the claim has no process until the run
             // attaches itself (`claim.attach`).
             match sched_run::claim_run(
@@ -386,7 +386,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             Ok(json!({ "turns": turns }))
         }
-        "hostclaim.queued" => queued(core),
+        "hostclaim.queued" => queued(core, &sources_of(p)?),
         "hostclaim.park" => match claims::park(core, int(p, "turn")?, need(p, "reason")?, now) {
             Ok(parked) => Ok(json!({ "parked": parked })),
             Err(e) => refusal(e),
@@ -408,26 +408,53 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
     }
 }
 
-/// `hostclaim.queued`: the turns the core queued that no host began (a schedule's fire), for the host's runner (design
+/// The `sources` a `hostclaim.queued` asks for: default `schedule` alone, so a host that only runs cron jobs never sees a
+/// wake's turn. Each must be a detached source.
+fn sources_of(p: &Value) -> Result<Vec<&str>> {
+    let Some(list) = p.get("sources") else {
+        return Ok(vec!["schedule"]);
+    };
+    let list = list.as_array().ok_or_else(|| bad("sources is a list"))?;
+    list.iter()
+        .map(|s| {
+            s.as_str()
+                .filter(|s| detached::is_source(s))
+                .ok_or_else(|| bad("sources are detached run sources (schedule, wake)"))
+        })
+        .collect()
+}
+
+/// `hostclaim.queued`: the turns the core queued that no host began (a schedule's fire, a wake's take), for the host's runner (design
 /// 2026-11-16-core-queued-runner, `HostRuns.tla` `MayPull`). Only unkeyed turns: a keyed one belongs to the host run that
 /// enqueued it, and the strays sweep cancels it when that run is gone. `redeemedBefore` is any claim of the turn having
 /// been redeemed (`running_at`): its prompt may have reached an engine, so the host cancels it instead of running it again
-/// (`SkipRedeemed`). Every schedule turn in this core.db was fired on this Mac, for an agent the index lists here.
-fn queued(core: &Core) -> Result<Value> {
+/// (`SkipRedeemed`). Every schedule turn in this core.db was fired on this Mac, for an agent the index lists here. Each item
+/// carries its `source`; a `wake` turn also answers its `door` (`run`: the kernel resumes it; `host`: the host takes it), the
+/// ids of the requests it carries (`requestIds`, in the order they came in) and the `note` it was made from (its prompt).
+fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
     let owner = owner_id(core);
-    let mut st = core.conn().prepare(
+    let mut st = core.conn().prepare(&format!(
         "SELECT t.id, t.conversation, c.agent, c.engine, t.person, t.prompt, t.deadline, t.parked_reason,
                 EXISTS (SELECT 1 FROM claims k WHERE k.turn = t.id AND k.running_at IS NOT NULL),
                 (SELECT f.job FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1),
-                (SELECT f.settings FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1)
+                (SELECT f.settings FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1),
+                t.source,
+                (SELECT s.door FROM wake_turns w JOIN wake_sessions s ON s.session = w.session WHERE w.turn_id = t.id),
+                (SELECT w.run FROM wake_turns w WHERE w.turn_id = t.id)
          FROM turns t JOIN conversations c ON c.id = t.conversation
-         WHERE t.enq_key IS NULL AND t.source = 'schedule' AND t.state IN ('queued', 'parked')
+         WHERE t.enq_key IS NULL AND t.source IN {} AND t.state IN ('queued', 'parked')
          ORDER BY t.id",
-    )?;
+        detached::quoted(sources)
+    ))?;
+    let mut ids = core
+        .conn()
+        .prepare("SELECT id FROM wake_items WHERE run = ?1 ORDER BY seq")?;
     let turns = st
         .query_map([], |r| {
             let person: String = r.get(4)?;
-            Ok(json!({
+            let source: String = r.get(11)?;
+            let wake = source == "wake";
+            let mut item = json!({
                 "turn": r.get::<_, i64>(0)?,
                 "conversation": r.get::<_, String>(1)?,
                 "agent": r.get::<_, String>(2)?,
@@ -439,13 +466,28 @@ fn queued(core: &Core) -> Result<Value> {
                     .get::<_, Option<String>>(10)?
                     .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
                 // null when the owner can't be read: the host says so instead of letting every run expire quietly.
-                "owner": owner.as_deref().map(|o| o == person),
+                // A wake's turn with no person is made for the word `owner` (`wake::turns::start_in`).
+                "owner": owner.as_deref().map(|o| o == person || (wake && person == "owner")),
                 "person": person,
                 "prompt": r.get::<_, String>(5)?,
                 "deadline": r.get::<_, Option<i64>>(6)?,
                 "parkedReason": r.get::<_, Option<String>>(7)?,
                 "redeemedBefore": r.get::<_, bool>(8)?,
-            }))
+                "source": source,
+            });
+            if wake {
+                let run: Option<String> = r.get(13)?;
+                let request_ids = match run {
+                    Some(run) => ids
+                        .query_map([run], |i| i.get::<_, String>(0))?
+                        .collect::<std::result::Result<Vec<_>, _>>()?,
+                    None => Vec::new(),
+                };
+                item["door"] = json!(r.get::<_, Option<String>>(12)?);
+                item["requestIds"] = json!(request_ids);
+                item["note"] = item["prompt"].clone();
+            }
+            Ok(item)
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(json!({ "turns": turns }))
