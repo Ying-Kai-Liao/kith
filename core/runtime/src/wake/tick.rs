@@ -85,7 +85,7 @@ fn phase_one(core: &mut Core, params: &Value) -> Result<Seen> {
     let tx = core.conn().unchecked_transaction()?;
     let state = load(&tx)?;
     let (linked, legacy) = settle::runs_in(&tx, &state)?;
-    let asks = asks::seen_in(&tx)?;
+    let asks = asks::seen_in(&tx, &folders.machine)?;
     Ok(Seen {
         state,
         folders,

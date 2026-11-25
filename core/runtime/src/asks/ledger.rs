@@ -235,7 +235,13 @@ pub(crate) fn settle_ask_in(
         Ended::Answered(c) => c.cost,
         Ended::Lost => 0.0,
     };
-    let fresh = spent > 0.0 && rows::count_cost_in(tx, id, turn.unwrap_or(0))?;
+    // An answer books its turn even at no cost, so the tick does not look for it again.
+    // A report that names no turn, of a `bg` ask that has one, is not any turn's: the tick books that turn's cost from its out file.
+    let nameless_bg = turn.is_none() && a.turn.is_some() && a.mode.as_deref() != Some("fg");
+    let fresh = matches!(ended, Ended::Answered(_))
+        && !nameless_bg
+        && rows::count_cost_in(tx, id, turn.unwrap_or(0))?
+        && spent > 0.0;
     // Every settle goes by the ask's current turn: a run of an earlier turn (before a card's resume) settles nothing.
     // No turn named: the run of an ask with no turn (a `fg` CLI's own first run), never the current turn of a resumed one.
     let current = match turn {
@@ -323,7 +329,7 @@ pub(crate) struct Finish<'a> {
     /// The callee's answer as the caller has it already (a `fg` CLI).
     pub callee: Option<Callee>,
     pub session: Option<&'a str>,
-    /// The turn whose run ended; the ask is settled only if it is the ask's current turn (default: the current one).
+    /// The turn whose run ended; the ask is settled only if it is the ask's current turn. Omitted: the run of an ask with no turn (a fg CLI's own first run). The host's report always names its turn.
     pub turn: Option<i64>,
 }
 

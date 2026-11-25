@@ -142,7 +142,7 @@ pub(super) const ROWS: &[Method] = &[
                 "turn",
                 "int",
                 &["--turn"],
-                "The turn whose run ended: the ask is settled only if it is the ask's current turn (default: the current one).",
+                "The turn whose run ended: the ask is settled only if it is the ask's current turn. Omitted: the run of an ask with no turn (a fg CLI's own first run). The host's report always names its turn.",
             ),
             KERNEL,
             HOME,

@@ -3,6 +3,8 @@
 //! - an `open` `bg` ask whose turn has ended (a host restart lost the waiter), with what its out file says;
 //! - an `open` `fg` ask whose recorded process is gone (a caller killed with no handler: `kill -9`, a closed terminal, a
 //!   Windows `TerminateProcess`), `lost`;
+//! - the cost of a finished run whose report was lost is booked (cost only: no settle, no row, no wake, so a parked ask
+//!   stays parked), once per turn through `ask_costs`, as `ask.finish` books it;
 //! - settled asks and their rows older than 31 days are forgotten.
 //!
 //! Three steps, in the tick's own shape (`wake/tick.rs`): [`seen_in`] under the lock in phase 1, [`look`] with no lock held
@@ -12,7 +14,7 @@
 //! it still has the process phase 1 saw.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
@@ -38,11 +40,22 @@ pub(crate) struct Fg {
     start: Option<String>,
 }
 
+/// A run whose cost may not be booked yet: key `key` of ask `ask` (0: the run of an ask with no turn, a `fg` CLI's own, which
+/// is over once its process is gone), and the out files its answer may be in.
+pub(crate) struct CostSeen {
+    ask: String,
+    key: i64,
+    paths: Vec<PathBuf>,
+    /// The process that must be gone first (key 0).
+    cli: Option<(i64, Option<String>)>,
+}
+
 /// What phase 1 read.
 #[derive(Default)]
 pub(crate) struct Seen {
     bg: Vec<Ended1>,
     fg: Vec<Fg>,
+    costs: Vec<CostSeen>,
 }
 
 /// What the world said, with no lock held.
@@ -52,10 +65,13 @@ pub(crate) struct Looked {
     answers: BTreeMap<String, Option<Callee>>,
     /// The `fg` asks whose process is gone.
     gone: BTreeSet<String>,
+    /// The cost each looked-at run's out file gave, by (ask, key).
+    costs: BTreeMap<(String, i64), f64>,
 }
 
 /// Phase 1: the asks whose run may have ended.
-pub(crate) fn seen_in(tx: &Connection) -> Result<Seen> {
+pub(crate) fn seen_in(tx: &Connection, machine: &Path) -> Result<Seen> {
+    let dir = machine.join("core").join("asks");
     let mut st = tx.prepare(&format!(
         "SELECT a.id, a.turn, a.out_path FROM asks a JOIN turns t ON t.id = a.turn
          WHERE a.state = 'open' AND a.ended_ms IS NULL AND a.parked_card IS NULL AND t.state IN {FINAL} ORDER BY a.id"
@@ -82,7 +98,56 @@ pub(crate) fn seen_in(tx: &Connection) -> Result<Seen> {
             })
         })?
         .collect::<std::result::Result<_, _>>()?;
-    Ok(Seen { bg, fg })
+    // Runs whose cost no report booked: a `fg` CLI's own run (key 0), and each finished turn of the ask's own conversation.
+    let mut costs = Vec::new();
+    let mut st = tx.prepare(
+        "SELECT id, cli_pid, cli_start FROM asks
+         WHERE mode = 'fg' AND cli_pid IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM ask_costs c WHERE c.ask = asks.id AND c.turn = 0) ORDER BY id",
+    )?;
+    for r in st.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, Option<String>>(2)?,
+        ))
+    })? {
+        let (id, pid, start) = r?;
+        costs.push(CostSeen {
+            paths: vec![dir.join(format!("{id}.out"))],
+            ask: id,
+            key: 0,
+            cli: Some((pid, start)),
+        });
+    }
+    let mut st = tx.prepare(&format!(
+        "SELECT a.id, t.id,
+                t.id = (SELECT MIN(x.id) FROM turns x WHERE x.conversation = t.conversation AND x.source = 'ask')
+         FROM asks a JOIN turns t ON t.conversation = 'ask:' || a.id AND t.source = 'ask'
+         WHERE t.state IN {FINAL}
+           AND NOT EXISTS (SELECT 1 FROM ask_costs c WHERE c.ask = a.id AND c.turn = t.id) ORDER BY a.id, t.id"
+    ))?;
+    for r in st.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, bool>(2)?,
+        ))
+    })? {
+        let (id, turn, first) = r?;
+        // The first turn's file is `<id>.out`; a resume's is `<id>-<turn>.out`.
+        let mut paths = vec![dir.join(format!("{id}-{turn}.out"))];
+        if first {
+            paths.push(dir.join(format!("{id}.out")));
+        }
+        costs.push(CostSeen {
+            ask: id,
+            key: turn,
+            paths,
+            cli: None,
+        });
+    }
+    Ok(Seen { bg, fg, costs })
 }
 
 /// Between the phases, with no lock held: the out files and the process table.
@@ -99,6 +164,21 @@ pub(crate) fn look(seen: &Seen, out: &dyn Outside) -> Looked {
     for f in &seen.fg {
         if !out.alive(f.pid, f.start.as_deref()) {
             looked.gone.insert(f.id.clone());
+        }
+    }
+    for c in &seen.costs {
+        if c.cli
+            .as_ref()
+            .is_some_and(|(pid, start)| out.alive(*pid, start.as_deref()))
+        {
+            continue;
+        }
+        let said = c
+            .paths
+            .iter()
+            .find_map(|p| out.read_text(p).and_then(|t| ledger::parse_callee(&t)));
+        if let Some(callee) = said {
+            looked.costs.insert((c.ask.clone(), c.key), callee.cost);
         }
     }
     looked
@@ -159,6 +239,13 @@ pub(crate) fn settle_in(
             ledger::settle_ask_in(tx, st, machine, &f.id, &Ended::Lost, None, None, true, now)?
         {
             settled.push(f.id.clone());
+        }
+    }
+    // A finished run whose report was lost still owes the chain its cost: booked once per turn, and nothing else (a parked ask
+    // stays parked, no row, no wake).
+    for ((ask, key), cost) in &looked.costs {
+        if rows::count_cost_in(tx, ask, *key)? && *cost > 0.0 {
+            super::settle_in(tx, machine, ask, *cost, None, now)?;
         }
     }
     rows::forget_old_in(tx, now)?;

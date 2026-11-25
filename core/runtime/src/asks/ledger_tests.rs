@@ -108,7 +108,7 @@ struct Rig {
     d: Daemon,
     f: Arc<Fake>,
     state: PathBuf,
-    _t: tempfile::TempDir,
+    tmp: tempfile::TempDir,
 }
 
 impl Rig {
@@ -145,7 +145,12 @@ impl Rig {
         };
         d.shared().set_wake_world(world);
         let state = t.path().join("state");
-        Self { d, f, state, _t: t }
+        Self {
+            d,
+            f,
+            state,
+            tmp: t,
+        }
     }
 
     fn call(&self, who: Principal, method: &str, params: &Value) -> Result<Value, Error> {
@@ -988,4 +993,91 @@ fn an_unpark_with_no_note_of_an_open_ask_is_refused() {
     // An ended ask only clears the card.
     r.owner("ask.end", &json!({"roots": ["a1"]}));
     r.owner("ask.unpark", &json!({"id": "a1"}));
+}
+
+// ---- a lost report's cost is booked by the tick (cost only) ----
+
+#[test]
+fn the_tick_books_the_cost_of_a_parked_fg_run_whose_report_was_lost_once() {
+    let r = Rig::new();
+    // The CLI's own run: it parked, its process died with no report, and its answer file holds its words and cost.
+    r.open(
+        "f1",
+        "fg",
+        &json!({"cliPid": 4242, "cliStart": "gone"}),
+        &[],
+    );
+    r.owner("ask.park", &json!({"id": "f1", "card": "c1"}));
+    let dir = r.tmp.path().join("machine/core/asks");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("f1.out"), answer("waiting on a card").to_string()).unwrap();
+    r.tick();
+    assert!((cost_of(&r, "f1") - 0.25).abs() < 1e-9);
+    // Cost only: still open, still parked, no row, no wake.
+    assert_eq!(r.ask_state("f1"), "open");
+    let parked: Option<String> = r.sql("SELECT parked_card FROM asks WHERE id = ?1", "f1");
+    assert_eq!(parked.as_deref(), Some("c1"));
+    assert_eq!(r.rows("f1"), []);
+    assert_eq!(r.wake_state("f1", 1), "unknown");
+    // A second tick books nothing more, and a late report of that run adds nothing.
+    r.tick();
+    assert!((cost_of(&r, "f1") - 0.25).abs() < 1e-9);
+    let late = r.owner(
+        "ask.finish",
+        &json!({"id": "f1", "result": "waiting on a card", "cost": 0.25}),
+    );
+    assert_eq!(late["settled"], json!(false));
+    assert!((cost_of(&r, "f1") - 0.25).abs() < 1e-9);
+}
+
+#[test]
+fn the_tick_books_the_cost_of_a_parked_bg_turn_whose_report_was_lost_once() {
+    let r = Rig::new();
+    let o = r.open_bg("a1");
+    let turn = turn_of(&o);
+    r.owner("ask.park", &json!({"id": "a1", "card": "c1"}));
+    // Its run is still going: nothing to book.
+    let claim = r.start("a1", turn);
+    r.tick();
+    assert!(cost_of(&r, "a1").abs() < 1e-9);
+    // The tick looks in its own machine folder for the first turn's `<id>.out`.
+    let dir = r.tmp.path().join("machine/core/asks");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a1.out"), answer("waiting on a card").to_string()).unwrap();
+    r.report(claim, "done");
+    r.tick();
+    assert!((cost_of(&r, "a1") - 0.25).abs() < 1e-9);
+    assert_eq!(r.ask_state("a1"), "open");
+    assert_eq!(r.rows("a1"), []);
+    r.tick();
+    assert!((cost_of(&r, "a1") - 0.25).abs() < 1e-9);
+    // The late report of that turn adds nothing.
+    let late = r.owner(
+        "ask.finish",
+        &json!({"id": "a1", "turn": turn, "out": answer("waiting on a card").to_string()}),
+    );
+    assert_eq!(late["settled"], json!(false));
+    assert!((cost_of(&r, "a1") - 0.25).abs() < 1e-9);
+}
+
+#[test]
+fn a_host_report_that_names_no_turn_does_not_book_a_cost_the_tick_books_later() {
+    let r = Rig::new();
+    let o = r.open_bg("a1");
+    let turn = turn_of(&o);
+    r.owner("ask.park", &json!({"id": "a1", "card": "c1"}));
+    let claim = r.start("a1", turn);
+    let said = r.owner(
+        "ask.finish",
+        &json!({"id": "a1", "result": "waiting", "cost": 0.25}),
+    );
+    assert_eq!(said["settled"], json!(false));
+    assert!(cost_of(&r, "a1").abs() < 1e-9);
+    let dir = r.tmp.path().join("machine/core/asks");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a1.out"), answer("waiting").to_string()).unwrap();
+    r.report(claim, "done");
+    r.tick();
+    r.tick();
+    assert!((cost_of(&r, "a1") - 0.25).abs() < 1e-9);
 }
