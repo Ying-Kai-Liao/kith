@@ -3,7 +3,7 @@ name = "kith-winsys"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Every unsafe Win32 call the core and kernel need: owner-only access lists, Credential Manager, the process tree, a named stop event"
+description = "Every unsafe Win32 call the core and kernel need: owner-only access lists, Credential Manager, the process tree, a named stop event, named job objects"
 license = "Apache-2.0"
 publish = false
 # An out-of-tree member of the host workspace (shares its Cargo.lock and target/), like kith-procstart.
@@ -24,6 +24,7 @@ windows-sys = { version = "0.61", features = [
   "Win32_Security_Credentials",
   "Win32_Storage_FileSystem",
   "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
   "Win32_System_Threading",
 ] }
 

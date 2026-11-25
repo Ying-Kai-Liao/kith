@@ -100,7 +100,8 @@ pub fn entry_in(dir: &Path) -> Option<PathBuf> {
 }
 
 fn is_kernel(dir: &Path) -> bool {
-    entry_in(dir).is_some()
+    // The Windows kernel folder is data only (no `bin/`, no `lib/`: nothing in it is a script); its `VERSION` says it is one.
+    entry_in(dir).is_some() || (cfg!(windows) && dir.join("VERSION").is_file())
 }
 
 /// `KITH_<name>`, else the old `HQ_<name>`: how the host reads every setting the kernel names both ways. (`HQ_BIN` is

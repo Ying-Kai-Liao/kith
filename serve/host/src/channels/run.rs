@@ -44,6 +44,9 @@ pub(crate) fn inherited(name: &str) -> bool {
     // No bot tokens or keys, and this is no agent's helper.
     let kith =
         ["KITH_HOME", "KITH_STATE", "KITH_MACHINE", "KITH_MODEL", "KITH_KERNEL_BIN", "KITH_KERNEL"].contains(&name);
+    // Windows: the profile, the system folder, the shell and the extensions a program is found by (a process without
+    // `SystemRoot` cannot even load its sockets), by the names Windows keeps them under.
+    let basic = basic || (cfg!(windows) && kith_kernel::launch::winenv::windows_basics(name));
     let hq = name.starts_with("HQ_")
         && !name.starts_with("HQ_DISCORD_")
         && !["HQ_AGENT", "HQ_PERSON", "HQ_RESUME", "HQ_BRIDGE_OUTBOX"].contains(&name);
@@ -392,6 +395,15 @@ impl Core {
         // The CLI may have been removed or replaced by one that is too old since the channels started.
         if let Some(why) = crate::agent::hq::refusal() {
             self.say(ad, conv, agent, &format!("⚠️ {agent} didn't start: {why}"), None).await;
+            return Ok(Attempt::NotStarted);
+        }
+        // The kernel's one-shot takes the session's claim in process, which Windows has not got yet (W12: claims, held terminals
+        // and host turns). It is said, not skipped: the person reads why nothing came back.
+        if cfg!(windows) {
+            let text = format!(
+                "⚠️ {agent} didn't start: runs from a chat are not on Windows yet (they wait the Windows claims package, W12)"
+            );
+            self.say(ad, conv, agent, &text, None).await;
             return Ok(Attempt::NotStarted);
         }
         let mut cmd = tokio::process::Command::new(&self.paths.hq_bin);

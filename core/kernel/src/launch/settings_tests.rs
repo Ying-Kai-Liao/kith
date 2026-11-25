@@ -147,6 +147,7 @@ impl Tree {
             ctmp: "",
             claude_version,
             guest_domains: Ok(&[]),
+            windows: false,
             env: &env,
         };
         settings::build(&input)
@@ -355,6 +356,7 @@ fn guest_without_a_readfence_program_does_not_run() {
         ctmp: "",
         claude_version: Some("2.1.309"),
         guest_domains: Ok(&[]),
+        windows: false,
         env: &env,
     })
     .err()
@@ -403,6 +405,7 @@ fn guest_work_dir_is_never_the_home_folder() {
         ctmp: "",
         claude_version: Some("2.1.309"),
         guest_domains: Ok(&[]),
+        windows: false,
         env: &env,
     })
     .unwrap();
@@ -450,6 +453,7 @@ fn guest_without_the_memory_check_does_not_run() {
         ctmp: "",
         claude_version: Some("2.1.309"),
         guest_domains: Ok(&[]),
+        windows: false,
         env: &env,
     })
     .err()

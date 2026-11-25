@@ -170,6 +170,9 @@ pub struct Input<'a> {
     /// The hosts every guest of this agent reaches without a card (`kith-auth agent-access AGENT --json`), or why they could
     /// not be read: the run goes on without them.
     pub guest_domains: Result<&'a [String], &'a str>,
+    /// The run is on Windows: file rules are spelled for its paths and Claude Code's PowerShell tool is denied (see
+    /// [`windows_rules`]). The paths in the other inputs are then Windows paths.
+    pub windows: bool,
     pub env: &'a dyn Fn(&str) -> Option<String>,
 }
 
@@ -208,7 +211,11 @@ impl Folders {
     pub fn new(p: &Paths, src_pkg: &Path, agent: &str, member: &Member) -> Self {
         let state = p.state.to_string_lossy();
         let sp = src_pkg.to_string_lossy();
-        let home = match sp.strip_suffix("/role") {
+        // The package folder is `<home>/role`; on Windows a path is spelled with backslashes, so that is `<home>\role` too.
+        let home = match sp
+            .strip_suffix("/role")
+            .or_else(|| sp.strip_suffix("\\role").filter(|_| cfg!(windows)))
+        {
             Some(h) => h.to_owned(),
             None => format!("{state}/agents/{agent}"),
         };
@@ -1065,6 +1072,9 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         )?;
     }
 
+    if i.windows {
+        windows_rules(sm)?;
+    }
     let launch_mode = if perm.is_empty() {
         st.get("permissions")
             .and_then(|x| x.get("defaultMode"))
@@ -1083,6 +1093,64 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         cwd,
         warnings,
     })
+}
+
+/// The tools whose rules name a file.
+const FILE_TOOLS: [&str; 5] = ["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+/// The spellings of a file rule for a path on a drive, or none for any other rule. Claude Code on Windows matches a path in the
+/// form Git Bash gives it (`C:\Users\k` is `/c/Users/k`, so the rule is `//c/Users/k`), and the rules here are built with the
+/// path as the OS spells it after one `/` (`/C:\Users\k/**`: a backslash would be an escape in the pattern). A rule is a deny,
+/// so both spellings are kept: the one that is not matched costs nothing.
+pub(super) fn drive_spellings(rule: &str) -> Option<[String; 2]> {
+    let (tool, rest) = rule.split_once('(')?;
+    if !FILE_TOOLS.contains(&tool) {
+        return None;
+    }
+    let path = rest.strip_suffix(')')?.strip_prefix('/')?;
+    let mut chars = path.chars();
+    let drive = chars.next().filter(char::is_ascii_alphabetic)?;
+    if chars.next()? != ':' {
+        return None;
+    }
+    let tail = path[2..].replace('\\', "/");
+    if !(tail.is_empty() || tail.starts_with('/')) {
+        return None;
+    }
+    Some([
+        format!("{tool}(//{}{tail})", drive.to_ascii_lowercase()),
+        format!("{tool}(/{}:{tail})", drive.to_ascii_uppercase()),
+    ])
+}
+
+/// What a Windows run's settings differ in from the Mac's (WI7), and nothing else: each file rule of the permission lists on a
+/// drive gets the Git Bash spelling and the drive spelling (see [`drive_spellings`]) in the place of the one the OS gave, and
+/// Claude Code's PowerShell tool is denied (the owner's Bash is Git Bash, Kai 2026-11-25), so it is not there even when a later
+/// version turns it on by default (`docs/windows-facts.md` F6, F7).
+pub(super) fn windows_rules(sm: &mut Map<String, Value>) -> R<()> {
+    let perms = obj(sm, "permissions")?;
+    for key in ["deny", "allow", "ask"] {
+        let Some(Value::Array(rules)) = perms.get_mut(key) else {
+            continue;
+        };
+        let mut out: Vec<Value> = Vec::with_capacity(rules.len());
+        for rule in std::mem::take(rules) {
+            let spelled = rule.as_str().and_then(drive_spellings);
+            match spelled {
+                Some(both) => {
+                    for r in both {
+                        if !has(&out, &r) {
+                            out.push(Value::String(r));
+                        }
+                    }
+                }
+                None => out.push(rule),
+            }
+        }
+        *rules = out;
+    }
+    extend_new(list(perms, "deny")?, ["PowerShell".to_owned()]);
+    Ok(())
 }
 
 /// The rules the settings file gets with the placeholders filled (`fill < "$pkg/settings.json"`).
