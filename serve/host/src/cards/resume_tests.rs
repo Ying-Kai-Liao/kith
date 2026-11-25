@@ -1484,3 +1484,41 @@ fn an_owner_app_chat_runs_card_has_no_door() {
     c.session = "run:o:acp:chat1:thr1".into();
     assert_eq!(door_of(&c), None);
 }
+
+/// The switched queue cannot be read (its core is not known or not up): a tombstone is the switch, and no core answers.
+fn queue_unreadable(r: &Rig) {
+    let dir = state(r).join("sessions/queue");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".tombstone"), "").unwrap();
+}
+
+#[tokio::test]
+async fn a_queue_that_cannot_be_read_ends_no_card_and_counts_no_miss() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let card = bot_card_approved(&r, &chat, "");
+    assert!(r.hub.store.card_resume_claim(&card.id, now_ms()).unwrap());
+    queue_unreadable(&r);
+    // Past the deadline, three passes: an id the queue could not be asked about is not an id it forgot.
+    for _ in 0..3 {
+        resume::settle_queue_at(&r.hub, now_ms() + 120_000).await;
+    }
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Approved);
+}
+
+#[tokio::test]
+async fn a_restart_with_the_queue_unreadable_keeps_every_claim() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let card = bot_card_approved(&r, &chat, "");
+    assert!(r.hub.store.card_resume_claim(&card.id, now_ms()).unwrap());
+    queue_unreadable(&r);
+    let queued = resume::queued_cards(&r.hub);
+    assert_eq!(queued, vec![card.id.clone()]);
+    r.hub.store.cards_restart_keeping(now_ms(), &queued).unwrap();
+    assert!(r.hub.store.card(&card.id).unwrap().resumed_at.is_some(), "the claim stays");
+}

@@ -48,6 +48,10 @@ one wake request (WaiterResult) and is gone. A CI wake's id names the PR's head 
 session once. Waiters come from the owner's terminal and one-shot runs for now: a host chat's or a guest's session wakes
 through the host, which takes host-door items but doesn't set waiters yet, and a guest's `ci:` would reach GitHub as the owner (rule 10).
 
+Once the queue is the Kith core's (the tombstone $KITH_STATE/sessions/queue/.tombstone, kernel/lib/kith_wake_core.py), every verb and
+helper here is a call of the core's wake rows and no file under sessions/queue/ is touched; a core that does not answer refuses.
+`drain` and `deliver` then do nothing: the host ticks the queue.
+
 Files: $KITH_STATE/sessions/queue/<hash>.json one item per session, queue/answered.json the ids answered or withdrawn
 (kept KEEP_DAYS, with the turn that carried each), sessions/waits/<id>.json one per waiter, sessions/log.jsonl every
 enqueue, turn, wait and drop. Run-door turns: <logs>/wake/RUN.log what the turn said, RUN.err the rest.
@@ -61,6 +65,7 @@ sys.path.insert(0, str(BIN.parent / 'lib'))
 from kith_paths import paths  # noqa: E402
 import kith_procstart  # noqa: E402
 import kith_claims  # noqa: E402
+import kith_wake_core  # noqa: E402  the helpers' and verbs' way to the core once the queue is its (R9)
 
 KEEP_DAYS = 7
 MAX_TRIES = 5                     # a run-door turn that fails this often without reaching the session ends as failed
@@ -76,6 +81,11 @@ HELD = re.compile(r'open in another|being taken over|answering in that thread|se
 def state():
     s = os.environ.get('KITH_STATE')
     return Path(s) if s else paths()['KITH_STATE']
+
+
+def switched():
+    """Whether the queue is the Kith core's on this Mac (the tombstone in sessions/queue/): then no queue file is touched."""
+    return kith_wake_core.switched(state())
 
 
 def qdir():
@@ -159,6 +169,8 @@ def mark_answered(ids, how, run=None):
 
 def status(rid):
     """(queued | running | how it was answered | unknown, the turn's run or None) for request rid."""
+    if switched():
+        return kith_wake_core.status(rid)
     with locked():
         for _, it in items():
             for r in it['requests']:
@@ -195,7 +207,7 @@ def alive(pid, started=None):
 
 def writer_live(sid):
     """Whether a live writer holds SESSION's claim (or the host's take-over claim): the one-writer claim the turn would need (S1/R1)."""
-    if kith_claims.switched(state()):
+    if kith_claims.switched(state()) or switched():   # the queue is the core's only on claims that are too
         return core_writer_live(sid)
     d = state() / 'live' / 'terminal'
     for name in (f'{sid}.claim', f'{sid}.takeover.claim'):
@@ -251,6 +263,8 @@ def enqueue(session, rid, agent, text, person=None, room=None, door='run', why='
     """WaiterResult / OtherEvent in the model: one more wake owed to session. Returns queued, merged or duplicate."""
     if door == 'run' and person:
         raise SystemExit('kith-wake: a person\'s session wakes through the host (--door host): only it can issue their run token')
+    if switched():
+        return kith_wake_core.enqueue(session, rid, agent, text, person, room, door, why)
     with locked():
         path = item_path(session)
         it = read_json(path, {})
@@ -280,6 +294,8 @@ def enqueue(session, rid, agent, text, person=None, room=None, door='run', why='
 def withdraw(session, rid=None):
     """Stop: the requests session is still owed are dropped and their ids kept, so a late copy doesn't come back, and
     (without rid) its waiters go too. A request a running turn already carries stays with that turn (it was delivered)."""
+    if switched():
+        return kith_wake_core.withdraw(session, rid)
     waits = 0 if rid else unwait(session)
     with locked():
         path = item_path(session)
@@ -298,6 +314,8 @@ def withdraw_person(persons):
     """Revoke or removal: everything the sessions of `persons` are owed is withdrawn as Stop does it (a request a running turn
     carries stays with that turn; the host's Recheck refuses it), and the waiters of those sessions go. A waiter carries no
     person: it is found by its session. Returns how many requests and waiters went."""
+    if switched():
+        return kith_wake_core.withdraw_person(persons)
     with locked():
         sessions = [it['session'] for _, it in items() if it.get('person') in persons]
     return sum(withdraw(s) for s in sessions)
@@ -738,6 +756,8 @@ def main(argv):
     ls.add_argument('--json', action='store_true')
     a = p.parse_args(argv)
 
+    if a.cmd not in ('enqueue', 'withdraw', 'withdraw-person', 'status') and switched():
+        return kith_wake_core.via_core(a)
     if a.cmd == 'enqueue':
         print(enqueue(a.session, a.id, a.agent, ' '.join(a.text), a.person, a.room, a.door, a.why))
     elif a.cmd == 'withdraw':
