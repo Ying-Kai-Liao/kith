@@ -42,8 +42,8 @@ used. First run downloads about 60 MB.
 
 ## Sync commit
 
-**Last confirmed to describe the code: `a62aeb29a2fd66507f4c99b74a9a7d736313ae67`** (origin/main after #1173, R3a `kith kernel launch-exec` shipped off,
-2026-11-25; what was read is in "Re-sync 2026-11-25 (R3a)" at the end: `Threads.tla`, `base.consts` and the rows are unchanged).
+**Last confirmed to describe the code: `28a000f9aa7cc2b84a3b9fb01b5179586642e6b7`** (origin/main `28a000f9a`; was after #1173, R3a `kith kernel launch-exec` shipped off,
+2026-11-26; what was read is in "Re-sync 2026-11-26" (and "Re-sync 2026-11-25 (R3a)") at the end: `Threads.tla`, `base.consts` and the rows are unchanged).
 
 The sync before it, `f9b5e509f476bb88f6203a125ae863369ba03aa9` (origin/rust-rebuild after #1015, #1016, #1017,
 2026-11-17, the re-sync before the claims step runs on a Mac): the changes since `b3f38db7` were re-read and none changes who may
@@ -499,3 +499,14 @@ variants and the rows are unchanged. `drift.sh` gained `serve/host/src/launch_cm
   claims and the lock do not read the registry. Open outside this folder: the `threads` path filter in `.github/workflows/ci.yml`
   lacks `core/kernel/src/launch/**`, `serve/host/src/core_front.rs`, `launch_cmd.rs` and `kernel/lib/core-switched.txt`.
 - TLC (no model change, so one smoke row): `core-gate` `NoBeginWhileHeld` pass, 35,618 distinct states, 1 s.
+
+## Re-sync 2026-11-26 - model unchanged (SYNC moved to 28a000f9aa7cc2b84a3b9fb01b5179586642e6b7, origin/main `28a000f9a`)
+
+Every covered change since `a62aeb29a` was read against `Threads.tla`:
+
+- `threads/writer.rs` `Taker::attach_run` (`claim.attach`: a host-claimed schedule or `--bg` ask turn is attached to this pid before anything starts) is the same check-and-set `external.rs` already offers; one claim row, one holder. A turn-claim refusal is now prefixed `TURN_CLAIM_REFUSED` and `start.rs` maps it to exit 10. `launch/exec.rs`: the claim is attached before the walk's attempts (which get the run's env without the claim) and, for a non-Claude or `-c` run, before the engine. `conversations/{sched_run,detached}.rs`: `ask` is a detached source; `attach` also refuses (ends the claim, cancels the turn) a peer whose pairing ended. All refuse more, never admit a second writer.
+- `claims.rs`: `Fence::Cut` (a refused claim), `unpark_ready_in` runs the same held-count check inside the caller's `claim_tx`, `Transaction` params became `Connection`: no step changed.
+- `threads/run.rs`, `kith-sessions`: after a terminal lets go, `wake.released` (one core call) replaces the shell when the wake queue is the core's; the core unparks only with the lock free and no live terminal. `kith-wake` `writer_live` asks the core when the queue is the core's. `kith-wake`, `cards/resume.rs`, `core_front.rs` (wake and ask rows on `core-call`): the queue's plumbing, no writer.
+- `core/stub/src/main.rs`: Windows pipe identification and owner check (the lock's second layer is stricter).
+- `bin/kith`, `kith-core.sh`, `core-switched.txt`: engine and wake routing, an `ask` line commented out. `launch_cmd.rs`, `core_front.rs` and `kernel/lib/core-switched.txt` are now in the `threads` CI filter.
+- No TLC row rerun (no model change); CI runs `thread-writers` and `thread-writers-slow`.
