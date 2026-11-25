@@ -144,7 +144,7 @@ jobs:
           for n in ESIGNER_USERNAME ESIGNER_PASSWORD ESIGNER_CREDENTIAL_ID ESIGNER_TOTP_SECRET; do
             total=$((total + 1)); [ -z "${!n}" ] || set=$((set + 1))
           done
-          if [ "$set" = 0 ]; then echo "unsigned: code signing not configured"; echo "enabled=false" >> "$GITHUB_OUTPUT"
+          if [ "$set" = 0 ]; then echo "::notice::unsigned for now (docs/windows-signing.md; Kai 2026-11-27)"; echo "enabled=false" >> "$GITHUB_OUTPUT"
           elif [ "$set" = "$total" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"
           else echo "::error::Code signing is half configured ($set of $total values set); see docs/windows-signing.md" >&2; exit 1; fi
       - name: Stage exes to sign

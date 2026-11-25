@@ -1,16 +1,32 @@
 # Signing the Windows exes
 
+Unsigned for now (Kai 2026-11-27: "not buying").
+
+Windows builds ship unsigned. `release.yml`'s `build-windows` job prints an `unsigned for now` notice and stays green. Nothing in the zip or the release notes claims a signature.
+
+## Free routes to check (not yet confirmed)
+
+Main is checking these with Kai. None is confirmed for kith.
+
+- **SignPath Foundation.** Free code signing for OSI-licensed open source. The repository is public and carries an Apache-2.0 LICENSE at its root. SignPath's own eligibility rules still apply, so this is "to confirm with SignPath", not a claim that kith qualifies.
+- **Microsoft Store / MSIX distribution.** A Store-signed package, so no separate certificate. Needs a Partner Center account. To check.
+- **Azure Artifact Signing.** Individual identity validation is US and Canada only, so it is not an option for Kai now. Organisation validation needs a registered company (see the end of this file).
+
+## A later option: SSL.com IV certificate + eSigner cloud signing
+
+The steps below are kept for later. The job signs only once all four eSigner secrets are set (see "GitHub settings").
+
 `release.yml`'s `build-windows` job signs every exe in the Windows zip (the programs in `scripts/windows-exes.txt`) with an
 SSL.com individual-validated (IV) code-signing certificate held in SSL.com's cloud (eSigner). It signs before the zip and
 its SHA-256 are made, then checks each exe with `Get-AuthenticodeSignature` (status Valid and a timestamp countersignature).
 
-- None of the four secrets below set: the job prints `unsigned: code signing not configured` and ships an unsigned zip (green).
+- None of the four secrets below set: the job prints `unsigned for now (docs/windows-signing.md; Kai 2026-11-27)` as a notice and ships an unsigned zip (green).
 - All four set: every signing step must pass, or the job is red.
 - Some set: red, "half configured". Never a half-signed zip.
 - The job has only `contents: read` (no `id-token`). The action is `SSLcom/esigner-codesign` pinned to the v1.3.2 commit.
 - Not covered: the desktop app and its NSIS installer (W16 signs those later with the same certificate).
 
-## Recommendation: SSL.com IV certificate + eSigner cloud signing
+### Why SSL.com (for the later option)
 
 Reasons: it is the only option I found where all of these are documented: an individual with no company can buy it, the
 key lives in SSL.com's HSM (no USB token), and there is an official GitHub Action that runs on Windows runners and signs

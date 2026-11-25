@@ -9,17 +9,20 @@
 //! 3. run state, the person's `proc` claim for the revoke sweep (I5);
 //! 4. the session id, the lock, the claim (I3), the permit token and a guest's grants, then the engine ([`super::start`]).
 //!
-//! A terminal run and `--held` are not here: the entry keeps them (`kith_oneshot_flag` in `lib/kith-core.sh` sends only a task).
+//! A run with no task is the terminal's ([`super::terminal`]), and `--held` hands it to the core's holder ([`super::held`]): the
+//! entry sends them here only when the program lists `launch-exec-term` (`kith_term_flag` in `lib/kith-core.sh`).
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use super::args::{Files, run_args};
 use super::assemble::{Env, get, pj_indent1, sync_env};
+use super::held;
 use super::plan::{self, ExecHooks, ExecOpts, Hooks, Mode, Resumed};
 use super::sched_turn::{self, Sched};
 use super::session;
 use super::start::{self, Adapter, Engine, Go};
+use super::terminal::{self, Term};
 use crate::secrets::pyjson;
 use crate::threads::core::Core;
 use crate::threads::resolve::{Host, resolve_taking};
@@ -27,10 +30,12 @@ use crate::threads::writer::{ProcErr, Taker};
 use crate::threads::{self, Ctx, claim_wait};
 use crate::{accounts, paths};
 
-/// What a run here asks of the world outside the kernel crate: the host (to name a thread) and the core (the claims).
+/// What a run here asks of the world outside the kernel crate: the host (to name a thread), the core (the claims) and, for
+/// `--held`, the core's terminal calls and the attach client (none: nothing can hold a terminal).
 pub struct Deps<'a> {
     pub host: &'a dyn Host,
     pub core: Option<&'a dyn Core>,
+    pub held: Option<&'a dyn held::Port>,
 }
 
 /// How `--resume` named its session.
@@ -137,6 +142,8 @@ struct Steps<'a> {
     accounts_ctx: accounts::Ctx<'a>,
     /// The resumed session was claimed under a core that gave no answer.
     alone: RefCell<bool>,
+    /// The Claude session `--resume`/`-r`/`-c` took the claim of ("" for none).
+    resumed: RefCell<String>,
     /// A schedule's turn: its claim is attached before the walk starts any attempt.
     sched: Option<&'a Sched>,
     /// The run's own environment, which the walk's attempts get (not this process's).
@@ -184,6 +191,7 @@ impl ExecHooks for Steps<'_> {
             Ok(t) => {
                 eprint!("{}", t.said);
                 *self.alone.borrow_mut() = t.alone;
+                self.resumed.borrow_mut().clone_from(&t.resolved.sid);
                 let run = accounts::session_run(&self.machine, &t.resolved.sid);
                 Ok(Resumed {
                     sid: t.resolved.sid,
@@ -282,9 +290,9 @@ fn run_one(
         return 2;
     };
     let flags = Flags::parse(rest);
-    if flags.no_run || flags.task.is_empty() {
+    if flags.no_run {
         eprintln!(
-            "kith: --exec runs a task (kith {agent} \"...\"); --print and --launch-json answer elsewhere"
+            "kith: --exec runs a task or a terminal; --print and --launch-json answer elsewhere"
         );
         return 2;
     }
@@ -348,7 +356,12 @@ fn run_one(
         flags: &flags,
         pid,
         kernel,
-        wait: claim_wait(&lookup),
+        // A one-shot waits a few seconds for a held session; a terminal run refuses at once.
+        wait: if flags.task.is_empty() {
+            std::time::Duration::ZERO
+        } else {
+            claim_wait(&lookup)
+        },
         pwd: {
             let cwd = std::env::current_dir().unwrap_or_default();
             match env0.get("PWD").filter(|d| !d.is_empty()) {
@@ -368,6 +381,7 @@ fn run_one(
             out: &system,
         },
         alone: RefCell::new(false),
+        resumed: RefCell::new(String::new()),
         sched,
         env: env0,
     };
@@ -384,7 +398,7 @@ fn run_one(
     };
     let opts = ExecOpts {
         hooks: Hooks(Some(&steps)),
-        ..ExecOpts::from_process(true, flags.held, "")
+        ..ExecOpts::from_process(!flags.task.is_empty(), flags.held, "")
     };
     let plan = match plan::plan(
         agent,
@@ -482,7 +496,7 @@ fn run_one(
         }
         return other_engine(&plan, env, &runs, pid, task);
     }
-    if flags.held {
+    if flags.held && !task.is_empty() {
         eprintln!("kith: --held is for an interactive session; this task runs here (--direct)");
     }
     if let Some(s) = &plan.settings {
@@ -504,6 +518,28 @@ fn run_one(
     }
     env.remove("KITH_CLAUDE_ARGS");
     env.remove("HQ_CLAUDE_ARGS");
+    if task.is_empty() {
+        return terminal::claude(
+            Term {
+                agent,
+                kernel,
+                env,
+                args: engine_args,
+                owner,
+                nested: plan.nested,
+                claim_person: plan.person_id.clone(),
+                settings_file,
+                resumed: steps.resumed.borrow().clone(),
+                alone: *steps.alone.borrow(),
+                held: flags.held,
+                kbin,
+                ctx: &ctx,
+                deps,
+            },
+            &taker,
+            pid,
+        );
+    }
     start::claude(
         Go {
             agent,
@@ -564,7 +600,7 @@ fn other_engine(plan: &plan::Plan, mut env: Env, runs: &Path, pid: i64, task: St
     // Global skills load unless the role turned them off.
     env.insert(
         "KITH_RUN_GLOBAL_SKILLS".to_owned(),
-        if plan.out.disable_slash_commands {
+        if plan.out.disable_slash_commands && !plan.owner_terminal {
             "0"
         } else {
             "1"
@@ -592,6 +628,9 @@ fn other_engine(plan: &plan::Plan, mut env: Env, runs: &Path, pid: i64, task: St
             .map(str::to_owned)
             .chain(flags)
             .collect();
+    }
+    if task.is_empty() {
+        return terminal::adapter(&plan.agent, &plan.harness, flags, &env, Engine::native());
     }
     start::other(Adapter {
         env,

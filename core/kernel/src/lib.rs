@@ -74,6 +74,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         // `kernel launch-exec`: a one-shot run in this process (the entry's one-shot branch). A token of its own: an older
         // program that lists `launch` must not be sent `--exec`.
         "launch-exec",
+        // `kernel launch-exec` also runs an interactive terminal session and `--held` (no task): the entry sends those only to a
+        // program that lists this one, so one that knows just the one-shots never receives one.
+        "launch-exec-term",
         "lifecycle",
         "paths",
         "permit",
@@ -142,7 +145,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","ask-ledger","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","ask-ledger","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","launch-exec-term","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
         );
     }
 }
