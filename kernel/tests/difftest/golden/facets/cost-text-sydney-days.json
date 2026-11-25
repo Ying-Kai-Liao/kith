@@ -6,7 +6,7 @@
   "step0.stdout": "\nall: $4.00 over 2 requests (0.00M output tokens, 0M cache reads)\n\nby day\n  2099-01-02      $2.50      1 req\n  2001-06-01      $1.50      1 req\n\nby project\n      $4.00      2 req  /w\n\nby model\n      $4.00      2 req  claude-sonnet-5\n\ntop sessions  (kith-cost session <id> for turns)\n      $4.00  s-syd  2001-06-01@23:30  late\n\n",
   "step1.exit": "0\n",
   "step1.stderr": "",
-  "step1.stdout": "\nweek: $2.50 over 1 requests (0.00M output tokens, 0M cache reads)\n\nby day\n  2099-01-02      $2.50      1 req\n\nby project\n      $2.50      1 req  /w\n\nby model\n      $2.50      1 req  claude-sonnet-5\n\ntop sessions  (kith-cost session <id> for turns)\n      $2.50  s-syd  2099-01-02@00:30  late\n\n",
+  "step1.stdout": "\nlast 7 days: $2.50 over 1 requests (0.00M output tokens, 0M cache reads)\n\nby day\n  2099-01-02      $2.50      1 req\n\nby project\n      $2.50      1 req  /w\n\nby model\n      $2.50      1 req  claude-sonnet-5\n\ntop sessions  (kith-cost session <id> for turns)\n      $2.50  s-syd  2099-01-02@00:30  late\n\n",
   "step2.exit": "0\n",
   "step2.stderr": "",
   "step2.stdout": "\nalpha, all: $4.00 over 1 runs, 2 requests, 0k output tokens\n\nby day\n  2099-01-02      $2.50    1 runs\n  2001-06-01      $1.50    1 runs\n\nby version, model and effort  (version and effort are known for `kith <agent>` runs only)\n      $4.00    1 runs  1           claude-sonnet-5        high    terminal\n\ncostliest runs  (kith-cost session <id> for turns)\n      $4.00  s-syd  2001-06-01@23:30  late\n\n",

@@ -22,7 +22,7 @@ use crate::conversations::{claims, sched_run};
 use crate::daemon::{Config, Daemon};
 use crate::error::Error;
 use crate::gate::Liveness;
-use crate::tests::{machine, paths};
+use crate::tests::{DAEMON_UP, machine, paths};
 
 const HOST: &str = "kith-serve-host/1-a";
 
@@ -195,7 +195,7 @@ fn rig_with(lock_wait: Duration) -> Rig {
             ..Config::default()
         },
     );
-    d.ready(Duration::from_secs(10)).expect("the daemon serves");
+    d.ready(DAEMON_UP).expect("the daemon serves");
     // The claims lane takes no claim until the host's reconcile has run (nothing to reconcile on a new machine).
     d.shared()
         .with_core(|c| claims::reconcile(c, &[], &[], i64::MAX, 1).map(|_| ()))

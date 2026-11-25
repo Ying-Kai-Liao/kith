@@ -1968,6 +1968,12 @@ fn cap_log() {
     }
 }
 
+/// Info and up from this program's own modules. Cargo builds the same source as `kith` and as `kith-serve`, so the
+/// target prefix is whichever crate this is, never a fixed name.
+fn default_log_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::new(concat!(env!("CARGO_CRATE_NAME"), "=info"))
+}
+
 async fn serve(bind: &str, port: u16) -> Result<()> {
     // The start-up phases are timed before the log exists, then logged once: a slow start says where it spent its time.
     let started = std::time::Instant::now();
@@ -1979,9 +1985,7 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
         tokio::net::TcpListener::bind((bind, port)).await.with_context(|| format!("binding {bind}:{port}"))?;
     cap_log();
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "kith_serve=info".into()),
-        )
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| default_log_filter()))
         // A failed log write would be reported with `eprintln!`, which panics when stderr is gone
         // too (a closed terminal, a full disk): a log line must never take a task down.
         .log_internal_errors(false)
@@ -2446,5 +2450,15 @@ mod cli_tests {
             (Some("Mac mini".into()), Some(Some("123456".into())), false)
         );
         assert_eq!(link(&["Mac mini", "--deny"]), (Some("Mac mini".into()), None, true));
+    }
+
+    #[test]
+    fn the_default_log_filter_lets_this_programs_info_lines_through() {
+        // Built as `kith` the host's lines are kith::…, as `kith-serve` kith_serve::…; both must reach host.log.
+        let subscriber = tracing_subscriber::fmt().with_env_filter(default_log_filter()).finish();
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(tracing::enabled!(tracing::Level::INFO), "info from {} is filtered out", module_path!());
+            assert!(!tracing::enabled!(tracing::Level::DEBUG));
+        });
     }
 }
