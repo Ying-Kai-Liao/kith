@@ -34,8 +34,8 @@ mod accounts;
 #[cfg(unix)]
 #[allow(dead_code)]
 mod authority;
-// The ask tree (M3-8a): nothing calls it but the daemon's `ask.*` rows and the tests; `kith-ask` switches at M3-10.
-#[cfg(unix)]
+// The ask tree and ledger (M3-8a, P2-3): nothing calls it but the daemon's `ask.*` rows and the tests; `kith-ask` switches at
+// M3-10. No Unix call of its own (the windows job builds it); the one row that needs the Unix-only `revoke_order` is gated.
 #[allow(dead_code, reason = "first callers are the switch of kith-ask (M3-10)")]
 mod asks;
 mod call;

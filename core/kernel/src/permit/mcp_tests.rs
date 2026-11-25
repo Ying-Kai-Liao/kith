@@ -55,7 +55,7 @@ fn guest(root: &Path, sock: &Path) -> Env {
         ("KITH_AGENT_DIR", root.join("pkg").to_str().unwrap()),
         ("KITH_STATE", root.join(".kith").to_str().unwrap()),
     ]);
-    e.python = root.join("py").to_str().unwrap().to_owned();
+    root.join("py").to_str().unwrap().clone_into(&mut e.python);
     e
 }
 

@@ -336,7 +336,7 @@ Rule 4 in practice. A deleted check comes out of `ci.yml` and `ci-exempt.txt` in
 - **Invitees and old app builds.** Invitees run no kernel; they use the owner's host through the app or web client. Old
   desktop builds bundle an old kernel and host that call the scripts by path: Kai controls his app version.
 - **Windows.** Removing the Python from the run path is what lets an owner run on Windows ("one-bot-model" M5). Out of
-  scope here; P1 and P2 are the prerequisite.
+  scope here; P1 and P2 are the prerequisite. The Windows owner milestone is planned in [windows-owner.md](windows-owner.md) (packages W0-W19).
 
 ## 8. Merging rust-rebuild into main
 

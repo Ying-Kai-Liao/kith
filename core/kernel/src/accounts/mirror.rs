@@ -100,14 +100,90 @@ fn mkdir_private(d: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Makes `link` a link to the folder `target` when nothing is there yet; whether it did. Anything already there (a link or
+/// a real folder holding the account's own data) is left alone.
 #[cfg(unix)]
-fn symlink(target: &Path, link: &Path) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(target, link)
+fn link_dir(target: &Path, link: &Path) -> std::io::Result<bool> {
+    if link.symlink_metadata().is_ok() {
+        return Ok(false);
+    }
+    std::os::unix::fs::symlink(target, link)?;
+    Ok(true)
 }
 
+/// Windows: a directory junction, which needs no privilege (a symlink needs Developer Mode or admin). A junction that
+/// already points at `target` stays; one that points elsewhere is replaced; a real folder or anything else is the
+/// account's own and is never touched.
 #[cfg(not(unix))]
-fn symlink(target: &Path, link: &Path) -> std::io::Result<()> {
-    std::os::windows::fs::symlink_dir(target, link)
+fn link_dir(target: &Path, link: &Path) -> std::io::Result<bool> {
+    if link.symlink_metadata().is_ok() {
+        if !junction::exists(link).unwrap_or(false) {
+            return Ok(false);
+        }
+        if junction::get_target(link).is_ok_and(|t| realpath(&t) == realpath(target)) {
+            return Ok(false);
+        }
+        unlink_dir(link)?;
+    }
+    junction::create(target, link)?;
+    Ok(true)
+}
+
+/// Removes a link made by `link_dir` and never what it points at: a junction goes with `remove_dir`, never
+/// `remove_dir_all`, which would walk into the target.
+#[cfg(not(unix))]
+fn unlink_dir(link: &Path) -> std::io::Result<()> {
+    junction::delete(link)?;
+    std::fs::remove_dir(link)
+}
+
+#[cfg(all(test, windows))]
+mod win_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("kith-mirror-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn a_folder_is_mirrored_with_a_junction_that_resolves_and_removal_keeps_the_target() {
+        let d = scratch("a");
+        let (src, other, link) = (d.join("src"), d.join("other"), d.join("link"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(src.join("f.txt"), b"x").unwrap();
+
+        assert!(link_dir(&src, &link).unwrap());
+        assert!(junction::exists(&link).unwrap());
+        assert_eq!(std::fs::read(link.join("f.txt")).unwrap(), b"x");
+        // twice: a correct junction is left alone
+        assert!(!link_dir(&src, &link).unwrap());
+        // a wrong one is replaced
+        assert!(link_dir(&other, &link).unwrap());
+        assert_eq!(realpath(&link), realpath(&other));
+        assert!(link_dir(&src, &link).unwrap());
+
+        unlink_dir(&link).unwrap();
+        assert!(link.symlink_metadata().is_err());
+        assert_eq!(std::fs::read(src.join("f.txt")).unwrap(), b"x");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_real_folder_in_the_way_is_left_alone() {
+        let d = scratch("b");
+        let (src, link) = (d.join("src"), d.join("link"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&link).unwrap();
+        std::fs::write(link.join("mine.txt"), b"y").unwrap();
+        assert!(!link_dir(&src, &link).unwrap());
+        assert_eq!(std::fs::read(link.join("mine.txt")).unwrap(), b"y");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 }
 
 fn sync(
@@ -140,8 +216,7 @@ fn sync(
         }
         for name in PLUGIN_DIRS {
             let link = plugins_dst.join(name);
-            if plugins_src.join(name).is_dir() && link.symlink_metadata().is_err() {
-                symlink(&plugins_src.join(name), &link)?;
+            if plugins_src.join(name).is_dir() && link_dir(&plugins_src.join(name), &link)? {
                 changed.push(format!("plugins/{name}"));
             }
         }

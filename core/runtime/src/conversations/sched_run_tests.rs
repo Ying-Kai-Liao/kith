@@ -6,7 +6,7 @@
 use serde_json::json;
 use tempfile::TempDir;
 
-use super::{attach, claim_run, paused_in};
+use super::{claim_run, paused_in};
 use crate::conversations::claims::{self, NewTurn, revoke_person};
 use crate::conversations::external::call_at;
 use crate::conversations::tests::Procs;
@@ -59,6 +59,17 @@ fn fired(c: &mut Core, job: &str, person: &str, paused: bool) -> (String, i64) {
         )
         .unwrap();
     (conversation, turn)
+}
+
+/// `attach` as the Python run-turn calls it (it names no conversation).
+fn attach(
+    c: &mut Core,
+    claim: i64,
+    pid: u32,
+    started: &str,
+    now: i64,
+) -> Result<serde_json::Value, Error> {
+    super::attach(c, claim, None, pid, started, now)
 }
 
 fn claim_for(c: &mut Core, conversation: &str, person: &str, turn: i64) -> Result<i64, Error> {
@@ -269,6 +280,14 @@ fn the_host_reports_a_clean_exit_done_and_a_bad_one_failed() {
         NOW + 3,
     )
     .unwrap();
+    // R3a: a report only says the launcher exited; the claim ends (and the turn with it) once the process is gone.
+    assert_eq!(
+        (turn_state(&c, a).as_str(), claim_row(&c, ok).1.as_str()),
+        ("running", "ending")
+    );
+    let mut ended = claims::end_gone(&mut c, &Procs::default(), NOW + 4).unwrap();
+    ended.sort_unstable();
+    assert_eq!(ended, vec![ok, bad]);
     assert_eq!(
         (turn_state(&c, a).as_str(), claim_row(&c, ok).1.as_str()),
         ("done", "ended")
