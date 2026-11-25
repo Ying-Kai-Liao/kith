@@ -11,7 +11,6 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write as _};
-use std::os::unix::fs::DirBuilderExt as _;
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt as _;
@@ -77,12 +76,15 @@ fn target(home: &str, data: &Value) -> Option<(String, String)> {
     let path = data.get("tool_input")?.get("file_path")?.as_str()?;
     // the Python's `realpath` raises on a NUL and its caller swallows that, so the note goes unrecorded;
     // refuse it here so every OS agrees (Linux accepts a NUL in a Path where the Python does not)
-    if !path.starts_with('/') || path.contains('\0') {
+    if !Path::new(path).is_absolute() || path.contains('\0') {
         return None;
     }
     let mem = realpath(&Path::new(home).join("memory"));
     let real = realpath(Path::new(path));
     let within = real.strip_prefix(&mem).ok()?.to_str()?.to_owned();
+    // the ledger names a note by its `/` path on every system
+    #[cfg(windows)]
+    let within = within.replace('\\', "/");
     let parts: Vec<&str> = within.split('/').collect();
     if parts.len() < 3 || parts[0] != "rooms" || !is_id(parts[1]) {
         return None;
@@ -167,13 +169,17 @@ fn strings_of(v: &Value) -> io::Result<Vec<String>> {
     }
 }
 
-/// An exclusive flock on `<ledger>.lock`, held until dropped.
+/// An exclusive lock (flock; `LockFileEx` on Windows, through fs2) on `<ledger>.lock`, held until dropped.
 struct Lock(#[allow(dead_code)] File);
 
 fn lock(file: &Path) -> io::Result<Lock> {
     let mut name = file.as_os_str().to_owned();
     name.push(".lock");
-    let f = OpenOptions::new().append(true).create(true).open(name)?;
+    let f = OpenOptions::new()
+        .write(true)
+        .truncate(false)
+        .create(true)
+        .open(name)?;
     f.lock_exclusive()?;
     Ok(Lock(f))
 }
@@ -193,12 +199,14 @@ fn record(file: &Path, rel: &str, present: &[String], existed: bool) -> io::Resu
         if let Some(up) = parent.parent() {
             fs::create_dir_all(up)?;
         }
-        match fs::DirBuilder::new().mode(0o700).create(parent) {
+        match crate::ownerfs::create_dir(parent) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists && parent.is_dir() => {}
             Err(e) => return Err(e),
         }
     }
+    // a ledger folder somebody made earlier with a list that lets others in is not written to (Windows; Unix never judged it)
+    crate::ownerfs::check_dir(parent)?;
     let _lock = lock(file)?;
     let mut map = match fs::read_to_string(file)
         .ok()

@@ -1,0 +1,1110 @@
+[
+  {
+    "name": "chain-limit-moves-on",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "limit-first"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-limit-on-stdout",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "limit-stdout"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-exit4-moves-on",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "exit4-first"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-nonlimit-stops",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "boom"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-all-limited",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "limit-all"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-all-exit4",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "exit4-all"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-long-output-is-a-task",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "long-limit"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-ok",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "ok"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-account-already-out",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      },
+      {
+        "write": "home/.kith/accounts/state.json",
+        "text": "{\"version\": 1, \"accounts\": {\"claude:work\": {\"out_until\": 4102444800, \"reason\": \"rate_limit\", \"since\": 1}}}"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "limit-first"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-out-reset-passed",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      },
+      {
+        "write": "home/.kith/accounts/state.json",
+        "text": "{\"version\": 1, \"accounts\": {\"claude:work\": {\"out_until\": 1, \"reason\": \"rate_limit\", \"since\": 1}}}"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "ok"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-longer-mark-stays",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      },
+      {
+        "write": "home/.kith/accounts/state.json",
+        "text": "{\"version\": 1, \"accounts\": {\"claude:work\": {\"out_until\": 4102444800, \"reason\": \"manual\", \"since\": 1}}}"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "limit-first"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-no-accounts",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "limit-first"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-codex-agent-falls-over",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"codex:b\", \"claude:work\"], \"agents\": {\"cdx\": {\"accounts\": [\"codex:b\", \"claude:work\"], \"cross_harness\": true}}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "cdx",
+        "{KITH_HOME}/agents/cdx/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "limit-first"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  },
+  {
+    "name": "chain-state-corrupt",
+    "command": "accounts",
+    "needs": "rust",
+    "program": {
+      "old": [
+        "python3",
+        "{KERNEL}/lib/kith_accounts.py"
+      ],
+      "new": [
+        "{BIN}",
+        "kernel",
+        "accounts",
+        "--kernel",
+        "{KERNEL}"
+      ]
+    },
+    "env": {
+      "KITH_STATE": "{HOME}/.kith"
+    },
+    "setup": [
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n"
+      },
+      {
+        "write": "kith/agents/cdx/role/agent.md",
+        "text": "---\nname: cdx\ndescription: test agent\nharness: codex\n---\nYou are cdx.\n"
+      },
+      {
+        "fake": "claude",
+        "script": "#!/bin/sh\necho \"claude $* cfg=${CLAUDE_CONFIG_DIR:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"auth status\") case \"${CLAUDE_CONFIG_DIR:-}\" in *work|\"\") echo '{\"loggedIn\":true}'; exit 0;; *other) echo '{\"loggedIn\":false}'; exit 0;; *) exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "fake": "codex",
+        "script": "#!/bin/sh\necho \"codex $* home=${CODEX_HOME:-}\" >> \"$DIFFTEST_FAKELOG\"\ncase \"$1 $2\" in\n  \"login status\") case \"${CODEX_HOME:-}\" in *b) echo 'Logged in'; exit 0;; *) echo 'Not logged in'; exit 1;; esac ;;\nesac\nexit 0\n"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/work"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/other"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/b"
+      },
+      {
+        "mkdir": "home/.kith/accounts/codex/c"
+      },
+      {
+        "mkdir": "home/.kith/accounts/claude/.hidden"
+      },
+      {
+        "write": "home/.kith/settings.json",
+        "text": "{\"accounts\": [\"claude:work\", \"claude:other\", \"codex:b\", \"claude\"], \"agents\": {}}"
+      },
+      {
+        "write": "home/fakekith",
+        "text": "#!/bin/sh\nhas=0; for a in \"$@\"; do [ \"$a\" = --account ] && has=1; last=$a; done\necho \"child: $* chain=${KITH_CHAIN_CHILD:-}\"\necho \"child-err: $*\" >&2\ncase $last in\n  limit-first) [ $has = 0 ] && { echo \"You've hit your usage limit\" >&2; exit 1; }; exit 0 ;;\n  limit-stdout) [ $has = 0 ] && { echo \"Rate limit exceeded\"; exit 1; }; exit 0 ;;\n  exit4-first) [ $has = 0 ] && { echo \"not logged in\" >&2; exit 4; }; exit 0 ;;\n  boom) echo \"boom\" >&2; exit 3 ;;\n  limit-all) echo \"weekly limit reached\" >&2; exit 1 ;;\n  exit4-all) exit 4 ;;\n  long-limit) i=0; while [ $i -lt 500 ]; do echo \"this usage limit text is a task output line $i\"; i=$((i+1)); done; exit 1 ;;\n  ok) exit 0 ;;\nesac\nexit 0\n",
+        "mode": "755"
+      },
+      {
+        "write": "home/.kith/accounts/state.json",
+        "text": "{not json"
+      }
+    ],
+    "run": [
+      [
+        "run-chain",
+        "echo",
+        "{KITH_HOME}/agents/echo/role/agent.md",
+        "{HOME}/fakekith",
+        "--",
+        "hello world",
+        "limit-first"
+      ]
+    ],
+    "mask_keys": [
+      "out_until",
+      "since"
+    ]
+  }
+]
