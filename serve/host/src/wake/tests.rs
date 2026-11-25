@@ -28,17 +28,9 @@ impl Core {
         Self { home, folders, daemon: Some(daemon) }
     }
 
-    /// Marks the core's generation reconciled, as the holder's first hello does in a live host: the claims wait for it, and
-    /// this core runs with no holder, so without it every claim is answered `waiting` (a turn for later).
+    /// The holder's first hello, which this holder-less core never gets: until it, every claim is answered `waiting`.
     fn reconciled(&self) {
-        let db = self.folders.machine.join("core/core.db");
-        let conn = rusqlite::Connection::open(db).expect("core.db");
-        conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) SELECT 'claims_reconciled_generation', CAST(value AS TEXT) \
-             FROM counters WHERE name = 'generation'",
-            [],
-        )
-        .expect("the reconcile mark");
+        self.daemon.as_ref().expect("the core runs").reconciled();
     }
 
     fn state(&self) -> &Path {

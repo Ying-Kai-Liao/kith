@@ -847,6 +847,13 @@ impl Daemon {
         Daemon { shared }
     }
 
+    /// Marks the claims reconciled for a daemon that runs with no holder (a host test): the claims wait for the holder's
+    /// first hello otherwise.
+    pub fn mark_reconciled_without_holder(&self) -> Result<()> {
+        self.shared
+            .with_core(|c| crate::conversations::claims::mark_reconciled(c))
+    }
+
     /// Waits until the daemon serves, or says why it will not.
     pub fn ready(&self, timeout: Duration) -> Result<()> {
         let end = Instant::now() + timeout;
