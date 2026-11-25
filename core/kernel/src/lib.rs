@@ -15,7 +15,7 @@ pub mod engines;
 pub mod helpers;
 // On Windows the launch is the plan and its settings (`launch::assemble`, what the host launches in process); the one-shot run
 // (`launch::exec`, `launch::start`) stands on claims and `kith-permit` and stays Unix only until W12. A guest's launch is
-// refused there until the Windows guest sandbox exists.
+// refused there (guests are not offered on Windows).
 pub mod launch;
 // Unix only: it forks the compaction (a parked child) and takes flocks, like `threads`, whose claims it takes.
 #[cfg(unix)]

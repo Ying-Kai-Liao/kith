@@ -328,8 +328,8 @@ fn every_run_that_is_not_the_owners_is_refused_on_windows_by_name() {
         &[("KITH_ROOM_MEMBERS", "sam,ann")][..],
     ] {
         let why = windows_guest_refusal(&env_of(pairs)).unwrap_or_else(|| panic!("{pairs:?}"));
-        assert!(why.contains("Windows guest sandbox"), "{why}");
-        assert!(why.contains("never started without a sandbox"), "{why}");
+        assert!(why.contains("not offered on Windows"), "{why}");
+        assert!(why.contains("Nothing was started"), "{why}");
     }
     assert!(
         windows_guest_refusal(&env_of(&[("KITH_PERSON", ""), ("KITH_AGENT", "echo")])).is_none()

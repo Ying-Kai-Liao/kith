@@ -1364,19 +1364,20 @@ pub fn plan_in(
 
 /// What stops a run for anyone but the owner on Windows (WI6, fail closed): an invited person, a bot guest or a room's people
 /// carry a `KITH_PERSON`, and a guest run's token (`KITH_RUN_TOKEN`, `KITH_RUN_SOCKET`) is the host's mark of one. None of them
-/// has a sandbox here yet, and a guest is never started without one. `None`: the owner's run.
+/// is on Windows, where guests are not offered: a guest is never started unsandboxed. `None`: the owner's run.
 pub fn windows_guest_refusal(env: &Env) -> Option<String> {
     let guest = [
         "KITH_PERSON",
         "KITH_RUN_TOKEN",
         "KITH_RUN_SOCKET",
         "KITH_ROOM_MEMBERS",
+        "KITH_ROOM_AUTHOR",
+        "KITH_CORE_RUN_SOCKET",
     ]
     .iter()
     .any(|k| !get(env, k).is_empty());
     guest.then(|| {
-        "kith: runs for anyone but the owner (an invited person, a bot guest) are not on Windows yet: they wait the Windows guest \
-         sandbox package, and a guest is never started without a sandbox. Nothing was started."
+        "kith: runs for anyone but the owner (an invited person, a bot guest) are not offered on Windows. Nothing was started."
             .to_owned()
     })
 }

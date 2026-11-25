@@ -57,19 +57,32 @@ fn full_name(name: &str) -> String {
 pub struct Job(Handle);
 
 impl Job {
-    /// Makes the job `name` (in the session's namespace) or opens it when it exists. It has no limits set.
+    /// Makes the job `name` (in the session's namespace). It has no limits set. A name that is taken is refused
+    /// (`AlreadyExists`): `CreateJobObjectW` would hand back the other run's job, and the no-limits and no-breakaway
+    /// guarantees would then be whoever made it first's, with two runs in one job.
     pub fn create(name: &str) -> io::Result<Self> {
+        const ERROR_ALREADY_EXISTS: i32 = 183;
         let n = wide(OsStr::new(&full_name(name)));
         // SAFETY: `n` is NUL-ended; null attributes mean the default security and a handle that is not inheritable.
         let h = unsafe { CreateJobObjectW(null(), n.as_ptr()) };
         if h.is_null() {
             return Err(last_err());
         }
-        Ok(Self(Handle(h)))
+        // Read before anything else can change the thread's last error; the handle closes on drop.
+        let taken = last_err().raw_os_error() == Some(ERROR_ALREADY_EXISTS);
+        let job = Self(Handle(h));
+        if taken {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("the job {name} exists already"),
+            ));
+        }
+        Ok(job)
     }
 
-    /// Opens the job somebody made, by name: it works after the host that made it has restarted. `Ok(None)` when there is
-    /// none (every process of it is gone and nobody holds it).
+    /// Opens the job somebody made, by name, while some process holds a handle to it (a name lasts only as long as one open
+    /// handle: when the last closes the job is gone from the namespace, even with processes still running in it). `Ok(None)`
+    /// is therefore NOT "the run is over": it also means nobody holds the job any more (docs/plans/windows-owner.md W12).
     pub fn open(name: &str) -> io::Result<Option<Self>> {
         Self::open_with(
             name,

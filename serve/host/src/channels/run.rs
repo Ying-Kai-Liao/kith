@@ -46,7 +46,9 @@ pub(crate) fn inherited(name: &str) -> bool {
         ["KITH_HOME", "KITH_STATE", "KITH_MACHINE", "KITH_MODEL", "KITH_KERNEL_BIN", "KITH_KERNEL"].contains(&name);
     // Windows: the profile, the system folder, the shell and the extensions a program is found by (a process without
     // `SystemRoot` cannot even load its sockets), by the names Windows keeps them under.
-    let basic = basic || (cfg!(windows) && kith_kernel::launch::winenv::windows_basics(name));
+    // Windows names variables without regard to case: it stores `Path`.
+    let basic = basic
+        || (cfg!(windows) && (name.eq_ignore_ascii_case("PATH") || kith_kernel::launch::winenv::windows_basics(name)));
     let hq = name.starts_with("HQ_")
         && !name.starts_with("HQ_DISCORD_")
         && !["HQ_AGENT", "HQ_PERSON", "HQ_RESUME", "HQ_BRIDGE_OUTBOX"].contains(&name);

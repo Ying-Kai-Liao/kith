@@ -796,9 +796,7 @@ async fn launch_text(
     use kith_kernel::launch::{assemble, winenv};
     if person.is_some() {
         return Err(Refused(
-            "Runs for anyone but the owner are not on Windows yet: they wait the Windows guest sandbox, and a guest is never \
-             started without one. Nothing was started."
-                .to_owned(),
+            "Runs for anyone but the owner are not offered on Windows. Nothing was started.".to_owned(),
         )
         .into());
     }
@@ -809,6 +807,11 @@ async fn launch_text(
     }
     let mut env = winenv::process_env();
     env.extend(crate::kernel::both("VIA", "serve"));
+    // A room's people, a run token: the plan's own marks of a guest, refused here in words the person can read.
+    let marked: assemble::Env = extra.iter().cloned().collect();
+    if let Some(why) = kith_kernel::launch::plan::windows_guest_refusal(&marked) {
+        return Err(Refused(why.trim_start_matches("kith: ").to_owned()).into());
+    }
     env.extend(crate::kernel::stub_env());
     for name in [
         crate::runauth::TOKEN_ENV,

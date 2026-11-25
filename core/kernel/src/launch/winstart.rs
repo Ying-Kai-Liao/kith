@@ -14,7 +14,7 @@ use super::assemble::{Env, which_in};
 const NOT_FOUND: i32 = 127;
 const CANT_RUN: i32 = 126;
 
-/// The name of the job of the run `run` (a claim id, a pid): `kith-run-<run>`.
+/// The name of the job of the run `run`: `kith-run-<run>`, with the run's claim id (never a pid: pids are reused).
 pub fn job_name(run: &str) -> String {
     format!("kith-run-{run}")
 }
