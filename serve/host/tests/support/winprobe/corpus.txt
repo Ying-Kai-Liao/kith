@@ -1,0 +1,15 @@
+a=(1 2 3); echo OK ${a[1]}
+[[ abc == a* ]] && echo OK
+echo OK $'a\tb'
+cat <(echo OK)
+set -o pipefail; false | true; echo OK rc=$?
+cat <<< OK
+echo 'echo OK' > s.sh; source ./s.sh
+f() { local x=OK; echo $x; }; f
+echo hi 2>/dev/null; echo OK
+echo OK | tr a-z A-Z
+v=$(echo OK); echo $v
+declare -A m; m[k]=OK; echo ${m[k]}
+echo ${BASH_VERSION:-nobash}
+shopt -s nullglob; echo OK
+trap 'echo OK-trap' EXIT

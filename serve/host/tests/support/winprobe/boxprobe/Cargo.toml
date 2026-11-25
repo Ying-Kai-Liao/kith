@@ -21,10 +21,15 @@ windows-sys = { version = "0.61", features = [
   "Win32_Security_Credentials",
   "Win32_Security_Isolation",
   "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_JobObjects",
+  "Win32_System_LibraryLoader",
   "Win32_System_Pipes",
   "Win32_System_Registry",
   "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
 ] }
 
 # A throwaway probe, never shipped: the unsafe Win32 calls are the point.

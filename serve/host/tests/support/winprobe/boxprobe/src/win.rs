@@ -47,6 +47,8 @@ use windows_sys::Win32::System::Threading::{
     TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
+mod rbox;
+
 type Res<T> = Result<T, String>;
 
 const ATTR_ENABLED: u32 = 4; // SE_GROUP_ENABLED
@@ -251,6 +253,14 @@ struct Spawn<'a> {
     jobs: Vec<HANDLE>,
     /// Stdout and stderr go here; the only inheritable handles (PROC_THREAD_ATTRIBUTE_HANDLE_LIST).
     out: Option<&'a File>,
+    /// A primary token (a restricted one): the process is made with CreateProcessAsUserW.
+    token: Option<HANDLE>,
+    /// CREATE_SUSPENDED: the caller resumes `pi.hThread`.
+    suspended: bool,
+    /// A security descriptor for the new process object (null: the default).
+    proc_sd: *mut c_void,
+    /// The child gets this process's own stdin/stdout/stderr (a shim handing Claude Code's pipes to the box).
+    pass_std: bool,
 }
 
 fn env_block(extra: &[(String, String)]) -> Vec<u16> {
@@ -284,11 +294,28 @@ unsafe fn spawn(o: &Spawn) -> Res<PROCESS_INFORMATION> {
     if !jobs.is_empty() {
         count += 1;
     }
+    // A box cannot open NUL itself (F12); the host opens it here and hands it over as stdin.
     let nul = File::open("NUL").map_err(|e| format!("open NUL: {e}"))?;
     let mut inherit: Vec<HANDLE> = Vec::new();
-    if let Some(out) = o.out {
-        inherit.push(nul.as_raw_handle());
-        inherit.push(out.as_raw_handle());
+    let std_h: Option<(HANDLE, HANDLE, HANDLE)> = if o.pass_std {
+        let g = |n| {
+            let h = windows_sys::Win32::System::Console::GetStdHandle(n);
+            if h.is_null() || h == INVALID_HANDLE_VALUE { nul.as_raw_handle() } else { h }
+        };
+        Some((
+            g(windows_sys::Win32::System::Console::STD_INPUT_HANDLE),
+            g(windows_sys::Win32::System::Console::STD_OUTPUT_HANDLE),
+            g(windows_sys::Win32::System::Console::STD_ERROR_HANDLE),
+        ))
+    } else {
+        o.out.map(|out| (nul.as_raw_handle(), out.as_raw_handle(), out.as_raw_handle()))
+    };
+    if let Some((i, u, e)) = std_h {
+        for h in [i, u, e] {
+            if !inherit.contains(&h) {
+                inherit.push(h);
+            }
+        }
         for h in &inherit {
             SetHandleInformation(*h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
         }
@@ -298,11 +325,14 @@ unsafe fn spawn(o: &Spawn) -> Res<PROCESS_INFORMATION> {
     let mut si: STARTUPINFOEXW = std::mem::zeroed();
     si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
     let mut flags = CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
-    if let Some(out) = o.out {
+    if o.suspended {
+        flags |= 4; // CREATE_SUSPENDED
+    }
+    if let Some((i, u, e)) = std_h {
         si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        si.StartupInfo.hStdInput = nul.as_raw_handle();
-        si.StartupInfo.hStdOutput = out.as_raw_handle();
-        si.StartupInfo.hStdError = out.as_raw_handle();
+        si.StartupInfo.hStdInput = i;
+        si.StartupInfo.hStdOutput = u;
+        si.StartupInfo.hStdError = e;
     }
 
     let mut list_mem: Vec<u64> = Vec::new();
@@ -362,18 +392,38 @@ unsafe fn spawn(o: &Spawn) -> Res<PROCESS_INFORMATION> {
     let env = env_block(&o.env);
     let cwd = o.cwd.as_deref().map(wide);
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
-    let ok = CreateProcessW(
-        null(),
-        cl.as_mut_ptr(),
-        null(),
-        null(),
-        i32::from(o.out.is_some()),
-        flags,
-        env.as_ptr().cast(),
-        cwd.as_ref().map_or(null(), |c| c.as_ptr()),
-        std::ptr::from_ref(&si).cast(),
-        &mut pi,
-    );
+    let mut psa: SECURITY_ATTRIBUTES = std::mem::zeroed();
+    psa.nLength = std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32;
+    psa.lpSecurityDescriptor = o.proc_sd;
+    let procattr: *const SECURITY_ATTRIBUTES = if o.proc_sd.is_null() { null() } else { &psa };
+    let inh = i32::from(std_h.is_some());
+    let ok = match o.token {
+        Some(t) => windows_sys::Win32::System::Threading::CreateProcessAsUserW(
+            t,
+            null(),
+            cl.as_mut_ptr(),
+            procattr,
+            null(),
+            inh,
+            flags,
+            env.as_ptr().cast(),
+            cwd.as_ref().map_or(null(), |c| c.as_ptr()),
+            std::ptr::from_ref(&si).cast(),
+            &mut pi,
+        ),
+        None => CreateProcessW(
+            null(),
+            cl.as_mut_ptr(),
+            procattr,
+            null(),
+            inh,
+            flags,
+            env.as_ptr().cast(),
+            cwd.as_ref().map_or(null(), |c| c.as_ptr()),
+            std::ptr::from_ref(&si).cast(),
+            &mut pi,
+        ),
+    };
     let e = last();
     if !list.is_null() {
         DeleteProcThreadAttributeList(list);
@@ -447,6 +497,10 @@ impl Boxx {
             ac: Some((self.ac, self.caps.clone())),
             jobs: vec![self.job],
             out: Some(out),
+            token: None,
+            suspended: false,
+            proc_sd: null_mut(),
+            pass_std: false,
         })
     }
     unsafe fn delete_profile(&self) {
@@ -531,7 +585,10 @@ unsafe fn cmd_ac_info() -> Res<()> {
     let mut is_ac = 0u32;
     let mut n = 0u32;
     GetTokenInformation(t, 29, std::ptr::from_mut(&mut is_ac).cast(), 4, &mut n);
-    r("acinfo", format!("is_appcontainer={is_ac}"));
+    r(
+        "acinfo",
+        format!("is_appcontainer={is_ac} is_restricted={}", windows_sys::Win32::Security::IsTokenRestricted(t)),
+    );
     let mut buf = vec![0u64; 64];
     if GetTokenInformation(t, 25, buf.as_mut_ptr().cast(), 512, &mut n) != 0 {
         r("acinfo", format!("integrity_sid={}", sid_str(*buf.as_ptr().cast::<PSID>())));
@@ -756,7 +813,12 @@ unsafe fn cmd_injob(a: &[String]) -> Res<()> {
 // ---- subcommands: network (P-G7, P-G11) -----------------------------------------------------------------------------
 
 fn cmd_tcp_listen(a: &[String]) -> Res<()> {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+    let l = std::net::TcpListener::bind(format!(
+        "{}:{}",
+        opt(a, "--bind").unwrap_or_else(|| "127.0.0.1".into()),
+        opt(a, "--port").unwrap_or_else(|| "0".into())
+    ))
+    .map_err(|e| e.to_string())?;
     let port = l.local_addr().map_err(|e| e.to_string())?.port();
     if let Some(f) = opt(a, "--port-file") {
         std::fs::write(&f, port.to_string()).map_err(|e| e.to_string())?;
@@ -898,6 +960,10 @@ unsafe fn cmd_g10() -> Res<()> {
         ac: None,
         jobs: vec![outer],
         out: Some(&out),
+        token: None,
+        suspended: false,
+        proc_sd: null_mut(),
+        pass_std: false,
     })?;
     r("g10", format!("run process pid={} in outer job", pi.dwProcessId));
     std::thread::sleep(Duration::from_secs(5));
@@ -1034,6 +1100,15 @@ fn fakesh(args: &[String]) {
         let _ = f.write_all(line.as_bytes());
     }
     let real = std::env::var("KITH_REAL_BASH").unwrap_or_else(|_| "C:\\Program Files\\Git\\bin\\bash.exe".into());
+    if std::env::var("KITH_BOX").as_deref() == Ok("r") {
+        match unsafe { rbox::shim_box(&real, &args[1..]) } {
+            Ok(c) => std::process::exit(c),
+            Err(e) => {
+                eprintln!("fakesh: boxed run failed: {e}");
+                std::process::exit(126);
+            }
+        }
+    }
     match std::process::Command::new(real).args(&args[1..]).status() {
         Ok(s) => std::process::exit(s.code().unwrap_or(1)),
         Err(e) => {
@@ -1072,6 +1147,18 @@ pub fn main() {
         "g10-run",
         "sock-dup",
         "sock-child",
+        "xbox",
+        "watch",
+        "g3n-box",
+        "objdir-hold",
+        "nul-open",
+        "sddl-of",
+        "p17",
+        "mutex-hold",
+        "mutex-open",
+        "pipe-anon",
+        "sid-of",
+        "kill-test",
     ];
     if !known.contains(&sub) {
         fakesh(&args);
@@ -1103,6 +1190,18 @@ pub fn main() {
             "g10-run" => cmd_g10_run(),
             "sock-dup" => cmd_sock_dup(a),
             "sock-child" => cmd_sock_child(a),
+            "xbox" => rbox::cmd_xbox(a),
+            "watch" => rbox::cmd_watch(a),
+            "g3n-box" => rbox::cmd_g3n_box(a),
+            "objdir-hold" => rbox::cmd_objdir_hold(a),
+            "nul-open" => rbox::cmd_nul_open(),
+            "sddl-of" => rbox::cmd_sddl_of(a),
+            "p17" => rbox::cmd_p17(a),
+            "mutex-hold" => rbox::cmd_mutex_hold(a),
+            "mutex-open" => rbox::cmd_mutex_open(a),
+            "pipe-anon" => rbox::cmd_pipe_anon(),
+            "sid-of" => rbox::cmd_sid_of(a),
+            "kill-test" => rbox::cmd_kill_test(a),
             _ => Err("unknown".into()),
         }
     };

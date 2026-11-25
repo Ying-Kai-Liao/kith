@@ -88,3 +88,37 @@ jobs:
           name: windows-guest-probe-output
           path: guest-out
           if-no-files-found: warn
+
+  # W20b: guest box probe round 2. Variant A (AppContainer) against variant R (restricted token in a job), as the same standard
+  # user; the pinned PortableGit and busybox-w32; the G10 admin steps (python grant, loopback exemption, firewall filters).
+  # Evidence only: the write-up is docs/windows-facts.md F24 onward.
+  guest2:
+    runs-on: windows-2025
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        shell: bash
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: winprobe-guest
+      - name: Build boxprobe
+        shell: bash
+        working-directory: serve
+        run: cargo build --manifest-path host/Cargo.toml -p kith-boxprobe --locked
+      - name: Guest box probe round 2 (A against R, as a standard user)
+        shell: pwsh
+        timeout-minutes: 75
+        run: >
+          ./serve/host/tests/support/winprobe/guest2.ps1
+          -Boxprobe "$env:GITHUB_WORKSPACE/serve/host/target/debug/boxprobe.exe"
+          -Out "$env:GITHUB_WORKSPACE/guest2-out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-guest2-probe-output
+          path: guest2-out
+          if-no-files-found: warn
