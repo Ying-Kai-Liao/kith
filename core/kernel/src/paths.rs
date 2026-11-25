@@ -133,6 +133,17 @@ fn getenv(env: Env<'_>, name: &str) -> String {
         .unwrap_or_default()
 }
 
+/// `base` with each `/`-separated part of `rel` joined on in turn, so on Windows the result has `\` between every name and
+/// no `/` from the text. A string like `agents/echo` joined whole would leave one `/` in the middle, which a prefix check,
+/// a comparison or a message then sees as a different spelling of the same folder.
+pub fn join_parts(base: &Path, rel: &str) -> PathBuf {
+    let mut out = base.to_path_buf();
+    for part in rel.split('/').filter(|s| !s.is_empty()) {
+        out.push(part);
+    }
+    out
+}
+
 /// A path the way Python's `Path()` spells it: no `.` parts, no doubled or trailing slash.
 fn norm(p: &Path) -> PathBuf {
     let out: PathBuf = p.components().filter(|c| *c != Component::CurDir).collect();
@@ -357,13 +368,19 @@ pub fn paths(home: &Path, kernel: &Path, env: Env<'_>) -> Paths {
         cache = dot.join("cache");
         store = dot.join("store");
     } else {
-        let config = first([home.join(".config/kith"), home.join(".config/hq")]);
+        let config = first([
+            join_parts(home, ".config/kith"),
+            join_parts(home, ".config/hq"),
+        ]);
         secrets = config.clone();
         machine = config;
-        logs = first([home.join("Library/Logs/kith"), home.join("Library/Logs/hq")]);
+        logs = first([
+            join_parts(home, "Library/Logs/kith"),
+            join_parts(home, "Library/Logs/hq"),
+        ]);
         cache = first([
-            home.join("Library/Caches/kith"),
-            home.join("Library/Caches/hq"),
+            join_parts(home, "Library/Caches/kith"),
+            join_parts(home, "Library/Caches/hq"),
         ]);
         store = agents.join(".store");
     }
@@ -432,6 +449,60 @@ pub fn known_home() -> Option<PathBuf> {
 /// `paths` for this process: its `$HOME` and environment, and the given kernel folder.
 pub fn from_process(kernel: &Path) -> Paths {
     paths(&process_home(), kernel, &process_env)
+}
+
+/// A program on a PATH string, the way the shell finds it. Unix: a file with an execute bit. Windows: a name with no
+/// extension tries each PATHEXT extension in order (`.COM;.EXE;.BAT;.CMD` when PATHEXT is unset), a name with one is tried
+/// as is, and there are no mode bits; a bare extensionless file (an npm sh shim) is never taken, as `CreateProcess` can't run it.
+pub fn which_on(program: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
+    let pathext = std::env::var("PATHEXT").ok();
+    which_with(program, path, pathext.as_deref(), cfg!(windows))
+}
+
+fn which_with(
+    program: &str,
+    path: &std::ffi::OsStr,
+    pathext: Option<&str>,
+    windows: bool,
+) -> Option<PathBuf> {
+    let names: Vec<String> = if !windows || Path::new(program).extension().is_some() {
+        vec![program.to_owned()]
+    } else {
+        let exts = pathext
+            .filter(|e| !e.trim().is_empty())
+            .unwrap_or(".COM;.EXE;.BAT;.CMD");
+        exts.split(';')
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .map(|e| format!("{program}{e}"))
+            .collect()
+    };
+    std::env::split_paths(path)
+        // Windows PATH entries may be quoted; an empty one means nothing, not the current folder.
+        .map(|d| PathBuf::from(d.to_string_lossy().trim_matches('"')))
+        .filter(|d| !d.as_os_str().is_empty())
+        .find_map(|d| {
+            names
+                .iter()
+                .map(|n| d.join(n))
+                .find(|p| is_runnable(p, windows))
+        })
+}
+
+fn is_runnable(p: &Path, windows: bool) -> bool {
+    let Ok(m) = std::fs::metadata(p) else {
+        return false;
+    };
+    if !m.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    if !windows {
+        use std::os::unix::fs::PermissionsExt as _;
+        return m.permissions().mode() & 0o111 != 0;
+    }
+    let _ = windows;
+    true
 }
 
 // The tests build POSIX layouts and symlinks; the Windows job runs the rest of the crate.

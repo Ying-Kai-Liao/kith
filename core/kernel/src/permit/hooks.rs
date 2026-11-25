@@ -8,6 +8,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 use std::fs;
 use std::io::Write as _;
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -119,18 +120,36 @@ pub fn hook_input(raw: &str) -> Option<Map<String, Value>> {
     (named && d.get("tool_input").is_some_and(Value::is_object)).then_some(d)
 }
 
-/// Records the one-shot in the run's own folder (made 0700). Files older than a day, and the folders of other runs that
+/// The run's folder, made owner-only if it is new and made so again if it is not.
+#[cfg(unix)]
+fn make_private_dir(once_dir: &Path) -> std::io::Result<()> {
+    match fs::DirBuilder::new().mode(0o700).create(once_dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && once_dir.is_dir() => {}
+        other => other?,
+    }
+    fs::set_permissions(once_dir, fs::Permissions::from_mode(0o700))
+}
+
+/// The same on Windows: a new folder gets its protected owner-only list in the call that makes it (nothing inherited, so
+/// no moment at which another account could read it); a folder that is there already is restricted again, as 0700 is set again.
+#[cfg(windows)]
+fn make_private_dir(once_dir: &Path) -> std::io::Result<()> {
+    match kith_winsys::acl::create_dir_private(once_dir, true) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && once_dir.is_dir() => {
+            kith_winsys::acl::restrict(once_dir, true)
+        }
+        other => other,
+    }
+}
+
+/// Records the one-shot in the run's own folder (made 0700; owner-only on Windows). Files older than a day, and the folders of other runs that
 /// are, are cleaned up on the way; the first thing that fails in that cleanup ends it, as in Python.
 pub fn keep_once(once_dir: &Path, key: &str, now: f64, short: bool) -> std::io::Result<()> {
     // makedirs(mode=0o700): only the last folder gets the mode, the ones above it the default
     if let Some(parent) = once_dir.parent() {
         fs::create_dir_all(parent)?;
     }
-    match fs::DirBuilder::new().mode(0o700).create(once_dir) {
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && once_dir.is_dir() => {}
-        other => other?,
-    }
-    fs::set_permissions(once_dir, fs::Permissions::from_mode(0o700))?;
+    make_private_dir(once_dir)?;
     let _ = clean_up(once_dir, now);
     let stamp = now.trunc() as i64;
     let mut f = fs::File::create(once_dir.join(key))?;

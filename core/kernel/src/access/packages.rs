@@ -173,7 +173,7 @@ fn plain(agent: &str) -> bool {
 }
 
 /// `agent_dirs()` in `kith-auth`: see [`Ctx::package_dir`].
-pub(super) fn package_dir(agents: &Path, kernel: &Path, agent: &str) -> PathBuf {
+pub(crate) fn package_dir(agents: &Path, kernel: &Path, agent: &str) -> PathBuf {
     touch();
     if plain(agent) {
         for root in [agents.to_path_buf(), kernel.join("agents")] {
@@ -191,14 +191,14 @@ pub(super) fn package_dir(agents: &Path, kernel: &Path, agent: &str) -> PathBuf 
     agents.join(agent)
 }
 
-pub(super) fn agent_exists(agents: &Path, kernel: &Path, agent: &str) -> bool {
+pub(crate) fn agent_exists(agents: &Path, kernel: &Path, agent: &str) -> bool {
     plain(agent)
         && package_dir(agents, kernel, agent)
             .join("agent.md")
             .is_file()
 }
 
-pub(super) fn is_builtin(agents: &Path, kernel: &Path, agent: &str) -> bool {
+pub(crate) fn is_builtin(agents: &Path, kernel: &Path, agent: &str) -> bool {
     touch();
     let has = |root: &Path| {
         let d = root.join(agent);
@@ -296,7 +296,7 @@ impl Ctx {
     }
 
     /// The jobs the agent's package declares (capabilities.yaml `jobs:`); none when it can't be read.
-    pub(super) fn declared_jobs(&self, agent: &str) -> Vec<Job> {
+    pub(crate) fn declared_jobs(&self, agent: &str) -> Vec<Job> {
         match &self.packages {
             Packages::Disk => jobs::read(&self.package_dir(agent).join("capabilities.yaml")),
             Packages::Source(_) => self
@@ -307,7 +307,7 @@ impl Ctx {
     }
 
     /// The `guest_domains:` of the agent's package; none when it can't be read.
-    pub(super) fn declared_domains(&self, agent: &str) -> Vec<String> {
+    pub(crate) fn declared_domains(&self, agent: &str) -> Vec<String> {
         match &self.packages {
             Packages::Disk => {
                 jobs::guest_domains(&self.package_dir(agent).join("capabilities.yaml"))

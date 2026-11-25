@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 
 /// What to run.
+#[derive(Default)]
 pub struct RunSpec {
     /// The engine's ACP command line (its row's `local` mode with `{bin}` resolved, or a registry adapter's).
     pub command: String,
@@ -22,10 +23,76 @@ pub struct RunSpec {
     /// ACP `mcpServers` for the session (see [`mcp_servers`]).
     pub mcp_servers: Value,
     pub task: String,
+    /// Continue this session (`session/load`) when the agent advertises `loadSession`; `task` is then the next prompt.
+    pub resume: Option<String>,
+    /// The task as a new session needs it (the agent's instructions in front): sent instead of `task` when the run is
+    /// not a resumed one, that is when `resume` is unset or the agent cannot load sessions.
+    pub fresh_task: Option<String>,
+    /// The reasoning effort to ask for: set when `session/new` lists a `thought_level` config option, else said on stderr.
+    pub effort: Option<String>,
+    /// Variables of this process kept out of the agent's environment.
+    pub env_remove: Vec<String>,
     /// For the whole run, handshake included.
     pub timeout: Duration,
     /// Answer the engine's permission requests with its first "allow" option; otherwise they are refused.
     pub approve: bool,
+    /// Without `approve`, still allow (once) the ask to run a tool of one of `mcp_servers`, when the agent marks it as an
+    /// MCP tool approval and names the server in the call it reported first (see [`Asks::allows`]). Off: every ask is
+    /// refused. Only for an agent whose own per-tool approval refuses a server the owner granted (codex-acp).
+    pub allow_granted_mcp: bool,
+}
+
+/// What the run answers the agent's permission asks with, and what it has seen to decide that.
+struct Asks {
+    approve: bool,
+    /// The servers of this run's `session/new`, when `allow_granted_mcp` is on; empty otherwise.
+    granted: Vec<String>,
+    /// `toolCallId` -> the MCP server of each tool call the agent reported (`rawInput.server`).
+    servers: std::collections::HashMap<String, String>,
+}
+
+impl Asks {
+    fn of(spec: &RunSpec) -> Self {
+        let granted = if spec.allow_granted_mcp {
+            spec.mcp_servers
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|s| s["name"].as_str().map(str::to_owned))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Self {
+            approve: spec.approve,
+            granted,
+            servers: std::collections::HashMap::new(),
+        }
+    }
+
+    /// The option to answer a `session/request_permission` with, if any. `approve`: the first allow option. Otherwise
+    /// only an MCP tool approval (`_meta.is_mcp_tool_approval`) for a call this run saw reported on one of its granted
+    /// servers, answered with `allow_once`: never an "always" option, which the agent keeps for later calls. If a later
+    /// agent drops the `_meta` flag the run loses its MCP tools; it never gains a permission.
+    fn allows<'a>(&self, params: &'a Value) -> Option<&'a str> {
+        let options = params["options"].as_array()?;
+        let kind = |o: &&Value, want: &dyn Fn(&str) -> bool| o["kind"].as_str().is_some_and(want);
+        if self.approve {
+            return options
+                .iter()
+                .find(|o| kind(o, &|k| k.starts_with("allow")))?["optionId"]
+                .as_str();
+        }
+        if params["_meta"]["is_mcp_tool_approval"].as_bool() != Some(true) {
+            return None;
+        }
+        let call = params["toolCall"]["toolCallId"].as_str()?;
+        let server = self.servers.get(call)?;
+        if !self.granted.contains(server) {
+            return None;
+        }
+        options.iter().find(|o| kind(o, &|k| k == "allow_once"))?["optionId"].as_str()
+    }
 }
 
 /// Tokens a run used, as the agent reported them.
@@ -139,12 +206,26 @@ pub async fn run_once(spec: RunSpec) -> Result<Outcome> {
 /// [`run_once`], and with it what the engine had reported it cost when the run ended, whether it finished or not: a run
 /// that crashed or timed out still spent that money, and a delegation's cost cap must count it.
 pub async fn run_once_spent(spec: RunSpec) -> (Result<Outcome>, Option<f64>) {
-    let (acp, mut rx) = match Acp::spawn(&spec.command, &spec.cwd, &spec.env) {
-        Ok(spawned) => spawned,
-        Err(e) => return (Err(e), None),
-    };
+    run_once_until(spec, std::future::pending()).await
+}
+
+/// [`run_once_spent`] that also stops, the agent with it, when `stop` completes (a TERM to the process that runs it): the
+/// run then ends as a [`Failure`] of kind [`FailureKind::Exited`].
+pub async fn run_once_until(
+    spec: RunSpec,
+    stop: impl std::future::Future<Output = ()>,
+) -> (Result<Outcome>, Option<f64>) {
+    let (acp, mut rx) =
+        match Acp::spawn_without(&spec.command, &spec.cwd, &spec.env, &spec.env_remove) {
+            Ok(spawned) => spawned,
+            Err(e) => return (Err(e), None),
+        };
     let mut cost = None;
-    let result = tokio::time::timeout(spec.timeout, session(&acp, &mut rx, &spec, &mut cost)).await;
+    let run = tokio::time::timeout(spec.timeout, session(&acp, &mut rx, &spec, &mut cost));
+    let result = tokio::select! {
+        r = run => r,
+        () = stop => Ok(Err(Failure::error(FailureKind::Exited, "stopped before it finished"))),
+    };
     acp.kill().await;
     crate::stopped().await;
     let result = result.unwrap_or_else(|_| {
@@ -167,6 +248,7 @@ async fn session(
     cost: &mut Option<f64>,
 ) -> Result<Outcome> {
     // The handshake is answered before anything else is read, but a hung agent still ends at the run's deadline.
+    let mut asks = Asks::of(spec);
     let init = acp
         .request(
             "initialize",
@@ -188,20 +270,49 @@ async fn session(
             );
         }
     }
-    let created = acp.request("session/new", new_session).await?;
-    let sid = created["sessionId"]
-        .as_str()
-        .ok_or_else(|| anyhow!("agent returned no sessionId"))?
-        .to_owned();
+    let loadable = init["agentCapabilities"]["loadSession"].as_bool() == Some(true);
+    let resumed = spec.resume.as_deref().filter(|_| loadable);
+    if let Some(id) = spec.resume.as_deref().filter(|_| !loadable) {
+        eprintln!("kith: this agent cannot resume session {id}; starting a new session");
+    }
+    let (created, sid) = if let Some(id) = resumed {
+        new_session["sessionId"] = json!(id);
+        let loaded = acp.request("session/load", new_session).await?;
+        // The agent replays the session's history before it answers: none of it is this run's answer or cost.
+        let (mut old_text, mut old_cost) = (String::new(), None);
+        while let Ok(inc) = rx.try_recv() {
+            if matches!(inc, Incoming::Closed { .. }) {
+                break;
+            }
+            handle(acp, Some(inc), &mut old_text, &mut old_cost, &mut asks).await?;
+        }
+        // Only calls made in this run count towards an ask, not the ones the history replay reported.
+        asks.servers.clear();
+        (loaded, id.to_owned())
+    } else {
+        let created = acp.request("session/new", new_session).await?;
+        let sid = created["sessionId"]
+            .as_str()
+            .ok_or_else(|| anyhow!("agent returned no sessionId"))?
+            .to_owned();
+        (created, sid)
+    };
     if !spec.modes.is_empty() {
         select_mode(acp, &created, &sid, &spec.modes, spec.approve).await?;
     }
     if let Some(model) = spec.model.as_deref().filter(|m| !m.is_empty()) {
         select_model(acp, &created, &sid, model).await?;
     }
+    if let Some(effort) = spec.effort.as_deref().filter(|e| !e.is_empty()) {
+        select_effort(acp, &created, &sid, effort).await?;
+    }
+    let task = match (&spec.fresh_task, resumed) {
+        (Some(fresh), None) => fresh,
+        _ => &spec.task,
+    };
     let prompt = acp.request(
         "session/prompt",
-        json!({"sessionId": sid, "prompt": [{"type": "text", "text": spec.task}]}),
+        json!({"sessionId": sid, "prompt": [{"type": "text", "text": task}]}),
     );
     tokio::pin!(prompt);
     let mut text = String::new();
@@ -218,7 +329,7 @@ async fn session(
                 {
                     break answered?;
                 }
-                handle(acp, inc, &mut text, cost, spec.approve).await?;
+                handle(acp, inc, &mut text, cost, &mut asks).await?;
             }
             r = &mut prompt => break r?,
         }
@@ -228,7 +339,7 @@ async fn session(
         if matches!(inc, Incoming::Closed { .. }) {
             break;
         }
-        handle(acp, Some(inc), &mut text, cost, spec.approve).await?;
+        handle(acp, Some(inc), &mut text, cost, &mut asks).await?;
     }
     Ok(Outcome {
         text,
@@ -308,13 +419,48 @@ async fn select_model(acp: &Acp, created: &Value, sid: &str, model: &str) -> Res
         .map_err(|e| e.context(format!("Couldn't select model {model}")))
 }
 
+/// Sets the effort through the agent's `thought_level` config option when it has one that takes the value; otherwise says
+/// on stderr that the run is without it.
+async fn select_effort(acp: &Acp, created: &Value, sid: &str, effort: &str) -> Result<()> {
+    let option = created["configOptions"]
+        .as_array()
+        .and_then(|o| o.iter().find(|o| o["category"] == "thought_level"));
+    let takes = |o: &Value| {
+        // Flat `{value}` entries, or groups of them; an option that lists none takes any value.
+        let mut values = Vec::new();
+        for item in o["options"].as_array().into_iter().flatten() {
+            match item["options"].as_array() {
+                Some(group) => values.extend(group.iter().filter_map(|g| g["value"].as_str())),
+                None => values.extend(item["value"].as_str()),
+            }
+        }
+        values.is_empty() || values.contains(&effort)
+    };
+    match option.filter(|o| takes(o)).and_then(|o| o["id"].as_str()) {
+        Some(id) => acp
+            .request(
+                "session/set_config_option",
+                json!({"sessionId": sid, "configId": id, "value": effort}),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| e.context(format!("Couldn't set effort {effort}"))),
+        None => {
+            eprintln!(
+                "kith: this agent takes no effort per run over ACP; this run is without effort {effort}"
+            );
+            Ok(())
+        }
+    }
+}
+
 /// Keeps reply text and the reported cost; answers what the agent asks of us. Errors once the agent is gone.
 async fn handle(
     acp: &Acp,
     inc: Option<Incoming>,
     text: &mut String,
     cost: &mut Option<f64>,
-    approve: bool,
+    asks: &mut Asks,
 ) -> Result<()> {
     match inc {
         None => Err(Failure::error(FailureKind::Exited, "agent process exited")),
@@ -333,6 +479,16 @@ async fn handle(
                 match u["sessionUpdate"].as_str() {
                     Some("agent_message_chunk") => text.push_str(&content_text(&u["content"])),
                     Some("usage_update") => *cost = cost_of(u).or(*cost),
+                    Some("tool_call") => {
+                        // An MCP call names its server and its tool; anything less is not one.
+                        if let (Some(id), Some(server), Some(_)) = (
+                            u["toolCallId"].as_str(),
+                            u["rawInput"]["server"].as_str(),
+                            u["rawInput"]["tool"].as_str(),
+                        ) {
+                            asks.servers.insert(id.to_owned(), server.to_owned());
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -340,16 +496,7 @@ async fn handle(
         }
         Some(Incoming::Request { id, method, params }) => {
             if method == "session/request_permission" {
-                let allow = approve
-                    .then(|| {
-                        params["options"].as_array().and_then(|o| {
-                            o.iter().find(|o| {
-                                o["kind"].as_str().is_some_and(|k| k.starts_with("allow"))
-                            })
-                        })
-                    })
-                    .flatten()
-                    .and_then(|o| o["optionId"].as_str());
+                let allow = asks.allows(&params);
                 let outcome = match allow {
                     Some(option) => json!({"outcome": "selected", "optionId": option}),
                     None => json!({"outcome": "cancelled"}),

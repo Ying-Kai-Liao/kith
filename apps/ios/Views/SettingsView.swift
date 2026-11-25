@@ -52,7 +52,7 @@ struct SettingsView: View {
             }
 
             if let owner = online.first {
-                PeopleSection(store: owner)
+                SharingSection(store: owner)
                 // Owner only: `online` holds the computers this account owns.
                 KeysSection(store: owner)
                 ReplyCardsSection(store: owner)

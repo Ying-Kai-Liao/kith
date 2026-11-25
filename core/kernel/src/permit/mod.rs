@@ -18,24 +18,37 @@
 )]
 
 mod access;
+// The guest halves lean on the launch (`launch::guard`, `launch::room`), a Python helper or a sandbox, none of which exist on
+// Windows, and guests are refused there (windows-owner WI6): `refused` answers for them by name.
+#[cfg(unix)]
 mod apply;
+#[cfg(unix)]
 pub use apply::never_granted;
+#[cfg(unix)]
 mod bug;
 mod decide;
+#[cfg(unix)]
 mod door;
+#[cfg(unix)]
 mod helper;
 mod hooks;
 pub use hooks::{NO_VERDICT, ONCE_KEEP_S, SHORT_ONCE_S, host_once_key};
 mod host;
 mod issue;
 mod mcp;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod mcp_tests;
+#[cfg(unix)]
 mod proc;
 mod pyval;
+#[cfg(windows)]
+mod refused;
+#[cfg(unix)]
 mod scrub;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;
+#[cfg(all(test, windows))]
+mod win_tests;
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -152,7 +165,10 @@ pub fn run(env: &Env, kernel: &Path, args: &[String], stdin: &mut dyn Read) -> O
                 ..Out::default()
             }
         }
+        #[cfg(unix)]
         ["apply", file] => apply::apply(env, kernel, file),
+        #[cfg(windows)]
+        ["apply", _] => refused::apply(),
         _ => {
             // the MCP server, with its replies collected (the program streams them: `serve_stdio`)
             let (mut out, mut err) = (Vec::new(), Vec::new());
