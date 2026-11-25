@@ -214,6 +214,12 @@ fn a_run_without_a_conversation_attaches_for_its_own_pid_and_says_why_it_did_not
 #[test]
 fn a_refused_turn_claim_exits_10_and_any_other_refusal_1() {
     use super::writer::{TURN_CLAIM_REFUSED, claim_exit};
-    assert_eq!(claim_exit(&format!("{TURN_CLAIM_REFUSED}: gone")), TURN_CLAIM_EXIT);
-    assert_eq!(claim_exit("that session is busy: held by terminal (pid 7); try again in a moment"), 1);
+    assert_eq!(
+        claim_exit(&format!("{TURN_CLAIM_REFUSED}: gone")),
+        TURN_CLAIM_EXIT
+    );
+    assert_eq!(
+        claim_exit("that session is busy: held by terminal (pid 7); try again in a moment"),
+        1
+    );
 }

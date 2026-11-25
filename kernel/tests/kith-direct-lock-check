@@ -284,5 +284,35 @@ touch "$T/go"; wait $R6
 rm -f "$REG/claims.tombstone"
 fi
 
+if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
+# The same Writer-mode rows with the runs done by the program (launch-exec): the program is the real one, and no core answers in
+# this folder, so the owner's run goes on under the lock alone. The stub's line is looked for by its key (the program may run the
+# stub as a child, so the shell's pid is not the stub's). The --held reclaim has no row: a held session needs the host's turn
+# queue and another holder's live claim, which this script has no setup for (the held.rs tests in core/kernel have it).
+stub_args() { ps -axo args= | grep -F -- "--key $1" | grep -F kith-stub | grep -vF grep | head -n1; }
+printf '{"kith_tombstone": 1, "module": "claims"}\n' > "$REG/claims.tombstone"
+SID9=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+rm -f "$T/go" "$T/started"
+( cd "$T/work" && KITH_CLAIM_WAIT=1 KITH_CLAUDE_ARGS="--session-id $SID9" "$KERNEL/bin/kith" designer "task" ) > "$T/r9.out" 2>&1 &
+R9=$!
+waitfor '[[ -s $T/started ]]' && ok "lock alone, launch-exec one-shot: claude started" || bad "lock alone, launch-exec one-shot: claude never started" "$(cat "$T/r9.out")"
+[[ $(stub_args $SID9) == *"--lock-alone"* ]] && ok "lock alone, launch-exec one-shot: the stub was started with --lock-alone" \
+  || bad "lock alone, launch-exec one-shot: no --lock-alone" "$(stub_args $SID9)"
+grep -q 'conversation lock alone' "$T/r9.out" && ok "lock alone, launch-exec one-shot: one line says so" || bad "lock alone, launch-exec one-shot: no line" "$(cat "$T/r9.out")"
+touch "$T/go"; wait $R9
+if declare -F ptyrun >/dev/null; then
+  SID10=cccccccc-cccc-4ccc-8ccc-cccccccccccc
+  rm -f "$T/go" "$T/started"
+  ( cd "$T/work" && KITH_CLAIM_WAIT=1 KITH_CLAUDE_ARGS="--session-id $SID10" ptyrun "$KERNEL/bin/kith" designer ) > "$T/r10.out" 2>&1 &
+  R10=$!
+  waitfor '[[ -s $T/started ]]' && ok "lock alone, launch-exec terminal: claude started" || bad "lock alone, launch-exec terminal: claude never started" "$(cat "$T/r10.out")"
+  [[ $(stub_args $SID10) == *"--lock-alone"* ]] && ok "lock alone, launch-exec terminal: the stub was started with --lock-alone" \
+    || bad "lock alone, launch-exec terminal: no --lock-alone" "$(stub_args $SID10)"
+  grep -q 'conversation lock alone' "$T/r10.out" && ok "lock alone, launch-exec terminal: one line says so" || bad "lock alone, launch-exec terminal: no line" "$(cat "$T/r10.out")"
+  touch "$T/go"; wait $R10
+fi
+rm -f "$REG/claims.tombstone"
+fi
+
 [[ $fail == 0 ]] && echo "all checks passed"
 exit $fail
