@@ -72,6 +72,20 @@ files with one masked name are an error), and `unswitched` (text saying why the 
 with `--rust` skips an `unswitched` case and prints `skip  NAME  (not switched: ...)`; `--require-switched` replays it, so it is
 red until the verb exists. The Python replay always runs every case.
 
+### Asks on the ledger (P2-3 A3)
+
+`corpus/ask.json` (`ask-*`, `needs: daemon`) runs `kith-ask` (OLD, files) against `kith kernel ask` (NEW, the thin client of the core's `ask.*` rows)
+on the same command lines: a foreground ask (answer, a failed run, a cap refusal, the hop limit, a run parked on a card: exit 3), `--bg`'s start
+line, `--wait`, `--answer`, `--to`, `--end`, `delegations --json`, `--cap`, `ls`, and `AGENT@MACHINE` through a fake `ssh` (`ask-remote-*`, design
+section 9, row X0). The cases run in the `--daemon` pass alone: the rows are the daemon's (a case with `"needs": "daemon"` is skipped by the plain and
+`--core` passes, said out loud). Each side gets its own copy of the kernel under `{ROOT}/k` with a stub `bin/kith` (the agent: one JSON line, or a
+failure, or a park), and `ask-driver.py` runs the line: `@ID` is the newest ask of `delegations --json`, `env:NAME=VALUE` words set the caller's
+environment for that line (an agent asking), `seed-bg` makes a `--bg` job with a session for `--to`. The two sides keep their asks in different
+places (files and `core.db`), which `intended.json` excuses as `state:*` for `ask-*`; what they print is compared exactly. Differences of the
+ledger that the cases keep out of the lines (listed at the top of `core/kernel/src/ask/mod.rs`): `--answer` says `woke` for an answer whether or
+not a writer holds the asker's session, `--wait` returns a row the asker's wake has not taken yet, `--to` to a stopped ask is refused at the
+send, and a failed run that printed no JSON settles `lost`, not `stopped`.
+
 ### Lifecycle (M3-14 P4)
 
 `golden/lifecycle.json` (golden only, like `wake.json`) freezes the former Python `kith-lifecycle sweep|status` (deleted in retire-python P0) and its `compact()` before `compact()`
@@ -185,8 +199,8 @@ fixture was re-recorded for that, and the `advance` row that showed the bug chan
 `golden/cost.json` freezes the verbs of `kith-cost` that the launch and the apps call: `limit` (text, `--json`,
 `--sh`), `spent`, `usage --json`, `agent NAME --json`, `members`, `bots --json`, `sync`, and the usage text. The cases are
 `needs: rust` with `program` set and `bin_both`. They were recorded against the Python `kith-cost` as `program.old` and `{BIN} kernel cost --kernel {KERNEL}` as
-`program.new`; the Python is gone (R2), `program.old` is the stub `bin/kith-cost` (it runs the same program, so a re-record proves nothing)
-and the frozen facets are the Python's. There is no `corpus/cost.json` and no `cost` line in `lib/core-switched.txt`. Ledgers are built from transcripts (`home/.claude/projects/**`, with
+`program.new`; the Python is gone (R2) and so is the stub `bin/kith-cost`, so `program.old` is now the same program line as `program.new`
+(a re-record proves nothing) and the frozen facets are the Python's. There is no `corpus/cost.json` and no `cost` line in `lib/core-switched.txt`. Ledgers are built from transcripts (`home/.claude/projects/**`, with
 subagent `.meta.json`), a hand-written `cost.db`, the bridge's `state.json`, an extra Claude account, `settings.json` limits and an `auth.json`.
 
 **The clock.** `kith-cost` takes `KITH_COST_NOW` (ISO local time or epoch seconds; unset it reads the clock) for the calendar month, the
@@ -201,7 +215,7 @@ cases use `all`. Tag/record error texts after `kith-cost tag: ` are masked (`<E>
 and exit 0 are. Left out on purpose: reports on a NULL project, a model-less row in `agent NAME`, NULL output tokens (the Python
 raises a traceback; the core prints a line). A pace so small that a limit lies years away makes the Python's `forecast` raise `OverflowError`; no case records
 that traceback, and the core answers "stays under" (unit test `a_tiny_pace_never_reaches_the_limit`). This is the one intended
-difference of the port (`kernel/tests/kith-cost-switch-check` reads the stub's side): the Python raised, the core does not.
+difference of the port: the Python raised, the core does not.
 
 ### Settings (M5-4)
 
@@ -365,7 +379,7 @@ Git noise: `.git/index`, `.git/objects/*`, `.git/hooks/*` and `.git/config` are 
 `intended.json` is a list of `{"case": glob, "facet": glob, "why": text}`. Facets are named `stepN.exit`,
 `stepN.stdout` / `stepN.json`, `stepN.stderr`, `state:<path under the side root>` and `fakes`. A difference that
 matches no entry fails. An entry that matches no difference in the cases that ran is reported as `STALE` and fails the
-run, so the list shrinks when a difference goes away. Every entry needs a reason (a ticket, a B-step of the plan).
+run, so the list shrinks when a difference goes away (an entry with `"daemon_only": true` is checked for staleness in the `--daemon` pass alone, where its cases run). Every entry needs a reason (a ticket, a B-step of the plan).
 
 An entry may carry `same_after`: `{"old": [[pattern, replacement]..], "new": [..]}`. It then excuses only the difference those
 rewrites explain: each side must have something to rewrite (so each side still shows which form it took), and the two texts must be
@@ -376,3 +390,16 @@ equal once rewritten. Use it when a case masks two forms to two tokens (the Sess
 
 `selftest.py` checks the runner itself: the same line is the same, a deliberately different NEW side fails with a diff,
 the same difference listed as intended passes, an unused entry is stale. Run by `kernel/tests/kith-difftest-check`.
+
+### launch-exec (retire-python P1-12 R3a)
+
+`corpus/launch-exec.json` has two kinds of case. `launch-exec-owner-*` (R2) compare what the bash entry's `claude` arguments and account
+variables are with what `kith kernel launch AGENT --plan-exec` says they will be. `launch-exec-run-*` (R3a) compare the whole one-shot:
+OLD is the bash body (`kith AGENT task`), NEW is the program running it in one process (`kith kernel launch-exec AGENT --kernel DIR task`), with a fake
+`claude` that prints its arguments (the long prompt is one word), the settings and MCP files it is pointed at, the environment that carries the
+run's state, its pid, and whether the claim on its session names it; a fake `kith-stub` that prints the lock arguments and runs what follows `--`.
+Both sides run with `KITH_CORE=rust` (the hooks are the program's on both) and the claim files are compared with their pids and session ids masked
+(`normalize_paths`). The line `launch-exec` in `lib/core-switched.txt` is off, so the OLD side is the script; the router itself is proved by
+`kith-run-kind-check`, `kith-owner-launch-check` and `kith-launch-once-race-check`, which run once more with the line switched on in a copy of the
+kernel folder. Not here: a fake host (the run socket's `consumeAccess` and `issueAskToken`), so a guest's grants are compared with no answer.
+

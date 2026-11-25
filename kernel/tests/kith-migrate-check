@@ -181,9 +181,9 @@ check "every dev.hq.* job became dev.kith.*" \
   "[ \"\$(ls $LA | tr '\n' ' ')\" = 'dev.kith.backup.plist dev.kith.cost.plist dev.kith.house.plist dev.kith.live.plist dev.kith.monitor.plist dev.kith.sched.plist dev.kith.serve.plist ' ]"
 check "sched plist came from its installer (new label, kith-sched, launcher is ~/.kith/bin/kith-uv)" \
   "plist_has $LA/dev.kith.sched.plist $HOME/.kith/bin/kith-uv && plist_has $LA/dev.kith.sched.plist kernel/bin/kith-sched"
-# dev.kith.cost still runs `kith-uv run --script .../kith-cost`: the stub is valid Python too (it re-runs itself under sh), so the plist stays as it is
-check "rewritten plists name ~/.kith and kith-* only" \
-  "plist_has $LA/dev.kith.cost.plist $HOME/.kith/bin/kith-uv && plist_has $LA/dev.kith.cost.plist $HOME/kith/kernel/bin/kith-cost && ! grep -l '/.hq' $LA/*.plist"
+# dev.kith.cost ran the polyglot `kith-uv run --script .../kith-cost sync`; the stub is gone, so the rewrite runs the program behind kith-uv
+check "dev.kith.cost runs the program: kith-uv run --no-project --quiet -- ~/.kith/cli/current/bin/kith kernel cost sync" \
+  "python3 -I -c 'import plistlib,sys; h=sys.argv[1]; a=plistlib.load(open(h+\"/Library/LaunchAgents/dev.kith.cost.plist\",\"rb\"))[\"ProgramArguments\"]; sys.exit(a != [h+\"/.kith/bin/kith-uv\",\"run\",\"--no-project\",\"--quiet\",\"--\",h+\"/.kith/cli/current/bin/kith\",\"kernel\",\"cost\",\"sync\"])' $HOME && ! grep -l '/.hq' $LA/*.plist && ! grep -q 'kernel/bin/kith-cost' $LA/dev.kith.cost.plist"
 check "the launcher was renamed (not copied) to kith-uv" "[ -x $HOME/.kith/bin/kith-uv ] && [ ! -e $HOME/.kith/bin/hq-uv ]"
 check "dev.kith.serve and serve/config.json point at kith-uv, and nothing points at hq-uv" \
   "plist_has $LA/dev.kith.serve.plist $HOME/.kith/bin/kith-uv && grep -q '$HOME/.kith/bin/kith-uv' $HOME/.kith/serve/config.json && ! grep -rq 'hq-uv' $LA $HOME/.kith/serve/config.json $HOME/.claude/settings.json $HOME/.kith/settings.json"

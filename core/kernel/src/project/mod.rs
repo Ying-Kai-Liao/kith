@@ -46,6 +46,27 @@ pub fn is_guest(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
     Guest::from_env(get).is_some()
 }
 
+/// The separators a path is written with here: `/`, and on Windows `\` too (git prints `/` there, the system `\`).
+const SEPS: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
+
+/// `s` with `/` between its names, which is how projects.json holds a path on every system. Unix paths are as they are.
+fn fwd(s: &str) -> String {
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s.to_owned()
+    }
+}
+
+/// A path as two of them are compared: `/` between names, and on Windows no difference between `C:` and `c:`.
+fn comparable(s: &str) -> String {
+    if cfg!(windows) {
+        fwd(s).to_lowercase()
+    } else {
+        s.to_owned()
+    }
+}
+
 /// Where a new project's home goes unless projects.json says "homes".
 const ROOT: &str = "~/Documents";
 
@@ -265,7 +286,9 @@ impl Run<'_> {
     fn expand(&self, path: &str) -> PathBuf {
         match path.strip_prefix('~') {
             Some("") => self.ctx.home.clone(),
-            Some(rest) if rest.starts_with('/') => self.ctx.home.join(rest.trim_start_matches('/')),
+            Some(rest) if rest.starts_with(SEPS) => {
+                self.ctx.home.join(rest.trim_start_matches(SEPS))
+            }
             _ => PathBuf::from(path),
         }
     }
@@ -280,8 +303,18 @@ impl Run<'_> {
 
     /// Store paths under the home directory as `~/...`, so the registry still reads right on another Mac.
     fn tilde(&self, path: &str) -> String {
-        let home = self.ctx.home.to_string_lossy();
-        match path.strip_prefix(home.as_ref()) {
+        let home = fwd(&self.ctx.home.to_string_lossy());
+        let slashed = fwd(path);
+        // git spells a Windows path with `/` and any case of the drive letter; the system with `\`
+        let under = if cfg!(windows) {
+            slashed
+                .get(..home.len())
+                .filter(|head| head.eq_ignore_ascii_case(&home))
+                .map(|_| &slashed[home.len()..])
+        } else {
+            slashed.strip_prefix(home.as_str())
+        };
+        match under {
             Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("~{rest}"),
             _ => path.to_owned(),
         }
@@ -343,6 +376,7 @@ impl Run<'_> {
     /// The project for directory `d`: its git remote, else the longest path alias that holds it.
     fn matching(&self, d: &str) -> Option<String> {
         let (remote, root) = locate(d);
+        let root = comparable(&root);
         let projects = self.projects();
         for (pid, p) in projects {
             if !remote.is_empty() && list(p, "remotes").contains(&remote) {
@@ -353,7 +387,7 @@ impl Run<'_> {
         let mut size = -1_i64;
         for (pid, p) in projects {
             for a in list(p, "paths") {
-                let a = self.real(&a);
+                let a = comparable(&self.real(&a));
                 let prefix = format!("{}/", a.trim_end_matches('/'));
                 let len = i64::try_from(a.chars().count()).unwrap_or(i64::MAX);
                 if (root == a || root.starts_with(&prefix)) && len > size {
@@ -438,7 +472,11 @@ impl Run<'_> {
                         .map(str::to_owned)
                 })
                 .unwrap_or_else(|| ROOT.to_owned());
-            let dir = format!("{}/{pid}", self.real(&base).trim_end_matches('/'));
+            let dir = format!(
+                "{}{}{pid}",
+                self.real(&base).trim_end_matches(SEPS),
+                std::path::MAIN_SEPARATOR
+            );
             made = !Path::new(&dir).is_dir();
             home = Some(dir);
         } else if home.as_deref() == Some("") {

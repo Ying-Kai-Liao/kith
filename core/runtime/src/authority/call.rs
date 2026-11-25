@@ -447,12 +447,13 @@ pub(crate) fn call_deferred(
     core: &mut Core,
     method: &str,
     params: &Value,
-) -> Result<(Value, Option<revoke::LifeMove>)> {
+) -> Result<(Value, Option<revoke::LifeMove>, Option<revoke::KeptNote>)> {
     let c = ctx_of(core, params)?;
     let life = life_of(core, params)?;
     let mut said = call_in_deferred(core, &c, &life, method, params)?;
     let mv = take_move(&mut said, &life);
-    Ok((said, mv))
+    let kept = take_kept(&mut said, &life, params);
+    Ok((said, mv, kept))
 }
 
 /// The moves the repair runs: for every person with old ids in `was`, each old id's folders to the person's current id.
@@ -488,6 +489,38 @@ pub(crate) fn finish_move(
     }
 }
 
+/// [`finish_move`] for a move that has no thread to run on: the startup repair moves the folders at the next start.
+pub(crate) fn finish_unmoved(said: Value, mv: &revoke::LifeMove) -> Value {
+    renamed(
+        said,
+        &[],
+        vec![format!(
+            "note: the folders of {} move to {} at the next start",
+            mv.old, mv.new
+        )],
+    )
+}
+
+/// A removal's answer with the line that tells what is kept: worded by the caller once the lock is let go.
+pub(crate) fn finish_kept(mut said: Value, folders: Option<Vec<(String, PathBuf)>>) -> Value {
+    let clause = revoke::KeptNote::clause(folders);
+    if let Some(first) = said["lines"].get_mut(0)
+        && let Some(line) = first.as_str()
+    {
+        *first = json!(format!("{line}{clause}"));
+    }
+    said
+}
+
+/// Takes the mark a removal left in its answer.
+fn take_kept(said: &mut Value, life: &Life, params: &Value) -> Option<revoke::KeptNote> {
+    said.as_object_mut()?.remove("lifeKept")?;
+    Some(revoke::KeptNote {
+        life: life.clone(),
+        pid: word(params, "id")?.to_owned(),
+    })
+}
+
 /// Takes the move a rename left in its answer.
 fn take_move(said: &mut Value, life: &Life) -> Option<revoke::LifeMove> {
     let m = said.as_object_mut()?.remove("lifeMove")?;
@@ -519,11 +552,12 @@ pub(crate) fn call_with_deferred(
     c: &Ctx,
     method: &str,
     params: &Value,
-) -> Result<(Value, Option<revoke::LifeMove>)> {
+) -> Result<(Value, Option<revoke::LifeMove>, Option<revoke::KeptNote>)> {
     let life = Life::beside(c);
     let mut said = call_in_deferred(core, c, &life, method, params)?;
     let mv = take_move(&mut said, &life);
-    Ok((said, mv))
+    let kept = take_kept(&mut said, &life, params);
+    Ok((said, mv, kept))
 }
 
 /// [`call_with`] with the folders of a person's life given too. A rename's folders move right here, after its commit:
@@ -536,10 +570,18 @@ pub(crate) fn call_in(
     params: &Value,
 ) -> Result<Value> {
     let mut said = call_in_deferred(core, c, life, method, params)?;
-    Ok(match take_move(&mut said, life) {
+    let kept = take_kept(&mut said, life, params);
+    let said = match take_move(&mut said, life) {
         Some(mv) => {
             let (report, _) = revoke::run_move(&mv);
             finish_move(said, &mv, Some(&report))
+        }
+        None => said,
+    };
+    Ok(match kept {
+        Some(note) => {
+            let folders = note.folders_now();
+            finish_kept(said, folders)
         }
         None => said,
     })
@@ -876,11 +918,13 @@ fn call_in_deferred(
             if m == "people.renamePerson"
                 && let (Some(old), Some(new)) = (word(params, "id"), word(params, "to"))
             {
-                // The person's old ids, as the row the rename just committed keeps them.
-                let earlier = store::read(core, |a| {
-                    write::words(write::people(a).get(new).and_then(|p| p.get("was")))
-                })?;
+                // The person's old ids, as the rename wrote them to the row it committed. A second read failing must
+                // not answer an error for a rename that stands, and leave its move to a restart.
                 let mut said = said;
+                let earlier = said
+                    .as_object_mut()
+                    .and_then(|o| o.remove("lifeWas"))
+                    .unwrap_or_else(|| json!([]));
                 said["lifeMove"] = json!({ "old": old, "new": new, "earlier": earlier });
                 return Ok(said);
             }
@@ -1178,19 +1222,23 @@ pub(super) fn write_in(
             out["joining"] = json!(joining);
             Ok(out)
         }
-        "people.renamePerson" => Ok(lines(revoke::person_rename(
-            a,
-            life,
-            need(params, "id")?,
-            need(params, "to")?,
-        )?)),
+        "people.renamePerson" => {
+            let (said, was) =
+                revoke::person_rename(a, life, need(params, "id")?, need(params, "to")?)?;
+            let mut out = lines(said);
+            // The old ids the rename itself wrote to the row: the move is built from these, not from a second read.
+            out["lifeWas"] = json!(was);
+            Ok(out)
+        }
         "people.removePerson" if switch(params, "unused") => Ok(lines(
             revoke::person_remove_unused(a, life, need(params, "id")?)?,
         )),
         "people.removePerson" => {
             let was = revoke::was_ids(a, need(params, "id")?);
-            let (said, ids) = revoke::person_remove(a, life, c, need(params, "id")?)?;
+            let (said, ids) = revoke::person_remove(a, c, need(params, "id")?)?;
             let mut out = lines(said);
+            // Marks the line the caller finishes once the lock is let go (`finish_kept`).
+            out["lifeKept"] = json!(true);
             // What the write did, for the record and the order below: keyed on the removal, not on the method name.
             out["removedPerson"] = json!(need(params, "id")?);
             out["ids"] = json!(ids);

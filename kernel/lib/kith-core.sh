@@ -140,9 +140,25 @@ kith_core_exec() {
   KITH_BIN=$bin exec "$bin" kernel $verb "$@"
 }
 
+# kith_wake_exec ARGS...   `kith wake`: execs the program's own `kernel wake` (a thin client of the core's wake rows, no Python) when the
+# wake queue is the core's (the tombstone in sessions/queue/: the step writes it before the switch record and the rollback removes it
+# last) and the program lists `wake`; otherwise returns 1 and kith-wake answers, which is itself the core's client once switched.
+kith_wake_exec() {
+  local bin ver
+  [[ ${KITH_CORE:-} != python && -e ${KITH_STATE:-/nonexistent}/sessions/queue/.tombstone ]] || return 1
+  if [[ -n ${_kith_core_primed:-} ]]; then
+    bin=$_kith_core_bin ver=$_kith_core_ver
+  else
+    bin=$(kith_find_bin) && [[ -n $bin ]] || return 1
+    ver=$("$bin" kernel version 2>/dev/null)
+  fi
+  [[ -n $bin && $ver == *'"wake"'* ]] || return 1
+  KITH_BIN=$bin exec "$bin" kernel wake "$@"
+}
+
 # kith_cost_bin   prints the kith program that has the cost ledger's writers (`cost-ledger` in `kith kernel version`) and returns 0, or
 # returns 1 when this Mac has none. KITH_CORE does not matter: there is no Python cost to go back to. The SessionStart hook of
-# `kith AGENT` names the program when there is one, else the stub (`bin/kith-cost tag`, which does nothing without a program).
+# `kith AGENT` names the program when there is one, else the launch writes no cost hook.
 kith_cost_bin() {
   local bin ver
   if [[ -n ${_kith_core_primed:-} ]]; then
@@ -186,12 +202,13 @@ kith_threads() {
   fi
 }
 
-# kith_cost ARGS...   `kith-cost ARGS`: the stub, which runs `kith kernel cost ARGS` on a program that has `cost-ledger` and
-# otherwise says so on stderr and fails (exit 3). Given the program the launch already looked up (KITH_BIN), the stub only asks it for its modules once.
-# A subshell, so `KITH_PERSON_WAS=.. kith_cost ..` reaches it.
+# kith_cost ARGS...   `kith kernel cost ARGS` on the program that has `cost-ledger` (see kith_cost_bin); with none it says so on
+# stderr and returns 3 (the code of "this moved"), which callers read as "cost unknown". A subshell, so
+# `KITH_PERSON_WAS=.. kith_cost ..` reaches it.
 kith_cost() {
-  ( [[ -z ${_kith_core_bin:-} || ${_kith_core_ver:-} != *'"cost-ledger"'* ]] || export KITH_BIN=$_kith_core_bin
-    exec "$KITH/bin/kith-cost" "$@" )
+  local cbin
+  cbin=$(kith_cost_bin) || { echo "kith-cost: the kith program with the cost ledger (module cost-ledger) was not found; kith update" >&2; return 3; }
+  ( KITH_BIN=$cbin exec "$cbin" kernel cost --kernel "$KITH" "$@" )
 }
 
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag
@@ -203,6 +220,32 @@ kith_launch_json_flag() {
       --hold|--resume|--account|--backup|-p|--project|-m|--model|-e|--effort|-H|--harness|--permission-mode) shift 2 || return 1 ;;
       --print|-r|-c|--continue|--bypass) shift ;;
       *) return 1 ;;
+    esac
+  done
+  return 1
+}
+
+# kith_switched VERB   succeeds when lib/core-switched.txt has a line for VERB (a commented one is no line). kith_core_exec routes a verb under
+# KITH_CORE=rust without a line too; a verb that ships off asks for the line first.
+kith_switched() {
+  awk -F'\t' -v v="$1" '$1 == v { f = 1 } END { exit !f }' "$KITH/lib/core-switched.txt" 2>/dev/null
+}
+
+# kith_oneshot_flag   ARGS...   succeeds when `kith AGENT ARGS` is a one-shot the program can run itself (`kith kernel launch-exec`): a task
+# stands after the leading flags (the flag loop of bin/kith: a flag with a value skips it, `--`, a word or a task that starts with a
+# dash and holds a blank ends the flags). A terminal run, --print, --launch-json, --inspect, --render, a flag the old body refuses
+# and a flag with no value stay with the old body.
+kith_oneshot_flag() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --print|--launch-json|--inspect|--render) return 1 ;;
+      --held|--direct|--bypass|-c|--continue) shift ;;
+      --hold|--resume|--account|--backup|-p|--project|-m|--model|-e|--effort|-H|--harness|--permission-mode) shift 2 || return 1 ;;
+      -r) if [[ -n ${2:-} && $2 != -* ]]; then shift 2; else shift; fi ;;
+      --) shift; [[ $# -gt 0 ]]; return ;;
+      -*[[:space:]]*) return 0 ;;
+      -*) return 1 ;;
+      *) return 0 ;;
     esac
   done
   return 1

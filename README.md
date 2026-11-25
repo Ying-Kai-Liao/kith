@@ -60,7 +60,7 @@ kith backup run                            # everything to private GitHub repos:
 Desktop app, one click: <https://kithbot.app/download>, or directly <https://kithbot.app/download/mac> (macOS, Apple silicon and Intel)
 and <https://kithbot.app/download/linux> (Linux x64, AppImage).
 
-Kith was called hq until 2026-10-22. The `hq` command still works as an alias (so do `hq-send`, `hq-auth`, `hq-pkg`, `hq-state`, `hq-new`, `hq-cost`, `hq-who`, `hq-serve` and `hq-doctor`, which older agents call), a Mac with an existing `~/.hq`
+Kith was called hq until 2026-10-22. The `hq` command still works as an alias (so do `hq-send`, `hq-auth`, `hq-pkg`, `hq-state`, `hq-new`, `hq-who`, `hq-serve` and `hq-doctor`, which older agents call), a Mac with an existing `~/.hq`
 keeps using it until `kith migrate run` moves it to `~/.kith`, and `~/hq` stays a link to the same folder as `~/kith`.
 Old `HQ_*` variables, `dev.hq.*` jobs and `hq-agent` repos are still read.
 
@@ -198,7 +198,7 @@ install.sh                 links ~/kith and ~/.local/bin/kith, makes ~/.kith, in
 docs/                      architecture, codebase map
 kernel/                    the code
   adapters/claude-code/    the Claude Code adapter (plugin)
-  adapters/harness.py      the other harnesses an agent can run on: codex, pi, agy, hermes, qwen, dsh, opencode
+  (engines)                Claude Code, Codex and Hermes run in full; other ACP engines one-shot only (`kith kernel engine-run`)
   lib/kith_paths.py          the one place that knows where things are
   bin/project-id           resolves the current directory to a project; --list, --register
   bin/kith                   run an agent directly: kith ls · kith <agent> [-p ID] [task] · --print
@@ -316,16 +316,16 @@ apply to both `kith <agent>` runs and `kith:<name>` subagents and change with th
 `kith <agent> -m MODEL -e EFFORT` (or `KITH_MODEL` / `KITH_EFFORT`); leave a field out to use your global setting.
 
 **Harness.** An agent runs on Claude Code unless `agent.md` says `harness:` with one of `codex` (OpenAI Codex CLI),
-`pi`, `agy` (Antigravity CLI), `hermes` (Hermes Agent), `qwen` (Qwen Code), `dsh` (DeepSeek Harness) or `opencode`.
+`pi`, `agy` (Antigravity CLI), `hermes` (Hermes Agent), `qwen` (Qwen Code) or `opencode`. Codex and Hermes also open
+their own terminal session; the others answer one task over ACP, and `pi` and `agy` have no ACP path here, so they say so.
 `kith <agent> -H codex`, `kith ask <agent> -H pi`, `kith schedule add … -H hermes` or `KITH_HARNESS` pick one for a run; the
 Discord bridge uses the agent's own. Every harness gets the same prompt (agent.md, PROTOCOL, memory, project),
-directories, model and effort; `kernel/adapters/harness.py` turns them into its flags and its answer into the shape
+directories, model and effort; `kith kernel engine-run` runs them over ACP and puts the answer into the shape
 `kith ask` and the bridge read, with sessions you continue (`-c`, a thread) on the same harness. A `model:` names a model
 of the agent's own harness, so with `-H` the other harness uses its default unless `-m` says. What only Claude Code
 runs have: the agent's `settings.json` (permissions, hooks), per-request costs (other harnesses: one ledger row per
-run), and on agy, hermes, qwen and dsh, the granted MCP servers (codex, pi and opencode get them). dsh takes its
-DeepSeek key from its own settings or a `deepseek` grant (`kith auth`); dsh and opencode run through `npx` when not
-installed. `kith:<name>` subagents always run inside the calling Claude Code session.
+run), and, in a terminal session, hermes's granted MCP servers (over ACP, every engine gets them). opencode runs
+through `npx` when not installed. `kith:<name>` subagents always run inside the calling Claude Code session.
 
 **Backups.** When an agent's own harness runs out of usage, `kith serve` can move the turn to a backup, in the order you set:
 `kith backup add claude:work` (an extra Claude subscription login made with `kith account add claude work`, kept in
@@ -338,11 +338,11 @@ entry's readiness and `kith <agent> --launch-json --backup <id>` launches one (e
 programs. The ledger records the harness and login of each run (`provider`, `account`).
 
 ## Cost
-`kith cost` (the Rust `kith kernel cost`, reached through `bin/kith-cost`) keeps every Claude Code request's cost (list API prices) in `~/.kith/cost.db`, so it outlives
+`kith cost` (the Rust `kith kernel cost`) keeps every Claude Code request's cost (list API prices) in `~/.kith/cost.db`, so it outlives
 transcript cleanup. Each session `kith` starts is tagged with the agent, package version, model, effort and caller
 (terminal or discord); `kith:<name>` subagents are recognised by their type. `kith cost agents [today|week|month|all]`
 compares agents; `kith cost agent video` shows one agent by day, by version/model/effort and its costliest runs;
-`kith-cost csv` exports every request with its agent for analysis elsewhere.
+`kith cost csv` exports every request with its agent for analysis elsewhere.
 
 ## Asking an agent from a script or another session
 `kith ask house "what expires this week?"` runs the agent exactly as `kith house "…"` does (its own package, settings,

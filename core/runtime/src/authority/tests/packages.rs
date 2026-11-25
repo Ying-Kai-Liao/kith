@@ -246,3 +246,28 @@ fn a_rename_leaves_its_folders_to_the_mover_and_reports_what_moved() {
             .exists()
     );
 }
+
+#[test]
+fn a_rename_hands_the_move_the_old_ids_it_wrote_itself_and_leaves_no_trace_in_the_answer() {
+    let mut rig = Rig::new(&base());
+    let first = put(&rig, "agents/house/memory/people/sam");
+    // A to B to C, one commit after the other: each move is built from the ids its own rename wrote to the row.
+    let one = rig
+        .call("people.renamePerson", &json!({"id": "sam", "to": "anna"}))
+        .unwrap();
+    let two = rig
+        .call("people.renamePerson", &json!({"id": "anna", "to": "bea"}))
+        .unwrap();
+    for said in [&one, &two] {
+        assert!(said.get("lifeWas").is_none(), "{said}");
+        assert!(said.get("lifeMove").is_none(), "{said}");
+    }
+    assert_eq!(
+        rig.tables()["people"]["bea"]["was"],
+        json!(["samuel", "sam", "anna"])
+    );
+    assert!(!first.exists());
+    let home = rig.machine_dir.path().join("agents/house/memory/people");
+    assert!(home.join("bea").exists());
+    assert!(!home.join("anna").exists());
+}

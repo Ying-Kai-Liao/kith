@@ -154,7 +154,9 @@ async fn status(refresh: bool) -> Value {
     answer
 }
 
+// Fake `kith` shell scripts and chmod: Unix-only until windows-owner W2b.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use crate::remote::account::ONE_AT_A_TIME;

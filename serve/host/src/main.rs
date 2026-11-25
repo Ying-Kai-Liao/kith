@@ -1,10 +1,19 @@
 //! `kith-serve`: runs coding-agent bots over ACP and serves the Kith apps.
 
+// The Windows host is mid-port (docs/plans/windows-owner.md): host.sock, the kernel verbs and the claim signals are
+// Unix-only, so what only they call is unused here, and the stubs that stand in for them have no awaits or returns to
+// use. Each package that ports one removes its part of this; the Unix build keeps every one of these lints.
+#![cfg_attr(
+    not(unix),
+    allow(dead_code, unused_imports, clippy::unused_async, clippy::unused_async_trait_impl, clippy::unnecessary_wraps)
+)]
+
 mod access;
 mod account_store;
 mod agent;
 mod analytics;
 mod api;
+mod ask_cmd;
 mod background;
 mod calls;
 mod cards;
@@ -14,15 +23,20 @@ mod compat;
 mod core_front;
 mod delegation;
 mod doors;
+mod engine_run;
 mod environment;
 mod hqmem;
 mod hub;
 mod kernel;
+mod kernel_windows;
+#[cfg(unix)]
 mod launch_cmd;
+#[cfg(unix)]
 mod lifecycle_cmd;
 mod limits;
 mod market;
 mod mcp;
+#[cfg(unix)]
 mod pkg_cmd;
 mod remote;
 mod rich_card;
@@ -37,6 +51,7 @@ mod shell;
 mod store;
 mod supervise;
 mod terminal;
+#[cfg(unix)]
 mod threads_cmd;
 mod tui;
 mod update;
@@ -44,6 +59,7 @@ mod usage;
 mod voice;
 mod voice_local;
 mod wake;
+mod wake_cmd;
 mod watchdog;
 
 use agent::backends;
@@ -368,6 +384,8 @@ fn write_token_file(token: &str) -> Result<()> {
 }
 
 /// What `kith kernel <module> ...` can be asked.
+// Their Unix-only verbs refuse before reading these fields on Windows.
+#[cfg_attr(not(unix), allow(dead_code))]
 #[derive(Subcommand)]
 enum KernelCmd {
     /// The interface version and modules of this build: `{"abi":1,"modules":[...]}`.
@@ -448,7 +466,8 @@ enum KernelCmd {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
-        /// `resolve <agent> [--person ID] [--via CALLER] [--take-once] [--json]` or `may <id> <agent> [--via CALLER] [--once]`.
+        /// `resolve <agent> [--person ID] [--via CALLER] [--take-once] [--json]`, `may <id> <agent> [--via CALLER] [--once]`,
+        /// `mcp-config <agent>` or `exec [--for AGENT] <service> -- CMD...` (a shared MCP server started with its keys).
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
@@ -475,9 +494,9 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
-    /// What Claude Code usage costs, every verb of `kernel/bin/kith-cost`: the launch's and the apps' (`limit`, `spent`, `usage --json`,
+    /// What Claude Code usage costs, every verb of the former `kernel/bin/kith-cost`: the launch's and the apps' (`limit`, `spent`, `usage --json`,
     /// `agent NAME --json`, `members`, `bots --json`, `sync`), the ledger's writers (`tag`, `record`) and the text reports.
-    /// Prints what `kith-cost` prints, with its exit codes. `kith cost` and the stub `kernel/bin/kith-cost` route here.
+    /// Prints what `kith-cost` prints, with its exit codes. `kith cost` routes here (through `bin/kith`'s `kith_cost`).
     // -h/--help belong to kith-cost's own usage text, so clap must not answer them.
     #[command(disable_help_flag = true)]
     Cost {
@@ -520,6 +539,26 @@ enum KernelCmd {
         /// The kernel folder (default: the one this program finds).
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
+    /// `kith ask` as a client of the core's ask rows (retire-python P2-3): the verbs of `kernel/bin/kith-ask`, with its words and exit codes.
+    /// `kernel/bin/kith-ask` hands its command line here when this program lists `ask-ledger` and the `asks` module is switched.
+    // kith-ask's own usage errors belong to the verb, so clap must not answer -h.
+    #[command(disable_help_flag = true)]
+    Ask {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
+    /// `kith wake` as a client of the core's wake rows, for a Mac whose wake queue is the core's (`kernel/bin/kith` routes it here
+    /// then; no Python): `enqueue`, `withdraw`, `withdraw-person`, `take`, `done`, `back`, `wait`, `status`, `ls` as `kernel/bin/kith-wake`
+    /// prints them; `drain` and `deliver` do nothing (the host ticks the queue).
+    // kith-wake's own usage errors (exit 2) belong to the verb, so clap must not answer -h.
+    #[command(disable_help_flag = true)]
+    Wake {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
@@ -573,6 +612,13 @@ enum KernelCmd {
         #[command(subcommand)]
         what: LaunchCmd,
     },
+    /// `AGENT [--kernel DIR] ARGS...`: a one-shot run in this process (`kith AGENT "task"`), the claims and the engine of
+    /// `kernel/bin/kith`'s one-shot branch. `kernel/bin/kith` routes to it while `launch-exec` is in `lib/core-switched.txt`.
+    #[command(name = "launch-exec", hide = true, disable_help_flag = true)]
+    LaunchExec {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
     /// kith's own settings, the command line of `kernel/lib/kith_settings.py`: `KEY [AGENT]`, `call_model`, `accounts`, `pin`,
     /// `limit AGENT`, `delegation.chain_cost_cap_usd`, `cap MODE CAPS_FILE`, `reads-others CAPS_FILE` and the writes `set permission_mode|
     /// call_model|at_limit [AGENT] VALUE`, `set limit AGENT N|none`, `set delegation.chain_cost_cap_usd N|none|default`. Prints what
@@ -622,6 +668,24 @@ enum KernelCmd {
         #[arg(long)]
         params_stdin: bool,
     },
+    /// A non-Claude agent's one-shot over ACP, as `kernel/bin/kith` runs it: the run's prompt, folders and MCP servers come
+    /// in `KITH_RUN_PROMPT`, `KITH_RUN_DIRS` and `KITH_RUN_MCP`; `--output json` prints what `claude -p --output-format json`
+    /// does; one cost row is written. Exit 78 before anything starts: this engine has no ACP one-shot here.
+    EngineRun {
+        engine: String,
+        #[arg(long)]
+        output: Option<String>,
+        /// A session this engine gave out before (`<engine>:<id>`); another engine's starts a new one.
+        #[arg(long)]
+        resume: Option<String>,
+        #[arg(long)]
+        permission_mode: Option<String>,
+        /// The engine's own terminal session (Codex, Hermes), no task: its CLI with the run's flags.
+        #[arg(long)]
+        interactive: bool,
+        #[arg(last = true)]
+        task: Vec<String>,
+    },
     /// One task on one engine over ACP: the answer on stdout (the task after `--`, or on stdin).
     RunOnce {
         engine: String,
@@ -630,6 +694,9 @@ enum KernelCmd {
         /// The folder the engine works in (default: here).
         #[arg(long)]
         cwd: Option<std::path::PathBuf>,
+        /// More folders the engine may work in (repeat it); only an engine that takes them gets them.
+        #[arg(long = "add-dir")]
+        dirs: Vec<std::path::PathBuf>,
         /// MCP servers for the run: `{"mcpServers": {...}}` as JSON or a file holding it.
         #[arg(long)]
         mcp_config: Option<String>,
@@ -718,6 +785,19 @@ enum DelegationAction {
 enum AccountsAction {
     /// The chain for `kith AGENT --backups-json`.
     BackupsJson { agent: String, agent_md: String },
+    /// The agent's accounts as one JSON object for `kith AGENT --accounts-json`: its set in order, status, usage, candidates.
+    AccountsJson { agent: String, agent_md: String },
+    /// The id of the agent's static main account (`kith AGENT`'s start when nothing is out).
+    MainId { agent: String, agent_md: String },
+    /// A one-shot over `pick`'s candidates: `kith kernel accounts run-chain AGENT AGENT.MD KITH -- ARGS...` runs
+    /// `KITH AGENT [--account ID] ARGS...`, moving on at exit 4 or a usage-limit message (which marks the account out).
+    RunChain {
+        agent: String,
+        agent_md: String,
+        kith: String,
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
     /// Shell assignments for a backup chain entry; exit 4 and one line on stderr when it can't run.
     LaunchEnv {
         agent: String,
@@ -778,6 +858,23 @@ fn print_accounts(kernel: Option<std::path::PathBuf>, action: AccountsAction) ->
     let result: Result<String, String> = match action {
         AccountsAction::BackupsJson { agent, agent_md } => {
             Ok(accounts::chain(&ctx, &agent, std::path::Path::new(&agent_md)).dumps())
+        }
+        AccountsAction::AccountsJson { agent, agent_md } => {
+            accounts::accounts_json(&ctx, &agent, std::path::Path::new(&agent_md))
+        }
+        AccountsAction::MainId { agent, agent_md } => {
+            Ok(accounts::main_id(&ctx, &agent, Some(std::path::Path::new(&agent_md)), None))
+        }
+        AccountsAction::RunChain { agent, agent_md, kith, args } => {
+            return accounts::chain::run(
+                &ctx,
+                &agent,
+                std::path::Path::new(&agent_md),
+                std::path::Path::new(&kith),
+                &args,
+                &mut std::io::stdout(),
+                &mut std::io::stderr(),
+            );
         }
         AccountsAction::LaunchEnv { agent, entry, record } => accounts::launch_env(&ctx, &agent, &entry, false, record),
         AccountsAction::MainEnv { agent, agent_md, state, record, prefer } => accounts::main_env(
@@ -850,6 +947,7 @@ fn print_account_state(kernel: Option<std::path::PathBuf>, mut args: Vec<String>
 }
 
 /// `kith kernel account <verb> ...`: `kernel/bin/kith-account`'s words and exit codes.
+#[cfg(unix)]
 fn print_account(kernel: Option<std::path::PathBuf>, args: Vec<String>) -> i32 {
     use kith_kernel::accounts::{self, Ctx, System};
     let home = kith_kernel::paths::process_home();
@@ -961,10 +1059,12 @@ fn cutover_verb(_: &kith_kernel::paths::Paths, _: &[String]) -> i32 {
     1
 }
 
+#[cfg(unix)]
 fn print_secrets(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use std::io::Write as _;
     let home = kith_kernel::paths::process_home();
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    launch_cmd::install_core();
     let ctx = kith_kernel::secrets::Ctx::from_process(&kernel);
     // No verb is `kith-auth` with no arguments: its usage text and exit 0 (not clap's usage error).
     let (verb, rest) = args.split_first().map_or(("--help", &[][..]), |(v, r)| (v.as_str(), r));
@@ -976,6 +1076,7 @@ fn print_secrets(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
 }
 
 /// `kith kernel cost <verb ...>`: `kith-cost`'s `limit`, `spent` and the apps' `--json` views from the `kith-kernel` crate.
+#[cfg(unix)]
 fn print_cost(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use std::io::Write as _;
     let home = kith_kernel::paths::process_home();
@@ -1005,6 +1106,7 @@ fn print_permit(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     out.code
 }
 
+#[cfg(unix)]
 fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use std::io::Write as _;
     let home = kith_kernel::paths::process_home();
@@ -1022,6 +1124,7 @@ fn project_id_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     out.code
 }
 
+#[cfg(unix)]
 fn room_ledger_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     let home = kith_kernel::paths::process_home();
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
@@ -1034,6 +1137,7 @@ fn room_ledger_cmd(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
 }
 
 /// `kith kernel people people|invite ARGS...`: what `kith-people` prints, with its exit codes.
+#[cfg(unix)]
 fn print_people(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use std::io::Write as _;
     let home = kith_kernel::paths::process_home();
@@ -1047,6 +1151,7 @@ fn print_people(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
 }
 
 /// `kith kernel settings ARGS...`: what `kith_settings.py` prints, with its exit codes.
+#[cfg(unix)]
 fn print_settings(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use kith_kernel::accounts::{Ctx, System};
     use std::io::Write as _;
@@ -1069,7 +1174,31 @@ fn print_settings(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     out.code
 }
 
+/// The kernel verbs whose modules are Unix-only in kith-kernel, with what to tell a Windows caller. Their ports are
+/// windows-owner W5a (secrets, settings, people, cost), W12 (threads, lifecycle) and retire-python P1
+/// (launch, pkg, project-id, room-ledger).
+#[cfg(not(unix))]
+fn unix_only_verb(cmd: &KernelCmd) -> Option<&'static str> {
+    Some(match cmd {
+        KernelCmd::Secrets { .. } => "kernel secrets (windows-owner W5a)",
+        KernelCmd::Account { .. } => "kernel account (windows-owner W5a)",
+        KernelCmd::Cost { .. } => "kernel cost (windows-owner W5a)",
+        KernelCmd::People { .. } => "kernel people (windows-owner W5a)",
+        KernelCmd::Settings { .. } => "kernel settings (windows-owner W5a)",
+        KernelCmd::Threads { .. } => "kernel threads (windows-owner W12)",
+        KernelCmd::Lifecycle { .. } => "kernel lifecycle (windows-owner W12)",
+        KernelCmd::ProjectId { .. } => "kernel project-id (retire-python P1)",
+        KernelCmd::RoomLedger { .. } => "kernel room-ledger (retire-python P1)",
+        KernelCmd::Pkg { .. } => "kernel pkg (retire-python P1)",
+        KernelCmd::Launch { .. } => "kernel launch (retire-python P1)",
+        KernelCmd::LaunchExec { .. } => "kernel launch-exec (retire-python P1)",
+        _ => return None,
+    })
+}
+
 /// `kith kernel launch <piece>`.
+// Their Unix-only verbs refuse before reading these fields on Windows.
+#[cfg_attr(not(unix), allow(dead_code))]
 #[derive(Subcommand)]
 enum LaunchCmd {
     /// The system prompt a run of the agent gets (`kith AGENT --launch-json`'s `system_prompt`). Reads the agent's
@@ -1178,6 +1307,7 @@ enum LaunchCmd {
 }
 
 /// What `kith kernel launch prompt` was asked.
+#[cfg(unix)]
 struct LaunchPromptArgs {
     agent: String,
     person: Option<String>,
@@ -1190,6 +1320,7 @@ struct LaunchPromptArgs {
 }
 
 /// `kith kernel launch prompt`: the prompt a launch assembles, from the `kith-kernel` crate.
+#[cfg(unix)]
 fn print_launch_prompt(a: LaunchPromptArgs) -> Result<()> {
     use kith_kernel::launch::prompt;
     let run = |prog: &str, args: &[&str]| -> Option<String> {
@@ -1533,11 +1664,33 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Sub::Kernel { cmd } => {
-            if let KernelCmd::RunOnce { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task } =
-                cmd
+            if let KernelCmd::RunOnce {
+                engine,
+                model,
+                cwd,
+                dirs,
+                mcp_config,
+                json,
+                approve,
+                timeout,
+                acp_command,
+                task,
+            } = cmd
             {
-                let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
+                let args =
+                    runonce::Args { engine, model, cwd, dirs, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
+            }
+            if let KernelCmd::EngineRun { engine, output, resume, permission_mode, interactive, task } = cmd {
+                let args = engine_run::Args {
+                    engine,
+                    json: output.as_deref() == Some("json"),
+                    resume,
+                    permission_mode,
+                    interactive,
+                    task,
+                };
+                std::process::exit(engine_run::run(args).await?);
             }
             if let KernelCmd::CoreCall { method, params_stdin } = cmd {
                 std::process::exit(core_front::core_call(&method, params_stdin));
@@ -1608,15 +1761,19 @@ async fn main() -> Result<()> {
             if let KernelCmd::AccountState { kernel, args } = cmd {
                 std::process::exit(print_account_state(kernel, args));
             }
+            #[cfg(unix)]
             if let KernelCmd::Account { kernel, args } = cmd {
                 std::process::exit(print_account(kernel, args));
             }
+            #[cfg(unix)]
             if let KernelCmd::Secrets { kernel, args } = cmd {
                 std::process::exit(print_secrets(kernel, &args));
             }
+            #[cfg(unix)]
             if let KernelCmd::Cost { kernel, args } = cmd {
                 std::process::exit(print_cost(kernel, &args));
             }
+            #[cfg(unix)]
             if let KernelCmd::People { kernel, args } = cmd {
                 std::process::exit(print_people(kernel, &args));
             }
@@ -1626,34 +1783,81 @@ async fn main() -> Result<()> {
             if let KernelCmd::Delegation { kernel, action } = cmd {
                 std::process::exit(print_delegation(kernel, action));
             }
+            // The verbs below are the kernel's Unix-only modules; each answers by name here until its port (windows-owner
+            // W5a/W5b/W12, retire-python P1) lands, never as a silent no-op (WI1).
+            #[cfg(not(unix))]
+            if let Some(what) = unix_only_verb(&cmd) {
+                eprintln!("kith: not on Windows yet: {what}");
+                std::process::exit(1);
+            }
+            #[cfg(unix)]
             if let KernelCmd::Threads { kernel, args } = cmd {
                 std::process::exit(threads_cmd::run(kernel, &args));
             }
+            #[cfg(unix)]
             if let KernelCmd::Lifecycle { kernel, args } = cmd {
                 std::process::exit(lifecycle_cmd::run(kernel, &args));
             }
+            if let KernelCmd::Wake { args } = cmd {
+                std::process::exit(wake_cmd::main(&args));
+            }
+            if let KernelCmd::Ask { kernel, args } = cmd {
+                std::process::exit(ask_cmd::main(kernel, &args));
+            }
+            #[cfg(unix)]
             if let KernelCmd::ProjectId { kernel, args } = cmd {
                 std::process::exit(project_id_cmd(kernel, &args));
             }
+            #[cfg(unix)]
             if let KernelCmd::RoomLedger { kernel, args } = cmd {
                 std::process::exit(room_ledger_cmd(kernel, &args));
             }
+            #[cfg(unix)]
             if let KernelCmd::Pkg { kernel, args } = cmd {
                 std::process::exit(pkg_cmd::run(kernel, &args));
             }
             if let KernelCmd::Permit { kernel, args } = cmd {
                 std::process::exit(print_permit(kernel, &args));
             }
+            // The launch asks the core itself (who the run is for, once authority is the core's), so it must not run inside an
+            // embedded core held here: that call would find the lock taken by its own process.
+            #[cfg(unix)]
+            if let KernelCmd::LaunchExec { args } = cmd {
+                std::process::exit(launch_cmd::run_exec(&args));
+            }
+            #[cfg(unix)]
+            if let KernelCmd::Launch { what: LaunchCmd::Whole(args) } = cmd {
+                std::process::exit(launch_cmd::print_whole(&args));
+            }
+            #[cfg(unix)]
+            if let KernelCmd::Launch {
+                what: LaunchCmd::Mcp { agent, person, pkg, snapshot, kernel, granted, resolve, json: _ },
+            } = cmd
+            {
+                launch_cmd::print_mcp(&launch_cmd::Args {
+                    agent,
+                    person,
+                    pkg,
+                    snapshot,
+                    kernel,
+                    resolve,
+                    granted,
+                    ..launch_cmd::Args::default()
+                })?;
+                return Ok(());
+            }
             through_core(|| -> Result<()> {
                 match cmd {
                     KernelCmd::Version => println!("{}", kith_kernel::version_json()),
                     KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
                     KernelCmd::Engines { json, action } => print_engines(json, action)?,
+                    #[cfg(unix)]
                     KernelCmd::Launch {
                         what: LaunchCmd::Prompt { agent, person, project, pkg, kernel, cwd, date, json },
                     } => {
                         print_launch_prompt(LaunchPromptArgs { agent, person, project, pkg, kernel, cwd, date, json })?;
                     }
+                    #[cfg(unix)]
                     KernelCmd::Launch {
                         what:
                             LaunchCmd::Settings {
@@ -1692,25 +1896,13 @@ async fn main() -> Result<()> {
                         resolve,
                         granted: None,
                     })?,
-                    KernelCmd::Launch {
-                        what: LaunchCmd::Mcp { agent, person, pkg, snapshot, kernel, granted, resolve, json: _ },
-                    } => {
-                        launch_cmd::print_mcp(&launch_cmd::Args {
-                            agent,
-                            person,
-                            pkg,
-                            snapshot,
-                            kernel,
-                            resolve,
-                            granted,
-                            ..launch_cmd::Args::default()
-                        })?;
-                    }
-                    KernelCmd::Launch { what: LaunchCmd::Whole(args) } => {
-                        std::process::exit(launch_cmd::print_whole(&args));
-                    }
+                    #[cfg(unix)]
                     KernelCmd::Settings { kernel, args } => std::process::exit(print_settings(kernel, &args)),
+                    #[cfg(not(unix))]
+                    KernelCmd::Launch { what: LaunchCmd::Prompt { .. } | LaunchCmd::Settings { .. } }
+                    | KernelCmd::Settings { .. } => unreachable!("refused above"),
                     KernelCmd::RunOnce { .. }
+                    | KernelCmd::EngineRun { .. }
                     | KernelCmd::Attach { .. }
                     | KernelCmd::CoreCall { .. }
                     | KernelCmd::Accounts { .. }
@@ -1719,6 +1911,8 @@ async fn main() -> Result<()> {
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
                     | KernelCmd::Lifecycle { .. }
+                    | KernelCmd::Wake { .. }
+                    | KernelCmd::Ask { .. }
                     | KernelCmd::ProjectId { .. }
                     | KernelCmd::RoomLedger { .. }
                     | KernelCmd::Pkg { .. }
@@ -1727,6 +1921,8 @@ async fn main() -> Result<()> {
                     | KernelCmd::AccountState { .. }
                     | KernelCmd::Account { .. }
                     | KernelCmd::Secrets { .. }
+                    | KernelCmd::LaunchExec { .. }
+                    | KernelCmd::Launch { what: LaunchCmd::Whole(_) | LaunchCmd::Mcp { .. } }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }
                     | KernelCmd::CoreDaemon
@@ -1868,7 +2064,25 @@ async fn shutdown_signal() {
             }
         }
     };
-    #[cfg(not(unix))]
+    // Console close and system shutdown stand in for SIGTERM. The named stop event the plan wants (windows-owner W4/W11)
+    // needs unsafe Win32 that belongs in core/winsys, not the host.
+    #[cfg(windows)]
+    let term = async {
+        use tokio::signal::windows;
+        let (mut close, mut shutdown) = match (windows::ctrl_close(), windows::ctrl_shutdown()) {
+            (Ok(c), Ok(s)) => (c, s),
+            (Err(error), _) | (_, Err(error)) => {
+                tracing::warn!(%error, "can't listen for console close or shutdown");
+                std::future::pending::<()>().await;
+                return;
+            }
+        };
+        tokio::select! {
+            _ = close.recv() => {}
+            _ = shutdown.recv() => {}
+        }
+    };
+    #[cfg(not(any(unix, windows)))]
     let term = std::future::pending::<()>();
     tokio::select! {
         () = ctrl_c => {}

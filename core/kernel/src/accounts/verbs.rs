@@ -342,3 +342,42 @@ fn started(ctx: &Ctx<'_>, mut args: Vec<String>) -> Result<Verb, Verb> {
     change::make(&ctx.machine, &c, change::now_secs()).map_err(|e| Verb::die(&e, 1))?;
     Ok(Verb::default())
 }
+
+/// `accounts-json`: `kith AGENT --accounts-json`, the host's view of the agent's accounts (docs/accounts.md): the set in
+/// order, each account's status and usage, and the candidates `pick` would try. An error (a tombstone with no core to
+/// read) is `kith: ...` and exit 4 in the caller, as the Python's `Tombstoned`.
+pub fn accounts_json(
+    ctx: &Ctx<'_>,
+    agent: &str,
+    agent_md: &std::path::Path,
+) -> Result<String, String> {
+    let state = change::read_state(&ctx.machine)?;
+    let s = settings::read(ctx);
+    let src = state::Fixed(state);
+    let now = clock::now();
+    let harness = super::agent_harness(Some(agent_md));
+    let (order, _) = super::static_order(&s, agent, &harness);
+    let p = pick_from(ctx, &s, agent, Some(agent_md), true, now, &src);
+    let (own_ids, whose) = settings::accounts(&s, agent);
+    let picked = pick_value(agent, settings::cross_harness(&s, agent), &p);
+    let rows: Vec<Value> = listing::rows_over(ctx, &s, agent, true, now, &src, Some(&order))
+        .into_iter()
+        .map(Value::Object)
+        .collect();
+    let v = json!({
+        "version": 1,
+        "own": if whose == "agent" { json!(own_ids.unwrap_or_default()) } else { Value::Null },
+        "agent": agent,
+        "harness": harness,
+        "policy": p.policy,
+        "pin": picked["pin"],
+        "main": order.first(),
+        "cross_harness": picked["cross_harness"],
+        "order": order,
+        "candidates": p.candidates,
+        "all_out": p.all_out,
+        "skipped": picked["skipped"],
+        "accounts": rows,
+    });
+    Ok(pyjson::dumps(&v))
+}

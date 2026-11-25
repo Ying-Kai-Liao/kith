@@ -437,7 +437,12 @@ fn personal(life: &Life, svc: &str) -> R<bool> {
 /// `rename`: a person's new id, carried through every table that names them. The old id stays in `was`, so what
 /// outside the tables still says old (a chat thread they started, the cost ledger) keeps meaning them. The folders
 /// follow after the commit (`move_life`).
-pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str) -> R<Vec<String>> {
+pub(crate) fn person_rename(
+    auth: &mut Value,
+    life: &Life,
+    old: &str,
+    new: &str,
+) -> R<(Vec<String>, Vec<String>)> {
     check_id(old)?;
     tables(auth);
     need_person(auth, old)?;
@@ -462,6 +467,7 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
             was.push(w);
         }
     }
+    let earlier = words(Some(&Value::Array(was.clone())));
     if let Some(o) = p.as_object_mut() {
         o.insert("was".to_owned(), Value::Array(was));
     }
@@ -523,7 +529,10 @@ pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str)
     } else {
         format!("; owns {}", owned.join(", "))
     };
-    Ok(vec![format!("{old} is now {new}{owns}{RENAMED_TAIL}")])
+    Ok((
+        vec![format!("{old} is now {new}{owns}{RENAMED_TAIL}")],
+        earlier,
+    ))
 }
 
 /// What a rename's line ends with; the folders that really moved are said before it (`renamed` in `call.rs`).
@@ -610,14 +619,34 @@ pub(crate) fn run_move(mv: &LifeMove) -> (MoveReport, Vec<String>) {
     (MoveReport { moved, notes }, repair_notes)
 }
 
+/// The line that tells what a removal keeps, worded once the removal is committed and the lock let go.
+pub(crate) struct KeptNote {
+    pub(crate) life: Life,
+    pub(crate) pid: String,
+}
+
+impl KeptNote {
+    /// The folders as a caller with no cache to wait on finds them (the disk, or what a cache already holds).
+    pub(crate) fn folders_now(&self) -> Option<Vec<(String, PathBuf)>> {
+        self.life.folders_soft(&self.pid)
+    }
+
+    /// The clause for the removal's line from the folders found (none: the disk did not answer in time).
+    pub(crate) fn clause(folders: Option<Vec<(String, PathBuf)>>) -> String {
+        match folders.map(sorted_labels) {
+            None => "; can't tell which of their memory and files are kept: the disk did not answer (look in the agents' memory/people and files/people)".to_owned(),
+            Some(kept) if !kept.is_empty() => format!(
+                "; their memory and files in {} are kept (delete them by hand)",
+                kept.join(", ")
+            ),
+            Some(_) => String::new(),
+        }
+    }
+}
+
 /// `person <id> --rm`: they go, with their bots, memberships and open invites; the id is retired (and the ids they
 /// had), so no new person takes it. Their memory and files stay. Returns the lines and every id that went.
-pub(crate) fn person_remove(
-    auth: &mut Value,
-    life: &Life,
-    c: &Ctx,
-    pid: &str,
-) -> R<(Vec<String>, Vec<String>)> {
+pub(crate) fn person_remove(auth: &mut Value, c: &Ctx, pid: &str) -> R<(Vec<String>, Vec<String>)> {
     check_id(pid)?;
     tables(auth);
     // their bots go with them: a bot is never more than its owner's, so without one it has no access anyway
@@ -646,25 +675,12 @@ pub(crate) fn person_remove(
     }
     let ids: Vec<&str> = gone.iter().map(String::as_str).collect();
     forget(auth, &ids);
-    // A removal narrows access and never waits on a folder: when the disk did not answer the line says so.
-    let kept = life.folders_soft(pid).map(sorted_labels);
+    // What they keep is said after the commit (`KeptNote`): a removal never waits on a folder.
     let mut msg = format!("{pid} removed, with their memberships and grants");
     if gone.len() > 1 {
         msg = format!("{msg} and bots ({})", gone[1..].join(", "));
     }
     msg.push_str(" (profiles they own are kept); the id is retired, a new person gets another");
-    match kept {
-        None => msg.push_str(
-            "; can't tell which of their memory and files are kept: the disk did not answer (look in the agents' memory/people and files/people)",
-        ),
-        Some(kept) if !kept.is_empty() => {
-            msg = format!(
-                "{msg}; their memory and files in {} are kept (delete them by hand)",
-                kept.join(", ")
-            );
-        }
-        Some(_) => {}
-    }
     Ok((vec![msg], gone))
 }
 

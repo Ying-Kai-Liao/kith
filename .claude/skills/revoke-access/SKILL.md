@@ -537,3 +537,13 @@ follows a removal) is still one locked step on core.db, and no authority answer 
 rename that commits and has not moved yet changes where memory sits, not who may do what, and an old id stays refused (`canonical != pid`).
 No model action, check or row changed; `run.sh` was not re-run for this. SYNC is not moved: the other covered changes since it (see `drift.sh`)
 have not been read.
+
+### Follow-up (2026-11-22, flow/resume-retire-python-now-2-corelock1d): a removal never waits, its kept line may
+
+A removal commits at once and never waits for the folders fact: `people.removePerson` is out of `life_ids`, and `person_remove` words no kept line.
+The kept line ("their memory and files in X are kept", or "can't tell which of their memory and files are kept") is worked out after the commit, outside
+the lock, in `PackageCache::finish_kept`, which waits for the folders fact for at most `REFRESH_WAIT`. So only the wording of the answer may wait: the
+committed removal and the revoke it makes (`run_open`, the kill list) never do. A rename's move is now built from the old ids the rename itself wrote
+(`lifeWas`), not a second read. No revoke step changed; SYNC is not moved.
+
+P1-15 M1 (2026-11-24, retire-python, design `2026-11-21-mcp-exec`): the Rust launch's `resolve` and `may` on the tombstone, which used to read the replaced auth.json and exit 3 (so no guest or room person launched through the Rust launch), now ask the core in process (`core/kernel/src/secrets/authority.rs`: `people.resolve`, `people.may` with the params `kith-auth` sends, 4 s). A core that does not answer, a guest's sandbox or a program with no core client is exit 3 with `kith-auth`'s `route_fail` text, never an answer from the file (RouterDoor; RouterStale stays the broken variant). `mcp-config` and `exec` read `people.secretsView` the same way and run the same code over it as over the file; `exec` still checks no `may()` (M3 adds it, a separate PR). No revoke step changed, no model row added; `core/kernel/src/secrets/authority.rs` is in `drift.sh`'s FILES. SYNC is not moved.

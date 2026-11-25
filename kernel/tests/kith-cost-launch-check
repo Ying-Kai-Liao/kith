@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# kith-cost-launch-check — what the bash launch (kernel/bin/kith) does with the cost ledger, which stays in bash until the launch is
+# retired: (5a) with no usable program `kith` refuses the launch in one line, owner or guest (its folders come from the
+# program); with a working program lacking `cost-ledger` the owner runs and sees the line and a guest is refused, (5b) a renamed person whose old id spent past the budget is refused on both launch paths,
+# (8) the SessionStart hook of a terminal launch is the program's `kernel cost ... tag` with a program and, without one, a refused launch and no hook.
+# Throwaway home, auth.json and ledger.
+#
+#   KITH_DIFFTEST_BIN=/path/to/kith kernel/tests/kith-cost-launch-check
+# Needs the Rust program (without one the check says so and exits 0).
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+REAL=${KITH_DIFFTEST_BIN:-}
+if [ -z "$REAL" ] || [ ! -x "$REAL" ]; then echo "skip: no Rust program (KITH_DIFFTEST_BIN)"; exit 0; fi
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-cost-launch-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+export HOME=$T/home KITH_AUTH=$T/auth.json TZ=UTC
+unset CARGO_TARGET_DIR KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CORE KITH_BIN HQ_HOME KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_HOME KITH_STORE KITH_PERSON_WAS
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+mkdir -p "$HOME" "$T/state" "$T/bin" "$T/work"
+export KITH_STATE=$T/state KITH_HOME=$T/kith
+A=$KITH_HOME/agents/echo/role
+mkdir -p "$A"
+printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$A/agent.md"
+git -C "$A" init -q && git -C "$A" commit -qm init --allow-empty
+printf '#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.300 (Claude Code)"; exit 0; }\necho claude "$@"\n' > "$T/bin/claude"
+chmod +x "$T/bin/claude"
+# no kith on PATH: "no program" must mean none
+export PATH=$T/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+# A copy of the kernel folder, so taking the `launch` line out of core-switched.txt never touches the checkout.
+cp -R "$KERNEL" "$T/k"
+KITH=$T/k/bin/kith
+SW=$T/k/lib/core-switched.txt
+export KITH_BIN=$REAL
+
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+AUTH() { python3 "$T/k/bin/kith-auth" "$@"; }
+C() { "$REAL" kernel cost --kernel "$T/k" "$@"; }
+trap 'rm -rf "$T"' EXIT
+
+AUTH person kai owner >/dev/null; AUTH person sam >/dev/null; AUTH person eve >/dev/null
+AUTH member echo sam budget=5 >/dev/null
+AUTH member echo eve budget=5 >/dev/null
+
+# The ledger: the owner and sam spent a little this month; eve spent past her budget.
+C sync >/dev/null 2>&1
+M=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()["KITH_MACHINE"])' "$T/k/lib")
+python3 - "$M/cost.db" <<'PY'
+import datetime as dt, sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+for i, (person, cost) in enumerate([(None, 1.0), ('sam', 2.0), ('eve', 9.0)]):
+    c.execute("insert into runs (session, agent, person) values (?, 'echo', ?)", (f's{i}', person))
+    c.execute("insert into req values (?, ?, ?, 'p', 'm', 'main', '1', 0, 0, 0, 0, ?)", (f'r{i}', f's{i}', now, cost))
+c.commit()
+PY
+
+# `kith echo --launch-json` through the core's launch ("rust") or, with the `launch` line gone from core-switched.txt, the
+# script's own checks ("bash").
+cp "$SW" "$T/switched.keep"
+launch() { # PATH PERSON [ENV=VAL...] → $T/l.rc, $T/l.err
+  local path=$1 who=$2; shift 2
+  [ "$path" = bash ] && grep -v '^launch	' "$T/switched.keep" > "$SW"
+  (cd "$T/work" && env KITH_PERSON=$who "$@" "$KITH" echo --launch-json >"$T/l.out" 2>"$T/l.err"); echo $? > "$T/l.rc"
+  cp "$T/switched.keep" "$SW"
+}
+
+# 5a. No program (nothing at KITH_BIN, none on PATH), or an old one without `cost-ledger`: the owner still runs on the bash path and
+# sees the line (the agent's at-limit hold is skipped there: the limit could not be read), a guest is refused, not run without the
+# budget check.
+mkdir -p "$T/old"
+# The old program is the real one minus the module: everything is passed on (so it stays usable), only `kernel version` loses it.
+cat > "$T/old/kith" <<OLD
+#!/bin/sh
+if [ "\$1 \$2" = "kernel version" ]; then "$REAL" kernel version | sed 's/"cost-ledger",//'; exit 0; fi
+exec "$REAL" "\$@"
+OLD
+chmod +x "$T/old/kith"
+for prog in none old; do
+  case $prog in none) NB=$T/nonexistent ;; old) NB=$T/old/kith ;; esac
+  "$KITH" echo set limit 0.5 >/dev/null 2>&1
+  launch bash kai X=1 KITH_BIN=$NB
+  if [ $prog = none ]; then
+    check "none program, bash path: the launch is refused in one line (kith's folders come from the program)" "[ \"\$(cat '$T/l.rc')\" = 1 ] && grep -q '^kith: ' '$T/l.err'"
+  else
+    check "old program, bash path: the owner still runs and sees the line" "[ \"\$(cat '$T/l.rc')\" = 0 ] && grep -q '^kith-cost: ' '$T/l.err'"
+  fi
+  "$KITH" echo set limit 0 >/dev/null 2>&1
+  launch bash sam X=1 KITH_BIN=$NB
+  if [ $prog = none ]; then
+    check "none program, bash path: a member is refused too, not run unchecked" "[ \"\$(cat '$T/l.rc')\" = 1 ] && grep -q '^kith: ' '$T/l.err'"
+  else
+    check "old program, bash path: a member is refused with the line, not run unchecked" "[ \"\$(cat '$T/l.rc')\" = 3 ] && grep -q '^kith-cost: ' '$T/l.err' && grep -q 'not running without the budget check' '$T/l.err'"
+  fi
+done
+
+# 5b. A renamed person: zed spent past the budget under the old id, then became zoe. The ledger still says zed, so zoe is
+# refused on both paths (KITH_PERSON_WAS carries the old id to the spend).
+AUTH person zed >/dev/null; AUTH member echo zed budget=5 >/dev/null
+python3 - "$M/cost.db" <<'PY'
+import datetime as dt, sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+c.execute("insert into runs (session, agent, person) values ('sz', 'echo', 'zed')")
+c.execute("insert into req values ('rz', 'sz', ?, 'p', 'm', 'main', '1', 0, 0, 0, 0, 9.0)", (now,))
+c.commit()
+PY
+AUTH person zed id=zoe >/dev/null
+for path in rust bash; do
+  launch $path zoe X=1
+  check "$path path: a renamed member whose old id spent past the budget is refused" "[ \"\$(cat '$T/l.rc')\" = 3 ] && grep -q 'has used' '$T/l.err'"
+done
+
+# 8. The SessionStart hooks of a launch without a terminal (a one-shot task: the launch builds the settings and runs claude): the
+# program's `kernel cost --kernel K tag` when the program found has `cost-ledger`, no cost hook when none or an old one is found.
+mv "$T/bin/claude" "$T/bin/claude.real"
+cat > "$T/bin/claude" <<'WRAP'
+#!/bin/sh
+prev=""; for a in "$@"; do [ "$prev" = --settings ] && cp "$a" "$STUB_SETTINGS"; prev=$a; done
+exec "$(dirname "$0")/claude.real" "$@"
+WRAP
+chmod +x "$T/bin/claude"
+export STUB_SETTINGS=$T/settings.json
+hooks() { # [ENV=VAL...] → every SessionStart hook command, one per line
+  rm -f "$STUB_SETTINGS"
+  (cd "$T/work" && env "$@" "$KITH" echo "say hi" >"$T/hook.out" 2>&1 </dev/null)
+  python3 -c 'import json,sys; [print(h["command"]) for g in json.load(open(sys.argv[1]))["hooks"]["SessionStart"] for h in g["hooks"]]' "$STUB_SETTINGS" 2>/dev/null
+}
+hooks X=1 > "$T/h.out"
+check "terminal launch, program with cost-ledger: the hook is the program's form" "grep -q 'kernel cost --kernel .* tag\$' '$T/h.out'"
+hooks KITH_BIN=$T/nonexistent > "$T/h.out"
+check "terminal launch, no program: refused in one line, no hook written" "[ -z '$(cat "$T/h.out")' ] && grep -q '^kith: ' '$T/hook.out'"
+hooks KITH_BIN=$T/old/kith > "$T/h.out"
+check "terminal launch, old program (no cost-ledger): the settings are written, with no cost hook" "[ -s '$STUB_SETTINGS' ] && [ -s '$T/h.out' ] && ! grep -q 'kernel cost\\|/bin/kith-cost' '$T/h.out'"
+
+echo
+if [ "$fails" = 0 ]; then echo "all checks passed"; else echo "$fails check(s) failed"; exit 1; fi
