@@ -60,13 +60,10 @@ function Api([string]$Method, $Body = @{}) {
   $json = $Body | ConvertTo-Json -Depth 10 -Compress
   try {
     $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/api/$Method" -Method Post -Body $json -ContentType 'application/json' `
-      -Headers @{ Authorization = "Bearer $token" } -UseBasicParsing -TimeoutSec 30
+      -Headers @{ Authorization = "Bearer $token" } -UseBasicParsing -TimeoutSec 30 -SkipHttpErrorCheck
     return [pscustomobject]@{ Status = [int]$r.StatusCode; Body = $r.Content }
   } catch {
-    $resp = $_.Exception.Response
-    $text = ''
-    if ($resp) { try { $text = (New-Object IO.StreamReader($resp.GetResponseStream())).ReadToEnd() } catch { $text = "$_" } }
-    return [pscustomobject]@{ Status = $(if ($resp) { [int]$resp.StatusCode } else { 0 }); Body = $text }
+    return [pscustomobject]@{ Status = 0; Body = "$_" }
   }
 }
 function Dump-HostLogs {
@@ -123,7 +120,7 @@ Check 'kith status reports the host' ($st.Code -eq 0) ($st.Out + $st.Err)
 $people = Api 'people'
 Log "people -> $($people.Status) $($people.Body)"
 Check 'the app API answers an authorised call' ($people.Status -eq 200) "$($people.Status) $($people.Body)"
-$noauth = try { (Invoke-WebRequest "http://127.0.0.1:$Port/api/people" -Method Post -UseBasicParsing -TimeoutSec 10).StatusCode } catch { [int]$_.Exception.Response.StatusCode }
+$noauth = (Invoke-WebRequest "http://127.0.0.1:$Port/api/people" -Method Post -UseBasicParsing -TimeoutSec 10 -SkipHttpErrorCheck).StatusCode
 Check 'the app API refuses a call without the token' ($noauth -eq 401) "$noauth"
 
 # --- Claude Code, Bash only, against the fake model --------------------------------------------------------------------------
