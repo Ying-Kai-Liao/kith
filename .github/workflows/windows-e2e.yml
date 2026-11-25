@@ -1,0 +1,95 @@
+# Windows end-to-end on free runners (docs/plans/windows-owner.md W18). Grows by one scenario per Windows package.
+# Not a required check. Free runners only, no API key, no secrets: Claude Code runs against kith-fakemodel with a dummy key.
+#
+# Each run, in a throwaway profile (KITH_HOME, KITH_STATE, KITH_SERVE_HOME, USERPROFILE inside the workspace):
+#   builds the Windows zip (scripts/package-windows.sh, the release.yml build-windows steps), unpacks it by a script step
+#   (scripts/install.ps1 does not exist yet: W14), `kith init`, `kith install` (HKCU Run key on the throwaway VM) and the
+#   host answering /health, the app API with and without the token, Claude Code with Bash only against the fake model,
+#   invite and revoke, a guest launch, the cost row, `kith stop` (no program of the zip left), `kith uninstall`.
+#   The script is serve/host/tests/windows_e2e/e2e.ps1; every check logs PASS or FAIL, and the log is the artifact.
+#
+# W18 scenarios, and where each stands (a step that cannot run yet asserts today's named refusal in e2e.ps1, never a pass):
+#   (a) terminal run in ConPTY, attach / detach / reattach   waits for W3 (ConPTY terminal) and W2b (host gates)
+#   (b) app-API chat turn through ACP                         waits for W6 (engines and accounts) and W8 (launch)
+#   (c) auto-mode refusal card, answered, retry passes        waits for W5b (permit) and W9 (hooks)
+#   (d) Stop ends the whole tree                              RUNS: no program of the zip is left after `kith stop`
+#   (e) the cost row in the ledger                            refusal asserted until W5a (cost) and W13 (cost and transcripts)
+#   (f) a schedule fire                                       waits for retire-python P2-4
+#   (g) a wake after a card                                   waits for retire-python P2-2
+#   (h) an update to a second build with a run in flight      waits for W15 (update parity) and W14 (install.ps1)
+#   (i) `kith stop` and uninstall                             RUNS: stop, uninstall, Run key removed
+#   (j) a guest launch refused (WI6)                          RUNS: the named refusal; flips to a real guest run when the
+#                                                             Windows guest packages land (Q1 in the plan, a later package)
+# Also: `kith init` is asserted to refuse until retire-python P4-13 (kith-init); W10's generated owner settings are
+# replaced for now by a hand-written PowerShell deny rule (TODO W10 in e2e.ps1).
+name: windows-e2e
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/windows-e2e.yml
+      - core/winsys/**
+      - core/kernel/**
+      - serve/host/**
+      - scripts/stage-kernel.sh
+      - scripts/package-windows.sh
+      - scripts/windows-exes.txt
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: e2e (${{ matrix.os }})
+    # windows-2025 always; windows-2022 only on the nightly (Kai, 2026-11-25).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ github.event_name == 'schedule' && fromJSON('["windows-2025","windows-2022"]') || fromJSON('["windows-2025"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: windows-e2e-${{ matrix.os }}
+      - name: Build the zip (the release build-windows steps)
+        run: |
+          scripts/package-windows.sh build
+          scripts/package-windows.sh pack 0.0.0-e2e serve/host/target/release dist
+      - name: Build kith-fakemodel
+        working-directory: serve
+        run: cargo build --manifest-path host/Cargo.toml -p kith-fakemodel --locked
+      - name: Unpack the zip (stands in for install.ps1 until W14)
+        run: |
+          mkdir unpacked && 7z x -bso0 -ounpacked dist/*.zip
+          ls unpacked
+      - name: End to end
+        shell: pwsh
+        timeout-minutes: 25
+        run: >
+          ./serve/host/tests/windows_e2e/e2e.ps1
+          -Unpacked (Get-ChildItem "$env:GITHUB_WORKSPACE/unpacked" -Directory | Select-Object -First 1).FullName
+          -Fakemodel "$env:GITHUB_WORKSPACE/serve/host/target/debug/kith-fakemodel.exe"
+          -Work "$env:RUNNER_TEMP/kith-e2e"
+          -Out "$env:GITHUB_WORKSPACE/e2e-out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-e2e-${{ matrix.os }}
+          path: e2e-out
+          if-no-files-found: warn
