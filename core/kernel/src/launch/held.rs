@@ -244,7 +244,7 @@ pub fn launch(h: &Held<'_>) -> Outcome {
         if !h.rsid.is_empty() {
             match call(h, "terminal.list", &json!({})) {
                 Ok(ans) if field(&ans, "link") == "up" => {
-                    if h.taker.release_own(h.rsid) {
+                    if h.taker.release_for(h.rsid, h.pid) {
                         released = true;
                     } else {
                         why = "the session's claim is not this shell's to hand over".to_owned();
@@ -389,7 +389,8 @@ mod tests {
         ] {
             env.insert(k.to_owned(), v.to_owned());
         }
-        let kept: Vec<String> = held_env(&env).keys().cloned().collect();
+        let mut kept: Vec<String> = held_env(&env).keys().cloned().collect();
+        kept.sort();
         assert_eq!(kept, ["HOME", "KITH_AGENT", "KITH_TERMINAL_SESSION"]);
     }
 
@@ -488,6 +489,52 @@ mod tests {
             ["terminal.open"],
             "a ticket in hand needs no attach call"
         );
+    }
+
+    #[test]
+    fn the_resumed_claim_is_given_back_by_this_process_before_open() {
+        let dir = std::env::temp_dir().join(format!("kith-held-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let none = |_: &str| -> Option<String> { None };
+        let ctx = Ctx {
+            state: Some(dir.clone()),
+            machine: None,
+            home: dir.clone(),
+            env: &none,
+        };
+        let taker = Taker::new(&ctx, None);
+        let pid = i64::from(std::process::id());
+        taker
+            .claim_start(SID, pid, "terminal", std::time::Duration::ZERO, None, None)
+            .unwrap();
+        let claim = dir.join("live/terminal").join(format!("{SID}.claim"));
+        assert!(claim.exists(), "the resume took the claim for this process");
+        let port = Fake {
+            answers: std::cell::RefCell::new(vec![
+                Call::Answered(json!({"link": "up"})),
+                Call::Answered(json!({"status": "busy"})),
+            ]),
+            asked: std::cell::RefCell::new(vec![]),
+            attach_code: 0,
+        };
+        let env = Env::new();
+        let h = Held {
+            agent: "designer",
+            sid: SID,
+            rsid: SID,
+            args: &[],
+            env: &env,
+            taker: &taker,
+            port: &port,
+            pid,
+            endpoint: PathBuf::new(),
+            tty: true,
+        };
+        assert_eq!(launch(&h), Outcome::Exit(75));
+        assert_eq!(port.asked.take(), ["terminal.list", "terminal.open"]);
+        assert!(!claim.exists(), "given back before terminal.open");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

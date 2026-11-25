@@ -71,6 +71,7 @@ FILES=(
   core/kernel/src/launch/session.rs   # R3a: the session id (--session-id / --resume / a new uuid), the stub's lock key and --lock-alone
   core/kernel/src/launch/terminal.rs  # R3b: the terminal's claim (kind terminal) for this pid, not for a resumed session, then `threads run` in process: claude is this pid's child under the stub (I2)
   core/kernel/src/launch/held.rs      # R3b: `kith_held_launch` in Rust: the resumed claim is given back, then terminal.open (I7); busy 75; exit 5 never repeated; the claim again on the direct fallback
+  serve/host/src/launch_cmd.rs        # R3b: HeldPort maps the core-call ends (refused 4, lost 5, no daemon 3) that held.rs reads: exit 5 is never repeated
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

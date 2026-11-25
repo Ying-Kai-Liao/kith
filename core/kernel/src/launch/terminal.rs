@@ -65,6 +65,16 @@ fn has_denied_hook(settings: &str) -> bool {
     })
 }
 
+/// `$PWD` as a shell names it (a symlinked folder keeps its own name), else the physical folder.
+fn shell_pwd(env: &Env) -> String {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let pwd = get(env, "PWD");
+    if !pwd.is_empty() && std::fs::canonicalize(pwd).ok() == std::fs::canonicalize(&cwd).ok() {
+        return pwd.to_owned();
+    }
+    cwd.to_string_lossy().into_owned()
+}
+
 /// Claims the session for this process (a terminal claim) and runs Claude as this process's child, under the lock. Returns the
 /// exit code the run ends with, or the one for a run that did not start.
 pub fn claude(t: Term<'_>, taker: &Taker<'_>, pid: i64) -> i32 {
@@ -162,10 +172,7 @@ pub fn claude(t: Term<'_>, taker: &Taker<'_>, pid: i64) -> i32 {
         && std::fs::read_to_string(&settings_file).is_ok_and(|s| has_denied_hook(&s))
     {
         let session = if csid.is_empty() {
-            format!(
-                "continue:{}",
-                std::env::current_dir().unwrap_or_default().display()
-            )
+            format!("continue:{}", shell_pwd(&env))
         } else {
             csid.clone()
         };
