@@ -151,6 +151,10 @@ fn a_tombstone_with_no_core_to_name_refuses() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "spawns the Python kith-wake as the files writer (os error 193); returns with retire-python P2 (wake port, kith-wake deleted)"
+)]
 fn with_the_switch_off_the_files_are_still_the_store() {
     let core = Core::start(false);
     let st = core.state();
@@ -163,6 +167,10 @@ fn with_the_switch_off_the_files_are_still_the_store() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "spawns the Python kith-wake as the files writer (os error 193); returns with retire-python P2 (wake port, kith-wake deleted)"
+)]
 fn a_switch_still_stepping_is_the_files_and_a_damaged_one_is_the_cores() {
     let core = Core::start(false);
     let st = core.state();
