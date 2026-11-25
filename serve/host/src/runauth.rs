@@ -1134,7 +1134,7 @@ mod tests {
 
     #[cfg_attr(
         windows,
-        ignore = "the host.sock run tokens bind a peer pid and are guest-only, refused on Windows (WI6); ancestry reads ps until W12"
+        ignore = "the host.sock run tokens bind a peer pid and are guest-only: core run tokens until W22b, run pipes for guests W23; ancestry reads ps until W12"
     )]
     #[tokio::test]
     async fn a_card_yes_is_used_up_once_and_belongs_to_the_run_that_asked() {
@@ -1160,7 +1160,7 @@ mod tests {
 
     #[cfg_attr(
         windows,
-        ignore = "the host.sock run tokens bind a peer pid and are guest-only, refused on Windows (WI6); ancestry reads ps until W12"
+        ignore = "the host.sock run tokens bind a peer pid and are guest-only: core run tokens until W22b, run pipes for guests W23; ancestry reads ps until W12"
     )]
     #[tokio::test]
     async fn consume_once_is_the_owner_runs_and_only_from_its_own_process() {
@@ -1371,7 +1371,7 @@ mod tests {
 
     #[cfg_attr(
         windows,
-        ignore = "the host.sock run tokens bind a peer pid and are guest-only, refused on Windows (WI6); ancestry reads ps until W12"
+        ignore = "the host.sock run tokens bind a peer pid and are guest-only: core run tokens until W22b, run pipes for guests W23; ancestry reads ps until W12"
     )]
     #[test]
     fn ancestry_follows_real_parents() {
@@ -1398,7 +1398,7 @@ mod tests {
         assert!(!guest.iter().any(|(k, _)| k == TOKEN_ENV));
     }
 
-    // host.sock is a Unix socket; Windows has no run socket (WI6).
+    // host.sock is a Unix socket; Windows has no run socket until W23.
     #[cfg(unix)]
     #[tokio::test]
     async fn socket_round_trip_refuses_a_forged_token() {

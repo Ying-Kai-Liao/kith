@@ -116,6 +116,7 @@ fn python_missing() -> bool {
     missing
 }
 
+#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
 #[tokio::test]
 async fn five_bots_at_once_run_two_and_queue_three() {
     if python_missing() {
@@ -173,6 +174,7 @@ async fn five_bots_at_once_run_two_and_queue_three() {
     assert_eq!((gate["running"].clone(), gate["waiting"].clone()), (json!(0), json!(0)), "gate: {gate}");
 }
 
+#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
 #[tokio::test]
 async fn stopping_a_waiting_bot_takes_it_out_of_the_line() {
     if python_missing() {

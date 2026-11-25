@@ -86,6 +86,7 @@ fn python_missing() -> bool {
     missing
 }
 
+#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
 #[tokio::test]
 async fn stop_ends_a_turn_whose_agent_ignores_the_cancel() {
     if python_missing() {
@@ -102,6 +103,7 @@ async fn stop_ends_a_turn_whose_agent_ignores_the_cancel() {
     assert_eq!(sync["bots"][0]["status"], "idle");
 }
 
+#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
 #[tokio::test]
 async fn a_member_busy_in_its_own_chat_still_answers_the_room() {
     if python_missing() {
@@ -135,6 +137,7 @@ async fn a_member_busy_in_its_own_chat_still_answers_the_room() {
     std::fs::write(folder.join("release"), "").unwrap();
 }
 
+#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
 /// Fast mode is gone: an old app's `fastMode` is accepted and ignored, and the bot always reports the fixed values
 /// that make an old app hide its switch.
 #[tokio::test]
@@ -154,6 +157,7 @@ async fn an_old_apps_fast_mode_is_ignored() {
     assert!(state["fastModeIssue"].is_null());
 }
 
+#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
 #[tokio::test]
 async fn a_session_that_ended_in_the_agent_is_closed_and_loaded_again() {
     if python_missing() {

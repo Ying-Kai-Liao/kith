@@ -165,6 +165,7 @@ async fn a_thread_works_while_the_chat_does_and_stops_alone() {
     );
 }
 
+#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
 #[tokio::test]
 async fn stop_in_the_chat_leaves_its_threads_running() {
     if python_missing() {
@@ -182,6 +183,7 @@ async fn stop_in_the_chat_leaves_its_threads_running() {
     host.wait_for(&bot, Some(&root), |e| text(e).contains("task U") && text(e).contains("step 20.")).await;
 }
 
+#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
 #[tokio::test]
 async fn a_group_turn_runs_while_the_member_works_in_its_own_chat() {
     if python_missing() {
@@ -209,6 +211,7 @@ async fn a_group_turn_runs_while_the_member_works_in_its_own_chat() {
     assert!(!room.contains("task C"), "nothing from the 1:1 reaches the group's session: {room}");
 }
 
+#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
 #[tokio::test]
 async fn a_new_session_starts_the_member_afresh_in_its_groups_too() {
     if python_missing() {
@@ -229,6 +232,7 @@ async fn a_new_session_starts_the_member_afresh_in_its_groups_too() {
     assert_ne!(session(text(&first)), session(text(&second)), "{} / {}", text(&first), text(&second));
 }
 
+#[cfg_attr(windows, ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)")]
 #[tokio::test]
 async fn deleting_a_group_stops_its_members_there_and_nowhere_else() {
     if python_missing() {

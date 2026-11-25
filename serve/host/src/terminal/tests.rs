@@ -1641,7 +1641,7 @@ async fn a_mirrored_ask_card_reaches_the_owner_and_no_invited_person_or_bot_gues
     }
 }
 
-// Unix-only until windows-owner W2b: built on the Unix-only core_claims fixture.
+// Unix-only until W12: built on the Unix-only core_claims fixture (claims and live-process checks).
 #[cfg(unix)]
 #[path = "core_claims_flow_tests.rs"]
 mod core_claims;
