@@ -15,6 +15,10 @@ on:
         description: "Dry run of the Linux client build only (skips the macOS build; nothing is published off a tag)"
         type: boolean
         default: false
+      windows_only:
+        description: "Dry run of the Windows zip only (skips every other job; nothing is published off a tag)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,7 +28,7 @@ env:
 
 jobs:
   build:
-    if: ${{ !inputs.guest_only }}
+    if: ${{ !inputs.guest_only && !inputs.windows_only }}
     runs-on: macos-latest
     timeout-minutes: 60
     strategy:
@@ -90,11 +94,60 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # Windows x64: kith-<version>-windows-x64.zip (bin\*.exe + share\kith data), what scripts/install.ps1 (W14) installs.
+  # The programs it must carry are listed in scripts/windows-exes.txt; package-windows.sh fails on a missing required one,
+  # and on a v* tag on a pending one too. UNSIGNED: signing is a gate before the first public Windows release
+  # (docs/plans/windows-owner.md Q2). Runs only on the release triggers, on a free runner.
+  build-windows:
+    if: ${{ !inputs.guest_only }}
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      KITH_WINDOWS_STRICT: ${{ github.ref_type == 'tag' && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then v=${GITHUB_REF_NAME#v}
+          elif [ -n "$INPUT_VERSION" ]; then v=$INPUT_VERSION
+          else v=$(sed -n 's/^version = "\(.*\)"/\1/p' serve/host/Cargo.toml | head -1); fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Rust
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          key: release-windows
+      - name: Build
+        run: scripts/package-windows.sh build
+      - name: Pack
+        run: scripts/package-windows.sh pack "${{ steps.v.outputs.version }}" serve/host/target/release dist
+      - name: Smoke test
+        run: |
+          mkdir smoke && 7z x -bso0 -osmoke dist/*.zip
+          smoke/kith-*/bin/kith.exe --version
+          smoke/kith-*/bin/kith-holder.exe --version
+          test -f smoke/kith-*/share/kith/kernel/VERSION
+          test ! -e smoke/kith-*/share/kith/kernel/bin && test ! -e smoke/kith-*/share/kith/kernel/lib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kith-windows-x64
+          path: dist/*
+          if-no-files-found: error
+
   # The client-only kith for Linux VMs (cloud bots): one static musl binary per CPU, built with zig as the C compiler
   # (ring still compiles a little C). Each arch builds on its own native runner, so the smoke test and the install test
   # run the real binary (docs/kith-bot-guests.md section 10). If aarch64-musl ever fails under zigbuild, build
   # aarch64-unknown-linux-gnu.2.17 instead (runs on any glibc since 2014).
   build-guest:
+    if: ${{ !inputs.windows_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -154,7 +207,7 @@ jobs:
   # exist and builds unsigned otherwise; only a tag publishes. Asset names carry no version so
   # releases/latest/download/<name> always resolves; electron-updater reads latest-mac.yml from the same release.
   desktop-mac:
-    if: ${{ !inputs.guest_only }}
+    if: ${{ !inputs.guest_only && !inputs.windows_only }}
     runs-on: macos-26
     timeout-minutes: 90
     defaults:
@@ -280,7 +333,7 @@ jobs:
 
   # Linux: the installed kith-serve is used (no bundled host), so there is nothing native to build first.
   desktop-linux:
-    if: ${{ !inputs.guest_only }}
+    if: ${{ !inputs.guest_only && !inputs.windows_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -331,7 +384,8 @@ jobs:
     # The Linux client never blocks the Mac release at first: publish runs when the Mac build passed (flip to
     # requiring build-guest once it has been stable for a few releases).
     if: ${{ !cancelled() && github.ref_type == 'tag' && needs.build.result == 'success' && needs.desktop-mac.result == 'success' && needs.desktop-linux.result == 'success' }}
-    needs: [build, build-guest, desktop-mac, desktop-linux]
+    # build-windows does not gate it either (the zip is unsigned and has known gaps, scripts/windows-exes.txt).
+    needs: [build, build-guest, build-windows, desktop-mac, desktop-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -344,7 +398,9 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          cat kith-*.tar.gz.sha256 > SHA256SUMS
+          for f in kith-*.tar.gz.sha256 kith-*.zip.sha256; do
+            if [ -f "$f" ]; then cat "$f"; fi
+          done > SHA256SUMS
           for f in kith-macos.dmg kith-macos.zip kith-linux-*.AppImage kith-linux-*.deb kith-linux-*.tar.gz; do
             [ -f "$f" ] && sha256sum "$f" >> SHA256SUMS
           done
@@ -373,6 +429,7 @@ jobs:
         with:
           files: |
             dist/*.tar.gz
+            dist/kith-*-windows-x64.zip
             dist/SHA256SUMS
             dist/SHA256SUMS.minisig
             dist/kith.rb

@@ -1,7 +1,6 @@
 //! `fetch(home)`: downloads each third-party skill `skills.json` links that is not already there at its pinned commit.
 
 use std::fs;
-use std::os::unix::fs::DirBuilderExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -28,7 +27,7 @@ impl TempDir {
         for n in 0..100u32 {
             let p = base.join(format!("kith-fetch-{:x}{:x}{n}", std::process::id(), stamp));
             // like mkdtemp: nobody else reads what a fetch puts here
-            match fs::DirBuilder::new().mode(0o700).create(&p) {
+            match crate::ownerfs::create_dir(&p) {
                 Ok(()) => return Ok(Self(p)),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(e) => return Err(os_err(&e, &p)),
