@@ -13,7 +13,7 @@ set -euo pipefail
 # the claim files as before (#324) and the core writer (CoreWriter in Threads.tla: the claim is a core row, the stub's lock the
 # second layer); the Rust takers (R5) and the one-shot in one process (R3a) are the same steps. What that read did not cover is
 # in the skill ("Re-sync 2026-11-25 (R3a)").
-SYNC=a8465ad5c020e4996a26b8fa852eb995cb96127e
+SYNC=6c46f64e4a2ddb8d7718c50dfd6bcf4de3a9ced3
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
@@ -48,6 +48,8 @@ FILES=(
   core/kernel/src/threads/registry.rs # the twin's registry reads and writes
   serve/host/src/hub/actors.rs        # working_lanes, Cmd::ForgetLoaded fan-out
   serve/host/src/terminal/core_writer.rs  # CoreWriter: begin (gate, settle, claim_next, take, redeem), finish, abandon, adopt
+  serve/host/src/cards/resume/wake_clock.rs # WK4b: the wake clock and the run door by turn id: wake.tick, hostclaim.queued, may_use_checked at the door, the wakeRun claim before any process, redeemedBefore cancels
+  serve/host/src/routines/run_door.rs # WK4b: claim_run_as, then the spawn; a claim refused as held is Later, nothing starts beside the writer
   serve/host/src/terminal/warm_stub.rs    # the host's resident stub: take / release / kill_group
   serve/host/src/agent/bot/writer.rs      # the actor's use of CoreWriter: orphaned begins, the mode
   serve/host/src/agent/bot/writer_turn.rs # End choice (Done / Died / Killed / OutOfUsage / Left), abandon + settle_gone, failover
