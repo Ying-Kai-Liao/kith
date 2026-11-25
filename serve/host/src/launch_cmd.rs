@@ -318,10 +318,43 @@ pub fn print_mcp(a: &Args) -> Result<()> {
     Ok(())
 }
 
+/// `kith kernel launch-exec AGENT [--kernel DIR] ARGS...` (also `kith kernel launch AGENT --exec ARGS...`): a one-shot run in this
+/// process (`kith_kernel::launch::exec`), with the exit code `kith AGENT "task"` gives. The router passes `--kernel DIR` right after
+/// the agent, and only there, so a task that says `--kernel` is a task.
+pub fn run_exec(args: &[String]) -> i32 {
+    install_core();
+    let Some((agent, rest)) = args.split_first() else {
+        eprintln!("usage: kith kernel launch-exec AGENT [--kernel DIR] ARGS...");
+        return 2;
+    };
+    let (kernel_dir, rest) = match rest {
+        [flag, dir, tail @ ..] if flag == "--kernel" => (Some(PathBuf::from(dir)), tail),
+        _ => (None, rest),
+    };
+    let Some(kernel_dir) = kernel_dir.or_else(kernel::current_kernel) else {
+        eprintln!("kith: can't find the kernel folder (--kernel)");
+        return 1;
+    };
+    let env: kith_kernel::launch::assemble::Env = std::env::vars_os()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+        .collect();
+    let door = crate::threads_cmd::Loopback { kernel: kernel_dir.clone(), home: kith_kernel::paths::process_home() };
+    let deps = kith_kernel::launch::exec::Deps { host: &door, core: Some(&door) };
+    let mut line = vec![agent.clone()];
+    line.extend(rest.iter().cloned());
+    kith_kernel::launch::exec::run(&line, &kernel_dir, env, &deps)
+}
+
 /// `kith kernel launch AGENT --launch-json [flags]`: the whole launch object (`kith_kernel::launch::assemble`), with the
 /// exit code `kith AGENT --launch-json` gives. `--kernel DIR` names the kernel folder (the router passes it).
 pub fn print_whole(args: &[String]) -> i32 {
     use std::io::Write as _;
+    // `kith kernel launch AGENT --exec ARGS...`: the run itself, not the object.
+    if let Some(at) = [1, 3].into_iter().find(|i| args.get(*i).is_some_and(|a| a == "--exec")) {
+        let mut rest = args.to_vec();
+        rest.remove(at);
+        return run_exec(&rest);
+    }
     install_core();
     let mut rest: Vec<String> = args.to_vec();
     let mut kernel_dir: Option<PathBuf> = None;

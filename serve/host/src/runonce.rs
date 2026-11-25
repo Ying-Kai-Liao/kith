@@ -10,8 +10,8 @@ use std::io::Read as _;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Exit code for "this engine has no ACP one-shot here" (a native one-shot, or neither an ACP mode nor a registry
-/// adapter Kith may start): the caller runs the engine its own way. Nothing was started. (BSD `EX_CONFIG`.)
+/// Exit code for "this engine has no ACP one-shot here" (neither an ACP mode nor a registry
+/// adapter Kith may start): the final answer, Kith runs non-Claude engines over ACP. Nothing was started. (BSD `EX_CONFIG`.)
 pub const NOT_AVAILABLE: i32 = 78;
 
 pub struct Args {
@@ -27,6 +27,12 @@ pub struct Args {
     pub task: Vec<String>,
 }
 
+/// A command was given (`--acp-command`, `KITH_RUN_ONCE_ACP_COMMAND`) in place of the engine's own adapter: whatever it
+/// starts is not the one whose asks Kith knows how to read.
+pub(crate) fn command_overridden(given: Option<&str>) -> bool {
+    given.is_some_and(|c| !c.is_empty()) || std::env::var("KITH_RUN_ONCE_ACP_COMMAND").is_ok_and(|c| !c.is_empty())
+}
+
 /// The ACP command line to run `engine` with, or `None` when it has no ACP one-shot here (said on stderr; the caller
 /// exits [`NOT_AVAILABLE`]). `given` overrides it (tests, `KITH_RUN_ONCE_ACP_COMMAND`); empty counts as not given.
 pub(crate) async fn acp_command(engine: &engines::Engine, given: Option<String>) -> Result<Option<String>> {
@@ -37,7 +43,10 @@ pub(crate) async fn acp_command(engine: &engines::Engine, given: Option<String>)
         _ if !matches!(engine.oneshot, Oneshot::Acp)
             || (engine.local.is_none() && engines::session_modes(engine.id, Reach::Workspace).is_empty()) =>
         {
-            eprintln!("kith: {} has no ACP one-shot on this computer; run it its own way", engine.name);
+            eprintln!(
+                "kith: {} has no ACP one-shot on this computer; Kith runs non-Claude engines over ACP",
+                engine.name
+            );
             return Ok(None);
         }
         _ => {
@@ -51,7 +60,10 @@ pub(crate) async fn acp_command(engine: &engines::Engine, given: Option<String>)
                     Ok(cmds) if !cmds.is_empty() => cmds[0].acp(),
                     other => {
                         let why = other.err().map(|e| format!(" ({e:#})")).unwrap_or_default();
-                        eprintln!("kith: {} has no ACP adapter to start here{why}; run it its own way", engine.name);
+                        eprintln!(
+                            "kith: {} has no ACP adapter to start here{why}; Kith runs non-Claude engines over ACP",
+                            engine.name
+                        );
                         return Ok(None);
                     }
                 },
@@ -108,6 +120,7 @@ pub async fn run(a: Args) -> Result<i32> {
         task,
         timeout: Duration::from_secs(a.timeout),
         approve: a.approve,
+        allow_granted_mcp: engines::allows_granted_mcp_asks(engine.id) && !command_overridden(a.acp_command.as_deref()),
         ..RunSpec::default()
     };
     let (result, spent) = kith_acp::run_once_spent(spec).await;
@@ -181,5 +194,13 @@ mod tests {
             assert!(e.local.is_none() && matches!(e.oneshot, Oneshot::Acp), "{engine} changed in the table");
             assert_eq!(run(args(engine)).await.unwrap(), NOT_AVAILABLE, "{engine}");
         }
+    }
+
+    #[test]
+    fn hermes_runs_over_its_own_acp_with_accept_edits_or_dont_ask() {
+        let hermes = engines::find("hermes").unwrap();
+        assert!(hermes.local.is_some() && matches!(hermes.oneshot, Oneshot::Acp));
+        assert_eq!(modes(hermes, false), ["accept_edits"]);
+        assert_eq!(modes(hermes, true), ["dont_ask"]);
     }
 }

@@ -6,5 +6,12 @@ use super::Migration;
 
 mod m0100_asks;
 mod m0101_asks_claim_id;
+mod m0102_ask_ledger;
+mod m0103_ask_peers;
 
-pub(super) const STEPS: &[Migration] = &[m0100_asks::MIGRATION, m0101_asks_claim_id::MIGRATION];
+pub(super) const STEPS: &[Migration] = &[
+    m0100_asks::MIGRATION,
+    m0101_asks_claim_id::MIGRATION,
+    m0102_ask_ledger::MIGRATION,
+    m0103_ask_peers::MIGRATION,
+];

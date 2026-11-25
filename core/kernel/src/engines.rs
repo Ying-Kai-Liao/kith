@@ -1,14 +1,17 @@
 //! The coding engines Kith can run an agent on, as one table (docs/plans/core-design.md section 7). The host's 27
-//! harnesses are the base; the kernel's `harness.py` engines that the host does not know (hermes, dsh) are rows too,
-//! with no ACP mode. Data plus pure functions: detection takes the lookup of a program on PATH as an argument, so the
-//! host (with its hydrated PATH) and the CLI (with the plain one) share the rows and keep their own search.
+//! harnesses are the base; hermes, which the host did not know, is a row too. Data plus pure functions: detection
+//! takes the lookup of a program on PATH as an argument, so the host (with its hydrated PATH) and the CLI (with the
+//! plain one) share the rows and keep their own search.
 //!
 //! Nothing here starts a process. The host runs the sign-in probes and the install and login commands in its own
 //! terminal; `kith engines install|login <id>` prints them.
 
+mod tui;
+pub use tui::{RunInputs, Tui, tui_argv};
+
 use serde_json::{Value, json};
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One engine.
 pub struct Engine {
@@ -133,8 +136,20 @@ pub fn session_modes(engine: &str, reach: Reach) -> &'static [&'static str] {
         ("codex", Reach::ReadOnly) => &["read-only"],
         ("codex", Reach::Workspace) => &["workspace-write", "auto"],
         ("codex", Reach::Full) => &["agent-full-access", "full-access"],
+        // `hermes acp` (never started with --accept-hooks): accept_edits allows edits in the workspace and still asks for
+        // the rest; dont_ask is the no-asking mode a bypass run needs.
+        ("hermes", Reach::ReadOnly) => &["default"],
+        ("hermes", Reach::Workspace) => &["accept_edits"],
+        ("hermes", Reach::Full) => &["dont_ask"],
         _ => &[],
     }
+}
+
+/// Whether a run without approval may still allow (once) the agent's ask to run a tool of an MCP server the owner granted
+/// it. Only codex-acp: its own per-tool approval refuses every tool of any server, and it names the server in the ask's
+/// structured fields. A run-once ask on any other engine stays refused (design 2026-11-21-harness-oneshots, H3).
+pub fn allows_granted_mcp_asks(engine: &str) -> bool {
+    engine == "codex"
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -240,7 +255,24 @@ pub fn detect(
     e: &Engine,
     which: &dyn Fn(&str) -> Option<PathBuf>,
 ) -> Option<(&'static str, PathBuf)> {
-    e.bins.iter().find_map(|b| which(b).map(|p| (*b, p)))
+    e.bins
+        .iter()
+        .find_map(|b| which(b).map(|p| (*b, p)))
+        .or_else(|| native_claude(e))
+}
+
+/// Windows: the native installer puts `claude.exe` in `%USERPROFILE%\.local\bin` and leaves that folder off PATH.
+fn native_claude(e: &Engine) -> Option<(&'static str, PathBuf)> {
+    if !cfg!(windows) || e.id != "claude" {
+        return None;
+    }
+    let home = std::env::var_os("USERPROFILE")?;
+    native_claude_in(Path::new(&home))
+}
+
+fn native_claude_in(home: &Path) -> Option<(&'static str, PathBuf)> {
+    let exe = home.join(".local").join("bin").join("claude.exe");
+    exe.is_file().then_some(("claude", exe))
 }
 
 /// One engine as `kith engines --json` lists it. `signed_in` is `null`: the probes run programs, which the host does
@@ -882,50 +914,27 @@ pub const ENGINES: &[Engine] = &[
         env: &[],
         enforces: Enforces::NONE,
     },
-    // The kernel's own engines (kernel/adapters/harness.py) that have no ACP mode we know of: one-shot runs go through
-    // their command, and the host does not list them.
+    // Hermes speaks ACP through `hermes acp` (per-session MCP servers, session modes).
     Engine {
         id: "hermes",
         aliases: &[],
         name: "Hermes Agent",
         bins: &["hermes"],
-        local: None,
+        local: Some("{bin} acp"),
         registry: None,
         setup: "Install Hermes Agent and run `hermes` to set it up.",
         install: None,
         login: "",
         signed_in: None,
         models: Models::None,
-        oneshot: Oneshot::Native("{bin} chat -Q --format stream-json -q {task}"),
+        oneshot: Oneshot::Acp,
         env: &[],
         enforces: Enforces {
             tool_hooks: false,
             permission_modes: false,
-            per_run_mcp: false,
-            role_prompt: RolePrompt::Env,
-            interactive: true,
-        },
-    },
-    Engine {
-        id: "dsh",
-        aliases: &[],
-        name: "DeepSeek Harness",
-        bins: &["dsh"],
-        local: None,
-        registry: None,
-        setup: "Install DeepSeek Harness (npm install -g @deepseek-ai/dsh) and set up a profile with `dsh`.",
-        install: Some(Install::Npm("@deepseek-ai/dsh")),
-        login: "",
-        signed_in: None,
-        models: Models::None,
-        oneshot: Oneshot::Native("{bin} --profile headless --json -"),
-        env: &["DEEPSEEK_API_KEY"],
-        enforces: Enforces {
-            tool_hooks: false,
-            permission_modes: false,
-            per_run_mcp: false,
+            per_run_mcp: true,
             role_prompt: RolePrompt::FirstMessage,
-            interactive: false,
+            interactive: true,
         },
     },
 ];
@@ -935,6 +944,17 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn the_native_claude_install_is_found_off_path() {
+        let home = std::env::temp_dir().join(format!("kith-eng-{}", std::process::id()));
+        let bin = home.join(".local").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        assert!(native_claude_in(&home).is_none());
+        std::fs::write(bin.join("claude.exe"), b"").unwrap();
+        assert_eq!(native_claude_in(&home).unwrap().1, bin.join("claude.exe"));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 
     fn nothing(_: &str) -> Option<PathBuf> {
         None
@@ -964,44 +984,29 @@ mod tests {
 
     #[test]
     fn every_kernel_harness_has_a_row() {
-        // kernel/adapters/harness.py HARNESSES, and claude.
-        for id in [
-            "claude", "codex", "pi", "agy", "hermes", "qwen", "dsh", "opencode",
-        ] {
+        for id in ["claude", "codex", "pi", "agy", "hermes", "qwen", "opencode"] {
             assert!(find(id).is_some(), "{id} has no row");
         }
-    }
-
-    /// The kernel's own list (`HARNESSES = (...)` in kernel/adapters/harness.py) read from the file, so a harness added
-    /// there without a row here fails.
-    #[test]
-    fn harness_py_harnesses_all_resolve() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../kernel/adapters/harness.py"
-        );
-        let Ok(src) = std::fs::read_to_string(path) else {
-            return;
-        }; // a crate packaged without the kernel
-        let line = src
-            .lines()
-            .find(|l| l.starts_with("HARNESSES = ("))
-            .expect("harness.py has a HARNESSES line");
-        let ids: Vec<&str> = line.split('\'').skip(1).step_by(2).collect();
-        assert!(ids.len() >= 7, "parsed {ids:?}");
-        for id in ids {
-            assert!(
-                find(id).is_some(),
-                "harness.py names {id}, which has no row in the engines table"
-            );
-        }
+        // Dropped with harness.py: nothing in Kith can run it.
+        assert!(find("dsh").is_none());
     }
 
     #[test]
     fn host_rows_are_the_acp_ones() {
-        assert_eq!(ENGINES.iter().filter(|e| e.has_acp()).count(), 27);
-        assert!(!find("hermes").unwrap().has_acp());
-        assert!(!find("dsh").unwrap().has_acp());
+        assert_eq!(ENGINES.iter().filter(|e| e.has_acp()).count(), 28);
+        assert!(find("hermes").unwrap().has_acp());
+    }
+
+    #[test]
+    fn hermes_is_an_owner_only_acp_row_with_its_three_session_modes() {
+        let h = find("hermes").unwrap();
+        assert_eq!(h.local, Some("{bin} acp"));
+        assert!(matches!(h.oneshot, Oneshot::Acp));
+        assert!(h.enforces.per_run_mcp && !h.enforces.tool_hooks && !h.serves_guests());
+        assert_eq!(h.enforces.role_prompt, RolePrompt::FirstMessage);
+        assert_eq!(session_modes("hermes", Reach::Workspace), ["accept_edits"]);
+        assert_eq!(session_modes("hermes", Reach::Full), ["dont_ask"]);
+        assert_eq!(session_modes("hermes", Reach::ReadOnly), ["default"]);
     }
 
     #[test]

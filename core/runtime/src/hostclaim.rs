@@ -229,7 +229,9 @@ pub(crate) fn call_at(core: &mut Core, method: &str, p: &Value, now: i64) -> Res
             }))
         }
         "hostclaim.epoch" => Ok(json!({ "epoch": claims::revoke_epoch(core, person(p)?)? })),
-        "hostclaim.claim" if matches!(word(p, "kind"), Some("scheduleRun" | "wakeRun")) => {
+        "hostclaim.claim"
+            if matches!(word(p, "kind"), Some("scheduleRun" | "wakeRun" | "askRun")) =>
+        {
             // A cron job's turn run by `kith-sched run-turn` (`conversations::sched_run`): the claim has no process until the run
             // attaches itself (`claim.attach`).
             match sched_run::claim_run(
@@ -419,7 +421,7 @@ fn sources_of(p: &Value) -> Result<Vec<&str>> {
         .map(|s| {
             s.as_str()
                 .filter(|s| detached::is_source(s))
-                .ok_or_else(|| bad("sources are detached run sources (schedule, wake)"))
+                .ok_or_else(|| bad("sources are detached run sources (schedule, wake, ask)"))
         })
         .collect()
 }
@@ -430,7 +432,8 @@ fn sources_of(p: &Value) -> Result<Vec<&str>> {
 /// been redeemed (`running_at`): its prompt may have reached an engine, so the host cancels it instead of running it again
 /// (`SkipRedeemed`). Every schedule turn in this core.db was fired on this Mac, for an agent the index lists here. Each item
 /// carries its `source`; a `wake` turn also answers its `door` (`run`: the kernel resumes it; `host`: the host takes it), the
-/// ids of the requests it carries (`requestIds`, in the order they came in) and the `note` it was made from (its prompt).
+/// ids of the requests it carries (`requestIds`, in the order they came in) and the `note` it was made from (its prompt); an `ask`
+/// turn (a `--bg` ask's callee) answers `ask` (the ask's id) and `out` (the file its run gives the callee as stdout).
 fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
     let owner = owner_id(core);
     let mut st = core.conn().prepare(&format!(
@@ -440,7 +443,8 @@ fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
                 (SELECT f.settings FROM sched_fires f WHERE f.agent = c.agent AND f.turn_id = CAST(t.id AS TEXT) LIMIT 1),
                 t.source,
                 (SELECT s.door FROM wake_turns w JOIN wake_sessions s ON s.session = w.session WHERE w.turn_id = t.id),
-                (SELECT w.run FROM wake_turns w WHERE w.turn_id = t.id)
+                (SELECT w.run FROM wake_turns w WHERE w.turn_id = t.id),
+                (SELECT a.id || char(0) || COALESCE(a.out_path, '') FROM asks a WHERE a.turn = t.id)
          FROM turns t JOIN conversations c ON c.id = t.conversation
          WHERE t.enq_key IS NULL AND t.source IN {} AND t.state IN ('queued', 'parked')
          ORDER BY t.id",
@@ -454,6 +458,7 @@ fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
             let person: String = r.get(4)?;
             let source: String = r.get(11)?;
             let wake = source == "wake";
+            let asked: Option<String> = r.get(14)?;
             let mut item = json!({
                 "turn": r.get::<_, i64>(0)?,
                 "conversation": r.get::<_, String>(1)?,
@@ -467,7 +472,7 @@ fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
                     .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
                 // null when the owner can't be read: the host says so instead of letting every run expire quietly.
                 // A wake's turn with no person is made for the word `owner` (`wake::turns::start_in`).
-                "owner": owner.as_deref().map(|o| o == person || (wake && person == "owner")),
+                "owner": owner.as_deref().map(|o| o == person || ((wake || asked.is_some()) && person == "owner")),
                 "person": person,
                 "prompt": r.get::<_, String>(5)?,
                 "deadline": r.get::<_, Option<i64>>(6)?,
@@ -475,6 +480,11 @@ fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
                 "redeemedBefore": r.get::<_, bool>(8)?,
                 "source": source,
             });
+            // An ask's callee (design 2026-11-24-ask-ledger R2): its id, and the file the host's run gives the callee as stdout.
+            if let Some((id, out)) = asked.as_deref().and_then(|a| a.split_once('\0')) {
+                item["ask"] = json!(id);
+                item["out"] = if out.is_empty() { Value::Null } else { json!(out) };
+            }
             if wake {
                 let run: Option<String> = r.get(13)?;
                 let request_ids = match run {

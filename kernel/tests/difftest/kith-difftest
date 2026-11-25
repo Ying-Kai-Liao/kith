@@ -637,7 +637,7 @@ def run_all(cases, prefixes, intended, jobs=4, keep=False, out=sys.stdout):
             print(f'ok    {name}' + (f'  ({n} intended difference(s))' if n else ''), file=out)
     ran = [c['name'] for c in cases]
     stale = [e for i, e in enumerate(intended)
-             if i not in used and any(fnmatch.fnmatchcase(n, e['case']) for n in ran)]
+             if i not in used and (WITH_DAEMON or not e.get('daemon_only')) and any(fnmatch.fnmatchcase(n, e['case']) for n in ran)]
     for e in stale:
         print(f'STALE intended difference no longer occurs: case {e["case"]!r} facet {e["facet"]!r} ({e["why"]})', file=out)
     for st in summary.values():
@@ -686,13 +686,20 @@ def main(argv=None):
     WITH_CORE = a.core
     WITH_DAEMON = a.daemon
     RUST_BIN = a.bin or os.environ.get('KITH_DIFFTEST_BIN') or (find_rust_bin() if (a.rust or a.new) else '')
-    if (a.rust or a.new) and not RUST_BIN and not RECORD and any(c.get('needs') == 'rust' for c in cases):
+    if (a.rust or a.new) and not RUST_BIN and not RECORD and any(c.get('needs') in ('rust', 'daemon') for c in cases):
         raise SystemExit('no kith program for the Rust cases: build one (cargo build --bin kith in serve/host) or pass --bin')
     if not (a.rust or a.new) and not GOLDEN:
-        skipped = [c['name'] for c in cases if c.get('needs') == 'rust']
-        cases = [c for c in cases if c.get('needs') != 'rust']
+        skipped = [c['name'] for c in cases if c.get('needs') in ('rust', 'daemon')]
+        cases = [c for c in cases if c.get('needs') not in ('rust', 'daemon')]
         if skipped:
             print(f'skip  {len(skipped)} case(s) that need the Rust binary (--rust): {", ".join(skipped)}')
+    # "needs": "daemon": the verb is a client of the core's rows, which only a daemon answers (no embedded core runs them), so the
+    # case runs in the --daemon pass alone (the plain and --core passes skip it, said out loud).
+    if not a.daemon and not GOLDEN:
+        skipped = [c['name'] for c in cases if c.get('needs') == 'daemon']
+        cases = [c for c in cases if c.get('needs') != 'daemon']
+        if skipped:
+            print(f'skip  {len(skipped)} case(s) that need a daemon (--daemon): {", ".join(skipped)}')
     if a.list:
         for c in cases:
             print(c['name'])

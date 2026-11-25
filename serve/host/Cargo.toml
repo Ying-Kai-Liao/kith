@@ -21,7 +21,7 @@ path = "src/main.rs"
 
 # The memory crate builds here and is mirrored to its own repository (docs/design/bot-memory.md#packaging).
 [workspace]
-members = ["crates/memory", "crates/tts", "crates/wire", "crates/guest", "../../core/kernel", "../../core/procstart","../../core/winsys","../../core/acp", "../../core/holder", "../../core/stub","../../core/api", "../../core/attach", "tests/support/fakemodel"]
+members = ["crates/memory", "crates/tts", "crates/wire", "crates/guest", "../../core/kernel", "../../core/procstart","../../core/winsys","../../core/acp", "../../core/holder", "../../core/stub","../../core/api", "../../core/attach", "tests/support/fakemodel", "tests/support/winprobe/boxprobe"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -84,6 +84,8 @@ keyring = { version = "3.6.3", features = ["apple-native"] }
 keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust", "vendored"] }
 
 [target.'cfg(windows)'.dependencies]
+# Owner-only access lists by SID (the memory-approvals key); the only unsafe Win32 lives in that crate.
+kith-winsys = { path = "../../core/winsys" }
 keyring = { version = "3.6.3", features = ["windows-native"] }
 
 # rust-skills lint-* rules: all default groups plus pedantic, with the

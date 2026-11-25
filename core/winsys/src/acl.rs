@@ -24,10 +24,12 @@ use windows_sys::Win32::Security::Authorization::{
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, AclSizeInformation,
     AddAccessAllowedAceEx, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, GetAce,
-    GetAclInformation, InitializeAcl, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    GetAclInformation, InitializeAcl, InitializeSecurityDescriptor, OBJECT_INHERIT_ACE,
+    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    SE_DACL_PROTECTED, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SetSecurityDescriptorControl,
+    SetSecurityDescriptorDacl,
 };
-use windows_sys::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
+use windows_sys::Win32::Storage::FileSystem::{CreateDirectoryW, FILE_ALL_ACCESS};
 
 use crate::sid::{self, Sid};
 use crate::{last_err, wide, win_err};
@@ -55,9 +57,10 @@ pub fn current_user_text() -> io::Result<String> {
     Ok(Sid::text(me.as_ptr()))
 }
 
-/// Replaces the list of `path` with a protected one (nothing inherited from the parent): full control for the current
-/// user, SYSTEM and Administrators. With `inherit` (a folder) the entries pass to everything made inside it.
-pub fn restrict(path: &Path, inherit: bool) -> io::Result<()> {
+/// The owner-only list as the words of an `ACL`: full control for the current user, SYSTEM and Administrators. With
+/// `inherit` (a folder) the entries pass to everything made inside it. Shared by [`restrict`] and [`create_dir_private`], so
+/// the two cannot drift apart.
+fn owner_acl(inherit: bool) -> io::Result<Vec<u32>> {
     let sids = [sid::current_user()?, sid::system()?, sid::administrators()?];
     let ace_fixed = size_of::<ACCESS_ALLOWED_ACE>() - size_of::<u32>();
     let size = size_of::<ACL>()
@@ -91,6 +94,14 @@ pub fn restrict(path: &Path, inherit: bool) -> io::Result<()> {
             return Err(last_err());
         }
     }
+    Ok(words)
+}
+
+/// Replaces the list of `path` with a protected one (nothing inherited from the parent): full control for the current
+/// user, SYSTEM and Administrators. With `inherit` (a folder) the entries pass to everything made inside it.
+pub fn restrict(path: &Path, inherit: bool) -> io::Result<()> {
+    let mut words = owner_acl(inherit)?;
+    let acl = words.as_mut_ptr().cast::<ACL>();
     let name = wide(path.as_os_str());
     // SAFETY: `name` is NUL-ended; `acl` is a complete list; owner, group and SACL are left alone (null). PROTECTED
     // cuts the inheritance from the parent.
@@ -110,6 +121,45 @@ pub fn restrict(path: &Path, inherit: bool) -> io::Result<()> {
     } else {
         Err(win_err(code))
     }
+}
+
+/// `SECURITY_DESCRIPTOR_REVISION` (winnt.h), which windows-sys keeps behind a feature this crate does not otherwise need.
+const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
+
+/// Makes the folder `path` (its parent must exist) with the protected owner-only list of [`restrict`] in the same call that
+/// creates it, so there is no moment at which it holds the list it would inherit: nobody else can have opened it or put
+/// anything in it before it is private. An existing folder is reported as `AlreadyExists`, and is left as it is.
+pub fn create_dir_private(path: &Path, inherit: bool) -> io::Result<()> {
+    let mut words = owner_acl(inherit)?;
+    let acl = words.as_mut_ptr().cast::<ACL>();
+    let mut sd = std::mem::MaybeUninit::<SECURITY_DESCRIPTOR>::zeroed();
+    let psd = sd.as_mut_ptr().cast::<c_void>();
+    // SAFETY: `psd` points at zeroed storage the size of a security descriptor, which InitializeSecurityDescriptor fills.
+    if unsafe { InitializeSecurityDescriptor(psd, SECURITY_DESCRIPTOR_REVISION) } == 0 {
+        return Err(last_err());
+    }
+    // SAFETY: `psd` was initialised above; `acl` is a complete list that outlives the create call below (the descriptor
+    // points at it rather than copying it).
+    if unsafe { SetSecurityDescriptorDacl(psd, 1, acl, 0) } == 0 {
+        return Err(last_err());
+    }
+    // PROTECTED: the parent's inheritable entries are not merged in, as with `restrict`.
+    // SAFETY: `psd` holds a descriptor with a DACL.
+    if unsafe { SetSecurityDescriptorControl(psd, SE_DACL_PROTECTED, SE_DACL_PROTECTED) } == 0 {
+        return Err(last_err());
+    }
+    let attrs = SECURITY_ATTRIBUTES {
+        nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(u32::MAX),
+        lpSecurityDescriptor: psd,
+        bInheritHandle: 0,
+    };
+    let name = wide(path.as_os_str());
+    // SAFETY: `name` is NUL-ended; `attrs` and the descriptor and list it points at live until the call returns.
+    if unsafe { CreateDirectoryW(name.as_ptr(), &raw const attrs) } == 0 {
+        // the last error carries ERROR_ALREADY_EXISTS, which `io::Error` maps to `AlreadyExists`
+        return Err(last_err());
+    }
+    Ok(())
 }
 
 /// Reads the access list and owner of `path` and judges them. An `Err` means they could not be read (the file is gone,
@@ -218,11 +268,12 @@ mod tests {
     use super::*;
     use std::process::Command;
 
-    /// Adds a read entry for a SID with `icacls`, whose `*S-...` form takes a SID, so it is language-free.
-    fn grant(path: &Path, sid: &str) {
+    /// Adds a read entry for a SID with `icacls`, whose `*S-...` form takes a SID, so it is language-free. `rights` is the
+    /// part after the colon: `(R)` for the folder alone, `(OI)(CI)(R)` for what it will hold too.
+    fn grant_with(path: &Path, sid: &str, rights: &str) {
         let out = Command::new("icacls")
             .arg(path)
-            .args(["/grant", &format!("*{sid}:(R)")])
+            .args(["/grant", &format!("*{sid}:{rights}")])
             .output()
             .unwrap();
         assert!(
@@ -230,6 +281,10 @@ mod tests {
             "icacls: {}",
             String::from_utf8_lossy(&out.stdout)
         );
+    }
+
+    fn grant(path: &Path, sid: &str) {
+        grant_with(path, sid, "(R)");
     }
 
     #[test]
@@ -272,6 +327,24 @@ mod tests {
                 Check::OwnerOnly => panic!("{sid} was let through"),
             }
         }
+    }
+
+    #[test]
+    fn a_folder_made_private_is_owner_only_from_the_first_moment() {
+        let tmp = tempfile::tempdir().unwrap();
+        // the parent lets Users in, and the entry is inherited by what is made inside it, as a shared temp folder may: so
+        // the folder is owner-only only if it blocks inheritance (an entry for the parent alone would prove nothing)
+        grant_with(tmp.path(), "S-1-5-32-545", "(OI)(CI)(R)");
+        let dir = tmp.path().join("fresh");
+        create_dir_private(&dir, true).unwrap();
+        assert_eq!(check(&dir).unwrap(), Check::OwnerOnly);
+        let file = dir.join("data");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(check(&file).unwrap(), Check::OwnerOnly);
+        // an existing folder is reported, and left as it was
+        let e = create_dir_private(&dir, true).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(check(&dir).unwrap(), Check::OwnerOnly);
     }
 
     #[test]
