@@ -116,6 +116,8 @@ fn truthy(v: &Value) -> bool {
 }
 
 /// Everything the settings read that is not a file under the agent's folders.
+// Each bool is an independent launch fact the caller reports, not one state: an enum would only rename them.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Input<'a> {
     pub agent: &'a str,
     pub paths: &'a Paths,
