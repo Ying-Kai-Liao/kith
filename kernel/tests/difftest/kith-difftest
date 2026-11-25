@@ -24,6 +24,9 @@ import fnmatch
 import hashlib
 import json
 import os
+import pty
+import signal
+import time
 import re
 import shlex
 import shutil
@@ -250,6 +253,39 @@ def build(side, side_dir, case):
 
 # --- running and snapshotting ----------------------------------------------------------------------------------------
 
+def run_pty(argv, cwd, env, timeout):
+    """Runs argv with a pseudo-terminal on all three ends, as at a terminal: -> (exit code, what it wrote). stdout and stderr are one
+    stream there (a case with "pty" compares that, so it sets "stderr": false). It reads the pty itself: pty.spawn can hang on macOS
+    after the child has exited."""
+    pid, fd = pty.fork()
+    if pid == 0:
+        try:
+            os.chdir(cwd)
+            os.execvpe(argv[0], argv, env)
+        except OSError:
+            os._exit(127)
+    out, deadline = b'', time.time() + timeout
+    while True:
+        left = deadline - time.time()
+        if left <= 0:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            return 'timeout', out.decode(errors='replace')
+        if not select.select([fd], [], [], min(left, 1))[0]:
+            continue
+        try:
+            data = os.read(fd, 65536)
+        except OSError:
+            break
+        if not data:
+            break
+        out += data
+    os.close(fd)
+    st = os.waitpid(pid, 0)[1]
+    code = os.WEXITSTATUS(st) if os.WIFEXITED(st) else 128 + os.WTERMSIG(st)
+    return code, out.decode(errors='replace').replace('\r\n', '\n')
+
+
 def run_steps(side, side_dir, case, prefix, env, norm):
     """-> {facet: text} for the case's command lines."""
     facets = {}
@@ -258,9 +294,13 @@ def run_steps(side, side_dir, case, prefix, env, norm):
         args = [subst(a, side_dir) for a in line]
         stdin = case.get('stdin')
         try:
-            r = subprocess.run([*prefix, *args], cwd=cwd, env=env, capture_output=True, text=True,
-                               input=subst(stdin, side_dir) if stdin is not None else '', timeout=TIMEOUT)
-            code, out, err = r.returncode, r.stdout, r.stderr
+            if case.get('pty'):   # a run at a terminal: the same pseudo-terminal on both sides
+                code, out = run_pty([*prefix, *args], cwd, env, TIMEOUT)
+                err = ''
+            else:
+                r = subprocess.run([*prefix, *args], cwd=cwd, env=env, capture_output=True, text=True,
+                                   input=subst(stdin, side_dir) if stdin is not None else '', timeout=TIMEOUT)
+                code, out, err = r.returncode, r.stdout, r.stderr
         except subprocess.TimeoutExpired:
             code, out, err = 'timeout', '', ''
         except OSError as e:
@@ -637,7 +677,7 @@ def run_all(cases, prefixes, intended, jobs=4, keep=False, out=sys.stdout):
             print(f'ok    {name}' + (f'  ({n} intended difference(s))' if n else ''), file=out)
     ran = [c['name'] for c in cases]
     stale = [e for i, e in enumerate(intended)
-             if i not in used and any(fnmatch.fnmatchcase(n, e['case']) for n in ran)]
+             if i not in used and (WITH_DAEMON or not e.get('daemon_only')) and any(fnmatch.fnmatchcase(n, e['case']) for n in ran)]
     for e in stale:
         print(f'STALE intended difference no longer occurs: case {e["case"]!r} facet {e["facet"]!r} ({e["why"]})', file=out)
     for st in summary.values():
@@ -686,13 +726,20 @@ def main(argv=None):
     WITH_CORE = a.core
     WITH_DAEMON = a.daemon
     RUST_BIN = a.bin or os.environ.get('KITH_DIFFTEST_BIN') or (find_rust_bin() if (a.rust or a.new) else '')
-    if (a.rust or a.new) and not RUST_BIN and not RECORD and any(c.get('needs') == 'rust' for c in cases):
+    if (a.rust or a.new) and not RUST_BIN and not RECORD and any(c.get('needs') in ('rust', 'daemon') for c in cases):
         raise SystemExit('no kith program for the Rust cases: build one (cargo build --bin kith in serve/host) or pass --bin')
     if not (a.rust or a.new) and not GOLDEN:
-        skipped = [c['name'] for c in cases if c.get('needs') == 'rust']
-        cases = [c for c in cases if c.get('needs') != 'rust']
+        skipped = [c['name'] for c in cases if c.get('needs') in ('rust', 'daemon')]
+        cases = [c for c in cases if c.get('needs') not in ('rust', 'daemon')]
         if skipped:
             print(f'skip  {len(skipped)} case(s) that need the Rust binary (--rust): {", ".join(skipped)}')
+    # "needs": "daemon": the verb is a client of the core's rows, which only a daemon answers (no embedded core runs them), so the
+    # case runs in the --daemon pass alone (the plain and --core passes skip it, said out loud).
+    if not a.daemon and not GOLDEN:
+        skipped = [c['name'] for c in cases if c.get('needs') == 'daemon']
+        cases = [c for c in cases if c.get('needs') != 'daemon']
+        if skipped:
+            print(f'skip  {len(skipped)} case(s) that need a daemon (--daemon): {", ".join(skipped)}')
     if a.list:
         for c in cases:
             print(c['name'])

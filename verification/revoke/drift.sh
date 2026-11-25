@@ -49,6 +49,8 @@ FILES=(
   core/kernel/src/launch/plan.rs          # P1-12 R0: who the run is for, with the sync hold (a person is resolved only while this Mac is in sync with the cloud), in Rust now
   core/kernel/src/launch/exec.rs          # P1-12 R3a: a one-shot run in this process: the revoke epoch is read BEFORE the plan resolves the person (I1), `proc` before the engine (I5), KITH_REVOKE_SEEN with every claim
   core/kernel/src/launch/start.rs         # R3a: the claim and the guest's once grants after it, then the engine (the pid the revoke sweep finds)
+  core/kernel/src/launch/terminal.rs      # R3b: the terminal run: `proc` before the engine (exec.rs), the terminal claim for this pid, then `threads run` in process (the pid the revoke sweep finds)
+  core/kernel/src/launch/held.rs          # R3b: --held (the owner's own terminal only): release the resumed claim, then terminal.open
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

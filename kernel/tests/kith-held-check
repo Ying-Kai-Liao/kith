@@ -48,6 +48,16 @@ unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE HQ_HOME HQ_STATE 
   KITH_CLAUDE_ARGS KITH_REQUIRE_STUB KITH_RUN_TOKEN KITH_ASK_TOKEN KITH_DETACH_KEY KITH_CORE
 mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/designer/role" "$CLAUDE_CONFIG_DIR" "$T/bin" "$T/work"
 printf -- '---\nname: designer\ndescription: test agent\n---\nbody\n' > "$KITH_HOME/agents/designer/role/agent.md"
+# KITH_LAUNCH_EXEC=on: the same checks with the runs done by the program (`kith kernel launch-exec`, token launch-exec-term): a copy of the
+# kernel folder with the `launch-exec` line switched on, the program being $BIN. Unset (the default): the script's own body.
+if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
+  LE_BIN=$BIN
+  [[ -n $LE_BIN && -x $LE_BIN ]] || { echo "FAIL launch-exec on: no kith program"; exit 1; }
+  "$LE_BIN" kernel version 2>/dev/null | grep -q '"launch-exec-term"' || { echo "FAIL launch-exec on: $LE_BIN does not list launch-exec-term"; exit 1; }
+  cp -R "$KERNEL" "$T/kernel-on" && printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt" || { echo "FAIL launch-exec on: no kernel copy"; exit 1; }
+  KERNEL=$T/kernel-on; export KITH_BIN=$LE_BIN
+  echo "(launch-exec on: the program runs the terminal and --held)"
+fi
 KITH=$KERNEL/bin/kith
 fail=0
 ok() { echo "ok   $1"; }

@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+# kith-model-keys-check — CI remembers a model check's full pass by a hash of its inputs (verification/model-keys.tsv,
+# verification/model-keys.sh) and skips the full rows when the hash already passed. That is only sound when the inputs are
+# everything the run reads. Fails when:
+#   - a model's run.sh reads a repo path outside its inputs (../…, verification/<other>/…, the repo root), or its drift.sh;
+#   - a model job in .github/workflows/ci.yml has no pass key, decides full rows by something else, or saves its marker
+#     without success() (or with always() / continue-on-error), or a job runs a model that has no row in model-keys.tsv;
+#   - a smoke.txt names a row that is not in its checks.tsv (run.sh checks this only after fetching the tools);
+#   - the key does not behave: a drift.sh edit changes it, an input edit does not, or an edit reaches a model it is not
+#     an input of (checked on a throwaway git copy of verification/).
+# It greps run.sh for literal paths only: a path built at run time (a variable joined from parts, a read through a tool
+# the model fetches) is not seen, so a run.sh change that reads a new file that way must add it to the tsv by hand.
+#
+#   kernel/tests/kith-model-keys-check                a few seconds
+#   kernel/tests/kith-model-keys-check --selftest     plants each fault in a copy and expects this check to fail naming it
+#   kernel/tests/kith-model-keys-check --root DIR     check DIR (holding verification/ and .github/workflows/ci.yml)
+set -o pipefail
+
+TESTS="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$TESTS/../.." && pwd)"
+G=/usr/bin/grep; [ -x $G ] || G=grep
+
+if [ "${1:-}" = "--selftest" ]; then
+  T=$(mktemp -d "${TMPDIR:-/tmp}/kith-model-keys-check.XXXXXX")
+  trap 'rm -rf "$T"' EXIT
+  copy() {   # copy NAME -> a fresh copy of what this check reads, at $T/NAME
+    mkdir -p "$T/$1/.github/workflows"
+    cp -R "$ROOT/verification" "$T/$1/verification"
+    cp "$ROOT/.github/workflows/ci.yml" "$T/$1/.github/workflows/ci.yml"
+  }
+  bad=0
+  expect() {   # expect NAME WANT WHAT: the check on copy NAME exits 1 and prints WANT
+    out=$("$0" --root "$T/$1" 2>&1); code=$?
+    if [ "$code" = 1 ] && printf '%s\n' "$out" | $G -qF -- "$2"; then echo "ok   $3 fails the check"
+    else echo "FAIL $3 was not caught (exit $code, wanted '$2'):"; printf '%s\n' "$out" | sed 's/^/     /'; bad=1; fi
+  }
+  copy clean
+  out=$("$0" --root "$T/clean" 2>&1) || { echo "FAIL the unchanged copy does not pass:"; printf '%s\n' "$out"; exit 1; }
+  copy outside; printf ': "$HERE/../../kernel/bin/kith"\n' >> "$T/outside/verification/lease/run.sh"
+  expect outside 'lease: run.sh reads kernel/bin/kith' 'a run.sh reading a path outside its inputs'
+  copy other; printf ': verification/revoke/checks.tsv\n' >> "$T/other/verification/secrets/run.sh"
+  expect other 'secrets: run.sh reads verification/revoke/checks.tsv' "a run.sh reading another model's file"
+  copy up; printf 'cd "$HERE/.."\n' >> "$T/up/verification/revoke/run.sh"
+  expect up 'revoke: run.sh reads verification,' 'a run.sh going to the folder above its own'
+  copy drift; printf '. "$HERE/drift.sh"\n' >> "$T/drift/verification/schedule-fire/run.sh"
+  expect drift 'schedule-fire: run.sh reads its drift.sh' 'a run.sh reading its drift.sh'
+  copy nosave; $G -v 'key: ${{ needs.changes.outputs.lease_key }}' "$ROOT/.github/workflows/ci.yml" > "$T/nosave/.github/workflows/ci.yml"
+  expect nosave 'holder-lease: never saves' 'a model job that saves no marker'
+  copy always; sed 's/if: success() \&\& needs.changes.outputs.secrets_full/if: always() \&\& needs.changes.outputs.secrets_full/' \
+    "$ROOT/.github/workflows/ci.yml" > "$T/always/.github/workflows/ci.yml"
+  expect always 'secret-cards: always()' 'a save under always()'
+  copy smoke; printf 'no-such-variant Nothing\n' >> "$T/smoke/verification/revoke/smoke.txt"
+  expect smoke "revoke: smoke.txt names 'no-such-variant Nothing'" 'a smoke row not in checks.tsv'
+  copy nokey; awk -F'\t' -v OFS='\t' '$1 == "holder-lease" || $1 == "lease" { next } { print }' \
+    "$ROOT/verification/model-keys.tsv" > "$T/nokey/verification/model-keys.tsv"
+  expect nokey 'holder-lease: runs verification/lease/run.sh but has no row' 'a model job with no pass key'
+  exit "$bad"
+fi
+[ "${1:-}" = "--root" ] && ROOT=$(cd "$2" && pwd)
+V=$ROOT/verification
+TSV=$V/model-keys.tsv
+CI=$ROOT/.github/workflows/ci.yml
+# Model jobs outside this scheme (not in the brief that set it up): they run their full table whenever their filter matches.
+EXEMPT_JOBS=" rooms-with-people registry-step "
+
+failed=0
+fail() { echo "FAIL $*"; failed=1; }
+rows() { $G -v '^#' "$TSV" | $G -v '^$'; }
+code() { sed -E 's/(^|[[:space:]])#.*$//' "$1"; }   # a script without its comments
+# norm PATH -> PATH with . and .. folded; fails when it climbs above the repo
+norm() {
+  local IFS=/ p out=() n
+  for p in $1; do
+    case $p in
+      ''|.) ;;
+      ..) n=${#out[@]}; [ "$n" -gt 0 ] || return 1; unset "out[$((n - 1))]"; out=("${out[@]}") ;;
+      *) out+=("$p") ;;
+    esac
+  done
+  [ ${#out[@]} -gt 0 ] && echo "${out[*]}"
+}
+covered() {   # covered PATH INPUTS...: PATH is one of the inputs or under one
+  local p=$1 i; shift
+  for i in "$@"; do [ "$p" = "$i" ] || [ "${p#"$i"/}" != "$p" ] && return 0; done
+  return 1
+}
+job_block() { awk -v j="  $1:" '$0 == j { on = 1; next } on && /^  [a-z][a-z0-9_-]*:$/ { exit } on' "$CI"; }
+
+[ -f "$TSV" ] || { echo "FAIL no verification/model-keys.tsv"; exit 1; }
+
+# 1. Each run.sh reads only its inputs, never its drift.sh.
+seen=" "
+while IFS=$'\t' read -r m job inputs; do
+  # shellcheck disable=SC2086
+  set -- $inputs
+  dir=$1; f=$ROOT/$dir/run.sh
+  case $seen in *" $dir "*) continue ;; esac; seen="$seen$dir "
+  [ -f "$f" ] || { fail "$m: no $dir/run.sh"; continue; }
+  c=$(code "$f")
+  printf '%s\n' "$c" | $G -q 'drift\.sh' && fail "$m: run.sh reads its drift.sh, which is not an input (a SYNC bump must not change the key)"
+  printf '%s\n' "$c" | $G -q 'show-toplevel' && fail "$m: run.sh finds the repo root, so it can read any file; read through \$HERE instead"
+  refs=$( { printf '%s\n' "$c" | $G -oE '(^|/)\.\.(/[A-Za-z0-9_./-]*)?' | sed -E "s|^/?|$dir/|"
+            printf '%s\n' "$c" | $G -oE '(^|[^A-Za-z0-9_./-])verification/[A-Za-z0-9_./-]*' | sed -E 's|^[^v]*||'; } | sort -u)
+  bad_ref=0
+  while read -r r; do
+    [ -n "$r" ] || continue
+    p=$(norm "$r") || { fail "$m: run.sh reads $r, above the repo"; bad_ref=1; continue; }
+    covered "$p" "$@" || { fail "$m: run.sh reads $p, which is not among its inputs ($inputs); add it to verification/model-keys.tsv or stop reading it"; bad_ref=1; }
+  done <<<"$refs"
+  [ "$bad_ref" = 0 ] && echo "ok   $m: run.sh reads only its inputs ($inputs)"
+done < <(rows)
+
+# 2. Every model job in ci.yml has a pass key, decides full rows by it and saves only after a full pass.
+$G -q '^[^#]*verification/model-keys.sh keys' "$CI" || fail "ci.yml: no step runs verification/model-keys.sh keys"
+$G -qE '^[[:space:]]+MODEL_PASS_SALT:' "$CI" || fail "ci.yml: no MODEL_PASS_SALT"
+while IFS=$'\t' read -r m job _; do
+  k=${m//-/_}
+  b=$(job_block "$job")
+  [ -n "$b" ] || { fail "$job ($m): no such job in ci.yml"; continue; }
+  ok=1
+  $G -qE "^      ${k}_key: \\$\\{\\{ steps.keys.outputs.${k}_key \\}\\}" "$CI" || { fail "$job: changes has no ${k}_key output"; ok=0; }
+  $G -qE "key: \"\\$\\{\\{ steps.keys.outputs.${k}_key \\}\\}[^\"]*\", lookup-only: true" "$CI" || { fail "$job: changes looks up no ${k}_key marker"; ok=0; }
+  printf '%s\n' "$b" | $G -qE "needs.changes.outputs.(${k}_full|${k}_shards)" || { fail "$job: does not decide its full rows by ${k}_full"; ok=0; }
+  if ! printf '%s\n' "$b" | $G -q 'uses: actions/cache/save@' || ! printf '%s\n' "$b" | $G -qF "needs.changes.outputs.${k}_key"; then
+    fail "$job: never saves its pass marker (actions/cache/save@ with key needs.changes.outputs.${k}_key)"; ok=0
+  fi
+  printf '%s\n' "$b" | $G -q '^[^#]*always()' && { fail "$job: always() in a model job; a failed or cancelled run must save no pass"; ok=0; }
+  printf '%s\n' "$b" | $G -q '^[^#]*continue-on-error' && { fail "$job: continue-on-error in a model job; a failed row would still save a pass"; ok=0; }
+  saves=$(printf '%s\n' "$b" | awk 'f { print; f = 0 } /uses: actions\/cache\/save@/ { f = 1 }')
+  printf '%s\n' "$saves" | $G -v 'if: success() && ' | $G -q . && { fail "$job: a save whose if does not start with success() &&"; ok=0; }
+  [ "$ok" = 1 ] && echo "ok   $job: full rows by its pass key ($m), marker saved only after they pass"
+done < <(rows)
+jobs_tsv=" $(rows | cut -f2 | tr '\n' ' ') "
+for job in $(awk '/^jobs:/ { on = 1; next } on && /^  [a-z][a-z0-9_-]*:$/ { sub(/:$/, ""); sub(/^  /, ""); print }' "$CI"); do
+  # A line that runs a model, not a cache key over a run.sh or a paths filter.
+  model=$(job_block "$job" | $G -v "hashFiles(" | $G -vE "^[[:space:]]*- '" | $G -oE '^[^#]*verification/[a-z-]+/run\.sh' \
+    | $G -oE 'verification/[a-z-]+/run\.sh' | head -1)
+  [ -n "$model" ] || continue
+  case "$jobs_tsv$EXEMPT_JOBS" in *" $job "*) continue ;; esac
+  fail "$job: runs $model but has no row in verification/model-keys.tsv"
+done
+
+# 3. smoke.txt rows exist: "VARIANT PROPERTY" against checks.tsv columns 1 and 3, or one cfg name against a fast row's
+# column 2 (writer-lock).
+for s in "$V"/*/smoke.txt; do
+  [ -f "$s" ] || continue
+  d=$(dirname "$s"); m=$(basename "$d"); n=0
+  while read -r a b _; do
+    case $a in ''|'#'*) continue ;; esac
+    n=$((n + 1))
+    if [ -n "$b" ]; then hit=$(awk -F'\t' -v a="$a" -v b="$b" '$1 == a && $3 == b' "$d/checks.tsv")
+    else hit=$(awk -F'\t' -v a="$a" '$2 == a && $5 == "fast"' "$d/checks.tsv"); fi
+    [ -n "$hit" ] || fail "$m: smoke.txt names '${a}${b:+ $b}', which is not a row of checks.tsv"
+  done < "$s"
+  echo "ok   $m: smoke.txt has $n rows"
+done
+
+# 4. The key itself, on a throwaway git copy of verification/.
+K=$(mktemp -d "${TMPDIR:-/tmp}/kith-model-keys.XXXXXX")
+cp -R "$V" "$K/verification"
+g() { git -C "$K" -c user.name=check -c user.email=check@invalid "$@" >/dev/null; }
+g init -q; g add -A; g commit -qm base
+key() { "$K/verification/model-keys.sh" hash "$1"; }
+markers=$(rows | cut -f1)
+snap() { for x in $markers; do echo "$x $(key "$x")"; done; }
+changed() { diff <(printf '%s\n' "$1") <(printf '%s\n' "$2") | sed -n 's/^> \([^ ]*\) .*/\1/p' | sort | tr '\n' ' ' | sed 's/ $//'; }
+want_changed() {   # want_changed WHAT EDIT-FILE MARKERS...: after appending a comment to EDIT-FILE, exactly MARKERS change
+  local what=$1 file=$2; shift 2
+  before=$(snap); printf '# edited by kith-model-keys-check\n' >> "$K/$file"; g add -A; after=$(snap)
+  got=$(changed "$before" "$after"); want=$(printf '%s\n' "$@" | sort | tr '\n' ' ' | sed 's/ $//')
+  if [ "$got" = "$want" ]; then echo "ok   key: $what changes ${want:-no key}"
+  else fail "key: $what changes [${got}], want [${want}]"; fi
+}
+n_keys=$("$K/verification/model-keys.sh" keys p | $G -c '_key=p-')
+[ "$n_keys" = "$(printf '%s\n' "$markers" | $G -c .)" ] || fail "key: model-keys.sh keys printed $n_keys keys for $(printf '%s\n' "$markers" | $G -c .) markers"
+for x in $markers; do
+  key "$x" | $G -qE '^[0-9a-f]{64}$' || fail "key: no hash for $x"
+done
+[ -f "$K/verification/revoke/drift.sh" ] && want_changed 'a drift.sh SYNC bump (revoke)' verification/revoke/drift.sh
+[ -f "$K/verification/revoke/checks.tsv" ] && want_changed 'a revoke checks.tsv edit' verification/revoke/checks.tsv revoke
+[ -f "$K/verification/threads/run.sh" ] && want_changed 'a threads/run.sh edit' verification/threads/run.sh \
+  $(rows | awk -F'\t' '{ n = split($3, i, " "); for (j = 1; j <= n; j++) if (i[j] == "verification/threads" || i[j] == "verification/threads/run.sh") { print $1; break } }')
+rm -rf "$K"
+
+[ "$failed" = 0 ] && echo "ok   every model pass key covers what its run reads, and every model job saves only a full pass"
+exit "$failed"
