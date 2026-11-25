@@ -126,6 +126,7 @@ pub(crate) static TEST_BAD_CWD: std::sync::atomic::AtomicBool = std::sync::atomi
 pub(crate) static SPAWNED: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
 
 /// Told the started process's pid: kept for a test, nothing for a host.
+#[allow(clippy::unnecessary_wraps, reason = "a test's is Some")]
 pub(super) fn note_pid() -> Option<super::run_door::Bind> {
     #[cfg(test)]
     return Some(Box::new(|pid| {
