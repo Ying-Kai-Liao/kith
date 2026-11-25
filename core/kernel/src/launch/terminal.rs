@@ -15,7 +15,7 @@ use super::held::{self, Held, Outcome};
 use super::session::{self, Locked};
 use super::start::{self, Engine, permit_run};
 use crate::threads::Ctx;
-use crate::threads::writer::Taker;
+use crate::threads::writer::{Taker, claim_exit};
 
 /// A Claude terminal run, ready to claim and start.
 #[allow(clippy::struct_excessive_bools)]
@@ -204,7 +204,7 @@ pub fn claude(t: Term<'_>, taker: &Taker<'_>, pid: i64) -> i32 {
         eprint!("{}", taker.said());
         if let Err(m) = claimed {
             eprintln!("kith: {m}");
-            return 1;
+            return claim_exit(&m);
         }
         lock_alone |= taker.alone();
     }
@@ -286,6 +286,11 @@ pub fn adapter(agent: &str, harness: &str, flags: Vec<String>, env: &Env, how: E
             return 1;
         }
     };
+    adapter_run(&me, harness, flags, env, how)
+}
+
+/// [`adapter`] past the terminal check and the program lookup (the tests name the program and the way it starts).
+fn adapter_run(me: &str, harness: &str, flags: Vec<String>, env: &Env, how: Engine) -> i32 {
     let mut args = vec![
         "kernel".to_owned(),
         "engine-run".to_owned(),
@@ -293,7 +298,7 @@ pub fn adapter(agent: &str, harness: &str, flags: Vec<String>, env: &Env, how: E
         "--interactive".to_owned(),
     ];
     args.extend(flags);
-    start::start(&me, &args, env, how)
+    start::start(me, &args, env, how)
 }
 
 #[cfg(test)]
@@ -306,5 +311,14 @@ mod tests {
         assert!(has_denied_hook(hook));
         assert!(!has_denied_hook(r#"{"command": "denied --dir x"}"#));
         assert!(!has_denied_hook("kith-permit approve"));
+    }
+
+    /// The way the run starts reaches the engine's start: `Spawn` returns the child's code (an `Exec` would replace the test).
+    #[cfg(unix)]
+    #[test]
+    fn another_engines_terminal_starts_the_way_it_is_told() {
+        let env = Env::new();
+        assert_eq!(adapter_run("/usr/bin/true", "codex", vec![], &env, Engine::Spawn), 0);
+        assert_eq!(adapter_run("/usr/bin/false", "codex", vec![], &env, Engine::Spawn), 1);
     }
 }

@@ -21,13 +21,14 @@ TR=$CLAUDE_CONFIG_DIR/projects/p
 cat > "$T/kith" <<'STUB'
 #!/bin/sh
 # stub: kith <agent> --resume <sid> <note>. STUB_MODE: ok (the note reaches the transcript), held (refused, a writer has it),
-# fail (exits 1 before the session saw anything), late (the session saw it, then the run failed)
+# fail (exits 1 before the session saw anything), refused (exits 79, the engine layer's final refusal), late (the session saw it, then the run failed)
 agent=$1 sid=$3 note=$4
 { printf '%s|%s|%s|' "$agent" "$sid" "${KITH_VIA:-}"; printf '%s' "${KITH_PERSON:-}"; printf '\n'; } >> "$KITH_STATE/stub-calls"
 printf '%s' "$note" > "$KITH_STATE/stub-note"
 case ${STUB_MODE:-ok} in
   held) echo "kith: that session is open in another writer (pid 1, terminal); close it first" >&2; exit 1 ;;
   fail) echo "kith: claude crashed" >&2; exit 1 ;;
+  refused) echo "kith: hermes can't be held to its folders; this run was not started" >&2; exit 79 ;;
 esac
 printf '{"type":"user","message":{"content":%s}}\n' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$note")" >> "$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl"
 [ "${STUB_MODE:-ok}" = late ] && exit 1
@@ -109,6 +110,13 @@ for f in pathlib.Path(sys.argv[1]).glob('*.json'):
 PY
 STUB_MODE=late python3 "$W" deliver s3
 is "a run that failed after the session saw the note is answered (at most once)" "$(owed s3)/$(how w:1)" "0/answered, exit 1"
+# A run the engine layer refused for good (exit 79) is failed at once and not retried; the same run with exit 1 is owed again.
+python3 "$W" enqueue sref --id w:6 --agent designer -- six >/dev/null
+STUB_MODE=refused python3 "$W" deliver sref
+is "a refused run (exit 79) ends as failed after one try" "$(owed sref)/$(how w:6)" "0/failed"
+python3 "$W" enqueue sfail --id w:7 --agent designer -- seven >/dev/null
+STUB_MODE=fail python3 "$W" deliver sfail
+is "control: an ordinary failure (exit 1) is still owed again" "$(owed sfail)/$(how w:7)" "1/"
 
 # --- the host door: take, merge while running, done -------------------------------------------------------------------
 python3 "$W" enqueue acp:c1:t1 --id card:7 --agent designer --person anna --room r1 --door host --why 'card answered' -- allowed >/dev/null
