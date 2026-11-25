@@ -114,12 +114,44 @@ case $VERSION in
 esac
 case $VERSION in *[!0-9A-Za-z.+-]*) die "odd version '$VERSION'" ;; esac
 
+# The cutover gate (retire-python): a release whose Python readers are gone lists the modules that must already be switched
+# to the new core on this Mac (share/kith/kernel/lib/requires-switched.txt). The NEW program is asked, not the installed one (an
+# older one answers --require with a usage error), and before anything is copied or cli/current moves, so a refusal leaves
+# the old version current and nothing new on disk. No list or an empty list passes. So does a Mac with no earlier install
+# at all: no program AND no state (Python may have written state with no program left: a --dev checkout, a Mac with only
+# ~/.hq, one whose cli/ was removed, so state counts as an earlier install; chosen over asking the new program per module
+# because the program would need a "nothing to strand" answer it does not have). gate.sh runs here and again at the start
+# of swap.sh, under the auth.json lock, so a rollback that lands between the two cannot slip past.
+cat > "$WORK/gate.sh" <<'GATE'
+set -u   # an unset variable must refuse, never pass
+REQ=$SRC/share/kith/kernel/lib/requires-switched.txt
+[ -f "$REQ" ] && [ -n "$(sed 's/#.*//; s/[[:space:]]//g; /^$/d' "$REQ")" ] || exit 0
+earlier=
+for f in "$PREFIX/cli/current" "$PREFIX/bin/kith" "$PREFIX/share/kith/kernel" \
+         "$PREFIX/secrets/auth.json" "$PREFIX/.migrated" "$PREFIX/cutover" \
+         "$HOME/.config/kith/auth.json" "$HOME/.config/hq/auth.json"; do
+  [ ! -e "$f" ] && [ ! -L "$f" ] || earlier=1
+done
+[ -z "$earlier" ] && [ -d "$HOME/.hq" ] && [ ! -L "$HOME/.hq" ] && earlier=1
+[ -n "$earlier" ] || exit 0
+if ! KITH_GATE_PHASE=${KITH_GATE_PHASE:-} "$SRC/bin/kith" kernel cutover status --require "$REQ" > "$WORK/gate.out" 2> "$WORK/gate.err"; then
+  cat "$WORK/gate.err" "$WORK/gate.out" >&2
+  # The last line is the one the Mac app shows.
+  BRIDGE=$(sed -n 's/^# Bridge release: //p' "$REQ" | sed -n 1p)
+  printf '%s\n' "install: the new kith's cutover check said no, so nothing was changed and the old version stays current. If this Mac runs v0.1.3 or older (no 'kith migrate step') or has no kith program, first install the bridge release, the last one whose requires-switched.txt is empty (${BRIDGE:-not recorded}; KITH_VERSION=<that release>), switch each module named above, then run the installer again. Reopen the app afterwards" | tee "$WORK/gate.last" >&2
+  exit 1
+fi
+GATE
+export WORK SRC PREFIX
+KITH_GATE_PHASE=pre sh "$WORK/gate.sh" || exit 1
+
 # The install, run under the auth.json lock: the version folder is built beside the others as <version>.partial and
 # renamed into place (a half-copied folder is never <version>, and the next install removes it), then cli/current is
 # flipped by rename, a flat layout of before is turned into links, and old versions are pruned. A version that is
 # already there is kept as it is. Two installs at once wait for each other on the lock.
 cat > "$WORK/swap.sh" <<'SWAP'
 set -eu
+KITH_GATE_PHASE=swap sh "$WORK/gate.sh"   # again, now that the lock is held
 CLI=$PREFIX/cli
 mkdir -p "$CLI"
 for p in "$CLI"/*.partial; do [ ! -e "$p" ] || rm -rf "$p"; done
@@ -218,7 +250,7 @@ def started_by_swap(etime):                         # etime has whole seconds, s
         return False
 
 
-def runs_kernel_file(command):
+def kernel_program(command):                        # (the program's path inside the kernel, the words after it), or None
     starts = [command]
     m = INTERPRETERS.match(command)
     if m:
@@ -228,7 +260,30 @@ def runs_kernel_file(command):
                 break
             if not words[i].startswith('-'):
                 starts.append(' '.join(words[i:]))
-    return any(c.startswith(r) for c in starts for r in ROOTS)
+    for c in starts:
+        for r in ROOTS:
+            if c.startswith(r):
+                words = c[len(r):].split()
+                return (words[0] if words else ''), words[1:]
+    return None
+
+
+# An agent run's own wrappers are not old writers: a background `kith ask` run, the account chain it runs, and what
+# bin/kith execs into for a run. They write neither settings.json nor auth.json; the kith-auth and kith_settings.py they
+# call are processes of their own and match WRITER. `kith ask --cap N` sets the chain cap in settings.json, so it stays.
+# bin/kith itself is not listed: a launch execs into one of these (or into claude) within seconds, and the wait reads
+# each process's command line again, so it drops out, while its other verbs (`kith account ...`) wait on writers.
+AGENT_RUN = {
+    'bin/kith-ask': lambda args: [a for a in args if a != '--bg'][:1] != ['--cap'],
+    'lib/kith_accounts.py': lambda args: args[:1] == ['run-chain'],
+    'bin/kith-sessions': lambda args: args[:1] == ['run'],
+    'adapters/harness.py': lambda args: True,
+}
+
+
+def old_kernel_program(command):
+    prog = kernel_program(command)
+    return prog is not None and not AGENT_RUN.get(prog[0], lambda args: False)(prog[1])
 
 
 def process_table():                                # [(pid, (pid, start), etime, tty, command)], -ww: never cut a command line
@@ -246,7 +301,7 @@ def old_writers():                                  # keyed by (pid, start time)
     for pid, key, etime, tty, command in process_table():
         if pid in mine:
             continue
-        if (WRITER.search(command) or (tty.startswith('?') and runs_kernel_file(command))) and started_by_swap(etime):
+        if (WRITER.search(command) or (tty.startswith('?') and old_kernel_program(command))) and started_by_swap(etime):
             found.add(key)
     return found
 
@@ -351,9 +406,9 @@ if [ -d "$OLD_KERNEL" ]; then
 fi
 export KITH_QUIESCE_ROOTS
 if have python3 && [ -d "$(dirname "$AUTH_LOCK")" ]; then
-  python3 "$WORK/quiesce.py" "$AUTH_LOCK" "$SETTINGS_LOCK" "${KITH_INSTALL_DRAIN_S:-30}" sh "$WORK/swap.sh" || die "could not install kith to $PREFIX"
+  python3 "$WORK/quiesce.py" "$AUTH_LOCK" "$SETTINGS_LOCK" "${KITH_INSTALL_DRAIN_S:-30}" sh "$WORK/swap.sh" || { [ ! -s "$WORK/gate.last" ] || exit 1; die "could not install kith to $PREFIX"; }
 else
-  sh "$WORK/swap.sh" || die "could not install kith to $PREFIX"   # a first install: nothing yet to lock
+  sh "$WORK/swap.sh" || { [ ! -s "$WORK/gate.last" ] || exit 1; die "could not install kith to $PREFIX"; }   # a first install: nothing yet to lock
 fi
 say "installed kith $VERSION to $PREFIX/cli/$VERSION"
 

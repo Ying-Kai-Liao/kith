@@ -110,6 +110,10 @@ pub fn switch_file_exists(folders: &Paths, module: &str) -> bool {
 fn answer_of(reached: kith_core::Reached) -> Answer {
     match reached {
         kith_core::Reached::Answered(v) => Answer::Done(v),
+        // A `busy` is the core's lock or connection limit, not its rules: nothing ran, and it said nothing about this
+        // call. Read as a refusal it would be a definite no (a grant denied, an access request recorded as declined);
+        // it fails closed like "core down" instead, and `lost: false` says nothing was sent.
+        kith_core::Reached::Refused(kith_core::Error::Busy(why)) => Answer::Down { why, lost: false },
         kith_core::Reached::Refused(e) => Answer::Refused(e.to_string()),
         kith_core::Reached::NoDaemon => Answer::Down { why: "no core is running".to_owned(), lost: false },
         kith_core::Reached::Mismatch(note) => Answer::Down { why: note, lost: false },
@@ -164,6 +168,7 @@ impl TestDaemon {
 /// `kith migrate step authority` over `folders` (the file at `folders.secrets/auth.json`), in this process; the lines it
 /// prints. Not while a daemon holds the core.
 #[cfg(test)]
+#[cfg(unix)]
 pub fn step_authority_for_test(folders: &Paths, kernel: &std::path::Path) -> Result<Vec<String>, String> {
     kith_core::cutover(folders, kernel, &["step".to_owned(), "authority".to_owned()]).map_err(|e| e.to_string())
 }
@@ -564,6 +569,34 @@ const CORE_CALL_METHODS: &[&str] = &[
     "doors.markLive",
     "doors.end",
     "doors.sweep",
+    // `kith wake` once the queue is the core's (kernel/lib/kith_wake_core.py, `kith kernel wake`, the terminal exit's
+    // `wake.released`). Daemon only: with no daemon the call is exit 3 and nothing was written. `wake.tick` is the host's.
+    "wake.enqueue",
+    "wake.withdraw",
+    "wake.withdrawPerson",
+    "wake.take",
+    "wake.done",
+    "wake.back",
+    "wake.queueList",
+    "wake.queueStatus",
+    "wake.wait",
+    "wake.released",
+    // `kith ask` once the asks are the core's (`kernel ask`, kernel/bin/kith-ask forwards there): the ledger's rows. Daemon only,
+    // like the wake rows: a core that does not answer is a refusal, nothing is written. `ask.unpark` is here for `--reply`; `ask.revokeEverywhere` is
+    // the revoke order's, not here.
+    "ask.open",
+    "ask.settle",
+    "ask.finish",
+    "ask.post",
+    "ask.read",
+    "ask.park",
+    "ask.capTold",
+    "ask.end",
+    "ask.to",
+    "ask.delegations",
+    "ask.record",
+    "ask.limits",
+    "ask.unpark",
 ];
 
 /// The methods `kith-auth` routes to the core on the authority tombstone. Each is sent with `viaSwitch: true`, so the core
@@ -629,6 +662,7 @@ fn core_call_embedded(folders: &Paths, method: &str, params: &Value) -> CallEnd 
                 // A daemon that came up meanwhile is used, never raced.
                 match kith_core::reach(folders, method, params, false) {
                     kith_core::Reached::Answered(answer) => return CallEnd::Answered(answer),
+                    kith_core::Reached::Refused(kith_core::Error::Busy(why)) => return CallEnd::NoAnswer(why, 3),
                     kith_core::Reached::Refused(e) => return CallEnd::Refused(e.to_string()),
                     _ => {}
                 }
@@ -692,10 +726,24 @@ impl CallEnd {
 fn core_call_dispatch(method: &str, params: &Value) -> CallEnd {
     let folders = kernel::folders(&kith_kernel::paths::process_home());
     // Only a list (or a read) is repeated when the connection breaks: an open or a ticket may have run.
-    let repeatable =
-        matches!(method, "terminal.list" | "claim.list" | "claim.epoch" | "schedule.jobs" | "schedule.runs");
+    let repeatable = matches!(
+        method,
+        "terminal.list"
+            | "claim.list"
+            | "claim.epoch"
+            | "schedule.jobs"
+            | "schedule.runs"
+            | "wake.queueList"
+            | "wake.queueStatus"
+            | "ask.delegations"
+            | "ask.record"
+            | "ask.limits"
+            | "ask.to"
+    );
     match kith_core::reach(&folders, method, params, repeatable) {
         kith_core::Reached::Answered(answer) => CallEnd::Answered(answer),
+        // Busy: nothing ran, and the core did not decide; exit 3 like "no daemon" (a hook keeps its spool entry).
+        kith_core::Reached::Refused(kith_core::Error::Busy(why)) => CallEnd::NoAnswer(why, 3),
         kith_core::Reached::Refused(e) => CallEnd::Refused(e.to_string()),
         #[cfg(unix)]
         // The revoke stopgap before M2-23: a revoke made in kith-auth reaches the core even with `kith serve` stopped.
@@ -903,6 +951,18 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    /// A `busy` is not the core's rules saying no: it fails closed as "core down" (nothing sent), never as a definite refusal.
+    #[test]
+    fn a_busy_core_is_down_and_not_a_refusal() {
+        let busy = kith_core::Reached::Refused(kith_core::Error::Busy("lock held; nothing ran".into()));
+        match answer_of(busy) {
+            Answer::Down { why, lost } => assert!(why.contains("lock held") && !lost),
+            _ => panic!("busy must not be a refusal"),
+        }
+        let said = kith_core::Reached::Refused(kith_core::Error::NotAllowed("no".into()));
+        assert!(matches!(answer_of(said), Answer::Refused(_)));
+    }
+
     /// The lists are written by hand; a routed method missing from one would only show on a switched Mac.
     #[test]
     fn every_routed_read_is_on_core_call_and_the_embedded_reads() {
@@ -934,6 +994,28 @@ mod tests {
     #[test]
     fn the_door_calls_are_on_core_call_and_never_embedded() {
         for m in ["doors.start", "doors.markLive", "doors.end", "doors.sweep"] {
+            assert!(CORE_CALL_METHODS.contains(&m), "{m} is not on CORE_CALL_METHODS");
+            #[cfg(unix)]
+            assert!(!kith_core::embedded(m), "{m} must not run without the daemon");
+        }
+    }
+
+    /// The wake rows `kith kernel wake` and the terminal exit call (`kernel/lib/kith_wake_core.py`): on `core-call`, and never run by
+    /// an embedded core, so with the queue the core's and no daemon the call is exit 3 and nothing was written.
+    #[test]
+    fn the_wake_calls_are_on_core_call_and_never_embedded() {
+        for m in [
+            "wake.enqueue",
+            "wake.withdraw",
+            "wake.withdrawPerson",
+            "wake.take",
+            "wake.done",
+            "wake.back",
+            "wake.queueList",
+            "wake.queueStatus",
+            "wake.wait",
+            "wake.released",
+        ] {
             assert!(CORE_CALL_METHODS.contains(&m), "{m} is not on CORE_CALL_METHODS");
             #[cfg(unix)]
             assert!(!kith_core::embedded(m), "{m} must not run without the daemon");

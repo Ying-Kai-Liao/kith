@@ -7,6 +7,81 @@
 #                                    - this Mac has a kith program that lists the module in `kith kernel version`.
 #                                    Otherwise it returns 1 and the caller runs the Python, silently.
 #
+# kith_find_bin   prints the kith program (and returns 0), or prints nothing and returns 1 when this Mac has none. No Python:
+# the first candidate that is an executable file, is not a kernel bash entry (the last three parts of its real path are
+# kernel/bin/kith: ~/.local/bin/kith may be another checkout's) and answers `kith memory hook --help` (an older program
+# does not, and a hook that cannot run checks nothing):
+#   $KITH_BIN, the release this kernel sits in (<release>/share/kith/kernel -> <release>/bin/kith), a kith on PATH, the host
+#   kith serve installed (~/.kith/serve/bin/kith-serve), a build in the checkout (CARGO_TARGET_DIR, else serve/host/target).
+# KITH_DEV_BIN=1 puts the builds right after KITH_BIN and the release last: a dev build never beats an installed host by
+# accident (CARGO_TARGET_DIR is set in sessions started from the repo). The answer is kept for the rest of this shell
+# (_kith_found_bin, set by the first kith_find_bin_set made without a subshell; not exported).
+_kith_usable() {
+  local c=$1 f l k=0 real
+  [[ -n $c && -f $c && -x $c ]] || return 1
+  f=$c
+  while [[ -L $f && $k -lt 16 ]]; do
+    l=$(readlink "$f") || return 1
+    case $l in /*) f=$l ;; *) f=$(dirname "$f")/$l ;; esac
+    k=$((k + 1))
+  done
+  real=$(cd "$(dirname "$f")" 2>/dev/null && pwd -P)/$(basename "$f")
+  case $real in */kernel/bin/kith) return 1 ;; esac
+  "$c" memory hook --help 2>/dev/null | grep -qi phase || return 1
+  # _kith_need_paths (kith_paths_bin): only a program that also answers `kernel paths` counts.
+  [[ -z ${_kith_need_paths:-} ]] || [[ -n $("$c" kernel paths --kernel "$KITH" --sh 2>/dev/null) ]]
+}
+kith_find_bin_set() {
+  local target oldifs=$IFS
+  _kith_found_bin=""
+  target=${CARGO_TARGET_DIR:-$KITH/../serve/host/target}
+  _kith_try() { _kith_usable "$1" && _kith_found_bin=$1; }
+  _kith_try_built() { _kith_try "$target/dev-app/kith" || _kith_try "$target/release/kith" || _kith_try "$target/debug/kith"; }
+  _kith_try_path() {
+    local d
+    IFS=:
+    for d in $PATH; do
+      if [[ -n $d ]] && _kith_try "$d/kith"; then IFS=$oldifs; return 0; fi
+    done
+    IFS=$oldifs
+    return 1
+  }
+  _kith_try_release() { case $KITH in */share/kith/kernel) _kith_try "$KITH/../../../bin/kith" ;; *) return 1 ;; esac; }
+  if [[ ${KITH_DEV_BIN:-} == 1 ]]; then
+    _kith_try "${KITH_BIN:-}" || _kith_try_built || _kith_try_path || _kith_try "$HOME/.kith/serve/bin/kith-serve" || _kith_try_release || true
+  else
+    _kith_try "${KITH_BIN:-}" || _kith_try_release || _kith_try_path || _kith_try "$HOME/.kith/serve/bin/kith-serve" || _kith_try_built || true
+  fi
+  unset -f _kith_try _kith_try_built _kith_try_path _kith_try_release
+  _kith_found_done=1
+}
+kith_find_bin() {
+  [[ -n ${_kith_found_done:-} ]] || kith_find_bin_set
+  [[ -n $_kith_found_bin ]] || return 1
+  printf '%s' "$_kith_found_bin"
+}
+# kith_paths_bin   the program that gives the folders: kith_find_bin's, or (when that one does not answer `kernel paths`: an
+# older program, or a stand-in that is the program for other verbs) the first other candidate that does. Nothing and
+# returns 1 when none does.
+kith_paths_bin() {
+  local c
+  c=$(kith_find_bin) && [[ -n $("$c" kernel paths --kernel "$KITH" --sh 2>/dev/null) ]] && { printf '%s' "$c"; return 0; }
+  c=$(_kith_need_paths=1; kith_find_bin_set; printf '%s' "$_kith_found_bin")
+  [[ -n $c ]] || return 1
+  printf '%s' "$c"
+}
+# kith_need_bin   kith_find_bin, or one line and exit 1: every call's folders come from the program.
+kith_need_bin() {
+  kith_find_bin || { echo "kith: kith needs the kith program, which was not found: kith update self or scripts/install.sh (kith serve start in a checkout)" >&2; exit 1; }
+}
+# kith_machine   this Mac's own folder (KITH_MACHINE): the caller's value, else what the program says.
+kith_machine() {
+  local bin
+  [[ -z ${KITH_MACHINE:-} ]] || { printf '%s' "$KITH_MACHINE"; return 0; }
+  bin=$(kith_find_bin) || return 1
+  ( eval "$("$bin" kernel paths --kernel "$KITH" --sh 2>/dev/null)" && printf '%s' "$KITH_MACHINE" )
+}
+
 # lib/core-switched.txt (`verb<TAB>module[<TAB>cutover module]`) is read here at run time, never baked into the program, so a
 # git pull and an older program cannot disagree about what is switched. Removing a line is the rollback.
 # kith_cutover_refuse MODULE   exits 1 with one line when MODULE has been switched to the core on this Mac (or is part-way
@@ -16,7 +91,7 @@
 kith_cutover_refuse() {
   local module=$1 machine f
   [[ $module =~ ^[a-z][a-z0-9-]*$ ]] || return 0
-  machine=${KITH_MACHINE:-$(python3 "$KITH/lib/kith_paths.py" --machine 2>/dev/null)}
+  machine=$(kith_machine) || machine=""
   f=$machine/core/cutover/$module.switch
   [[ -n $machine && -e $f ]] || return 0
   # A file that says anything but stepping (or that cannot be read) counts as switched.
@@ -29,10 +104,10 @@ kith_cutover_refuse() {
 
 # kith_core_prime   looks up the program and its module list once and keeps them in shell variables, so the launch's
 # several kith_core_exec calls (pkg) and the project_id calls (they pass the program as KITH_BIN to the stub) do not each spawn
-# `kith_paths.py --bin` and `kith kernel version`.
+# the program lookup and `kith kernel version`.
 # Subshells inherit the variables; nothing is exported. The decision is the same as without it, made earlier.
 kith_core_prime() {
-  _kith_core_bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || _kith_core_bin=""
+  _kith_core_bin=$(kith_find_bin) || _kith_core_bin=""
   _kith_core_ver=""
   [[ -z $_kith_core_bin ]] || _kith_core_ver=$("$_kith_core_bin" kernel version 2>/dev/null) || _kith_core_ver=""
   _kith_core_primed=1
@@ -56,7 +131,7 @@ kith_core_exec() {
   if [[ -n ${_kith_core_primed:-} ]]; then
     bin=$_kith_core_bin ver=$_kith_core_ver
   else
-    bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+    bin=$(kith_find_bin) && [[ -n $bin ]] || return 1
     ver=$("$bin" kernel version 2>/dev/null)
   fi
   [[ -n $bin && $ver == *"\"$module\""* ]] || return 1
@@ -65,15 +140,31 @@ kith_core_exec() {
   KITH_BIN=$bin exec "$bin" kernel $verb "$@"
 }
 
+# kith_wake_exec ARGS...   `kith wake`: execs the program's own `kernel wake` (a thin client of the core's wake rows, no Python) when the
+# wake queue is the core's (the tombstone in sessions/queue/: the step writes it before the switch record and the rollback removes it
+# last) and the program lists `wake`; otherwise returns 1 and kith-wake answers, which is itself the core's client once switched.
+kith_wake_exec() {
+  local bin ver
+  [[ ${KITH_CORE:-} != python && -e ${KITH_STATE:-/nonexistent}/sessions/queue/.tombstone ]] || return 1
+  if [[ -n ${_kith_core_primed:-} ]]; then
+    bin=$_kith_core_bin ver=$_kith_core_ver
+  else
+    bin=$(kith_find_bin) && [[ -n $bin ]] || return 1
+    ver=$("$bin" kernel version 2>/dev/null)
+  fi
+  [[ -n $bin && $ver == *'"wake"'* ]] || return 1
+  KITH_BIN=$bin exec "$bin" kernel wake "$@"
+}
+
 # kith_cost_bin   prints the kith program that has the cost ledger's writers (`cost-ledger` in `kith kernel version`) and returns 0, or
 # returns 1 when this Mac has none. KITH_CORE does not matter: there is no Python cost to go back to. The SessionStart hook of
-# `kith AGENT` names the program when there is one, else the stub (`bin/kith-cost tag`, which does nothing without a program).
+# `kith AGENT` names the program when there is one, else the launch writes no cost hook.
 kith_cost_bin() {
   local bin ver
   if [[ -n ${_kith_core_primed:-} ]]; then
     bin=$_kith_core_bin ver=$_kith_core_ver
   else
-    bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+    bin=$(kith_find_bin) && [[ -n $bin ]] || return 1
     ver=$("$bin" kernel version 2>/dev/null)
   fi
   [[ -n $bin && $ver == *'"cost-ledger"'* ]] || return 1
@@ -95,7 +186,7 @@ kith_core_bin() {
   if [[ -n ${_kith_core_primed:-} ]]; then
     bin=$_kith_core_bin ver=$_kith_core_ver
   else
-    bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+    bin=$(kith_find_bin) && [[ -n $bin ]] || return 1
     ver=$("$bin" kernel version 2>/dev/null)
   fi
   [[ -n $bin && $ver == *"\"$module\""* ]] || return 1
@@ -111,12 +202,13 @@ kith_threads() {
   fi
 }
 
-# kith_cost ARGS...   `kith-cost ARGS`: the stub, which runs `kith kernel cost ARGS` on a program that has `cost-ledger` and
-# otherwise says so on stderr and fails (exit 3). Given the program the launch already looked up (KITH_BIN), the stub only asks it for its modules once.
-# A subshell, so `KITH_PERSON_WAS=.. kith_cost ..` reaches it.
+# kith_cost ARGS...   `kith kernel cost ARGS` on the program that has `cost-ledger` (see kith_cost_bin); with none it says so on
+# stderr and returns 3 (the code of "this moved"), which callers read as "cost unknown". A subshell, so
+# `KITH_PERSON_WAS=.. kith_cost ..` reaches it.
 kith_cost() {
-  ( [[ -z ${_kith_core_bin:-} || ${_kith_core_ver:-} != *'"cost-ledger"'* ]] || export KITH_BIN=$_kith_core_bin
-    exec "$KITH/bin/kith-cost" "$@" )
+  local cbin
+  cbin=$(kith_cost_bin) || { echo "kith-cost: the kith program with the cost ledger (module cost-ledger) was not found; kith update" >&2; return 3; }
+  ( KITH_BIN=$cbin exec "$cbin" kernel cost --kernel "$KITH" "$@" )
 }
 
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag
@@ -128,6 +220,32 @@ kith_launch_json_flag() {
       --hold|--resume|--account|--backup|-p|--project|-m|--model|-e|--effort|-H|--harness|--permission-mode) shift 2 || return 1 ;;
       --print|-r|-c|--continue|--bypass) shift ;;
       *) return 1 ;;
+    esac
+  done
+  return 1
+}
+
+# kith_switched VERB   succeeds when lib/core-switched.txt has a line for VERB (a commented one is no line). kith_core_exec routes a verb under
+# KITH_CORE=rust without a line too; a verb that ships off asks for the line first.
+kith_switched() {
+  awk -F'\t' -v v="$1" '$1 == v { f = 1 } END { exit !f }' "$KITH/lib/core-switched.txt" 2>/dev/null
+}
+
+# kith_oneshot_flag   ARGS...   succeeds when `kith AGENT ARGS` is a one-shot the program can run itself (`kith kernel launch-exec`): a task
+# stands after the leading flags (the flag loop of bin/kith: a flag with a value skips it, `--`, a word or a task that starts with a
+# dash and holds a blank ends the flags). A terminal run, --print, --launch-json, --inspect, --render, a flag the old body refuses
+# and a flag with no value stay with the old body.
+kith_oneshot_flag() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --print|--launch-json|--inspect|--render) return 1 ;;
+      --held|--direct|--bypass|-c|--continue) shift ;;
+      --hold|--resume|--account|--backup|-p|--project|-m|--model|-e|--effort|-H|--harness|--permission-mode) shift 2 || return 1 ;;
+      -r) if [[ -n ${2:-} && $2 != -* ]]; then shift 2; else shift; fi ;;
+      --) shift; [[ $# -gt 0 ]]; return ;;
+      -*[[:space:]]*) return 0 ;;
+      -*) return 1 ;;
+      *) return 0 ;;
     esac
   done
   return 1
@@ -149,7 +267,7 @@ print("" if v is None else (v if isinstance(v, str) else json.dumps(v)))' "$1"
 # kith_held_call METHOD   the params as JSON on stdin; the answer on stdout; core-call's exit code.
 kith_held_call() {
   local bin err rc=0
-  bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 3
+  bin=$(kith_find_bin) && [[ -n $bin ]] || return 3
   err=$(mktemp "${TMPDIR:-/tmp}/kith-held.XXXXXX") || return 3
   "$bin" kernel core-call "$1" --params-stdin 2>"$err" || rc=$?
   # A refusal says why; "no daemon" and a program without the verb are the caller's one line.
@@ -165,7 +283,7 @@ kith_held_client() {
   local ticket=$1 bin err
   shift
   held_rc=1 held_note=""
-  bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || { echo "kith: no kith program to attach with" >&2; return 0; }
+  bin=$(kith_find_bin) && [[ -n $bin ]] || { echo "kith: no kith program to attach with" >&2; return 0; }
   err=$(mktemp "${TMPDIR:-/tmp}/kith-held.XXXXXX") || return 0
   held_rc=0
   printf '%s\n' "$ticket" | "$bin" kernel attach --endpoint "$KITH_MACHINE/core/attach.sock" --ticket-stdin --tty "$@" 2>"$err" || held_rc=$?

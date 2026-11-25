@@ -34,8 +34,8 @@ mod accounts;
 #[cfg(unix)]
 #[allow(dead_code)]
 mod authority;
-// The ask tree (M3-8a): nothing calls it but the daemon's `ask.*` rows and the tests; `kith-ask` switches at M3-10.
-#[cfg(unix)]
+// The ask tree and ledger (M3-8a, P2-3): nothing calls it but the daemon's `ask.*` rows and the tests; `kith-ask` switches at
+// M3-10. No Unix call of its own (the windows job builds it); the one row that needs the Unix-only `revoke_order` is gated.
 #[allow(dead_code, reason = "first callers are the switch of kith-ask (M3-10)")]
 mod asks;
 mod call;
@@ -64,6 +64,7 @@ mod doors;
 // Held terminals start on Unix only for now; elsewhere the relay has nothing to relay.
 #[cfg_attr(not(unix), allow(dead_code))]
 mod attach;
+mod breaker;
 mod db;
 mod error;
 mod gate;
@@ -78,6 +79,12 @@ mod log;
 mod marker;
 mod migrations;
 mod owner;
+#[cfg(unix)]
+mod packages;
+// Windows has no `kith_kernel::secrets`, so no rule asks for package facts: the stub keeps the daemon's calls the same.
+#[cfg(not(unix))]
+#[path = "packages_stub.rs"]
+mod packages;
 mod perms;
 mod runs;
 mod runsock;
@@ -462,6 +469,10 @@ pub fn stateless_through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T,
 /// Where nothing answers (no daemon, a stale socket) the answer is [`Reached::NoDaemon`] and the caller runs the verb
 /// embedded as it did before; where a daemon answers but disagrees about the protocol or the method table it is
 /// [`Reached::Mismatch`] with a note, and nothing has run.
+///
+/// A core that answered `busy` or did not answer in time is not asked again at once: the process keeps one circuit
+/// breaker per core, open for 1 s and doubling to 30 s, with one test call per window. While it is open the answer is
+/// [`Reached::NoDaemon`] and nothing was sent. A `busy` answer (`Refused(Error::Busy)`) is never retried.
 pub fn reach(paths: &Paths, method: &str, params: &serde_json::Value, repeatable: bool) -> Reached {
     owner::reach(&Layout::new(&paths.machine), method, params, repeatable)
 }

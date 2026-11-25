@@ -3,17 +3,20 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::Command;
-use std::time::Duration;
 
 use serde_json::Value;
 
-use super::git::run;
+#[cfg(unix)]
+use super::life;
 use super::py::{
     Kind, PyErr, R, exists, is_dir, is_file, is_word, loads, no_attr, read_text, repr, type_name,
 };
 use super::text::{frontmatter, has_needs, needs_list, placeholders, skill_refs, split_needs};
-use super::{Ctx, life, name_of};
+use super::{Ctx, name_of};
+#[cfg(unix)]
+use crate::launch::guard::Places;
+#[cfg(unix)]
+use crate::launch::judge::{must_ask_rule, sentence_class};
 
 const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 const PLACEHOLDERS: [&str; 11] = [
@@ -312,41 +315,6 @@ fn service_problems(home: &Path) -> R<Vec<String>> {
     Ok(out)
 }
 
-/// The judging half of the guard (`kith_guard.must_ask_rule`, `sentence_class`) is still the Python's. This hands it the
-/// package and gets the problems back, and only when `settings.json` has rules for it to judge.
-const MUST_ASK: &str = r"
-import json, os, re, sys
-from pathlib import Path
-KITH = Path(sys.argv[1]); home = Path(sys.argv[2]); life_dir = sys.argv[3]
-sys.path.insert(0, str(KITH / 'lib'))
-from kith_paths import paths
-import kith_guard
-try:
-    s = json.loads((home / 'settings.json').read_text())
-except (OSError, ValueError):
-    s = None
-out = []
-if s is not None:
-    agent = home.parent.name if home.name == 'role' else home.name
-    p = paths()
-    values = {'KITH': str(KITH), 'HQ': str(KITH), 'AGENTS': str(p['KITH_AGENTS']), 'PACKAGE': str(home), 'AGENT': agent,
-              'AGENT_DIR': str(home), 'HOME_DIR': life_dir, 'HOME_REAL': os.path.realpath(life_dir),
-              'STATE': str(p['KITH_STATE']), 'MACHINE': str(p['KITH_MACHINE']), 'USER_HOME': str(Path.home())}
-    fill = lambda t: re.sub(r'\{\{([A-Z_]+)\}\}', lambda m: values.get(m.group(1), m.group(0)), t)
-    places = kith_guard.Places(package=home)
-    perms = s.get('permissions') if isinstance(s.get('permissions'), dict) else {}
-    for rule in perms.get('allow') or []:
-        c = isinstance(rule, str) and kith_guard.must_ask_rule(rule, fill, places)
-        if c:
-            out.append(f'settings.json: allow {rule} is must-ask ({c}); the run asks for it whatever allows it')
-    auto = s.get('autoMode') if isinstance(s.get('autoMode'), dict) else {}
-    for line in auto.get('allow') or []:
-        c = isinstance(line, str) and line != '$defaults' and kith_guard.sentence_class(line)
-        if c:
-            out.append(f'settings.json: autoMode.allow names a must-ask class ({c}): {line[:80]}')
-print(json.dumps(out))
-";
-
 /// Whether `settings.json` has anything for the must-ask judge: a truthy `permissions.allow` or `autoMode.allow`.
 fn has_rules(v: &Value) -> bool {
     let allow = |key: &str| {
@@ -372,24 +340,107 @@ fn must_ask_problems(ctx: &Ctx, home: &Path) -> R<Vec<String>> {
     if !has_rules(&s) {
         return Ok(vec![]);
     }
+    must_ask_rules(ctx, home, &s)
+}
+
+/// The judge is the launch module's, which the Windows build does not have yet (W8): a package that has rules to judge is
+/// refused by name rather than passed unjudged.
+#[cfg(not(unix))]
+fn must_ask_rules(_ctx: &Ctx, home: &Path, _s: &Value) -> R<Vec<String>> {
+    Err(PyErr::new(
+        Kind::Other,
+        format!(
+            "not on Windows yet: the must-ask check of {} (it needs the launch module, W8)",
+            home.join("settings.json").display()
+        ),
+    ))
+}
+
+#[cfg(unix)]
+fn must_ask_rules(ctx: &Ctx, home: &Path, s: &Value) -> R<Vec<String>> {
     let agent = if name_of(home) == "role" {
         home.parent().map(name_of).unwrap_or_default()
     } else {
         name_of(home)
     };
-    let mut cmd = Command::new(&ctx.python);
-    cmd.arg("-I")
-        .arg("-c")
-        .arg(MUST_ASK)
-        .arg(&ctx.kernel)
-        .arg(home)
-        .arg(life(ctx, &agent));
-    let ran = run(cmd, Duration::from_secs(60))?;
-    if ran.code != 0 {
-        return Err(PyErr::new(Kind::Other, super::py::strip(&ran.stderr)));
+    let kernel = ctx.kernel.as_path();
+    let p = crate::paths::from_process(kernel);
+    let home_dir = crate::paths::known_home().unwrap_or_default();
+    let life_dir = life(ctx, &agent);
+    let life_real = crate::paths::realpath(&life_dir);
+    let sp = |x: &Path| x.to_string_lossy().into_owned();
+    let values: [(&str, String); 11] = [
+        ("KITH", sp(kernel)),
+        ("HQ", sp(kernel)),
+        ("AGENTS", sp(&p.agents)),
+        ("PACKAGE", sp(home)),
+        ("AGENT", agent.clone()),
+        ("AGENT_DIR", sp(home)),
+        ("HOME_DIR", sp(&life_dir)),
+        ("HOME_REAL", sp(&life_real)),
+        ("STATE", sp(&p.state)),
+        ("MACHINE", sp(&p.machine)),
+        ("USER_HOME", sp(&home_dir)),
+    ];
+    let fill = |t: &str| {
+        static NAME: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"\{\{([A-Z_]+)\}\}").expect("fixed pattern")
+        });
+        NAME.replace_all(t, |m: &regex::Captures| {
+            values
+                .iter()
+                .find(|(k, _)| *k == &m[1])
+                .map_or_else(|| m[0].to_owned(), |(_, v)| v.clone())
+        })
+        .into_owned()
+    };
+    let places = Places::new(
+        &sp(&home_dir),
+        &sp(&p.state),
+        &sp(&p.machine),
+        &sp(&p.agents),
+        &sp(&p.home),
+        kernel,
+        &sp(home),
+        &sp(&p.secrets),
+    );
+    let mut out = vec![];
+    let perms = s.get("permissions").filter(|x| x.is_object());
+    for rule in iter_values(perms.and_then(|x| x.get("allow")))? {
+        if let Some(c) = rule.as_str().and_then(|r| must_ask_rule(r, &fill, &places)) {
+            let rule = rule.as_str().unwrap_or_default();
+            out.push(format!(
+                "settings.json: allow {rule} is must-ask ({c}); the run asks for it whatever allows it"
+            ));
+        }
     }
-    match serde_json::from_str::<Vec<String>>(&ran.stdout) {
-        Ok(v) => Ok(v),
-        Err(e) => Err(PyErr::new(Kind::Other, format!("must-ask judge: {e}"))),
+    let auto = s.get("autoMode").filter(|x| x.is_object());
+    for line in iter_values(auto.and_then(|x| x.get("allow")))? {
+        let Some(text) = line.as_str() else { continue };
+        if text != "$defaults"
+            && let Some(c) = sentence_class(text)
+        {
+            let head: String = text.chars().take(80).collect();
+            out.push(format!(
+                "settings.json: autoMode.allow names a must-ask class ({c}): {head}"
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// `for x in value or []`: what Python iterates for a list, a string (its characters) or a mapping (its keys).
+#[cfg(unix)]
+fn iter_values(v: Option<&Value>) -> R<Vec<Value>> {
+    match v {
+        None | Some(Value::Null | Value::Bool(false)) => Ok(vec![]),
+        Some(Value::Array(a)) => Ok(a.clone()),
+        Some(Value::String(t)) => Ok(t.chars().map(|c| Value::String(c.to_string())).collect()),
+        Some(Value::Object(o)) => Ok(o.keys().map(|k| Value::String(k.clone())).collect()),
+        Some(x) if !truthy(x) => Ok(vec![]),
+        Some(x) => Err(PyErr::new(
+            Kind::Other,
+            format!("TypeError: '{}' object is not iterable", type_name(x)),
+        )),
     }
 }

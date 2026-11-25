@@ -17,7 +17,6 @@ SYNC=f9b5e509f476bb88f6203a125ae863369ba03aa9
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
   kernel/bin/kith                     # --resume: resolve + r_sid; csid: claim / terminal before claude; exec run (the Rust `kernel threads run` when the program lists threads-run, else the Python)
-  kernel/bin/kith-lifecycle           # compact: take_claim for the parked child's pid, still(), then it execs claude; end
   core/kernel/src/lifecycle/sweep.rs  # the Rust compact and end: Taker::take (lifecycle_owner) for the parked child's pid, still(), then it execs claude; end
   core/kernel/src/lifecycle/proc.rs   # parked(): the fork that is claude (or the stub), held before its exec; reap
   kernel/bin/kith-wake                # deliver/drain: kith AGENT --resume SESSION (resolve claims), skip writer_live; take: host-door items
@@ -66,6 +65,10 @@ FILES=(
   core/runtime/src/terminal.rs        # terminal.open: the --held claim and the stub's lock
   kernel/lib/kith_claims.py           # the kernel takers' route to the core claims
   kernel/lib/kith-core.sh             # kith_held_launch
+  core/kernel/src/launch/exec.rs      # P1-12 R3a: a one-shot run in this process (`kernel launch-exec`): the order I1 epoch, plan (--resume's resolve takes the claim), proc (I5), then claim, permit, engine
+  core/kernel/src/launch/start.rs     # R3a: the claim for this pid (claim_start, oneshot) before the engine, the guest's grants after it (I3), execve keeps the pid (I2); Windows spawns and waits
+  core/kernel/src/launch/plan.rs      # R3a: the --resume claim's place in the order (the plan's sync hold, resolve, the account walk)
+  core/kernel/src/launch/session.rs   # R3a: the session id (--session-id / --resume / a new uuid), the stub's lock key and --lock-alone
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

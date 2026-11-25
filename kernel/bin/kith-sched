@@ -6,7 +6,7 @@
   kith-sched rm AGENT ID                                 remove a job
   kith-sched pause|resume AGENT ID                       keep a job but stop or restart it
   kith-sched run AGENT ID                                run a job now, in the background
-  kith-sched log [AGENT [ID]]                            the last runs, with the path of each run's output
+  kith-sched log [AGENT [ID] | AGENT/ID]                 the last runs, with the path of each run's output
   kith-sched prune                                       trim old run logs, rotate auth.log, drop dead terminal records (tick does it hourly)
   kith-sched tick                                        (launchd, every minute) start the jobs that are due
   kith-sched run-turn AGENT JOB --turn N --claim C       (the Kith host, once the core fires the schedules) run the core's turn N of a job
@@ -63,6 +63,7 @@ import kith_procstart  # noqa: E402
 import kith_runenv  # noqa: E402
 import kith_tombstone  # noqa: E402
 import kith_sched_core  # noqa: E402  the verbs once the schedules are the Kith core's
+import kith_wake_core  # noqa: E402  the wake queue once it is the core's: the tick leaves it alone
 from kith_paths import paths, launcher, job_installed, retire_old_job, stable_kernel  # noqa: E402  the one place that knows where kith's folders are
 KITH_SCHED_TICK_LOCK = 1  # honours sched/tick.lock (cutover gate reads this line)
 STATE = paths()['KITH_STATE']
@@ -645,15 +646,17 @@ def tick():
         print('kith-sched: prune: %s' % e, file=sys.stderr)
     # The wake queue (kith-wake): owed turns of ended sessions start here once their writer lets go, and turns whose
     # deliverer died (a restart) are answered or owed again. First, a kith ask answer whose asker's session has ended
-    # without reading it becomes such a turn (kith-ask --sweep).
-    try:
-        subprocess.run([sys.executable, str(KITH / 'bin/kith-ask'), '--sweep'], timeout=30, stdout=subprocess.DEVNULL)
-    except Exception as e:  # noqa: BLE001
-        print('kith-sched: ask sweep: %s' % e, file=sys.stderr)
-    try:
-        subprocess.run([sys.executable, str(KITH / 'bin/kith-wake'), 'drain'], timeout=30, stdout=subprocess.DEVNULL)
-    except Exception as e:  # noqa: BLE001
-        print('kith-sched: wake drain: %s' % e, file=sys.stderr)
+    # without reading it becomes such a turn (kith-ask --sweep). Once the queue is the core's the host ticks it (and runs the
+    # sweep), so this does nothing (retire-python S4 R9).
+    if not kith_wake_core.switched(STATE):
+        try:
+            subprocess.run([sys.executable, str(KITH / 'bin/kith-ask'), '--sweep'], timeout=30, stdout=subprocess.DEVNULL)
+        except Exception as e:  # noqa: BLE001
+            print('kith-sched: ask sweep: %s' % e, file=sys.stderr)
+        try:
+            subprocess.run([sys.executable, str(KITH / 'bin/kith-wake'), 'drain'], timeout=30, stdout=subprocess.DEVNULL)
+        except Exception as e:  # noqa: BLE001
+            print('kith-sched: wake drain: %s' % e, file=sys.stderr)
     now = clock().replace(second=0, microsecond=0)
     try:
         with tick_lock():   # one exclusive lock over read, decide, record, save; prune, the sweep and the drain are outside
@@ -929,7 +932,7 @@ def main(argv):
     if cmd == '--install': return install()
     if cmd == '--uninstall': return uninstall()
     if cmd == 'ls': return ls(rest[0] if rest else None)
-    if cmd == 'log': return log(*rest[:2])
+    if cmd == 'log': return log(*(rest[0].split('/', 1) if len(rest) == 1 and '/' in rest[0] else rest[:2]))
     if cmd == 'add':
         opts, pos, i = {}, [], 0
         while i < len(rest):

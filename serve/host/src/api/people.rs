@@ -691,11 +691,13 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
             )
         })?;
     }
-    let (core_updated, pending) = local_revoke(hub, &bin, id, revoke).await.map_err(|e| unfinished(id, revoke, &e))?;
-    if who.kith.is_empty() {
+    let (core_updated, pending) = if who.kith.is_empty() {
         // Known only by a chat handle: the cloud knows nothing of them, so the owner's other computers hear it over Mac link.
-        crate::remote::handle_revokes::changed(hub, &who, revoke);
+        crate::remote::handle_revokes::owner_change(hub, &bin, &who, revoke).await
+    } else {
+        local_revoke(hub, &bin, id, revoke).await
     }
+    .map_err(|e| unfinished(id, revoke, &e))?;
     // false: auth.json has it but the core's copy missed it (or may have); the owner runs it again once the core is up.
     let mut out = json!({"revoked": revoke, "everywhere": everywhere, "coreUpdated": core_updated});
     // The core took the revoke but could not finish stopping their runs: said to the owner, not only logged.
@@ -760,18 +762,19 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
             }
         };
         account::note_stderr(id, &said);
-        if !revoke {
+        if revoke {
+            crate::remote::core_revokes::set_aside_held(hub, id).await;
+        } else {
             // In the undo's own locked section: a cut still owed from a revoke without the core must not land after it.
             crate::remote::core_revokes::clear_owed(hub, id).await;
+            // The give-back in the same hold as the unrevoke: after it, a re-revoke could land first and be undone.
+            crate::remote::core_revokes::restore_held(hub, id).await;
         }
         let pending = said.lines().find(|l| l.contains("part of the revoke is pending")).map(str::to_owned);
         (!account::core_missed(&said), pending)
     };
     if revoke {
         cut_off_held(hub, id).await;
-    } else {
-        // an undo gives back what the host set aside under every id it may hold them under
-        crate::remote::core_revokes::restore_held(hub, id).await;
     }
     Ok((core_updated, pending))
 }

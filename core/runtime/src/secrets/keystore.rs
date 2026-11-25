@@ -1,7 +1,12 @@
 //! Where the one master key per machine lives: the operating system's credential store, behind [`KeyStore`].
 //!
-//! The backends here drive the OS's own command line tool, and the key goes to it on its stdin, never on an argv or in
-//! an environment (a process list shows both). The signed daemon reads the key through Security.framework instead
+//! The macOS and Linux backends drive the OS's own command line tool, and the key goes to it on its stdin, never on an
+//! argv or in an environment (a process list shows both). Windows calls Credential Manager through `kith-winsys` (the
+//! one place the Win32 calls live; this crate forbids unsafe code).
+//!
+//! None of the three has a per-program rule: Credential Manager, like the Secret Service and a login Keychain item an
+//! unsigned build made, gives the key to any process of the same user. The envelope's protection is against the file
+//! (core.db, a backup, a stolen disk image), not against another process of the owner. The signed daemon reads the key through Security.framework instead
 //! (M2-6); this macOS backend is the development one. It shares the item name with the signed daemon for now (M2-6 gives
 //! the dev backend its own name or re-creates the item, since a key item is bound to the app that made it).
 //! There is no file fallback and no in-memory backend a running binary can select: [`MemoryKeyStore`] exists for tests.
@@ -63,10 +68,13 @@ pub(crate) fn os_key_store() -> Result<Box<dyn KeyStore>> {
     {
         Ok(Box::new(SecretTool::new(SERVICE, &account())))
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(windows)]
     {
-        // Windows Credential Manager needs raw Win32 calls, which this crate forbids (unsafe_code); it lands with the
-        // signed daemon's backend. Until then a Windows core refuses secrets rather than keep a key somewhere weaker.
+        Ok(Box::new(CredentialManager::new(SERVICE, &account())))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    {
+        // No store here: refuse secrets rather than keep a key somewhere weaker.
         Err(Error::Io(
             "kith-core: this operating system has no supported key store for the secrets envelope yet; secrets are unavailable"
                 .into(),
@@ -213,6 +221,58 @@ impl KeyStore for SecretTool {
                 out.stderr.trim()
             )))
         }
+    }
+}
+
+/// Windows: one generic Credential Manager item, named `<service>/<account>`, holding the key as hex text (the form the
+/// other stores keep). Compiled everywhere so the name rule is tested everywhere; only Windows reads or writes it.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) struct CredentialManager {
+    target: String,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl CredentialManager {
+    pub(crate) fn new(service: &str, account: &str) -> Self {
+        Self {
+            target: format!("{service}/{account}"),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn target(&self) -> &str {
+        &self.target
+    }
+
+    #[cfg(all(test, windows))]
+    pub(crate) fn remove(&self) {
+        let _ = kith_winsys::cred::delete(&self.target);
+    }
+}
+
+#[cfg(windows)]
+impl KeyStore for CredentialManager {
+    fn get(&self) -> Result<Option<Zeroizing<Vec<u8>>>> {
+        let blob = kith_winsys::cred::read(&self.target).map_err(|e| {
+            Error::Io(format!(
+                "kith-core: Credential Manager would not give up the secrets master key: {e}"
+            ))
+        })?;
+        blob.map(|b| decode_stored(&b)).transpose()
+    }
+
+    fn add(&self, key: &[u8]) -> Result<()> {
+        // Like the Keychain: an item that is there stays, so the loser of a mint race does not overwrite the winner's key.
+        // The two calls are not one step; the caller reads back and adopts whatever key the store holds.
+        if self.get()?.is_some() {
+            return Ok(());
+        }
+        let text = hex_encode(key);
+        kith_winsys::cred::write(&self.target, text.as_bytes()).map_err(|e| {
+            Error::Io(format!(
+                "kith-core: Credential Manager would not store the secrets master key: {e}"
+            ))
+        })
     }
 }
 

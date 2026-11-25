@@ -4,20 +4,21 @@
 
 use anyhow::{Result, anyhow, bail};
 use kith_acp::{Failure, FailureKind, RunSpec, depleted, needs_sign_in};
-use kith_kernel::engines::{self, Oneshot};
+use kith_kernel::engines::{self, Oneshot, Reach};
 use serde_json::{Value, json};
 use std::io::Read as _;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Exit code for "this engine has no ACP one-shot here" (a registry adapter only, or a native one-shot): the caller
-/// runs the engine its own way. Nothing was started. (BSD `EX_CONFIG`.)
+/// Exit code for "this engine has no ACP one-shot here" (neither an ACP mode nor a registry
+/// adapter Kith may start): the final answer, Kith runs non-Claude engines over ACP. Nothing was started. (BSD `EX_CONFIG`.)
 pub const NOT_AVAILABLE: i32 = 78;
 
 pub struct Args {
     pub engine: String,
     pub model: Option<String>,
     pub cwd: Option<PathBuf>,
+    pub dirs: Vec<PathBuf>,
     pub mcp_config: Option<String>,
     pub json: bool,
     pub approve: bool,
@@ -26,22 +27,66 @@ pub struct Args {
     pub task: Vec<String>,
 }
 
+/// A command was given (`--acp-command`, `KITH_RUN_ONCE_ACP_COMMAND`) in place of the engine's own adapter: whatever it
+/// starts is not the one whose asks Kith knows how to read.
+pub(crate) fn command_overridden(given: Option<&str>) -> bool {
+    given.is_some_and(|c| !c.is_empty()) || std::env::var("KITH_RUN_ONCE_ACP_COMMAND").is_ok_and(|c| !c.is_empty())
+}
+
+/// The ACP command line to run `engine` with, or `None` when it has no ACP one-shot here (said on stderr; the caller
+/// exits [`NOT_AVAILABLE`]). `given` overrides it (tests, `KITH_RUN_ONCE_ACP_COMMAND`); empty counts as not given.
+pub(crate) async fn acp_command(engine: &engines::Engine, given: Option<String>) -> Result<Option<String>> {
+    Ok(Some(match given.or_else(|| std::env::var("KITH_RUN_ONCE_ACP_COMMAND").ok()) {
+        Some(c) if !c.is_empty() => c,
+        // A registry adapter only for an engine whose session modes Kith sets (codex): any other would run in the
+        // adapter's own default mode.
+        _ if !matches!(engine.oneshot, Oneshot::Acp)
+            || (engine.local.is_none() && engines::session_modes(engine.id, Reach::Workspace).is_empty()) =>
+        {
+            eprintln!(
+                "kith: {} has no ACP one-shot on this computer; Kith runs non-Claude engines over ACP",
+                engine.name
+            );
+            return Ok(None);
+        }
+        _ => {
+            let Some((_, path)) = engines::detect(engine, &|b| crate::agent::backends::which(b)) else {
+                bail!("{} is not installed ({})", engine.bins[0], engine.setup);
+            };
+            match engine.local {
+                Some(local) => local.replace("{bin}", &crate::shell::quote(&path.to_string_lossy())),
+                // No ACP mode in the CLI itself (codex): its registry adapter, as the app's chats start it.
+                None => match crate::agent::backends::launch_candidates(engine.id, |_| {}).await {
+                    Ok(cmds) if !cmds.is_empty() => cmds[0].acp(),
+                    other => {
+                        let why = other.err().map(|e| format!(" ({e:#})")).unwrap_or_default();
+                        eprintln!(
+                            "kith: {} has no ACP adapter to start here{why}; Kith runs non-Claude engines over ACP",
+                            engine.name
+                        );
+                        return Ok(None);
+                    }
+                },
+            }
+        }
+    }))
+}
+
+/// The session modes a run is in: what the native one-shots had, workspace-write, or full access with `approve`; asks
+/// reach `handle`, which refuses them without it.
+pub(crate) fn modes(engine: &engines::Engine, approve: bool) -> Vec<String> {
+    engines::session_modes(engine.id, if approve { Reach::Full } else { Reach::Workspace })
+        .iter()
+        .map(|m| (*m).to_owned())
+        .collect()
+}
+
 /// Runs it and returns the exit code.
 pub async fn run(a: Args) -> Result<i32> {
     let engine =
         engines::find(&a.engine).ok_or_else(|| anyhow!("no engine called {} (kith engines lists them)", a.engine))?;
-    let command = match a.acp_command.clone().or_else(|| std::env::var("KITH_RUN_ONCE_ACP_COMMAND").ok()) {
-        Some(c) if !c.is_empty() => c,
-        _ => {
-            let Some(local) = engine.local.filter(|_| matches!(engine.oneshot, Oneshot::Acp)) else {
-                eprintln!("kith: {} has no ACP one-shot on this computer; run it its own way", engine.name);
-                return Ok(NOT_AVAILABLE);
-            };
-            let Some((_, path)) = engines::detect(engine, &|b| crate::agent::backends::which(b)) else {
-                bail!("{} is not installed ({})", engine.bins[0], engine.setup);
-            };
-            local.replace("{bin}", &crate::shell::quote(&path.to_string_lossy()))
-        }
+    let Some(command) = acp_command(engine, a.acp_command.clone()).await? else {
+        return Ok(NOT_AVAILABLE);
     };
     let task = if a.task.is_empty() {
         let mut s = String::new();
@@ -67,12 +112,16 @@ pub async fn run(a: Args) -> Result<i32> {
     let spec = RunSpec {
         command,
         cwd: cwd.to_string_lossy().into_owned(),
+        dirs: a.dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect(),
         env: Vec::new(),
         model: a.model,
+        modes: modes(engine, a.approve),
         mcp_servers,
         task,
         timeout: Duration::from_secs(a.timeout),
         approve: a.approve,
+        allow_granted_mcp: engines::allows_granted_mcp_asks(engine.id) && !command_overridden(a.acp_command.as_deref()),
+        ..RunSpec::default()
     };
     let (result, spent) = kith_acp::run_once_spent(spec).await;
     match result {
@@ -104,7 +153,7 @@ pub async fn run(a: Args) -> Result<i32> {
 
 /// What kind of failure `e` is, for the caller: `depleted` (with when the plan resets), `needs_sign_in`, `timeout`,
 /// `exited` or plain `error`.
-fn classify(e: &anyhow::Error) -> (&'static str, Option<i64>) {
+pub(crate) fn classify(e: &anyhow::Error) -> (&'static str, Option<i64>) {
     if let Some(d) = depleted(e) {
         return ("depleted", d.resets_at);
     }
@@ -115,5 +164,43 @@ fn classify(e: &anyhow::Error) -> (&'static str, Option<i64>) {
         Some(FailureKind::Timeout) => ("timeout", None),
         Some(FailureKind::Exited) => ("exited", None),
         _ => ("error", None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(engine: &str) -> Args {
+        Args {
+            engine: engine.into(),
+            model: None,
+            cwd: None,
+            dirs: Vec::new(),
+            mcp_config: None,
+            json: true,
+            approve: false,
+            timeout: 5,
+            // Empty: not given, and KITH_RUN_ONCE_ACP_COMMAND is not read either.
+            acp_command: Some(String::new()),
+            task: vec!["hello".into()],
+        }
+    }
+
+    #[tokio::test]
+    async fn registry_only_engines_but_codex_stay_native() {
+        for engine in ["pi", "amp", "vibe", "antigravity"] {
+            let e = engines::find(engine).unwrap();
+            assert!(e.local.is_none() && matches!(e.oneshot, Oneshot::Acp), "{engine} changed in the table");
+            assert_eq!(run(args(engine)).await.unwrap(), NOT_AVAILABLE, "{engine}");
+        }
+    }
+
+    #[test]
+    fn hermes_runs_over_its_own_acp_with_accept_edits_or_dont_ask() {
+        let hermes = engines::find("hermes").unwrap();
+        assert!(hermes.local.is_some() && matches!(hermes.oneshot, Oneshot::Acp));
+        assert_eq!(modes(hermes, false), ["accept_edits"]);
+        assert_eq!(modes(hermes, true), ["dont_ask"]);
     }
 }

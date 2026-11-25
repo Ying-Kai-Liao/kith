@@ -274,6 +274,11 @@ def must_ask_problems(home):
         c = isinstance(rule, str) and kith_guard.must_ask_rule(rule, fill, places)
         if c:
             out.append(f'settings.json: allow {rule} is must-ask ({c}); the run asks for it whatever allows it')
+    for key in ('allow', 'ask', 'deny'):
+        for rule in perms.get(key) or []:
+            if isinstance(rule, str) and re.match(r'Bash\(.*\*.*:\*\)$', rule):
+                out.append(f'settings.json: {rule}: a * before the trailing :* makes Claude Code read it as a literal '
+                           'prefix, so it never matches; end it in * instead')
     auto = s.get('autoMode') if isinstance(s.get('autoMode'), dict) else {}
     for line in auto.get('allow') or []:
         c = isinstance(line, str) and line != '$defaults' and kith_guard.sentence_class(line)
@@ -672,13 +677,8 @@ def share_problems(home):
 
 
 def harness_names():
-    """claude plus the harnesses adapters/harness.py runs, read from its HARNESSES tuple (not imported: it runs on import)."""
-    import ast
-    src = (Path(__file__).resolve().parent.parent / 'adapters' / 'harness.py').read_text()
-    for node in ast.parse(src).body:
-        if isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', '') == 'HARNESSES':
-            return ('claude', *ast.literal_eval(node.value))
-    return ('claude',)
+    """claude plus the engines `kith kernel engine-run` runs (the kernel's rows in core/kernel/src/engines.rs)."""
+    return ('claude', 'codex', 'pi', 'agy', 'hermes', 'qwen', 'opencode')
 
 
 def set_result(agent, setting, value, previous, changed, as_json, text, **extra):

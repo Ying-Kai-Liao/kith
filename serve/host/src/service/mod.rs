@@ -95,7 +95,8 @@ pub const DEFAULT_PORT: u16 = crate::environment::PORT;
 
 /// The user's home. Kith can't do anything useful without one, so its absence is fatal.
 pub(crate) fn home() -> PathBuf {
-    dirs::home_dir().expect("HOME must be set: Kith keeps its data and agent settings there")
+    kith_kernel::paths::known_home()
+        .expect("HOME (USERPROFILE on Windows) must be set: Kith keeps its data and agent settings there")
 }
 
 pub fn data_dir() -> PathBuf {

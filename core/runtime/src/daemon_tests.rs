@@ -417,6 +417,8 @@ fn holder_cfg(exe: std::path::PathBuf) -> Config {
         host: false,
         exiting: || false,
         wait_for_embedded: Duration::from_secs(10),
+        package_probe: None,
+        lock_wait: crate::daemon::LOCK_WAIT,
         holder: HolderConfig {
             exe: Some(exe),
             idle: Duration::from_secs(5),
@@ -2373,6 +2375,10 @@ fn stubborn_leader() -> (u32, String) {
 }
 
 #[cfg(unix)]
+#[path = "kill_resend_detached_tests.rs"]
+mod kill_resend_detached;
+
+#[cfg(unix)]
 fn set_reason(d: &Daemon, id: i64, reason: &str) {
     d.shared
         .with_core(|c| {
@@ -2705,3 +2711,428 @@ fn a_marked_warm_process_with_two_conversations_is_signalled_once() {
     until("the process to be gone", || !alive(pid));
     d.stop();
 }
+
+// --- the core lock: a time limit on taking it, and no disk read of an agent folder under it ---------------------------
+
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+fn put(path: &std::path::Path, text: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}
+
+/// A daemon over a machine whose `house` agent declares a guest domain, with `sam` a member of it.
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+fn house_daemon(m: &std::path::Path, cfg: Config) -> Daemon {
+    // From here a read of a package folder on a thread that holds the core lock panics that thread.
+    crate::packages::forbid_disk_under_lock();
+    put(&m.join("house/role/agent.md"), "---\nname: house\n---\n");
+    put(
+        &m.join("house/role/capabilities.yaml"),
+        "guest_domains: [pkg.example]\n",
+    );
+    let d = serving(&paths(m), cfg);
+    d.shared()
+        .with_core(|c| {
+            crate::authority::load_for_tests(
+                c.conn(),
+                &json!({
+                    "people": {"kai": {"owner": true}, "sam": {"name": "Sam"}},
+                    "members": {"house": {"sam": {"preset": "member"}}},
+                }),
+            );
+            Ok(())
+        })
+        .unwrap();
+    d
+}
+
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+fn domains_of(r: Reached) -> Vec<String> {
+    match r {
+        Reached::Answered(v) => v["access"]["domains"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|d| d.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used, clippy::many_single_char_names)]
+fn a_package_disk_that_never_answers_slows_the_one_call_that_needs_it_and_stops_no_other() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let hold = Arc::new(AtomicBool::new(false));
+    let h = hold.clone();
+    let d = house_daemon(
+        &m,
+        Config {
+            package_probe: Some(Arc::new(move || {
+                while h.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            })),
+            ..quiet()
+        },
+    );
+    let ask = json!({"agent": "house", "person": "sam"});
+    // The control: a working refresher hands the package's domain to the guest.
+    assert_eq!(
+        domains_of(read(&p, "people.resolve", &ask)),
+        ["pkg.example"]
+    );
+    // The outage: every read of the folder blocks, for good.
+    hold.store(true, Ordering::SeqCst);
+    put(
+        &m.join("house/role/capabilities.yaml"),
+        "guest_domains: [pkg.example, other.example]\n",
+    );
+    let began = Instant::now();
+    let answer = read(&p, "people.resolve", &ask);
+    assert!(
+        began.elapsed() < crate::packages::REFRESH_WAIT + Duration::from_millis(1500),
+        "{:?}",
+        began.elapsed()
+    );
+    // The narrow answer: the package is owner-only while it can't be read, so the guest gets none of its domains.
+    match &answer {
+        Reached::Answered(v) => {
+            assert_eq!(v["allowed"], false, "{v}");
+            assert!(v.to_string().contains("can't read house's package"), "{v}");
+        }
+        other => panic!("{other:?}"),
+    }
+    // While it blocks, the calls that read no package answer at once, and so does the status.
+    for (method, params) in [
+        ("people.revision", json!({})),
+        ("people.who", json!({"platform": "x", "id": "y"})),
+        ("kernel.coreStatus", json!({})),
+    ] {
+        let began = Instant::now();
+        let r = read(&p, method, &params);
+        assert!(
+            !matches!(r, Reached::NoDaemon | Reached::Lost(_)),
+            "{method}: {r:?}"
+        );
+        assert!(
+            began.elapsed() < Duration::from_secs(1),
+            "{method}: {:?}",
+            began.elapsed()
+        );
+    }
+    hold.store(false, Ordering::SeqCst);
+    drop(d);
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used, clippy::many_single_char_names)]
+fn a_call_that_cannot_get_the_lock_in_time_is_busy_and_runs_nothing_and_the_status_names_the_holder()
+ {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = house_daemon(
+        &m,
+        Config {
+            lock_wait: Duration::from_millis(400),
+            ..quiet()
+        },
+    );
+    let shared = d.shared().clone();
+    let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
+    let (free_tx, free_rx) = std::sync::mpsc::channel::<()>();
+    let holder = std::thread::spawn(move || {
+        shared
+            .with_core_until(
+                "the test's slow call",
+                Instant::now() + Duration::from_secs(5),
+                |_| {
+                    held_tx.send(()).unwrap();
+                    let _ = free_rx.recv_timeout(Duration::from_secs(30));
+                    Ok(())
+                },
+            )
+            .unwrap();
+    });
+    held_rx.recv().unwrap();
+    let grant = json!({"person": "sam", "agent": "house", "preset": "guest"});
+    let began = Instant::now();
+    match crate::reach(&p, "people.grant", &grant, false) {
+        Reached::Refused(Error::Busy(why)) => {
+            assert!(why.contains("the test's slow call"), "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        began.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        began.elapsed()
+    );
+    // The status answers with the lock held, and says who has it. (The client's breaker opened on the busy: this asks the
+    // server again at once.)
+    forget_breaker(&p);
+    let began = Instant::now();
+    match read(&p, "kernel.coreStatus", &json!({})) {
+        Reached::Answered(v) => {
+            assert_eq!(v["lock"]["busy"], true, "{v}");
+            assert!(
+                v["lock"]["held_by"]
+                    .as_str()
+                    .unwrap()
+                    .contains("the test's slow call"),
+                "{v}"
+            );
+            assert_eq!(v["daemon"]["pid"], std::process::id());
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        began.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        began.elapsed()
+    );
+    free_tx.send(()).unwrap();
+    holder.join().unwrap();
+    // Busy meant nothing ran: sam kept the member preset, and the same write goes through now.
+    let preset = |p: &Paths| match read(
+        p,
+        "people.resolve",
+        &json!({"agent": "house", "person": "sam"}),
+    ) {
+        Reached::Answered(v) => v["preset"].clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(preset(&p), json!("member"));
+    forget_breaker(&p);
+    assert!(matches!(
+        crate::reach(&p, "people.grant", &grant, false),
+        Reached::Answered(_)
+    ));
+    assert_eq!(preset(&p), json!("guest"));
+}
+
+/// Closes this process's client breaker for the core of `p`: the server tests above ask again right after a `busy`.
+#[cfg(unix)]
+fn forget_breaker(p: &Paths) {
+    let core = crate::owner::endpoint(&Layout::new(&p.machine));
+    crate::breaker::process().forget(&core);
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used, clippy::many_single_char_names)]
+fn at_the_connection_limit_a_new_client_is_told_busy_not_no_daemon() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let _d = serving(&p, quiet());
+    let open: Vec<Raw> = (0..64).map(|_| Raw::connect(&m)).collect();
+    // A connection is counted once it is accepted: the 65th is the first one refused.
+    until("the 64 connections to be counted", || {
+        forget_breaker(&p);
+        matches!(
+            crate::reach(&p, "kernel.version", &json!({}), false),
+            Reached::Refused(Error::Busy(_))
+        )
+    });
+    forget_breaker(&p);
+    match crate::reach(&p, "kernel.version", &json!({}), true) {
+        Reached::Refused(Error::Busy(why)) => assert!(why.contains("64 connections"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    drop(open);
+    until("a slot to free", || {
+        forget_breaker(&p);
+        matches!(
+            crate::reach(&p, "kernel.version", &json!({}), true),
+            Reached::Answered(_)
+        )
+    });
+}
+
+// --- the rows that name no agent: a sweep and a tick must not decide on a package fact the cache lacks ------------------
+
+#[cfg(unix)]
+const RENDER: &str = "render@03d245db65bb";
+
+/// `house_daemon` for a house that shares a door with `sam` through a job he ticked, and a refresher the test can block.
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+fn door_daemon(m: &std::path::Path) -> (Daemon, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let hold = Arc::new(AtomicBool::new(false));
+    let h = hold.clone();
+    let d = house_daemon(
+        m,
+        Config {
+            package_probe: Some(Arc::new(move || {
+                while h.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            })),
+            ..quiet()
+        },
+    );
+    put(
+        &m.join("house/role/capabilities.yaml"),
+        "helpers: []\ndoors:\n  - name: render\n    npm: [hyperframes@0.8.159]\n    lockfile: doors/render.lock.json\n    tools: [node, ffmpeg]\n    bin: hyperframes/bin/hyperframes.mjs\n    args: [render, --quality, draft]\n    writes: [renders]\n    env: [HYPERFRAMES_NO_UPDATE_CHECK=1, FF=$ffmpeg]\njobs:\n  - name: render-videos\n    doors: [render]\n",
+    );
+    put(&m.join("house/role/doors/render.lock.json"), "{}");
+    d.shared()
+        .with_core(|c| {
+            // No cloud on this machine: a non-owner's door is in sync.
+            crate::sync_lease::unlink(c, &crate::sync_lease::System)?;
+            c.conn().execute(
+                "UPDATE memberships SET jobs = ?1 WHERE agent = 'house' AND person = 'sam'",
+                [json!({"render-videos": {"snapshot": {"doors": [RENDER]}}}).to_string()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    (d, hold)
+}
+
+#[cfg(unix)]
+#[allow(clippy::unwrap_used)]
+fn open_doors(p: &Paths) -> usize {
+    let v = answered(read(p, "doors.list", &json!({})));
+    v["doors"].as_array().unwrap().len()
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_recheck_sweep_keeps_a_guest_door_on_a_healthy_disk_and_when_the_refresher_is_blocked() {
+    use std::sync::atomic::Ordering;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let (d, hold) = door_daemon(&m);
+    let started = answered(read(
+        &p,
+        "doors.start",
+        &json!({"agent": "house", "door": RENDER, "person": "sam", "pid": std::process::id()}),
+    ));
+    assert_eq!(started["state"], "starting", "{started}");
+    assert_eq!(open_doors(&p), 1);
+    // The sweep names no agent: its first pass finds every fact a miss, rolls back, and the refresher gives the facts.
+    let swept = answered(read(&p, "doors.sweep", &json!({"persons": []})));
+    assert_eq!(swept["swept"], json!([]), "{swept}");
+    assert_eq!(open_doors(&p), 1);
+    // The disk stops answering: the sweep takes no "no" from facts it does not have, and the door stays for the next one.
+    hold.store(true, Ordering::SeqCst);
+    put(
+        &m.join("house/role/capabilities.yaml"),
+        "guest_domains: [other.example]\n",
+    );
+    let swept = answered(read(&p, "doors.sweep", &json!({"persons": []})));
+    assert_eq!(swept["swept"], json!([]), "{swept}");
+    assert_eq!(open_doors(&p), 1);
+    hold.store(false, Ordering::SeqCst);
+    drop(d);
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn one_tick_refreshes_every_agent_with_a_due_guest_job_not_two_a_round() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let (d, _hold) = door_daemon(&m);
+    for a in ["garden", "shed"] {
+        put(
+            &m.join(format!("{a}/role/agent.md")),
+            &format!("---\nname: {a}\n---\n"),
+        );
+        answered(read(
+            &p,
+            "people.grant",
+            &json!({"agent": a, "person": "sam", "preset": "member"}),
+        ));
+    }
+    for a in ["house", "garden", "shed"] {
+        put(
+            &m.join(format!("{a}/jobs.json")),
+            &json!([{"id": "j", "cron": "* * * * *", "tz": "UTC", "task": "do j", "person": "sam"}])
+                .to_string(),
+        );
+    }
+    let v = answered(read(&p, "schedule.tick", &json!({})));
+    let fired: Vec<&str> = v["fires"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["outcome"] == "fired")
+        .map(|f| f["agent"].as_str().unwrap())
+        .collect();
+    assert_eq!(fired.len(), 3, "{v}");
+    drop(d);
+}
+
+#[cfg(unix)]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_tick_fires_a_due_guest_job_on_a_healthy_disk_and_writes_no_skip_when_the_refresher_is_blocked()
+{
+    use std::sync::atomic::Ordering;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let (d, hold) = door_daemon(&m);
+    put(
+        &m.join("house/jobs.json"),
+        &json!([{"id": "j", "cron": "* * * * *", "tz": "UTC", "task": "do j", "person": "sam"}])
+            .to_string(),
+    );
+    let skips = |d: &Daemon| -> i64 {
+        let mut n = 0;
+        d.shared()
+            .with_core(|c| {
+                n = c.conn().query_row(
+                    "SELECT COUNT(*) FROM sched_fires WHERE outcome LIKE 'skipped%'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        n
+    };
+    // The disk stops answering first: the tick (no agent named) cannot read house's package, and decides nothing.
+    hold.store(true, Ordering::SeqCst);
+    let v = answered(read(&p, "schedule.tick", &json!({})));
+    assert_eq!(skips(&d), 0, "{v}");
+    assert!(
+        v["fires"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["outcome"] != "fired" && f["final"].is_null()),
+        "{v}"
+    );
+    hold.store(false, Ordering::SeqCst);
+    // The disk answers: the same slot is still due, and it fires.
+    let v = answered(read(&p, "schedule.tick", &json!({})));
+    assert_eq!(skips(&d), 0, "{v}");
+    assert!(
+        v["fires"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["job"] == "j" && f["outcome"] == "fired"),
+        "{v}"
+    );
+    drop(d);
+}
+
+#[cfg(unix)]
+#[path = "daemon_life_tests.rs"]
+mod life;

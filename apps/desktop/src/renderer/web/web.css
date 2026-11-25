@@ -257,3 +257,8 @@
 .web-notice.signIn {
   color: var(--text);
 }
+.web-shared { margin: 4px 8px 8px; font-size: var(--text-footnote); }
+.web-shared summary { cursor: pointer; }
+.web-shared ul { list-style: none; margin: 4px 0; padding: 0; }
+.web-shared li { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.web-level { opacity: 0.7; }

@@ -32,6 +32,15 @@ chrono = "0.4.45"
 chrono-tz = "0.10.4"
 croner = "3"
 serde = { version = "1.0.229", features = ["derive"] }
+# The must-ask judge (launch/judge.rs) ports the guard's regexes; the host links regex 1.x already.
+regex = "1"
+
+# Windows only. winsys: the native owner-only access list (the only unsafe Win32 calls live there; this crate stays free
+# of them). junction: a Windows account mirror links folders with a directory junction, which needs no privilege (a
+# symlink needs Developer Mode or admin); the crate holds the FSCTL_SET_REPARSE_POINT unsafe.
+[target.'cfg(windows)'.dependencies]
+kith-winsys = { path = "../winsys" }
+junction = "1.2"
 
 [lints.rust]
 # `deny`, not `forbid`: threads/os.rs allows its kill(2) calls (a process check has no safe std spelling).

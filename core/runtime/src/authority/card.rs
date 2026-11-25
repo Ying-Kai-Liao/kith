@@ -273,6 +273,9 @@ pub(crate) fn helper_set(
             "{pid}'s runs of {agent} may no longer call {helper}"
         )]);
     }
+    if let Some(why) = c.unreadable(helper) {
+        return usage(why);
+    }
     if !c.agent_exists(helper) || helper == agent {
         return usage(format!("no agent '{helper}' to call from {agent}"));
     }

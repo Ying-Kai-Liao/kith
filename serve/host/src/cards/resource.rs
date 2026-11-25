@@ -145,49 +145,27 @@ impl Roots {
     }
 }
 
-/// The folders for this Mac, asked of the kernel (`kith_paths.py --json`). A lookup that failed is not remembered:
-/// the next ask tries again, and meanwhile the host's own reading of the rules stands.
+/// The folders for this Mac, by the kernel's rules in process (`kith-kernel` paths, the port of the kernel's old
+/// `kith_paths.py`): there is no program to ask, so the answer is always settled and kept.
 pub fn roots() -> Roots {
     static CACHE: Mutex<Option<Roots>> = Mutex::new(None);
     if let Some(r) = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
         return r;
     }
     let mut r = Roots::default();
-    Roots::add(&mut r.kith, crate::kernel::state_dir(&dirs::home_dir().unwrap_or_default()));
+    let home = dirs::home_dir().unwrap_or_default();
     Roots::add(&mut r.whole, crate::service::data_dir());
-    let mut settled = true;
-    if let Some(k) = crate::kernel::current_kernel() {
-        let asked = std::process::Command::new("python3")
-            .arg(k.join("lib/kith_paths.py"))
-            .arg("--json")
-            .output()
-            .ok()
-            .and_then(|o| o.status.success().then_some(o.stdout))
-            .and_then(|out| serde_json::from_slice::<Value>(&out).ok());
-        match asked {
-            Some(v) => {
-                for key in ["KITH_STATE", "KITH_MACHINE"] {
-                    if let Some(p) = v[key].as_str() {
-                        Roots::add(&mut r.kith, PathBuf::from(p));
-                    }
-                }
-                if let Some(sec) = v["KITH_SECRETS"].as_str() {
-                    Roots::add(&mut r.secrets_folder, PathBuf::from(sec));
-                }
-                // The older layout keeps the secrets among the machine things: the patterns cover `env` and
-                // `auth.json` there, and the folder is only secret whole when it is a folder of its own.
-                if let (Some(sec), Some(machine)) = (v["KITH_SECRETS"].as_str(), v["KITH_MACHINE"].as_str())
-                    && sec != machine
-                {
-                    Roots::add(&mut r.whole, PathBuf::from(sec));
-                }
-            }
-            None => settled = false,
-        }
+    let p = crate::kernel::folders(&home);
+    for folder in [&p.state, &p.machine] {
+        Roots::add(&mut r.kith, folder.clone());
     }
-    if settled {
-        *CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r.clone());
+    Roots::add(&mut r.secrets_folder, p.secrets.clone());
+    // The older layout keeps the secrets among the machine things: the patterns cover `env` and
+    // `auth.json` there, and the folder is only secret whole when it is a folder of its own.
+    if p.secrets != p.machine {
+        Roots::add(&mut r.whole, p.secrets.clone());
     }
+    *CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r.clone());
     r
 }
 
@@ -433,7 +411,20 @@ pub fn classify(tool: &str, input: &Value, roots: &Roots) -> Classified {
     if shown.len() > MAX_SHOWN {
         return Classified::Malformed("it is too long to show in full for approval");
     }
-    Classified::Card { key: format!("{tool}:{}", digest(input)), shown }
+    Classified::Card { key: input_key(tool, input), shown }
+}
+
+/// The key of a call bound by its whole input. A Bash call's description is the model's own wording, rewritten between
+/// tries and never run, so it is left out: a retry joins the open card or uses its yes (as kith-permit's `once_key`).
+pub fn input_key(tool: &str, input: &Value) -> String {
+    match input {
+        Value::Object(m) if tool == "Bash" && m.contains_key("description") => {
+            let mut m = m.clone();
+            m.remove("description");
+            format!("{tool}:{}", digest(&Value::Object(m)))
+        }
+        _ => format!("{tool}:{}", digest(input)),
+    }
 }
 
 #[cfg(test)]
@@ -513,6 +504,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_dotdot_after_a_link_is_applied_to_where_the_link_led() {
         // /tmp/l -> <state>/serve : /tmp/l/../secrets/env is <state>/secrets/env, not /tmp/secrets/env.
@@ -562,6 +554,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_card_names_the_resolved_real_path() {
         let dir = std::env::temp_dir().join(format!("kc-{}", uuid::Uuid::new_v4().simple()));
@@ -610,5 +603,27 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, classify("Bash", &json!({"command": "ls -la", "description": "list"}), &none));
         assert!(matches!(classify("", &json!({}), &none), Classified::Malformed(_)));
+    }
+
+    #[test]
+    fn a_bash_retry_in_other_words_is_the_same_ask() {
+        let none = Roots::default();
+        let card = |tool: &str, input: Value| match classify(tool, &input, &none) {
+            Classified::Card { key, shown } => (key, shown),
+            other => panic!("{other:?}"),
+        };
+        let (a, shown_a) = card("Bash", json!({"command": "ls", "description": "a"}));
+        let (b, shown_b) = card("Bash", json!({"command": "ls", "description": "b"}));
+        assert_eq!(a, b, "the description is the model's wording, not what runs");
+        assert_eq!((shown_a.as_str(), shown_b.as_str()), ("ls", "ls"));
+        assert_ne!(a, card("Bash", json!({"command": "pwd", "description": "a"})).0);
+        let (timed, shown) = card("Bash", json!({"command": "ls", "description": "a", "timeout": 5000}));
+        assert_ne!(a, timed, "everything else stays in the key");
+        assert!(shown.contains("\"description\":\"a\"") && shown.contains("5000"), "shown unchanged: {shown}");
+        // Only Bash: another tool's description is part of what it does.
+        assert_ne!(
+            card("mcp__x__post", json!({"description": "a"})).0,
+            card("mcp__x__post", json!({"description": "b"})).0
+        );
     }
 }

@@ -533,6 +533,18 @@ def rewrite_plist(o):
     return o
 
 
+def cost_job(pl):
+    """dev.kith.cost ran the polyglot stub `kernel/bin/kith-cost` through kith-uv; the stub is gone (retire-python P1), so the job
+    runs `kith kernel cost sync` (no bash or Python between), still behind kith-uv: launchd's Full Disk Access is granted to uv, not to the program. Its verb (sync) is kept."""
+    argv = pl.get('ProgramArguments', [])
+    for i, a in enumerate(argv):
+        if a.endswith('/kernel/bin/kith-cost'):
+            pl['ProgramArguments'] = [str(NEW / 'bin/kith-uv'), 'run', '--no-project', '--quiet', '--',
+                                      str(NEW / 'cli/current/bin/kith'), 'kernel', 'cost', *(argv[i + 1:] or ['sync'])]
+            break
+    return pl
+
+
 def loaded(label):
     return sh('launchctl', 'print', f'gui/{UID}/{label}').returncode == 0
 
@@ -607,6 +619,8 @@ def s_jobs(m, dry):
             if oldp.exists():
                 pl = rewrite_plist(plistlib.loads(oldp.read_bytes()))
                 pl['Label'] = f'dev.kith.{j}'
+                if j == 'cost':
+                    pl = cost_job(pl)
                 newp.write_bytes(plistlib.dumps(pl))
             if j in m.get('was_loaded', []):
                 bootout(f'dev.kith.{j}')
@@ -866,26 +880,10 @@ def undo(dry=False, force=False):
     return 0
 
 
-def cutover(argv):
-    """`kith migrate step|status|check|rollback|is-module ...`: the module-keyed cutover framework, which lives in the Rust core
-    (`kith kernel cutover`, core/runtime/src/cutover/). Nothing here touches the hq -> kith steps above."""
-    import kith_paths
-    binary = kith_paths.kith_bin()
-    if not binary:
-        print('kith migrate: this Mac has no kith program, and the cutover steps run in it (kith update)', file=sys.stderr)
-        return 1
-    if argv[0] == 'is-module':   # for `kith rollback NAME`: a cutover module, or an agent package
-        r = subprocess.run([binary, 'kernel', 'cutover', 'modules'], capture_output=True, text=True)
-        return 0 if r.returncode == 0 and len(argv) == 2 and argv[1] in r.stdout.split() else 1
-    return subprocess.run([binary, 'kernel', 'cutover', *argv]).returncode
-
-
 def main(argv):
     if '-h' in argv or '--help' in argv:
         print(__doc__.strip())
         return 0
-    if argv and argv[0] in ('step', 'status', 'check', 'rollback', 'is-module'):
-        return cutover(argv)
     flags = set(argv)
     unknown = flags - {'--dry-run', '--undo', '--force', '--status'}
     if unknown:

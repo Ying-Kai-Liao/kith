@@ -1,14 +1,25 @@
 # verb-path	module: the verbs the Rust core answers (kernel/lib/kith-core.sh). A line is the switch, removing it the rollback.
-paths	paths
 engines	engines
 launch	launch
 settings	settings
 account	account
 account-state	account-state	accounts
+# `kith AGENT --backups-json|--accounts-json`: the program answers when it lists the module (the Python stays for a program without it).
+accounts backups-json	accounts
+accounts accounts-json	accounts-json	accounts
 # pkg and room-ledger: neither launch reads these lines any more (R2: no Python to go back to, so removing one is no rollback; the
 # program that lists the module answers). room-ledger's line only picks the program hook over the stub.
 pkg	pkg
+run-once	acp
 room-ledger	room-ledger
 # `threads` also sends bin/kith's last exec (`kith-sessions run`) to `kernel threads run`, when the program lists `threads-run` too.
 threads	threads-writer
 lifecycle	lifecycle
+permit	permit
+# `kith AGENT "task"` (a one-shot) runs in the program (`kith kernel launch-exec`, one process, claims and engine) when this line is here and the program lists `launch-exec`.
+# Shipped off (retire-python P1-12 R3a): the line is commented out until R4 switches it on after the live soak; KITH_CORE=python keeps bash either way.
+#launch-exec	launch-exec
+# `kith ask`: `kernel/bin/kith-ask` hands its command line to `kith kernel ask` (the thin client of the core's ask rows, retire-python P2-3 A3) under `__main__` only,
+# when the program lists `ask-ledger` AND the `asks` cutover module is switched on the Mac (`<machine>/core/cutover/asks.switch`): the Python reads the switch itself,
+# not this file, so a line here would route nothing. Shipped off: the line stays commented out until A4 lands the module and its step.
+#ask	ask-ledger

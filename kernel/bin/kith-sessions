@@ -446,7 +446,7 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_own
     """Take the writer claim on sid for pid. Returns None when taken, else the live claim that holds it. The claim is made
     whole in a temp file and linked into place (exclusive); a stale one is removed and replaced under a lock file next
     to it, so two takers never both judge it stale and one deletes the other's fresh claim. A taker ends the session's intent and
-    pending decision (F12 rules 12, 14); kith-lifecycle, taking it to compact or end, is the one that keeps them."""
+    pending decision (F12 rules 12, 14); the lifecycle sweep, taking it to compact or end, is the one that keeps them."""
     if writer_mode():
         return core_take(sid, pid, person, agent, lifecycle_owner, held_when_down=lifecycle_owner)
     dest = claim_path(sid)
@@ -965,8 +965,25 @@ def asleep(child):
     e = entry_of(child)
     if not e or lifecycle().cache_life() > lifecycle().SHORT_CACHE:
         return
-    subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / 'kith-lifecycle'), 'sweep', '--session', e['sessionId'],
-                      '--at-sleep'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    try:   # the sweep is the program's (`kith kernel lifecycle`); with none on this Mac it is skipped, housekeeping only
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'lib'))
+        from kith_paths import kith_bin
+        prog = kith_bin()
+    except Exception:  # noqa: BLE001
+        prog = ''
+    if not prog:
+        print('kith-sessions: no kith program on this Mac, so the at-sleep lifecycle sweep is skipped', file=sys.stderr)
+        return
+    try:   # an older program has no `kernel lifecycle`: say so rather than let the sweep fail unseen
+        has = subprocess.run([prog, 'kernel', 'lifecycle', '--kernel', str(Path(__file__).resolve().parent.parent), 'sweep', '--help'],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        has = False
+    if not has:
+        print('kith-sessions: this kith program has no `kernel lifecycle` (update kith), so the at-sleep sweep is skipped', file=sys.stderr)
+        return
+    subprocess.Popen([prog, 'kernel', 'lifecycle', '--kernel', str(Path(__file__).resolve().parent.parent), 'sweep', '--session',
+                      e['sessionId'], '--at-sleep'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True)
 
 
@@ -1029,7 +1046,7 @@ def run(agent, cmd):
             asleep(eng or child)
         if not taken_note(agent, eng or child):
             resume_note(agent, eng or child)
-        wake_owed()
+        wake_owed(eng or child)
     except Exception as e:  # noqa: BLE001
         print(f'kith-sessions: {e}', file=sys.stderr)
     code = os.waitstatus_to_exitcode(st)   # a signal death comes back as -n
@@ -1055,12 +1072,25 @@ def stub_verdict(fd, code):
     return code
 
 
-def wake_owed():
+def wake_owed(pid):
     """A terminal held its session while wakes for it queued (a reply, a card, a waiter): now that it let go, the kernel's
     wake queue may deliver them without waiting for the next tick. A kith ask this session made and didn't read the
-    answer of becomes one of them first (kith-ask --sweep, M8)."""
+    answer of becomes one of them first (kith-ask --sweep, M8). With the queue the core's it is one call, `wake.released`,
+    and no shell: a lost call is caught by the core's next tick (R8)."""
     d = reg_dir()
     if not d:
+        return
+    lib = str(Path(__file__).resolve().parent.parent / 'lib')
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import kith_wake_core
+    if kith_wake_core.switched(os.environ.get('KITH_STATE')):
+        e = entry_of(pid)
+        if e:
+            try:
+                kith_wake_core.call('wake.released', {'session': e['sessionId']}, timeout=5)
+            except SystemExit:
+                pass
         return
     here = Path(__file__).resolve().parent
     script = '"$0" "$1" --sweep; ls "$3"/*.json >/dev/null 2>&1 && exec "$0" "$2" drain'
