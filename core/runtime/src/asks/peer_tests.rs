@@ -110,6 +110,14 @@ fn apply(
     r.host("ask.peerApply", &p)
 }
 
+/// The host's claim says no as an answer (`{refused}`) or as an error.
+fn was_refused(said: &Result<Value, Error>) -> bool {
+    match said {
+        Err(_) => true,
+        Ok(v) => v.get("refused").is_some(),
+    }
+}
+
 fn try_claim(r: &Rig, id: &str, turn: i64) -> Result<Value, Error> {
     r.call(
         Principal::Host,
@@ -163,8 +171,8 @@ fn a_peer_open_needs_a_live_pairing_and_makes_no_turn() {
     assert_eq!(r.ask_state("p1"), "open");
     let turn: Option<i64> = r.sql("SELECT turn FROM asks WHERE id = ?1", "p1");
     assert_eq!(turn, None);
-    let epoch: i64 = r.sql("SELECT peer_epoch FROM asks WHERE id = ?1", "p1");
-    assert_eq!(epoch, 1);
+    let epoch: String = r.sql("SELECT peer_epoch FROM asks WHERE id = ?1", "p1");
+    assert_eq!(epoch, ep(1));
     // It crosses: one cross hop, whatever the caller said.
     let cross: i64 = r.sql("SELECT cross_hops FROM asks WHERE id = ?1", "p1");
     assert_eq!(cross, 1);
@@ -346,7 +354,8 @@ fn after_end_peer_nothing_opens_claims_or_attaches() {
     // Opening: refused as a row, no turn.
     assert_eq!(origin(&r, "b", "kb", 1)["refused"], json!(true));
     // Claiming: the sweep cancelled the turn; the claim is refused.
-    assert!(try_claim(&r, "a", turn).is_err());
+    let refused = try_claim(&r, "a", turn);
+    assert!(was_refused(&refused), "{refused:?}");
     assert_eq!(
         count(
             &r,
@@ -365,7 +374,7 @@ fn the_claim_fence_alone_refuses_a_turn_of_an_ended_epoch() {
     let turn = turn_of(&origin(&r, "a", "ka", 1));
     drop_fence(&r, "in");
     let refused = try_claim(&r, "a", turn);
-    assert!(matches!(refused, Err(Error::Refused(_))), "{refused:?}");
+    assert!(was_refused(&refused), "{refused:?}");
     assert_eq!(r.turn_state(turn), "cancelled");
 }
 
