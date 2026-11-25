@@ -52,3 +52,5 @@ src/terminal/core_writer_tests.rs	terminal::core_writer::tests::
 src/api/native_guard_tests.rs	api::native_guard_tests::
 src/chat/group.rs	chat::group::tests::
 src/market/requests.rs	market::requests::tests::
+src/cards/resume/channel_wake_tests.rs	cards::resume::channel_wake::tests::
+src/cards/resume/wake_clock_core_tests.rs	cards::resume::wake_clock::core_tests::

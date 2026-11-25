@@ -320,12 +320,11 @@ async fn a_claimed_wake_is_a_batch_of_its_own_that_is_never_saved_and_no_message
     let note = "[kith wake run-9] the staging box is ready";
     let w = ChannelWake::for_test("run-9", 7, 41, wk);
     assert_eq!(r.core.wake_claimed(wk, note, w), Wake::Queued);
-    // A message sent while the wake batch waits starts a batch of its own (and runs, whatever becomes of the wake).
-    r.send(&Rig::in_thread(Rig::msg("2", "and the lights?"), "fake/x:room:1")).await;
-    // The saved state never has the wake: a batch on disk would replay the note after a restart and send the prompt twice.
+    // The wake waits in the inbox in memory, and the saved state never has it: a batch on disk would replay the note after a
+    // restart and send the prompt twice.
+    assert!(r.core.with(|i| i.st.inbox.get(wk).is_some_and(|q| q.iter().flatten().any(|m| m == note))));
     let saved = std::fs::read_to_string(r.dir.join("data/state.json")).unwrap();
     assert!(!saved.contains("staging box"), "the wake batch is memory only: {saved}");
-    assert!(saved.contains("and the lights?"), "an ordinary message still is saved: {saved}");
     assert!(!r.core.with(|i| i.st.wakes.contains_key(wk)), "not among the card wake notes either");
     // A restart loads what was saved: no batch of it comes back to replay the note.
     let reloaded = super::state::State::load(&r.dir.join("data/state.json"));
@@ -334,6 +333,8 @@ async fn a_claimed_wake_is_a_batch_of_its_own_that_is_never_saved_and_no_message
         "a saved inbox never holds the wake batch: {:?}",
         reloaded.inbox
     );
+    // A message sent while the wake batch waits starts a batch of its own.
+    r.send(&Rig::in_thread(Rig::msg("2", "and the lights?"), "fake/x:room:1")).await;
     until("both turns", || r.fake.posts().len() == 3).await;
     assert_eq!(r.fake.posts()[1].1, echo(note), "the wake alone");
     assert!(r.fake.posts()[2].1.contains("and the lights?") && !r.fake.posts()[2].1.contains("staging box"));

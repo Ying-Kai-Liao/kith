@@ -54,6 +54,7 @@ fn scripted(
             })
         }),
     );
+    crate::terminal::core_claims::enable(&state, folders.clone());
     r.hub.terminal.set_env(crate::terminal::Env { state, sessions: None });
     (Arc::new(CoreWriter::with_instance(folders, "test".to_owned())), log)
 }
