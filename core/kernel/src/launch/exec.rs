@@ -139,6 +139,8 @@ struct Steps<'a> {
     alone: RefCell<bool>,
     /// A schedule's turn: its claim is attached before the walk starts any attempt.
     sched: Option<&'a Sched>,
+    /// The run's own environment, which the walk's attempts get (not this process's).
+    env: &'a Env,
 }
 
 impl ExecHooks for Steps<'_> {
@@ -199,10 +201,19 @@ impl ExecHooks for Steps<'_> {
 
     fn walk(&self, agent: &str, agent_md: &Path, argv: &[String]) -> i32 {
         // The attempts are runs of their own that send the prompt: the claim is this process's before the first one.
-        if let Some(s) = self.sched
-            && let Err(code) = s.attach(&Taker::new(self.ctx, self.deps.core), self.pid)
-        {
+        let taker = Taker::new(self.ctx, self.deps.core);
+        if let Some(s) = self.sched {
+            if let Err(code) = s.attach(&taker, self.pid) {
+                return code;
+            }
+        } else if let Some(code) = sched_turn::attach_env_claim(self.env, &taker, self.pid) {
             return code;
+        }
+        // The attempts are runs of the run's own environment, without the claim (it is attached above, and each attempt would
+        // try to attach its own pid).
+        let mut attempt_env = self.env.clone();
+        for k in ["KITH_TURN_CLAIM", "HQ_TURN_CLAIM"] {
+            attempt_env.remove(k);
         }
         let Ok(me) = std::env::current_exe() else {
             eprintln!("kith: can't find this program to start the attempts");
@@ -224,6 +235,7 @@ impl ExecHooks for Steps<'_> {
             &base,
             &tail,
             argv,
+            Some(&attempt_env),
             &mut std::io::stdout(),
             &mut std::io::stderr(),
         )
@@ -275,6 +287,12 @@ fn run_one(
             "kith: --exec runs a task (kith {agent} \"...\"); --print and --launch-json answer elsewhere"
         );
         return 2;
+    }
+    // A claim that is no claim id is refused before anything else is looked at (a schedule's turn has its claim in its flags).
+    if sched.is_none()
+        && let Err(code) = sched_turn::env_claim(env0)
+    {
+        return code;
     }
     let person = get(env0, "KITH_PERSON").to_owned();
     // A room person (the meet of everyone in a room with people) has no row in auth.json: only the Rust launch builds its grant, and
@@ -351,6 +369,7 @@ fn run_one(
         },
         alone: RefCell::new(false),
         sched,
+        env: env0,
     };
     // What the plan takes out of the environment and this run still needs (names of the caller's, for this run only).
     let launch_kind = get(env0, "KITH_LAUNCH_KIND").to_owned();
@@ -376,7 +395,7 @@ fn run_one(
     ) {
         Ok(p) => p,
         // A turn's run that the plan refuses (the person's auth did not resolve, or was revoked) is `refused()` to the host: 3.
-        Err(1) if sched.is_some() => return sched_turn::REFUSED,
+        Err(1) if sched.is_some_and(|s| !s.attached()) => return sched_turn::REFUSED,
         Err(code) => return code,
     };
     let mut env = plan.env.clone();
@@ -476,6 +495,13 @@ fn run_one(
     let mut engine_args = run_args(&plan, &files);
     // Extra claude flags from a caller such as kith serve (e.g. --output-format json --resume <session>); for them only.
     engine_args.extend(session::extra_args(&claude_args, owner));
+    // Claude's claim step attaches by the session's id: a run that continues the folder's latest session (`-c`) names none, so
+    // the claim is attached here, for this process, as another engine's is.
+    if matches!(session::session_of(&engine_args), Ok((csid, _)) if csid.is_empty())
+        && let Some(code) = sched_turn::attach_env_claim(env0, &taker, pid)
+    {
+        return code;
+    }
     env.remove("KITH_CLAUDE_ARGS");
     env.remove("HQ_CLAUDE_ARGS");
     start::claude(

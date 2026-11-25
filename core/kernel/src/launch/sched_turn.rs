@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::assemble::{Env, get, sync_env};
-use crate::threads::writer::{AttachErr, TURN_CLAIM_EXIT, Taker};
+use crate::threads::writer::{AttachErr, TURN_CLAIM_EXIT, TURN_CLAIM_REFUSED, Taker};
 
 /// The exits `run-turn` has, which the host reads.
 const BAD: i32 = 2;
@@ -144,6 +144,28 @@ fn build(
         kernel.display()
     );
     let header = format!("# {} {agent} {id} ({why})\n", now_minute(env));
+    for k in INHERITED {
+        env.remove(k);
+        env.remove(&format!("HQ_{}", &k[5..]));
+    }
+    // The run's origin, built by the host (the call key and chat, or an outbox, or nothing). It goes in
+    // after what is taken out of the environment and before what the turn sets itself, so nothing it names can replace those.
+    if let Some(origin) = spec.get("origin").and_then(Value::as_object) {
+        for (k, v) in origin {
+            if matches!(k.as_str(), "KITH_PERSON" | "HQ_PERSON") {
+                continue;
+            }
+            if let Some(v) = v.as_str().filter(|v| !v.is_empty()) {
+                env.insert(k.clone(), v.to_owned());
+            }
+        }
+    }
+    // The test clock is the host's, not the run's; the claim is this process's to attach, so the engine and a nested kith never
+    // see it.
+    for k in ["SCHED_NOW", "TURN_CLAIM"] {
+        env.remove(&format!("KITH_{k}"));
+        env.remove(&format!("HQ_{k}"));
+    }
     for (k, v) in [
         ("KITH_VIA", "schedule"),
         ("KITH_SCHED_JOB", id),
@@ -157,29 +179,11 @@ fn build(
     if !mode.is_empty() {
         env.insert("KITH_PERMISSION_MODE".to_owned(), mode);
     }
-    for k in INHERITED {
-        env.remove(k);
-        env.remove(&format!("HQ_{}", &k[5..]));
-    }
-    // The test clock is the host's, not the run's; the claim is this process's to attach, so the engine and a nested kith never
-    // see it.
-    for k in ["SCHED_NOW", "TURN_CLAIM"] {
-        env.remove(&format!("KITH_{k}"));
-        env.remove(&format!("HQ_{k}"));
-    }
     env.insert("KITH_BACKUP_CHAIN".to_owned(), "on".to_owned());
     // None: whoever started this (the host's own environment: the owner).
     if let Some(p) = person {
         env.insert("KITH_PERSON".to_owned(), p.to_owned());
         env.insert("HQ_PERSON".to_owned(), p.to_owned());
-    }
-    // The run's origin, built by the host (the call key and chat, or an outbox, or nothing).
-    if let Some(origin) = spec.get("origin").and_then(Value::as_object) {
-        for (k, v) in origin {
-            if let Some(v) = v.as_str().filter(|v| !v.is_empty()) {
-                env.insert(k.clone(), v.to_owned());
-            }
-        }
     }
     for (k, v) in [
         ("KITH_MODEL", model),
@@ -222,10 +226,19 @@ impl Sched {
                 eprintln!("kith: sched turn: the turn's JSON is not on stdin");
                 BAD
             })?;
-        let (task, header) = build(agent, turn, &spec, kernel, env)?;
-        let outbox = Some(get(env, "KITH_RUN_OUTBOX"))
-            .filter(|b| !b.is_empty())
+        // The host made an outbox for this run (named in the spec's origin): a turn refused before the attach is a run that did
+        // not happen, so it is removed on every way out here too.
+        let outbox = spec
+            .get("origin")
+            .and_then(|o| text(o, "KITH_RUN_OUTBOX"))
             .map(PathBuf::from);
+        let (task, header) = match build(agent, turn, &spec, kernel, env) {
+            Ok(x) => x,
+            Err(code) => {
+                remove_outbox(outbox.as_deref());
+                return Err(code);
+            }
+        };
         let home = get(env, "HOME").to_owned();
         if !home.is_empty() && std::env::set_current_dir(&home).is_ok() {
             env.insert("PWD".to_owned(), home);
@@ -277,44 +290,58 @@ impl Sched {
 
     /// The run ended with `code`: when it never attached, the outbox made for it is for a run that did not happen.
     pub fn finish(&self, code: i32) -> i32 {
-        if !self.attached.get()
-            && let Some(box_dir) = &self.outbox
-        {
-            let _ = std::fs::remove_dir_all(box_dir);
-            let mut meta = box_dir.clone().into_os_string();
-            meta.push(".json");
-            let _ = std::fs::remove_file(meta);
+        if !self.attached.get() {
+            remove_outbox(self.outbox.as_deref());
         }
         code
     }
+
+    /// Whether the claim is this process's yet: the account walk's attempts do not carry it.
+    pub fn attached(&self) -> bool {
+        self.attached.get()
+    }
 }
 
-/// The claim a run that is not a schedule's turn was handed (`KITH_TURN_CLAIM`), attached here when the run has no claim step of
-/// its own to attach it (another engine). `Some(exit)`: it could not be attached; nothing was started.
-pub fn attach_env_claim(env: &Env, taker: &Taker<'_>, pid: i64) -> Option<i32> {
+fn remove_outbox(outbox: Option<&Path>) {
+    let Some(box_dir) = outbox else { return };
+    let _ = std::fs::remove_dir_all(box_dir);
+    let mut meta = box_dir.to_path_buf().into_os_string();
+    meta.push(".json");
+    let _ = std::fs::remove_file(meta);
+}
+
+/// The claim a run that is not a schedule's turn was handed (`KITH_TURN_CLAIM`), if it names one. A value that is not a claim id
+/// is refused with [`TURN_CLAIM_EXIT`], before anything else is looked at.
+pub fn env_claim(env: &Env) -> Result<Option<i64>, i32> {
     let raw = get(env, "KITH_TURN_CLAIM").trim();
     if raw.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let claim = match raw.parse::<i64>() {
-        Ok(c) if c > 0 => c,
+    match raw.parse::<i64>() {
+        Ok(c) if c > 0 => Ok(Some(c)),
         _ => {
-            eprintln!(
-                "kith: the turn claim was refused: KITH_TURN_CLAIM \"{raw}\" is not a claim id"
-            );
-            return Some(TURN_CLAIM_EXIT);
+            eprintln!("kith: {TURN_CLAIM_REFUSED}: KITH_TURN_CLAIM \"{raw}\" is not a claim id");
+            Err(TURN_CLAIM_EXIT)
         }
+    }
+}
+
+/// The claim a run that is not a schedule's turn was handed, attached here when the run has no claim step of its own to attach it
+/// (another engine, an account walk, a Claude run that continues the folder's session and so names none). `Some(exit)`: it could
+/// not be attached; nothing was started. The exit is [`TURN_CLAIM_EXIT`] for every refusal, as Claude's own claim step has it: a
+/// host's chat turn reads one code for "the turn is no longer this run's" whatever engine ran. (A schedule's turn, whose spec has
+/// its own contract with the host, keeps `run-turn`'s 4 and 5.)
+pub fn attach_env_claim(env: &Env, taker: &Taker<'_>, pid: i64) -> Option<i32> {
+    let claim = match env_claim(env) {
+        Ok(Some(c)) => c,
+        Ok(None) => return None,
+        Err(code) => return Some(code),
     };
     match taker.attach_run(claim, pid) {
         Ok(()) => None,
-        // Same exits as a schedule turn's attach: 4 the claim is gone, 5 the core did not answer.
-        Err(AttachErr::Gone(s)) => {
-            eprintln!("kith: the turn claim was refused: claim {claim}: {s}; nothing was started");
-            Some(GONE)
-        }
-        Err(AttachErr::Down(s)) => {
-            eprintln!("kith: the turn claim was refused: claim {claim}: {s}; nothing was started");
-            Some(NO_ANSWER)
+        Err(AttachErr::Gone(s) | AttachErr::Down(s)) => {
+            eprintln!("kith: {TURN_CLAIM_REFUSED}: claim {claim}: {s}; nothing was started");
+            Some(TURN_CLAIM_EXIT)
         }
     }
 }
@@ -404,6 +431,19 @@ mod tests {
         assert_eq!(get(&env, "HQ_PERSON"), "sam");
         assert_eq!(get(&env, "KITH_RUN_OUTBOX"), "/o/run");
         assert!(!env.contains_key("KITH_CALL_KEY"));
+    }
+
+    #[test]
+    fn the_origin_cannot_name_the_person_or_the_claim_or_the_kind_of_run() {
+        let spec = json!({"prompt": "p", "settings": null, "person": null,
+            "job": {"id": "a", "cron": "c"},
+            "origin": {"KITH_PERSON": "sam", "HQ_PERSON": "sam", "KITH_TURN_CLAIM": "5", "KITH_VIA": "terminal"}});
+        let mut env = Env::new();
+        built(&spec, &mut env).unwrap();
+        for k in ["KITH_PERSON", "HQ_PERSON", "KITH_TURN_CLAIM"] {
+            assert!(!env.contains_key(k), "{k}");
+        }
+        assert_eq!(get(&env, "KITH_VIA"), "schedule");
     }
 
     #[test]

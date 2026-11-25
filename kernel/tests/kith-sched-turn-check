@@ -6,7 +6,7 @@
 #     claim is never asked for, no engine starts, the log the host opened is untouched, and the outbox made for the run is removed
 #   - core down at the attach: exit 5, no engine, log untouched, outbox removed
 #   - a host-claimed run through plain --exec (KITH_TURN_CLAIM, another engine) no longer exits 10 before asking: it asks the core,
-#     and with none answering it starts nothing (exit 5, core down at the attach)
+#     and with none answering it starts nothing (exit 10, as Claude's own claim step refuses)
 # The attach that wins (the run's env, argv and log against `kith-sched run-turn`) needs a host-made claim in a running core, which
 # no script here can make: the Rust tests of core/kernel (launch/sched_turn.rs, threads/writer_turn_tests.rs) cover it.
 #
@@ -64,7 +64,7 @@ is "core down at the attach exits 5" "$rc" 5; untouched "core down"
 # A plain --exec with a host claim: asks the core instead of refusing up front; none answers, so nothing starts.
 rm -f "$STUB_OUT"
 KITH_TURN_CLAIM=7 "$KB" kernel launch house --exec --kernel "$KERNEL" -H codex "do it" >"$T/out" 2>"$T/err"; rc=$?
-is "a claimed one-shot of another engine, no core: exits 5" "$rc" 5
+is "a claimed one-shot of another engine, no core: exits 10" "$rc" 10
 [[ ! -e $STUB_OUT ]] && ok "it starts no engine" || bad "engine started"
 grep -q "refused" "$T/err" && ok "and says the claim was refused" || bad "no reason" "$(cat "$T/err")"
 exit "$fail"

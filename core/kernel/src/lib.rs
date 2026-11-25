@@ -75,7 +75,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "project-guest",
         "readfence",
         "room-ledger",
-        // `kernel launch --exec AGENT --turn N --claim C`: the core's turn of a cron job, its spec on stdin; the launch attaches
+        // `kernel launch AGENT --exec --kernel K --turn N --claim C`: the core's turn of a cron job, its spec on stdin; the launch attaches
         // the claim before the engine. Listed only by a program whose `launch --exec` takes the flags (the host checks it).
         "sched-turn",
         // `kernel secrets exec` (start a shared MCP server with its keys) and `kernel secrets mcp-config`: `mcp-config` names
