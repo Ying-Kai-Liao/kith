@@ -582,8 +582,8 @@ const CORE_CALL_METHODS: &[&str] = &[
     "wake.wait",
     "wake.released",
     // `kith ask` once the asks are the core's (`kernel ask`, kernel/bin/kith-ask forwards there): the ledger's rows. Daemon only,
-    // like the wake rows: a core that does not answer is a refusal, nothing is written. `ask.unpark` and `ask.revokeEverywhere` are
-    // the host's (cards, revoke): not here.
+    // like the wake rows: a core that does not answer is a refusal, nothing is written. `ask.unpark` is here for `--reply`; `ask.revokeEverywhere` is
+    // the revoke order's, not here.
     "ask.open",
     "ask.settle",
     "ask.finish",

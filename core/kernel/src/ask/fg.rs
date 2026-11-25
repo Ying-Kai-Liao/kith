@@ -102,6 +102,15 @@ fn short(flag: &str) -> String {
     }
 }
 
+/// The flag as the usage names it: `-p`, `-m`, `-e`.
+fn short_flag(flag: &str) -> &'static str {
+    match short(flag).as_str() {
+        "-p" => "-p",
+        "-m" => "-m",
+        _ => "-e",
+    }
+}
+
 /// Where the agent works: -C, else the folder of the project -p names, else a named conversation's own folder; the process
 /// goes there (the conversation belongs to the directory it ran in).
 fn work_in(host: &Host, agent: &str, p: &Parsed, err: &mut dyn Write) -> R<()> {
@@ -208,6 +217,20 @@ pub(super) fn ask(
     err: &mut dyn Write,
 ) -> R<i32> {
     let p = parse(rest)?;
+    if bg {
+        // The row has no field for these yet (A2/S1 #1194): refuse by name rather than run the agent without them.
+        let named = p.dir.as_ref().map(|_| "-C").or_else(|| {
+            p.opts
+                .iter()
+                .find(|(f, _)| !matches!(f.as_str(), "-H" | "--harness"))
+                .map(|(f, _)| short_flag(f))
+        });
+        if let Some(flag) = named {
+            return Err(die(format!(
+                "kith ask: {flag} is not carried by a background ask yet"
+            )));
+        }
+    }
     let started = std::env::current_dir().unwrap_or_default();
     work_in(host, agent, &p, err)?;
     let at = conversation(host, agent, &p);
@@ -556,8 +579,7 @@ fn background(
     if let Some(last) = rest.last() {
         open["brief"] = json!(last);
     }
-    // TODO(retire-python P2-3 A2, S1 #1194): the row has no field for -m, -e, -C or -p yet, so the host's turn runs the agent
-    // with its own settings in its own folder. -H names the engine.
+    // -m, -e, -C and -p were refused by name before (the row has no field for them yet: TODO A2/S1 #1194). -H names the engine.
     if let Some((_, h)) = p
         .opts
         .iter()

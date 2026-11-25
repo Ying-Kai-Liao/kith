@@ -228,3 +228,22 @@ fn bg_to_another_computer_is_refused_for_now() {
     assert_eq!(code, 1);
     assert!(err.contains("use the foreground form"), "{err}");
 }
+
+#[test]
+fn bg_refuses_the_options_the_row_cannot_carry_by_name() {
+    let none = Fake::new(vec![]);
+    for (flag, arg) in [
+        ("-p", "kith"),
+        ("-m", "opus"),
+        ("-e", "high"),
+        ("-C", "/tmp"),
+    ] {
+        let (code, _, err) = go(&none, &["--bg", "coder", flag, arg, "task"]);
+        assert_eq!(code, 1);
+        assert_eq!(
+            err,
+            format!("kith ask: {flag} is not carried by a background ask yet\n")
+        );
+    }
+    assert!(none.calls.borrow().is_empty());
+}
