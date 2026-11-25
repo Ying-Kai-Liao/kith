@@ -58,6 +58,13 @@ fn codex_mode(permission: &str, listed: Option<&Vec<Value>>) -> Option<&'static 
     }
 }
 
+/// Why `launch` must not start a process at all: its engine can't be held to its folders (see
+/// [`engines::refuses_unbypassed`]) and the launch is not bypass. The chat shows this as the reason it didn't start.
+fn start_refusal(launch: &hq::Launch) -> Option<String> {
+    let engine = launch.other_engine().filter(|e| engines::refuses_unbypassed(e))?;
+    (launch.permission_mode != Some(hq::PermissionMode::BypassPermissions)).then(|| engines::refusal(engine))
+}
+
 /// The environment of the agent process. The keys the host holds for Claude are the default login's and win over
 /// `CLAUDE_CONFIG_DIR` and `apiKeyHelper`, so a run on a login of its own gets none of them: a Claude backup, and any
 /// run on a named account or API profile (`KITH_ACCOUNT`), the agent's main account included.
@@ -530,10 +537,8 @@ impl Actor {
         };
         // An engine no mode can hold to its folders (see `engines::refuses_unbypassed`) does not start for a launch
         // without bypass: the chat shows why, as the one-shots do.
-        if let Some(engine) = launch.other_engine().filter(|e| engines::refuses_unbypassed(e))
-            && launch.permission_mode != Some(hq::PermissionMode::BypassPermissions)
-        {
-            return Err(anyhow!(engines::refusal(engine)));
+        if let Some(why) = start_refusal(&launch) {
+            return Err(anyhow!(why));
         }
         // Only the agent's own Claude run on the owner's behalf switches models for a call.
         self.call_models = (backup.is_none() && person.is_none() && launch.other_engine().is_none()).then(|| {
@@ -856,6 +861,28 @@ mod tests {
 
     fn names(env: &[(String, String)]) -> Vec<&str> {
         env.iter().map(|(k, _)| k.as_str()).collect()
+    }
+
+    #[test]
+    fn a_non_bypass_hermes_chat_is_refused_before_a_process_starts_and_a_bypass_one_is_not() {
+        let hermes = |mode: Option<&str>| {
+            let mut over = json!({"harness": "claude", "engine": "hermes"});
+            if let Some(mode) = mode {
+                over["permission_mode"] = json!(mode);
+            }
+            hq::printed_launch(over)
+        };
+        if engines::HERMES_REFUSES_WITHOUT_BYPASS {
+            for mode in [None, Some("default"), Some("acceptEdits"), Some("auto"), Some("plan")] {
+                let why = start_refusal(&hermes(mode)).unwrap_or_else(|| panic!("{mode:?} was not refused"));
+                assert_eq!(why, engines::refusal("hermes"));
+                assert!(why.contains("bypass mode"), "{why}");
+            }
+        }
+        assert_eq!(start_refusal(&hermes(Some("bypassPermissions"))), None);
+        // Other engines and the agent's own Claude are never held back by it.
+        assert_eq!(start_refusal(&hq::printed_launch(json!({"harness": "claude", "engine": "codex"}))), None);
+        assert_eq!(start_refusal(&launch("claude", "")), None);
     }
 
     #[test]
