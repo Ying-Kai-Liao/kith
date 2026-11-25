@@ -29,7 +29,7 @@
 
 Options: -c/--continue, --as NAME (a named conversation: -c --as NAME picks it up from anywhere, in its folder),
 -C/--dir DIR (work in DIR), -p PROJECT (its memory, and its folder unless -C says; the current one if it has none),
--m MODEL, -e EFFORT, -H HARNESS (claude, codex, pi, agy, hermes, qwen, dsh, opencode; default the agent's own),
+-m MODEL, -e EFFORT, -H HARNESS (claude, codex, pi, agy, hermes, qwen, opencode; default the agent's own),
 --json (the whole result: answer, session, cost, turns).
 
 The same run as `kith <agent> "task"`: its pinned package, own settings and services, memory and project, tagged
@@ -600,6 +600,9 @@ def alive(pid):
     return True
 
 
+unwithdrawn = set()   # what the last end_asks could not withdraw wakes of (the core did not answer)
+
+
 def end_asks(sessions=(), persons=()):
     """Stop, revoke and removal in one step (R5, R8): every delegation whose caller is one of `sessions` (reply_to.session) or
     `persons` (the person it was asked for, or the person of the --bg job) ends. Its run is stopped, its record is settled
@@ -640,12 +643,21 @@ def end_asks(sessions=(), persons=()):
     # The runs are stopped with the lock let go and the records already ended: a kith-ask answering TERM settles its own record
     # (stop_record), which needs this lock, and sees ended_at. Holding it through the grace would cost every ask 2 s.
     owed.discard('')
+    unwithdrawn.clear()
 
     def withdraw():
+        # A refused withdraw (the queue is the core's and no daemon answers: a revoke made with kith serve down) must not keep the
+        # runs from being stopped: it is told at the end, and the exit says so.
         for session in sorted(owed):
-            wake.withdraw(session)
+            try:
+                wake.withdraw(session)
+            except SystemExit:
+                unwithdrawn.add('session ' + session)
         if persons:
-            wake.withdraw_person(sorted(persons))
+            try:
+                wake.withdraw_person(sorted(persons))
+            except SystemExit:
+                unwithdrawn.update('person ' + p for p in persons)
     # Withdrawn before the runs are stopped as well as after: a --bg run that finishes while this goes on kicks a wake
     # drain, and a follow-up it was owed must not be delivered after the end (kith-wake does not look at ended_at).
     withdraw()
@@ -788,7 +800,7 @@ def follow_ups(mid, end, code):
 def kick_wakes(sid):
     """The run's turn ended: a wake its session is owed (a --to message) is delivered now, not at the next tick."""
     wake = wake_queue()
-    if sid and wake.item_path(sid).exists():
+    if sid and not wake.switched() and wake.item_path(sid).exists():   # switched: the host ticks, and no queue file is read
         wake.spawn_drain()
 
 
@@ -966,6 +978,10 @@ def main(argv):
             else:
                 sys.exit('usage: kith ask --end [--session S]... [--person P]...')
         print('ended %s' % ' '.join(end_asks(sessions, persons)))
+        if unwithdrawn:
+            print('kith ask: the runs are stopped, but the wakes of %s were not withdrawn (the Kith core did not answer); run the end again '
+                  'once it does' % ', '.join(sorted(unwithdrawn)), file=sys.stderr)
+            return 1
         return 0
     if argv[0] == 'delegations':   # --json is the only form
         return delegations()

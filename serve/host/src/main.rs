@@ -57,6 +57,7 @@ mod usage;
 mod voice;
 mod voice_local;
 mod wake;
+mod wake_cmd;
 mod watchdog;
 
 use agent::backends;
@@ -539,6 +540,15 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
+    /// `kith wake` as a client of the core's wake rows, for a Mac whose wake queue is the core's (`kernel/bin/kith` routes it here
+    /// then; no Python): `enqueue`, `withdraw`, `withdraw-person`, `take`, `done`, `back`, `wait`, `status`, `ls` as `kernel/bin/kith-wake`
+    /// prints them; `drain` and `deliver` do nothing (the host ticks the queue).
+    // kith-wake's own usage errors (exit 2) belong to the verb, so clap must not answer -h.
+    #[command(disable_help_flag = true)]
+    Wake {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
     /// The kith project of a directory (`kernel/bin/project-id` is a stub that runs this; a guest run asks the host over the run socket).
     #[command(name = "project-id", disable_help_flag = true)]
     ProjectId {
@@ -657,6 +667,9 @@ enum KernelCmd {
         resume: Option<String>,
         #[arg(long)]
         permission_mode: Option<String>,
+        /// The engine's own terminal session (Codex, Hermes), no task: its CLI with the run's flags.
+        #[arg(long)]
+        interactive: bool,
         #[arg(last = true)]
         task: Vec<String>,
     },
@@ -1655,9 +1668,15 @@ async fn main() -> Result<()> {
                     runonce::Args { engine, model, cwd, dirs, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
-            if let KernelCmd::EngineRun { engine, output, resume, permission_mode, task } = cmd {
-                let args =
-                    engine_run::Args { engine, json: output.as_deref() == Some("json"), resume, permission_mode, task };
+            if let KernelCmd::EngineRun { engine, output, resume, permission_mode, interactive, task } = cmd {
+                let args = engine_run::Args {
+                    engine,
+                    json: output.as_deref() == Some("json"),
+                    resume,
+                    permission_mode,
+                    interactive,
+                    task,
+                };
                 std::process::exit(engine_run::run(args).await?);
             }
             if let KernelCmd::CoreCall { method, params_stdin } = cmd {
@@ -1766,6 +1785,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Lifecycle { kernel, args } = cmd {
                 std::process::exit(lifecycle_cmd::run(kernel, &args));
             }
+            if let KernelCmd::Wake { args } = cmd {
+                std::process::exit(wake_cmd::main(&args));
+            }
             #[cfg(unix)]
             if let KernelCmd::ProjectId { kernel, args } = cmd {
                 std::process::exit(project_id_cmd(kernel, &args));
@@ -1873,6 +1895,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
                     | KernelCmd::Lifecycle { .. }
+                    | KernelCmd::Wake { .. }
                     | KernelCmd::ProjectId { .. }
                     | KernelCmd::RoomLedger { .. }
                     | KernelCmd::Pkg { .. }

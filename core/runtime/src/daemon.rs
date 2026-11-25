@@ -631,12 +631,19 @@ impl Shared {
             return Ok(answer);
         }
         // The ask tree: open, settle and end are claim transactions (M3-8a).
+<<<<<<< HEAD
         {
             if crate::asks::serves(method) {
                 let answer = self.with_core(|c| crate::asks::call(c, method, params))?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
             }
+=======
+        if crate::asks::serves(method) {
+            let answer = self.with_core(|c| crate::asks::call(c, method, params))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+>>>>>>> origin/flow/windows-owner-build-2-w22a
         }
         // Same for the sync lease: a change is a claim transaction.
         if method.starts_with("syncLease.") {
