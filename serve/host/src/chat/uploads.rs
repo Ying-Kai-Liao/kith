@@ -97,6 +97,7 @@ pub fn append(
     done: bool,
     who: Uploader,
 ) -> Result<Option<Value>> {
+    #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt as _;
     let dir = dir(root, upload)?;
     let path = dir.join(clean_name(name)?);
@@ -118,11 +119,25 @@ pub fn append(
             bail!("Upload limit reached: you can keep up to {} MB of files here", GUEST_QUOTA / 1024 / 1024);
         }
         let mut opts = std::fs::OpenOptions::new();
+        #[cfg(unix)]
         opts.custom_flags(libc::O_NOFOLLOW);
+        // Windows has no O_NOFOLLOW: a link is opened itself and refused on the open handle (no check-then-open gap).
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt as _;
+            opts.custom_flags(crate::hqmem::FILE_FLAG_OPEN_REPARSE_POINT);
+        }
         let created = !exists;
         let mut file = if created { opts.write(true).create_new(true) } else { opts.append(true) }
             .open(&path)
             .context("opening the upload")?;
+        #[cfg(windows)]
+        // Fails closed: metadata that can't be read is refused like a reparse point.
+        if !file.metadata().is_ok_and(|m| !crate::hqmem::is_reparse_point(&m)) {
+            bail!(
+                "the upload is a link or a cloud or placeholder file (reparse point), or can't be inspected; kith won't write to it"
+            );
+        }
         if let (true, Uploader::Guest(person)) = (created, who) {
             let _ = std::fs::write(dir.join(OWNER_MARK), person);
         }
@@ -232,6 +247,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[cfg(unix)]
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_file_or_folder_is_refused() {
         let root = tmp();

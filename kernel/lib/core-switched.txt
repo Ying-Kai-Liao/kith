@@ -4,11 +4,18 @@ launch	launch
 settings	settings
 account	account
 account-state	account-state	accounts
+# `kith AGENT --backups-json|--accounts-json`: the program answers when it lists the module (the Python stays for a program without it).
+accounts backups-json	accounts
+accounts accounts-json	accounts-json	accounts
 # pkg and room-ledger: neither launch reads these lines any more (R2: no Python to go back to, so removing one is no rollback; the
 # program that lists the module answers). room-ledger's line only picks the program hook over the stub.
 pkg	pkg
+run-once	acp
 room-ledger	room-ledger
 # `threads` also sends bin/kith's last exec (`kith-sessions run`) to `kernel threads run`, when the program lists `threads-run` too.
 threads	threads-writer
 lifecycle	lifecycle
 permit	permit
+# `kith AGENT "task"` (a one-shot) runs in the program (`kith kernel launch-exec`, one process, claims and engine) when this line is here and the program lists `launch-exec`.
+# Shipped off (retire-python P1-12 R3a): the line is commented out until R4 switches it on after the live soak; KITH_CORE=python keeps bash either way.
+#launch-exec	launch-exec

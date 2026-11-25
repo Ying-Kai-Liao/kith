@@ -120,6 +120,19 @@ pub fn rows_from(
     now: f64,
     src: &dyn state::StateSource,
 ) -> Vec<Map> {
+    rows_over(ctx, s, agent, deep, now, src, None)
+}
+
+/// [`rows_from`] over the agent's order and only `only` (`--accounts-json` lists just its order), not every id worth listing.
+pub(super) fn rows_over(
+    ctx: &Ctx<'_>,
+    s: &Map,
+    agent: &str,
+    deep: bool,
+    now: f64,
+    src: &dyn state::StateSource,
+    only: Option<&[String]>,
+) -> Vec<Map> {
     let state = src.accounts(&ctx.machine);
     let out: HashMap<String, Mark> = state::out_marks(&ctx.machine, &state, now);
     let (in_order, cands): (Vec<String>, Vec<String>) = if agent.is_empty() {
@@ -139,7 +152,7 @@ pub fn rows_from(
         in_order
             .iter()
             .cloned()
-            .chain(known_ids(ctx, s, agent))
+            .chain(only.map_or_else(|| known_ids(ctx, s, agent), <[String]>::to_vec))
             .collect(),
     );
     let status: HashMap<String, Status> =

@@ -15,6 +15,10 @@ on:
         description: "Dry run of the Linux client build only (skips the macOS build; nothing is published off a tag)"
         type: boolean
         default: false
+      windows_only:
+        description: "Dry run of the Windows zip only (skips every other job; nothing is published off a tag)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,7 +28,7 @@ env:
 
 jobs:
   build:
-    if: ${{ !inputs.guest_only }}
+    if: ${{ !inputs.guest_only && !inputs.windows_only }}
     runs-on: macos-latest
     timeout-minutes: 60
     strategy:
@@ -90,11 +94,124 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # Windows x64: kith-<version>-windows-x64.zip (bin\*.exe + share\kith data), what scripts/install.ps1 (W14) installs.
+  # The programs it must carry are listed in scripts/windows-exes.txt; package-windows.sh fails on a missing required one,
+  # and on a v* tag on a pending one too. The exes are signed with Azure Artifact Signing (formerly Trusted Signing)
+  # before the zip and its SHA-256 are made; without the Azure secrets/vars the zip stays unsigned and the job is green
+  # (docs/windows-signing.md). Runs only on the release triggers, on a free runner.
+  build-windows:
+    if: ${{ !inputs.guest_only }}
+    runs-on: windows-2025
+    timeout-minutes: 60
+    # id-token is what azure/login trades for an Azure token (OIDC, no stored client secret).
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      KITH_WINDOWS_STRICT: ${{ github.ref_type == 'tag' && '1' || '' }}
+      # Signing config, names only in docs/windows-signing.md. Empty on forks and until Azure is set up.
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+      AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+      AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then v=${GITHUB_REF_NAME#v}
+          elif [ -n "$INPUT_VERSION" ]; then v=$INPUT_VERSION
+          else v=$(sed -n 's/^version = "\(.*\)"/\1/p' serve/host/Cargo.toml | head -1); fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Rust
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          key: release-windows
+      - name: Build
+        run: scripts/package-windows.sh build
+      # Signing sits between Build and Pack so the zip and its SHA-256 carry the signed exes. All-or-nothing: no
+      # config -> unsigned and green; some config -> every signing step must pass or the job is red.
+      - name: Signing config
+        id: sign
+        run: |
+          set=0 total=0
+          for n in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_SIGNING_ENDPOINT AZURE_SIGNING_ACCOUNT AZURE_SIGNING_PROFILE; do
+            total=$((total + 1)); [ -z "${!n}" ] || set=$((set + 1))
+          done
+          if [ "$set" = 0 ]; then echo "unsigned: Azure signing not configured"; echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ "$set" = "$total" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else echo "::error::Azure signing is half configured ($set of $total values set); see docs/windows-signing.md" >&2; exit 1; fi
+      - name: Stage exes to sign
+        if: steps.sign.outputs.enabled == 'true'
+        run: |
+          # Only the programs the zip carries (not every exe cargo leaves in target/release).
+          mkdir -p sign
+          sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' scripts/windows-exes.txt | while read -r exe _; do
+            if [ -f "serve/host/target/release/$exe" ]; then cp "serve/host/target/release/$exe" "sign/$exe"; fi
+          done
+          ls sign
+      - name: Azure login
+        if: steps.sign.outputs.enabled == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign exes
+        if: steps.sign.outputs.enabled == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ env.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\sign
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Verify signatures and put them back
+        if: steps.sign.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem sign -Filter *.exe | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            "{0}: {1} ({2})" -f $_.Name, $sig.Status, $sig.SignerCertificate.Subject
+            if ($sig.Status -ne 'Valid' -or -not $sig.TimeStamperCertificate) { $bad++ }
+          }
+          if ($bad -gt 0) { Write-Error "$bad exe(s) not validly signed and timestamped"; exit 1 }
+          Copy-Item sign\*.exe serve\host\target\release\ -Force
+      - name: Pack
+        run: scripts/package-windows.sh pack "${{ steps.v.outputs.version }}" serve/host/target/release dist
+      - name: Smoke test
+        run: |
+          mkdir smoke && 7z x -bso0 -osmoke dist/*.zip
+          smoke/kith-*/bin/kith.exe --version
+          smoke/kith-*/bin/kith-holder.exe --version
+          test -f smoke/kith-*/share/kith/kernel/VERSION
+          test ! -e smoke/kith-*/share/kith/kernel/bin && test ! -e smoke/kith-*/share/kith/kernel/lib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kith-windows-x64
+          path: dist/*
+          if-no-files-found: error
+
   # The client-only kith for Linux VMs (cloud bots): one static musl binary per CPU, built with zig as the C compiler
   # (ring still compiles a little C). Each arch builds on its own native runner, so the smoke test and the install test
   # run the real binary (docs/kith-bot-guests.md section 10). If aarch64-musl ever fails under zigbuild, build
   # aarch64-unknown-linux-gnu.2.17 instead (runs on any glibc since 2014).
   build-guest:
+    if: ${{ !inputs.windows_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -154,7 +271,7 @@ jobs:
   # exist and builds unsigned otherwise; only a tag publishes. Asset names carry no version so
   # releases/latest/download/<name> always resolves; electron-updater reads latest-mac.yml from the same release.
   desktop-mac:
-    if: ${{ !inputs.guest_only }}
+    if: ${{ !inputs.guest_only && !inputs.windows_only }}
     runs-on: macos-26
     timeout-minutes: 90
     defaults:
@@ -280,7 +397,7 @@ jobs:
 
   # Linux: the installed kith-serve is used (no bundled host), so there is nothing native to build first.
   desktop-linux:
-    if: ${{ !inputs.guest_only }}
+    if: ${{ !inputs.guest_only && !inputs.windows_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -331,7 +448,8 @@ jobs:
     # The Linux client never blocks the Mac release at first: publish runs when the Mac build passed (flip to
     # requiring build-guest once it has been stable for a few releases).
     if: ${{ !cancelled() && github.ref_type == 'tag' && needs.build.result == 'success' && needs.desktop-mac.result == 'success' && needs.desktop-linux.result == 'success' }}
-    needs: [build, build-guest, desktop-mac, desktop-linux]
+    # build-windows does not gate it either (the zip is unsigned and has known gaps, scripts/windows-exes.txt).
+    needs: [build, build-guest, build-windows, desktop-mac, desktop-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -344,7 +462,9 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          cat kith-*.tar.gz.sha256 > SHA256SUMS
+          for f in kith-*.tar.gz.sha256 kith-*.zip.sha256; do
+            if [ -f "$f" ]; then cat "$f"; fi
+          done > SHA256SUMS
           for f in kith-macos.dmg kith-macos.zip kith-linux-*.AppImage kith-linux-*.deb kith-linux-*.tar.gz; do
             [ -f "$f" ] && sha256sum "$f" >> SHA256SUMS
           done
@@ -373,6 +493,7 @@ jobs:
         with:
           files: |
             dist/*.tar.gz
+            dist/kith-*-windows-x64.zip
             dist/SHA256SUMS
             dist/SHA256SUMS.minisig
             dist/kith.rb

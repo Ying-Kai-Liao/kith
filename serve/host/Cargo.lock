@@ -2081,6 +2081,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "junction"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cfc352a66ba903c23239ef51e809508b6fc2b0f90e3476ac7a9ff47e863ae95"
+dependencies = [
+ "scopeguard",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "kasuari"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2148,12 +2158,20 @@ dependencies = [
  "kith-api",
  "kith-holder",
  "kith-kernel",
+ "kith-winsys",
  "proptest",
  "rusqlite",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
  "zeroize",
+]
+
+[[package]]
+name = "kith-fakemodel"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -2201,7 +2219,9 @@ dependencies = [
  "chrono-tz",
  "croner",
  "fs2",
+ "junction",
  "kith-procstart",
+ "kith-winsys",
  "libc",
  "regex",
  "rusqlite",
@@ -2259,6 +2279,7 @@ dependencies = [
  "kith-guest",
  "kith-kernel",
  "kith-mem",
+ "kith-winsys",
  "kith-wire",
  "libc",
  "portable-pty",
@@ -2301,6 +2322,15 @@ dependencies = [
  "base64 0.23.1",
  "ptts",
  "serde_json",
+]
+
+[[package]]
+name = "kith-winsys"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]

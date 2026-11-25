@@ -39,6 +39,11 @@ impl Holder {
     }
 }
 
+/// The line a launch dies with when its host-made turn claim cannot be attached (`KITH_TURN_CLAIM`); the CLI exits
+/// [`TURN_CLAIM_EXIT`] for it, so the host can tell "the turn is no longer this run's" from any other refusal.
+pub const TURN_CLAIM_REFUSED: &str = "the turn claim was refused";
+pub const TURN_CLAIM_EXIT: i32 = 10;
+
 /// Why a `proc` claim was not made. `Core` is exit 9: the launcher stops a person's run for it.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProcErr {
@@ -99,6 +104,13 @@ impl<'a> Taker<'a> {
         if self.writer() {
             return self.core_take(sid, pid, how, None, how.lifecycle_owner);
         }
+        // The host's claim is a core row: in Files mode there is nothing to attach it to, and a run that started anyway would
+        // leave it `claimed` with no process, for a host restart to requeue and prompt twice.
+        if self.turn_claim()?.is_some() {
+            return Err(format!(
+                "{TURN_CLAIM_REFUSED}: the claims are not the core's here, so the host's claim cannot be attached; nothing was started"
+            ));
+        }
         match take_claim_checked(self.c, sid, pid, how, &|| self.writer()) {
             Err(e) => Err(e.to_string()),
             Ok(Outcome::Taken) => Ok(None),
@@ -141,8 +153,13 @@ impl<'a> Taker<'a> {
                 "session id \"{sid}\" cannot be locked (only a-z 0-9 . _ - are allowed), so it cannot be claimed"
             ));
         }
+        let turn_claim = self.turn_claim()?;
         if let Some(why) = unclaimable {
-            if person.is_some() || (self.c.env)("KITH_REQUIRE_STUB").as_deref() == Some("1") {
+            // A host-claimed turn is never run unclaimed: the host reads its claim's state to know the run is alive.
+            if person.is_some()
+                || turn_claim.is_some()
+                || (self.c.env)("KITH_REQUIRE_STUB").as_deref() == Some("1")
+            {
                 return Err(why);
             }
             self.say(&format!("kith: {why}; this run is not claimed"));
@@ -172,6 +189,9 @@ impl<'a> Taker<'a> {
             {
                 params["revokeSeen"] = json!(n);
             }
+        }
+        if let Some(claim) = turn_claim {
+            self.attach_turn(claim, sid, pid, started.as_deref().unwrap_or_default())?;
         }
         let ans = match self.ask("claim.external", &params) {
             Ok(a) => a,
@@ -244,6 +264,42 @@ impl<'a> Taker<'a> {
             intent::taken(state, sid);
         }
         Ok(None)
+    }
+
+    /// The claim the host made for the turn this launch runs (`KITH_TURN_CLAIM`, which `bin/kith` hands over from its own
+    /// environment so the engine and a nested `kith` never see it). Empty is none.
+    fn turn_claim(&self) -> Result<Option<i64>, String> {
+        let Some(raw) = (self.c.env)("KITH_TURN_CLAIM").filter(|v| !v.trim().is_empty()) else {
+            return Ok(None);
+        };
+        raw.trim()
+            .parse::<i64>()
+            .ok()
+            .filter(|id| *id > 0)
+            .map(Some)
+            .ok_or_else(|| {
+                format!("{TURN_CLAIM_REFUSED}: KITH_TURN_CLAIM \"{raw}\" is not a claim id")
+            })
+    }
+
+    /// `claim.attach`: the launch's own process takes the host's claim for this turn before anything starts. The core's
+    /// check-and-set refuses a claim that was cancelled, adopted by a host restart, another conversation's, or already
+    /// attached by another process; the same process asking again (once per claim step) is told `again`.
+    fn attach_turn(&self, claim: i64, sid: &str, pid: i64, started: &str) -> Result<(), String> {
+        let params = json!({"claimId": claim, "conversation": sid, "pid": pid, "started": started});
+        match self.ask("claim.attach", &params) {
+            Ok(a) if a.get("attached").is_some_and(truthy) => Ok(()),
+            Ok(a) => {
+                let state = a.get("state").and_then(Value::as_str).unwrap_or("unknown");
+                Err(format!(
+                    "{TURN_CLAIM_REFUSED}: claim {claim} is no longer this run's to start in {sid} (it is {state}); nothing was started"
+                ))
+            }
+            Err(CoreErr::Refused(e)) => Err(format!("{TURN_CLAIM_REFUSED}: {e}")),
+            Err(CoreErr::NoAnswer(why)) => Err(format!(
+                "{TURN_CLAIM_REFUSED}: the Kith core is not answering ({why}); nothing was started"
+            )),
+        }
     }
 
     /// [`Self::take`], retried for up to `wait` while a live writer holds the session. `None` when taken (also when `pid`

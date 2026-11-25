@@ -3,21 +3,35 @@
 //! `chat/oneshot.rs`; this is the launcher the `kith` program and the kernel's one-shots use.
 
 use crate::client::{Acp, Failure, FailureKind, Incoming, content_text};
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 use std::time::Duration;
 
 /// What to run.
+#[derive(Default)]
 pub struct RunSpec {
     /// The engine's ACP command line (its row's `local` mode with `{bin}` resolved, or a registry adapter's).
     pub command: String,
     pub cwd: String,
+    /// More folders the engine may work in (ACP `additionalDirectories`); sent only to an agent that says it takes them.
+    pub dirs: Vec<String>,
     /// Added to the agent's environment; kept out of the command line (it can hold API keys).
     pub env: Vec<(String, String)>,
     pub model: Option<String>,
+    /// ACP session modes to run in, best first: the first the agent lists is set. Empty: the agent's own.
+    pub modes: Vec<String>,
     /// ACP `mcpServers` for the session (see [`mcp_servers`]).
     pub mcp_servers: Value,
     pub task: String,
+    /// Continue this session (`session/load`) when the agent advertises `loadSession`; `task` is then the next prompt.
+    pub resume: Option<String>,
+    /// The task as a new session needs it (the agent's instructions in front): sent instead of `task` when the run is
+    /// not a resumed one, that is when `resume` is unset or the agent cannot load sessions.
+    pub fresh_task: Option<String>,
+    /// The reasoning effort to ask for: set when `session/new` lists a `thought_level` config option, else said on stderr.
+    pub effort: Option<String>,
+    /// Variables of this process kept out of the agent's environment.
+    pub env_remove: Vec<String>,
     /// For the whole run, handshake included.
     pub timeout: Duration,
     /// Answer the engine's permission requests with its first "allow" option; otherwise they are refused.
@@ -135,12 +149,26 @@ pub async fn run_once(spec: RunSpec) -> Result<Outcome> {
 /// [`run_once`], and with it what the engine had reported it cost when the run ended, whether it finished or not: a run
 /// that crashed or timed out still spent that money, and a delegation's cost cap must count it.
 pub async fn run_once_spent(spec: RunSpec) -> (Result<Outcome>, Option<f64>) {
-    let (acp, mut rx) = match Acp::spawn(&spec.command, &spec.cwd, &spec.env) {
-        Ok(spawned) => spawned,
-        Err(e) => return (Err(e), None),
-    };
+    run_once_until(spec, std::future::pending()).await
+}
+
+/// [`run_once_spent`] that also stops, the agent with it, when `stop` completes (a TERM to the process that runs it): the
+/// run then ends as a [`Failure`] of kind [`FailureKind::Exited`].
+pub async fn run_once_until(
+    spec: RunSpec,
+    stop: impl std::future::Future<Output = ()>,
+) -> (Result<Outcome>, Option<f64>) {
+    let (acp, mut rx) =
+        match Acp::spawn_without(&spec.command, &spec.cwd, &spec.env, &spec.env_remove) {
+            Ok(spawned) => spawned,
+            Err(e) => return (Err(e), None),
+        };
     let mut cost = None;
-    let result = tokio::time::timeout(spec.timeout, session(&acp, &mut rx, &spec, &mut cost)).await;
+    let run = tokio::time::timeout(spec.timeout, session(&acp, &mut rx, &spec, &mut cost));
+    let result = tokio::select! {
+        r = run => r,
+        () = stop => Ok(Err(Failure::error(FailureKind::Exited, "stopped before it finished"))),
+    };
     acp.kill().await;
     crate::stopped().await;
     let result = result.unwrap_or_else(|_| {
@@ -163,31 +191,68 @@ async fn session(
     cost: &mut Option<f64>,
 ) -> Result<Outcome> {
     // The handshake is answered before anything else is read, but a hung agent still ends at the run's deadline.
-    acp.request(
-        "initialize",
-        json!({
-            "protocolVersion": 1,
-            "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
-            "clientInfo": {"name": "kith", "title": "Kith", "version": env!("CARGO_PKG_VERSION")},
-        }),
-    )
-    .await?;
-    let created = acp
+    let init = acp
         .request(
-            "session/new",
-            json!({"cwd": spec.cwd, "mcpServers": spec.mcp_servers}),
+            "initialize",
+            json!({
+                "protocolVersion": 1,
+                "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
+                "clientInfo": {"name": "kith", "title": "Kith", "version": env!("CARGO_PKG_VERSION")},
+            }),
         )
         .await?;
-    let sid = created["sessionId"]
-        .as_str()
-        .ok_or_else(|| anyhow!("agent returned no sessionId"))?
-        .to_owned();
+    let mut new_session = json!({"cwd": spec.cwd, "mcpServers": spec.mcp_servers});
+    if !spec.dirs.is_empty() {
+        if init["agentCapabilities"]["sessionCapabilities"]["additionalDirectories"].is_object() {
+            new_session["additionalDirectories"] = json!(spec.dirs);
+        } else {
+            eprintln!(
+                "kith: this agent works in one directory over ACP; this run is without {}",
+                spec.dirs.join(", ")
+            );
+        }
+    }
+    let loadable = init["agentCapabilities"]["loadSession"].as_bool() == Some(true);
+    let resumed = spec.resume.as_deref().filter(|_| loadable);
+    if let Some(id) = spec.resume.as_deref().filter(|_| !loadable) {
+        eprintln!("kith: this agent cannot resume session {id}; starting a new session");
+    }
+    let (created, sid) = if let Some(id) = resumed {
+        new_session["sessionId"] = json!(id);
+        let loaded = acp.request("session/load", new_session).await?;
+        // The agent replays the session's history before it answers: none of it is this run's answer or cost.
+        let (mut old_text, mut old_cost) = (String::new(), None);
+        while let Ok(inc) = rx.try_recv() {
+            if matches!(inc, Incoming::Closed { .. }) {
+                break;
+            }
+            handle(acp, Some(inc), &mut old_text, &mut old_cost, spec.approve).await?;
+        }
+        (loaded, id.to_owned())
+    } else {
+        let created = acp.request("session/new", new_session).await?;
+        let sid = created["sessionId"]
+            .as_str()
+            .ok_or_else(|| anyhow!("agent returned no sessionId"))?
+            .to_owned();
+        (created, sid)
+    };
+    if !spec.modes.is_empty() {
+        select_mode(acp, &created, &sid, &spec.modes, spec.approve).await?;
+    }
     if let Some(model) = spec.model.as_deref().filter(|m| !m.is_empty()) {
         select_model(acp, &created, &sid, model).await?;
     }
+    if let Some(effort) = spec.effort.as_deref().filter(|e| !e.is_empty()) {
+        select_effort(acp, &created, &sid, effort).await?;
+    }
+    let task = match (&spec.fresh_task, resumed) {
+        (Some(fresh), None) => fresh,
+        _ => &spec.task,
+    };
     let prompt = acp.request(
         "session/prompt",
-        json!({"sessionId": sid, "prompt": [{"type": "text", "text": spec.task}]}),
+        json!({"sessionId": sid, "prompt": [{"type": "text", "text": task}]}),
     );
     tokio::pin!(prompt);
     let mut text = String::new();
@@ -225,6 +290,44 @@ async fn session(
     })
 }
 
+/// The first of `modes` the agent lists in `session/new`. None listed: a run without `approve` ends before its task is
+/// sent (the agent's own mode may reach further than asked); an approved one stays as it started, said on stderr.
+async fn select_mode(
+    acp: &Acp,
+    created: &Value,
+    sid: &str,
+    modes: &[String],
+    approve: bool,
+) -> Result<()> {
+    let listed = created["modes"]["availableModes"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let Some(mode) = modes
+        .iter()
+        .find(|m| listed.iter().any(|l| l["id"].as_str() == Some(m.as_str())))
+    else {
+        if !approve {
+            bail!(
+                "this agent offers none of the session modes {}; the task was not sent",
+                modes.join(", ")
+            );
+        }
+        eprintln!(
+            "kith: this agent offers none of the session modes {}; this run is in its own mode",
+            modes.join(", ")
+        );
+        return Ok(());
+    };
+    acp.request(
+        "session/set_mode",
+        json!({"sessionId": sid, "modeId": mode}),
+    )
+    .await
+    .map(|_| ())
+    .map_err(|e| e.context(format!("Couldn't set session mode {mode}")))
+}
+
 /// The agent's model list may be a config option (`category: model`) or the older `session/set_model`.
 async fn select_model(acp: &Acp, created: &Value, sid: &str, model: &str) -> Result<()> {
     let option = created["configOptions"].as_array().and_then(|options| {
@@ -254,6 +357,41 @@ async fn select_model(acp: &Acp, created: &Value, sid: &str, model: &str) -> Res
         .await
         .map(|_| ())
         .map_err(|e| e.context(format!("Couldn't select model {model}")))
+}
+
+/// Sets the effort through the agent's `thought_level` config option when it has one that takes the value; otherwise says
+/// on stderr that the run is without it.
+async fn select_effort(acp: &Acp, created: &Value, sid: &str, effort: &str) -> Result<()> {
+    let option = created["configOptions"]
+        .as_array()
+        .and_then(|o| o.iter().find(|o| o["category"] == "thought_level"));
+    let takes = |o: &Value| {
+        // Flat `{value}` entries, or groups of them; an option that lists none takes any value.
+        let mut values = Vec::new();
+        for item in o["options"].as_array().into_iter().flatten() {
+            match item["options"].as_array() {
+                Some(group) => values.extend(group.iter().filter_map(|g| g["value"].as_str())),
+                None => values.extend(item["value"].as_str()),
+            }
+        }
+        values.is_empty() || values.contains(&effort)
+    };
+    match option.filter(|o| takes(o)).and_then(|o| o["id"].as_str()) {
+        Some(id) => acp
+            .request(
+                "session/set_config_option",
+                json!({"sessionId": sid, "configId": id, "value": effort}),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| e.context(format!("Couldn't set effort {effort}"))),
+        None => {
+            eprintln!(
+                "kith: this agent takes no effort per run over ACP; this run is without effort {effort}"
+            );
+            Ok(())
+        }
+    }
 }
 
 /// Keeps reply text and the reported cost; answers what the agent asks of us. Errors once the agent is gone.

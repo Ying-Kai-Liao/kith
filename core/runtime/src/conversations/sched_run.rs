@@ -13,6 +13,9 @@
 //!    claim. The check-and-set is what makes `cancel_waiting_in`'s "no pid yet" rule true: a claim a rollback or a pause
 //!    ended can never be attached, so no run starts that they cannot see.
 //!
+//! Both steps serve every detached source (`detached::SOURCES`: a schedule's turn, a wake's), and a report on the attached
+//! claim does not end it (`detached`, R3a).
+//!
 //! A schedule turn's claim also reads the job's paused row ([`paused_in`], `Fence::Paused`): the pause is level-triggered, so a
 //! turn queued before the pause (or put back by a restart) is cancelled as it is claimed, not run.
 
@@ -50,8 +53,9 @@ pub(crate) fn paused_in(tx: &rusqlite::Connection, turn: i64) -> Result<bool> {
     }
 }
 
-/// Step 1: claims a pulled schedule turn for a run that has no process yet. Refused for any turn of another source (the
-/// other kinds of turn go through `claim_next`, which picks their account).
+/// Step 1: claims a pulled detached turn (a schedule's or a wake's: [`super::detached::SOURCES`]) for a run that has no
+/// process yet. Refused for any turn of another source (the other kinds of turn go through `claim_next`, which picks their
+/// account).
 pub(crate) fn claim_run(
     core: &mut Core,
     conversation: &str,
@@ -81,9 +85,9 @@ pub(crate) fn claim_run(
                 |r| r.get(0),
             )
             .optional()?;
-        if source.as_deref() != Some("schedule") {
+        if !source.as_deref().is_some_and(super::detached::is_source) {
             return Err(Error::Refused(format!(
-                "kith-core: turn {turn} is not waiting for {person} in conversation {conversation} as a schedule's"
+                "kith-core: turn {turn} is not waiting for {person} in conversation {conversation} as a detached run's"
             )));
         }
         let claimed = claims::claim_checked_in(&tx, generation, &req, now)?;
@@ -106,6 +110,7 @@ pub(crate) fn claim_run(
 pub(crate) fn attach(
     core: &mut Core,
     claim_id: i64,
+    conversation: Option<&str>,
     pid: u32,
     started: &str,
     now: i64,
@@ -116,11 +121,18 @@ pub(crate) fn attach(
         ));
     }
     let tx = core.claim_tx()?;
+    // A run names its own conversation: a claim whose turn is another conversation's is refused, not attached. Only a
+    // schedule's turn may omit it (the Python `kith-sched run-turn` still does).
     let n = tx.execute(
-        "UPDATE claims SET kind = 'external', state = 'running', running_at = ?2, pid = ?3, pid_started = ?4
-         WHERE claim_id = ?1 AND kind = 'turn' AND state = 'claimed' AND pid IS NULL AND account IS NULL
-           AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = ?1 AND t.source = 'schedule' AND t.state = 'claimed')",
-        params![claim_id, now, pid, started],
+        &format!(
+            "UPDATE claims SET kind = 'external', state = 'running', running_at = ?2, pid = ?3, pid_started = ?4
+             WHERE claim_id = ?1 AND kind = 'turn' AND state = 'claimed' AND pid IS NULL AND account IS NULL
+               AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = ?1 AND t.source IN {} AND t.state = 'claimed'
+                           AND (?5 IS NULL OR t.conversation = ?5)
+                           AND (?5 IS NOT NULL OR t.source = 'schedule'))",
+            super::detached::sources_sql()
+        ),
+        params![claim_id, now, pid, started, conversation],
     )?;
     if n == 1 {
         tx.execute(

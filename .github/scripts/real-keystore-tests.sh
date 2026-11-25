@@ -2,7 +2,9 @@
 # Runs the secrets envelope's real-store tests (core/runtime/src/secrets/tests.rs, gated behind
 # KITH_TEST_OS_KEYSTORE=1) against a throwaway store, so nothing touches a real login keychain:
 #   macOS: a keychain made in this job and set as the default;
-#   Linux: gnome-keyring in its own D-Bus session, unlocked with a throwaway password.
+#   Linux: gnome-keyring in its own D-Bus session, unlocked with a throwaway password;
+#   Windows: Credential Manager of the runner's own account (the tests use a throwaway target name and delete it), plus
+#   the kith-winsys tests (native access list, Credential Manager, process tree, stop event).
 # Run from serve/host. Needs the pinned toolchain and, on Linux, gnome-keyring, libsecret-tools and dbus.
 set -euo pipefail
 
@@ -14,7 +16,7 @@ run_tests() {
   }
   echo "$out"
   # The tests return early without the variable; make sure one really ran against the store.
-  echo "$out" | grep -Eq 'test .*os_store_(macos_security_cli|linux_secret_tool) \.\.\. ok' || {
+  echo "$out" | grep -Eq 'test .*os_store_(macos_security_cli|linux_secret_tool|windows_credential_manager) \.\.\. ok' || {
     echo "::error::the real-store test did not run"
     return 1
   }
@@ -49,6 +51,10 @@ case "$(uname -s)" in
       echo -n throwaway | gnome-keyring-daemon --unlock --components=secrets >/dev/null
       run_tests
     '
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    cargo test -p kith-winsys --locked -- --test-threads=1
+    run_tests
     ;;
   *)
     echo "no real key store test for $(uname -s)" >&2

@@ -376,3 +376,16 @@ equal once rewritten. Use it when a case masks two forms to two tokens (the Sess
 
 `selftest.py` checks the runner itself: the same line is the same, a deliberately different NEW side fails with a diff,
 the same difference listed as intended passes, an unused entry is stale. Run by `kernel/tests/kith-difftest-check`.
+
+### launch-exec (retire-python P1-12 R3a)
+
+`corpus/launch-exec.json` has two kinds of case. `launch-exec-owner-*` (R2) compare what the bash entry's `claude` arguments and account
+variables are with what `kith kernel launch AGENT --plan-exec` says they will be. `launch-exec-run-*` (R3a) compare the whole one-shot:
+OLD is the bash body (`kith AGENT task`), NEW is the program running it in one process (`kith kernel launch-exec AGENT --kernel DIR task`), with a fake
+`claude` that prints its arguments (the long prompt is one word), the settings and MCP files it is pointed at, the environment that carries the
+run's state, its pid, and whether the claim on its session names it; a fake `kith-stub` that prints the lock arguments and runs what follows `--`.
+Both sides run with `KITH_CORE=rust` (the hooks are the program's on both) and the claim files are compared with their pids and session ids masked
+(`normalize_paths`). The line `launch-exec` in `lib/core-switched.txt` is off, so the OLD side is the script; the router itself is proved by
+`kith-run-kind-check`, `kith-owner-launch-check` and `kith-launch-once-race-check`, which run once more with the line switched on in a copy of the
+kernel folder. Not here: a fake host (the run socket's `consumeAccess` and `issueAskToken`), so a guest's grants are compared with no answer.
+
