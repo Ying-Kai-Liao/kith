@@ -22,6 +22,8 @@ use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
 
+use kith_kernel::GUESTS_NOT_ON_WINDOWS;
+
 /// An invite's link stays good this long.
 const INVITE_MS: i64 = 24 * 60 * 60 * 1000;
 /// Dollars a month an invited person's runs of one agent may cost, until the owner changes it.
@@ -32,6 +34,8 @@ pub(crate) static AUTH_WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::cons
 
 pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
     Ok(ControlFlow::Break(match method {
+        // Refused before `create_invite` writes an invite row, a token or a card.
+        "createInvite" if cfg!(windows) => return Err(NotAllowed(GUESTS_NOT_ON_WINDOWS.into()).into()),
         "createInvite" => create_invite(hub, &b).await?,
         "invites" => invites(hub)?,
         "revokeInvite" => revoke_invite(hub, str_arg(&b, "inviteId")?).await?,

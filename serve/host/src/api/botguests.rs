@@ -115,6 +115,10 @@ impl Actor {
 
 pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
     Ok(ControlFlow::Break(match method {
+        // A guest bot is parked on Windows: refused before a bot row, an invite or a cloud call exists.
+        "createBotInvite" | "decideBot" if cfg!(windows) => {
+            return Err(NotAllowed(kith_kernel::GUESTS_NOT_ON_WINDOWS.into()).into());
+        }
         "createBotInvite" => create_bot_invite(hub, caller, &b).await?,
         "revokeBotInvite" => revoke_bot_invite(hub, caller, str_arg(&b, "inviteId")?).await?,
         "revokeBot" => revoke_bot(hub, caller, str_arg(&b, "botId")?).await?,
