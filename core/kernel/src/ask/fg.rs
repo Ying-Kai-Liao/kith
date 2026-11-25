@@ -193,9 +193,11 @@ fn prev_str<'a>(prev: Option<&'a Value>, key: &str) -> Option<&'a str> {
     prev?.get(key)?.as_str()
 }
 
-/// Whether a live writer holds `sid` (a `claim.list` of the core: a terminal, a run or a turn). A core that does not answer is
-/// read as a writer, as the Python reads it: the message then goes the way of a wake, which says so.
-fn writer_live(host: &Host, sid: &str) -> bool {
+/// Whether a live writer holds `sid`, as `kith-wake`'s `writer_live` reads it. The claims are the core's (a `claim.list`: a terminal,
+/// a run or a turn), or, while the `claims` module is not switched (the core says so in those words), the kernel's own files
+/// `<state>/live/terminal/<sid>.claim` and `.takeover.claim` of a process that still runs. Any other answer, or none (down, busy,
+/// lost), reads as a writer: a follow-up must never start an engine on a session someone may be writing.
+pub(super) fn writer_live(host: &Host, sid: &str) -> bool {
     match (host.call)("claim.list", &json!({})) {
         Ok(got) => got
             .get("live")
@@ -203,7 +205,41 @@ fn writer_live(host: &Host, sid: &str) -> bool {
             .into_iter()
             .flatten()
             .any(|c| c.get("conversation").and_then(Value::as_str) == Some(sid)),
+        Err(Fail::Refused(why)) if why.contains("not switched to the core") => {
+            let dir = host.state.join("live").join("terminal");
+            [format!("{sid}.claim"), format!("{sid}.takeover.claim")]
+                .iter()
+                .any(|f| claim_file_alive(&dir.join(f)))
+        }
         Err(_) => true,
+    }
+}
+
+/// A kernel claim file whose process still runs (the start stamp is compared when the file holds one and it is of the same form).
+fn claim_file_alive(path: &std::path::Path) -> bool {
+    let Some(claim) = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+    else {
+        return false;
+    };
+    let Some(pid) = claim
+        .get("pid")
+        .and_then(Value::as_u64)
+        .and_then(|p| u32::try_from(p).ok())
+    else {
+        return false;
+    };
+    match procstart::probe(pid) {
+        procstart::Probe::Gone => false,
+        procstart::Probe::Alive(now) => {
+            let recorded = claim.get("procStart").and_then(Value::as_str);
+            match (recorded, now) {
+                (Some(r), Some(n)) if procstart::comparable(r, &n) => r == n,
+                _ => true,
+            }
+        }
+        procstart::Probe::Unknown => true,
     }
 }
 

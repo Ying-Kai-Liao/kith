@@ -45,6 +45,19 @@ fn scratch(name: &str) -> std::path::PathBuf {
 }
 
 fn go_in(fake: &Fake, args: &[&str], dir: &std::path::Path) -> (i32, String, String) {
+    with_host(fake, dir, |host| {
+        let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = run(host, &args, &mut out, &mut err);
+        (
+            code,
+            String::from_utf8_lossy(&out).into_owned(),
+            String::from_utf8_lossy(&err).into_owned(),
+        )
+    })
+}
+
+fn with_host<T>(fake: &Fake, dir: &std::path::Path, f: impl FnOnce(&Host) -> T) -> T {
     let call = |m: &str, p: &Value| fake.call(m, p);
     let terminated = || false;
     let watch = || ();
@@ -60,14 +73,7 @@ fn go_in(fake: &Fake, args: &[&str], dir: &std::path::Path) -> (i32, String, Str
         watch_term: &watch,
         settings: &settings,
     };
-    let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let code = run(&host, &args, &mut out, &mut err);
-    (
-        code,
-        String::from_utf8_lossy(&out).into_owned(),
-        String::from_utf8_lossy(&err).into_owned(),
-    )
+    f(&host)
 }
 
 #[test]
@@ -274,4 +280,53 @@ fn bg_continuing_a_conversation_that_kept_a_project_is_refused() {
         "kith ask: this conversation keeps -p, which a background ask does not carry yet\n"
     );
     assert!(none.calls.borrow().is_empty());
+}
+
+fn claims(answer: Result<Value, String>) -> Fake {
+    Fake::new(vec![("claim.list", answer)])
+}
+
+#[test]
+fn a_writer_is_known_from_the_cores_claims() {
+    let dir = scratch("writer");
+    let live = claims(Ok(json!({"live": [{"conversation": "s1", "pid": 1}]})));
+    assert!(with_host(&live, &dir, |h| super::fg::writer_live(h, "s1")));
+    assert!(!with_host(&live, &dir, |h| super::fg::writer_live(
+        h, "other"
+    )));
+}
+
+#[test]
+fn a_core_that_cannot_answer_is_a_writer_but_unswitched_claims_read_the_files() {
+    let dir = scratch("claimfiles");
+    let _ = std::fs::remove_dir_all(&dir);
+    // down, busy, lost, any other refusal: fail closed
+    for fake in [
+        Fake::new(vec![]),
+        claims(Err("kith-core: the core is busy".into())),
+    ] {
+        assert!(with_host(&fake, &dir, |h| super::fg::writer_live(h, "s1")));
+    }
+    // claims not switched: the kernel's files are the record (as kith-wake reads them): none, no writer
+    let unswitched = claims(Err(
+        "kith-core: claim.list: the claims are not switched to the core on this Mac".into(),
+    ));
+    assert!(!with_host(&unswitched, &dir, |h| super::fg::writer_live(
+        h, "s1"
+    )));
+    // a claim file of a live process (this one): a writer
+    let terminal = dir.join("state").join("live").join("terminal");
+    std::fs::create_dir_all(&terminal).expect("folder");
+    std::fs::write(
+        terminal.join("s1.claim"),
+        format!("{{\"pid\": {}}}", std::process::id()),
+    )
+    .expect("file");
+    assert!(with_host(&unswitched, &dir, |h| super::fg::writer_live(
+        h, "s1"
+    )));
+    assert!(!with_host(&unswitched, &dir, |h| super::fg::writer_live(
+        h, "s2"
+    )));
+    let _ = std::fs::remove_dir_all(&dir);
 }
