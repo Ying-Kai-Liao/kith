@@ -1368,12 +1368,14 @@ fn a_login_typed_as_the_owner_stays_unowned() {
 }
 
 /// `kith-auth person <old> id=<new>` over a file holding `auth`, or `None` where there is no python3.
+#[cfg(unix)]
 fn python_rename(auth: &Value, old: &str, new: &str) -> Option<Value> {
     python_person(auth, &[old, &format!("id={new}")], None).map(|(auth, _)| auth)
 }
 
 /// `kith-auth person ARGS` over a file holding `auth` (with `kernel` as its kernel folder, for the service specs):
 /// the file after, and what it printed. `None` where there is no python3.
+#[cfg(unix)]
 fn python_person(
     auth: &Value,
     args: &[&str],
@@ -1416,6 +1418,8 @@ fn python_person(
     ))
 }
 
+// Compares against the Python kith-auth, which is Unix only (`import fcntl`) until retire-python P1.
+#[cfg(unix)]
 #[test]
 fn the_secrets_after_a_rename_are_what_kith_auth_leaves() {
     let mut a = secrets_world();
@@ -1461,6 +1465,8 @@ fn the_secrets_after_a_rename_are_what_kith_auth_leaves() {
     assert_eq!(narrow(&profiles), narrow(&py["profiles"]));
 }
 
+// Compares against the Python kith-auth, which is Unix only (`import fcntl`) until retire-python P1.
+#[cfg(unix)]
 #[test]
 fn the_owner_change_is_what_kith_auth_leaves() {
     // Python's input holds the default logins unmarked; the import stores them as the owner's id.
