@@ -26,12 +26,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
 
-use super::core::Core;
+use super::core::{Core, CoreErr};
 use super::resolve::Host;
 use super::runproc::{self, Wait};
 use super::writer::Taker;
 use super::{Ctx, intent};
 use crate::lifecycle::transcript;
+use crate::wake;
 
 /// The cache life at or below which there is no timer, so the decision to compact is made at the moment of sleep.
 const SHORT_CACHE: i64 = transcript::SHORT_CACHE;
@@ -39,6 +40,9 @@ const SHORT_CACHE: i64 = transcript::SHORT_CACHE;
 const DEFAULT_SLEEP_AFTER: f64 = 3600.0;
 /// How long the status pipe is read after the child is gone (a descendant may have kept it open).
 const STATUS_READ: Duration = Duration::from_secs(3);
+
+/// `wake.released` is a tell, not a wait: a lost call is the next tick's.
+const WAKE_CALL: Duration = Duration::from_secs(5);
 
 /// Where the notes go: a line each (stderr in the program, a list in the tests).
 pub type Say<'a> = &'a dyn Fn(&str);
@@ -294,12 +298,28 @@ fn record_quit(c: &Ctx, pid: i64) {
 }
 
 /// A terminal held its session while wakes for it queued (a reply, a card, a waiter): now that it let go, the kernel's wake
-/// queue may deliver them without waiting for the next tick. A kith ask this session made and didn't read the answer of
-/// becomes one of them first (kith-ask --sweep, M8).
-fn wake_owed(c: &Ctx, kernel: &Path) {
+/// queue may deliver them without waiting for the next tick. With the queue the core's that is one call, `wake.released`
+/// (R8), and no shell: the core unparks the conversation's wake turns, a lost call is caught by its next tick, and the host
+/// runs the ask hand-over (`kith-ask --sweep`) on its next tick. Until the cutover the queue is the files: a kith ask this
+/// session made and didn't read the answer of becomes one of them first (kith-ask --sweep, M8), then `kith-wake drain`.
+fn wake_owed(c: &Ctx, core: Option<&dyn Core>, kernel: &Path, pid: i64) {
     let Some(state) = c.state.as_deref() else {
         return;
     };
+    if wake::switched(Some(state), c.machine.as_deref()) {
+        if let (Some(core), Some(e)) = (core, entry_of(c, pid, true))
+            && let Some(sid) = str_of(&e, "sessionId")
+        {
+            let call = |m: &str, p: &Value| {
+                core.call(m, p, Some(WAKE_CALL)).map_err(|e| match e {
+                    CoreErr::Refused(w) => wake::Fail::Refused(w),
+                    CoreErr::NoAnswer(w) => wake::Fail::NoAnswer(w),
+                })
+            };
+            wake::released(&call, sid);
+        }
+        return;
+    }
     let bin = kernel.join("bin");
     let script = r#""$0" "$1" --sweep; ls "$3"/*.json >/dev/null 2>&1 && exec "$0" "$2" drain"#;
     let args: Vec<OsString> = [
@@ -566,7 +586,7 @@ fn after(
     if !taken_note(c, host, say, agent, eng) {
         resume_note(c, host, say, agent, eng);
     }
-    wake_owed(c, kernel);
+    wake_owed(c, core, kernel, eng);
 }
 
 #[cfg(test)]

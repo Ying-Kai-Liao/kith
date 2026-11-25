@@ -229,7 +229,7 @@ case $1 in
   bug)                shift; exec "$KITH/bin/kith-bug" "${@:---help}" ;;
   project)            shift; exec "$KITH/bin/kith-project" "$@" ;;
   schedule)           shift; exec "$KITH/bin/kith-sched" "${@:-ls}" ;;
-  wake)               shift; exec "$KITH/bin/kith-wake" "${@:-ls}" ;;
+  wake)               shift; . "$KITH/lib/kith-core.sh"; kith_wake_exec "${@:-ls}" || exec "$KITH/bin/kith-wake" "${@:-ls}" ;;
   acp)                shift; exec "$KITH/bin/kith-acp" "$@" ;;
   group|bot)          exec "$KITH/bin/kith-group" "$@" ;;
   people|invite)      exec "$KITH/bin/kith-people" "$@" ;;
