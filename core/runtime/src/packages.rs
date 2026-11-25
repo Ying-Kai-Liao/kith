@@ -157,6 +157,10 @@ struct MoveJob {
 }
 
 /// What the mover thread is asked, in the order it was asked.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one message at a time on a channel; boxing it buys nothing"
+)]
 enum MoveMsg {
     Move(MoveJob),
     Repair(Vec<LifeMove>),

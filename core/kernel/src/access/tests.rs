@@ -622,13 +622,13 @@ fn ticked_jobs_add_their_pieces_to_a_run_and_a_bot_gets_no_more_than_its_owner()
 #[test]
 fn domains_follow_the_guard_rule() {
     for ok in ["a.com", "registry.npmjs.org", "a-b.c0.example", "x.y"] {
-        assert!(jobs::valid_domain(ok), "{ok}");
+        assert!(valid_domain(ok), "{ok}");
     }
     for bad in [
         "", "com", "*.a.com", "a.com:80", "1.2.3.4", "A.com", "-a.com", "a-.com", "a..com",
         "a.1com", ".a.com",
     ] {
-        assert!(!jobs::valid_domain(bad), "{bad}");
+        assert!(!valid_domain(bad), "{bad}");
     }
 }
 

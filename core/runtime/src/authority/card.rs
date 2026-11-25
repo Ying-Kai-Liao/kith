@@ -117,6 +117,10 @@ fn never_granted(
 }
 
 #[cfg(not(unix))]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "the Unix twin answers None for a path it allows"
+)]
 fn never_granted(
     _home: &str,
     _life: &Life,

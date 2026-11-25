@@ -1015,6 +1015,7 @@ fn a_database_imported_before_handles_cannot_say_a_person_is_unused() {
 
 // --- lane B filled by the import ---------------------------------------------------------------------------------------------
 
+#[cfg(unix)] // the import stays Unix (windows-owner WI1: a Windows install has nothing to import)
 /// A world the real importer fills: a person with an `agent@<id>` grant, one who owns a profile, one it is lent to, one with
 /// nothing, and an owned profile of an id that is no longer a person.
 fn imported_world() -> Rig {
@@ -1036,6 +1037,7 @@ fn imported_world() -> Rig {
     rig
 }
 
+#[cfg(unix)]
 #[test]
 fn after_an_import_remove_unused_refuses_a_person_with_a_grant_a_profile_or_one_lent_to_them() {
     let mut rig = imported_world();
@@ -1055,6 +1057,7 @@ fn after_an_import_remove_unused_refuses_a_person_with_a_grant_a_profile_or_one_
         .unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn after_an_import_a_removed_persons_id_is_kept_while_they_own_a_profile() {
     let mut rig = imported_world();
@@ -1073,6 +1076,7 @@ fn after_an_import_a_removed_persons_id_is_kept_while_they_own_a_profile() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_database_imported_before_the_tables_were_filled_cannot_say_an_id_is_free_or_a_person_unused() {
     let mut rig = imported_world();
