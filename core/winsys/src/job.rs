@@ -28,7 +28,6 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
     EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, InitializeProcThreadAttributeList,
-    JOB_OBJECT_ASSIGN_PROCESS, JOB_OBJECT_QUERY, JOB_OBJECT_TERMINATE,
     LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW,
     TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
@@ -39,6 +38,10 @@ use crate::{Handle, last_err, wide};
 const PROC_THREAD_ATTRIBUTE_JOB_LIST: usize = 0x0002_000D;
 /// `ProcThreadAttributeHandleList` (2) with the input flag: the only handles the new process inherits.
 const PROC_THREAD_ATTRIBUTE_HANDLE_LIST: usize = 0x0002_0002;
+/// Job access rights (winnt.h): assign a process, query, terminate.
+const JOB_OBJECT_ASSIGN_PROCESS: u32 = 0x1;
+const JOB_OBJECT_QUERY: u32 = 0x4;
+const JOB_OBJECT_TERMINATE: u32 = 0x8;
 /// `STILL_ACTIVE`, what `GetExitCodeProcess` answers for a process that has not ended.
 const STILL_ACTIVE: u32 = 259;
 
