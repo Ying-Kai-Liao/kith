@@ -31,6 +31,12 @@ on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
+    inputs:
+      os:
+        description: 'Runner row: windows-2025 (default) or windows-2022'
+        type: choice
+        options: [windows-2025, windows-2022]
+        default: windows-2025
   pull_request:
     paths:
       - .github/workflows/windows-e2e.yml
@@ -55,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event_name == 'schedule' && fromJSON('["windows-2025","windows-2022"]') || fromJSON('["windows-2025"]') }}
+        os: ${{ github.event_name == 'schedule' && fromJSON('["windows-2025","windows-2022"]') || (github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.os))) || fromJSON('["windows-2025"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:

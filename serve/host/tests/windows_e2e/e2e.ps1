@@ -85,14 +85,8 @@ Check 'kith.exe --version runs from the unpacked zip' ($ver.Code -eq 0 -and $ver
 Check 'the zip carries the data folder' (Test-Path (Join-Path $Unpacked 'share\kith\kernel\VERSION'))
 Check 'the zip leaves out kernel\bin (Windows data only)' (-not (Test-Path (Join-Path $Unpacked 'share\kith\kernel\bin')))
 
-# The zip carries kith.exe but no kith-serve.exe, and kith-servew.exe starts kith-serve.exe beside itself: installed as is, the
-# host never starts (found by this e2e's first run). Named gap, not a silent pass: W14's install.ps1 must make kith-serve.exe
-# from kith.exe (or W7 must ship it). Until then this step does it, so the rest can run.
-if (-not (Test-Path (Join-Path $Bin 'kith-serve.exe'))) {
-  Write-Host '::warning::the Windows zip has no kith-serve.exe, which kith-servew.exe starts (W7 / W14 gap); the e2e copies kith.exe to it'
-  Log 'GAP: zip lacks kith-serve.exe (W7 / W14); copying kith.exe'
-  Copy-Item $Kith (Join-Path $Bin 'kith-serve.exe')
-}
+# kith-servew.exe starts kith-serve.exe beside itself, so the zip must carry it (scripts/windows-exes.txt).
+Check 'the zip carries kith-serve.exe (what kith-servew.exe starts)' (Test-Path (Join-Path $Bin 'kith-serve.exe'))
 
 # --- init -------------------------------------------------------------------------------------------------------------------
 Section 'kith init'
@@ -117,9 +111,10 @@ Log "health: $($h | ConvertTo-Json -Compress)"
 Check 'the host wrote its local token' (Test-Path (Join-Path $ServeHome 'token'))
 $st = Run-Cap $Kith @('status', '--port', "$Port") 30 'status'
 Check 'kith status reports the host' ($st.Code -eq 0) ($st.Out + $st.Err)
-$people = Api 'people'
-Log "people -> $($people.Status) $($people.Body)"
-Check 'the app API answers an authorised call' ($people.Status -eq 200) "$($people.Status) $($people.Body)"
+$hello = Api 'hello'
+Log "hello -> $($hello.Status) $($hello.Body)"
+$helloJson = try { $hello.Body | ConvertFrom-Json } catch { $null }
+Check 'the app API answers an authorised call (hello, with the token)' ($hello.Status -eq 200 -and $helloJson.os -eq 'windows' -and $helloJson.hostId) "$($hello.Status) $($hello.Body)"
 $noauth = (Invoke-WebRequest "http://127.0.0.1:$Port/api/people" -Method Post -UseBasicParsing -TimeoutSec 10 -SkipHttpErrorCheck).StatusCode
 Check 'the app API refuses a call without the token' ($noauth -eq 401) "$noauth"
 
@@ -174,15 +169,22 @@ if ($fake) { Stop-Process -Id $fake.Id -Force -ErrorAction SilentlyContinue }
 
 # --- revoke -------------------------------------------------------------------------------------------------------------------
 Section 'invite and revoke'
+# Today's exact behaviour on Windows, asserted so a package that fixes it flips the check on purpose.
 $inv = Api 'createInvite' @{ name = 'Sam'; agents = @{} }
 Log "createInvite -> $($inv.Status) $($inv.Body)"
-# people.* in the core is NotServed on Windows until W22b (core authority on Windows): the refusal may be today's answer.
+# FLIPS: needs a signed-in Kith cloud account. No test cloud without secrets exists, so this needs a person (or a later
+# package with a cloud test double); it then becomes a 200 with an invite link.
+Check 'createInvite refuses today: sign in to a Kith account first' ($inv.Status -eq 400 -and $inv.Body -match 'sign in to a Kith account')
+$people = Api 'people'
+Log "people -> $($people.Status) $($people.Body)"
+# FLIPS: W22b (core authority on Windows) plus retire-python P3-1 (kith-auth in Rust): people then answers 200 with a list.
+Check 'people refuses today: kith-auth not found' ($people.Status -eq 400 -and $people.Body -match 'kith-auth not found')
 $rev = Api 'revokePerson' @{ personId = 'sam' }
 Log "revokePerson -> $($rev.Status) $($rev.Body)"
-$after = Api 'people'
-Log "people after -> $($after.Status) $($after.Body)"
-# TODO(observe): the assertions for this block are tightened after the first CI run shows today's behaviour.
-Check 'the host still answers after an invite and a revoke' ($after.Status -eq 200) "$($after.Status)"
+# FLIPS: same as people (W22b, P3-1); W28 then adds the mid-run revoke (a running guest run is cut off).
+Check 'revokePerson refuses today: kith-auth not found' ($rev.Status -eq 400 -and $rev.Body -match 'kith-auth not found')
+$after = Api 'hello'
+Check 'the host still answers after the refused invite and revoke' ($after.Status -eq 200) "$($after.Status)"
 
 # --- guests (refused today, WI6) --------------------------------------------------------------------------------------------
 Section 'guest run (refused today)'
