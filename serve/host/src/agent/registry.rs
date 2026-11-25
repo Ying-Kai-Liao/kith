@@ -261,25 +261,30 @@ fn npm_error(stderr: &str) -> String {
     out
 }
 
-/// `npm config get cache`, asked once.
+/// npm's cache directory, asked once.
 async fn npm_cache() -> Result<&'static Path> {
     static DIR: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_new();
-    let dir = DIR
-        .get_or_try_init(|| async {
-            let out = tokio::process::Command::new(shell::program("npm"))
-                .args(["config", "get", "cache"])
-                .stdin(std::process::Stdio::null())
-                .output()
-                .await
-                .context("running npm")?;
-            let dir = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-            if !out.status.success() || dir.is_empty() {
-                bail!("npm didn't report its cache directory");
-            }
-            Ok(PathBuf::from(dir))
-        })
-        .await?;
+    let dir = DIR.get_or_try_init(|| query_npm_cache(shell::program("npm"))).await?;
     Ok(dir)
+}
+
+/// `npm config get cache`. npm 10.9 refuses that ("The cache option is protected") once the
+/// cache is set by `npm_config_cache` or a `cache=` line in `.npmrc`; but a command run by
+/// `npm exec` is handed the resolved cache as `npm_config_cache`, so ask it to print that.
+async fn query_npm_cache(npm: PathBuf) -> Result<PathBuf> {
+    async fn ask(npm: &Path, args: &[&str]) -> Option<String> {
+        let out =
+            tokio::process::Command::new(npm).args(args).stdin(std::process::Stdio::null()).output().await.ok()?;
+        let dir = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        (out.status.success() && !dir.is_empty()).then_some(dir)
+    }
+    let npm = npm.as_path();
+    // No quoting in the `-c` text: it must mean the same to sh and to cmd.exe.
+    let printed = match ask(npm, &["config", "get", "cache"]).await {
+        Some(dir) => Some(dir),
+        None => ask(npm, &["exec", "--yes", "-c", "node -p process.env.npm_config_cache"]).await,
+    };
+    printed.map(PathBuf::from).ok_or_else(|| anyhow!("npm didn't report its cache directory"))
 }
 
 /// npx's cache key for one package spec (libnpmexec: the first 16 hex digits of its SHA-512).
@@ -436,6 +441,44 @@ mod tests {
         assert_eq!(npm_error(&"npm error x\n".repeat(500)).lines().count(), 20);
         let wide = format!("npm error {}", "é".repeat(3000));
         assert!(npm_error(&wide).len() <= 2048 + "…".len());
+    }
+
+    /// A stand-in `npm` that answers `config get cache` as `config` says and `exec` with `exec`.
+    #[cfg(unix)]
+    fn fake_npm(config: &str, exec: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("kith-npm-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let npm = dir.join("npm");
+        let script = format!("#!/bin/sh\ncase \"$1\" in\n  config) {config} ;;\n  exec) {exec} ;;\nesac\n");
+        std::fs::write(&npm, script).unwrap();
+        std::fs::set_permissions(&npm, std::fs::Permissions::from_mode(0o755)).unwrap();
+        npm
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn npm_cache_comes_from_config_when_npm_answers() {
+        let npm = fake_npm("echo /home/u/.npm", "echo wrong; exit 1");
+        assert_eq!(query_npm_cache(npm).await.unwrap(), PathBuf::from("/home/u/.npm"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn npm_cache_survives_npm_calling_it_protected() {
+        // npm 10.9 with `npm_config_cache` set or `cache=` in .npmrc.
+        let npm = fake_npm(
+            "echo 'npm error The cache option is protected, and can not be retrieved in this way' >&2; exit 1",
+            "echo /srv/npm-cache",
+        );
+        assert_eq!(query_npm_cache(npm).await.unwrap(), PathBuf::from("/srv/npm-cache"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn npm_cache_fails_when_npm_says_nothing() {
+        let npm = fake_npm("exit 1", "exit 1");
+        assert!(query_npm_cache(npm).await.is_err());
     }
 
     #[test]
