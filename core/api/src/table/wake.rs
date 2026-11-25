@@ -172,7 +172,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     wake(
         "wake.tick",
-        "The host's clock for the wake queue (every few seconds, and after a kick): fires the waiters whose thing happened, settles each finished run against its turn (answered, withdrawn or given back), unparks the wake turns of conversations nothing holds, and takes what is due (both doors) as one run and one turn each. `gh`, process probes and transcript reads run with no core lock held. Answers `fired`, `settled`, `unparked` and `taken` (the runs' turns, `queued` or `parked`).",
+        "The host's clock for the wake queue (every few seconds, and after a kick): fires the waiters whose thing happened, settles each finished run against its turn (answered, withdrawn or given back), unparks the wake turns of conversations nothing holds, takes what is due (both doors) as one run and one turn each, and settles the asks no one reported (a `--bg` ask whose turn ended, a `fg` ask whose caller process is gone: the ask design's R4) and forgets settled asks older than 31 days. `gh`, process probes and transcript reads run with no core lock held. Answers `fired`, `settled`, `unparked`, `taken` (the runs' turns, `queued` or `parked`) and `asks` (the asks settled).",
         &[],
         &["wake", "tick"],
     )

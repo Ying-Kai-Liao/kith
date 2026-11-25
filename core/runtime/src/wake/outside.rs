@@ -58,6 +58,18 @@ pub(crate) trait Outside {
     fn ci_poll(&self) -> f64 {
         CI_POLL
     }
+    /// A file's text (the ask design's out file, read by the tick with no lock held); `None` when it cannot be read. Capped
+    /// so a runaway file cannot fill the host's memory.
+    fn read_text(&self, path: &Path) -> Option<String> {
+        use std::io::Read as _;
+        let mut text = String::new();
+        std::fs::File::open(path)
+            .ok()?
+            .take(16 * 1024 * 1024)
+            .read_to_string(&mut text)
+            .ok()?;
+        Some(text)
+    }
 }
 
 pub(crate) trait Transcripts {

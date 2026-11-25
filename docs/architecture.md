@@ -117,8 +117,8 @@ ask `kith-auth get`. Every secret handed out is logged. Least privilege between 
 `kith:<name>` subagent. `kith kernel cost` keeps a ledger of every request; `kith` tags its sessions with agent, version,
 model and effort, so `kith cost agents` / `kith cost agent <name>` show what each agent and each version costs.
 
-**Harnesses** (`adapters/harness.py`, 2026-10-18). An agent runs on Claude Code or, with `harness:` in `agent.md`
-(or `-H`), on codex, pi, agy, hermes, qwen, dsh or opencode. `bin/kith` still builds the run (prompt, snapshot, project,
+**Harnesses** (`kith kernel engine-run`, since 2026-11; `adapters/harness.py` before). An agent runs on Claude Code or, with
+`harness:` in `agent.md` (or `-H`), on codex, pi, agy, hermes, qwen or opencode. `bin/kith` still builds the run (prompt, snapshot, project,
 directories, granted MCP servers, model, effort); only the last step differs. Callers ask for JSON, a session to resume
 and a permission mode with `KITH_OUTPUT`, `KITH_RESUME`, `KITH_PERMISSION_MODE`, the same for every harness, and get Claude's
 result shape back. Session ids from other harnesses are `<harness>:<id>`, so a session is only ever resumed by the

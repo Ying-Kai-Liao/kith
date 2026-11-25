@@ -897,6 +897,20 @@ impl Drop for Conn {
     }
 }
 
+/// Why no stream: nobody there, or (Windows) the pipe's server is not this account's, which `kith doctor` and the
+/// caller's note show as a mismatch rather than "no daemon". Nothing was sent, and it is done, not retried.
+fn connect_refused(layout: &Layout, e: &std::io::Error) -> Reached {
+    #[cfg(windows)]
+    if e.kind() == std::io::ErrorKind::PermissionDenied {
+        return Reached::Mismatch(format!(
+            "the owner pipe {} is served by something that is not this account's ({e}); it may be squatted, so nothing was sent",
+            endpoint(layout).display()
+        ));
+    }
+    let _ = (layout, e);
+    Reached::NoDaemon
+}
+
 fn attempt(
     layout: &Layout,
     method: &str,
@@ -909,8 +923,9 @@ fn attempt(
         sent: false,
         why: why.to_owned(),
     };
-    let Ok(stream) = platform::connect(&endpoint(layout)) else {
-        return Attempt::Done(Reached::NoDaemon);
+    let stream = match platform::connect(&endpoint(layout)) {
+        Ok(stream) => stream,
+        Err(e) => return Attempt::Done(connect_refused(layout, &e)),
     };
     // Without the owner token there is nothing to prove with. A host without the secret still says hello, to learn why
     // (no Host on this daemon, or a Host that is another process): a line worth logging, unlike "no daemon".

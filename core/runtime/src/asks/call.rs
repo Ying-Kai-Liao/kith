@@ -4,8 +4,12 @@
 
 use serde_json::{Value, json};
 
+use super::ledger::{self, Callee, Finish};
+use super::peer::{self, Apply, InRow};
+use super::rows::Kind;
 use super::{
-    EndReq, Open, cap_told, check_to, delegations, end_tree, limits, open, record, settle,
+    EndReq, LedgerOpen, Open, Origin, cap_told, check_to, delegations, end_tree, limits, open,
+    record, settle,
 };
 use crate::db::Core;
 use crate::error::{Error, Result};
@@ -16,6 +20,11 @@ pub(crate) fn serves(method: &str) -> bool {
         method,
         "ask.open"
             | "ask.settle"
+            | "ask.finish"
+            | "ask.post"
+            | "ask.read"
+            | "ask.park"
+            | "ask.unpark"
             | "ask.capTold"
             | "ask.end"
             | "ask.to"
@@ -23,6 +32,10 @@ pub(crate) fn serves(method: &str) -> bool {
             | "ask.delegations"
             | "ask.record"
             | "ask.limits"
+            | "ask.peerLink"
+            | "ask.endPeer"
+            | "ask.peerApply"
+            | "ask.peerOwed"
     )
 }
 
@@ -44,6 +57,23 @@ fn need<'a>(params: &'a Value, key: &str) -> Result<&'a str> {
     word(params, key)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| bad(&format!("{key} is required")))
+}
+
+/// The direction of a pairing: `in` (asks that computer sends here) or `out` (asks sent there).
+fn need_dir(params: &Value) -> Result<&str> {
+    need(params, "dir").and_then(|d| {
+        if matches!(d, "in" | "out") {
+            Ok(d)
+        } else {
+            Err(bad("dir is in or out"))
+        }
+    })
+}
+
+fn kills(kill: &[crate::conversations::claims::Kill]) -> Vec<Value> {
+    kill.iter()
+        .map(|k| json!({"claimId": k.claim_id, "pid": k.pid, "started": k.started}))
+        .collect()
 }
 
 fn flag(params: &Value, key: &str) -> bool {
@@ -76,6 +106,23 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             };
+            let origin = match (
+                word(params, "originComputer"),
+                word(params, "originKey"),
+                word(params, "originEpoch"),
+            ) {
+                (Some(computer), Some(key), Some(epoch))
+                    if !computer.is_empty() && !key.is_empty() && !epoch.is_empty() =>
+                {
+                    Some(Origin {
+                        computer,
+                        key,
+                        epoch,
+                    })
+                }
+                (None, None, None) => None,
+                _ => return Err(bad("originComputer, originKey and originEpoch go together")),
+            };
             let o = Open {
                 id: need(params, "id")?,
                 asked: word(params, "asked").unwrap_or_default(),
@@ -84,7 +131,30 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                 pid: params.get("pid").and_then(Value::as_i64),
                 conversation: word(params, "conversation"),
                 claim_id: params.get("claimId").and_then(Value::as_i64),
+                ledger: word(params, "mode").map(|mode| LedgerOpen {
+                    mode,
+                    task: word(params, "task"),
+                    cli_pid: params.get("cliPid").and_then(Value::as_i64),
+                    cli_start: word(params, "cliStart"),
+                    engine: word(params, "engine"),
+                    peer: word(params, "peer"),
+                    cont: word(params, "cont"),
+                    origin,
+                }),
             };
+            if let Some(l) = &o.ledger {
+                if !matches!(l.mode, "fg" | "bg" | "peer") {
+                    return Err(bad("mode is fg, bg or peer"));
+                }
+                if (l.mode == "peer") != l.peer.is_some() {
+                    return Err(bad("peer goes with mode peer, and only with it"));
+                }
+                if l.origin.is_some() && l.mode != "bg" {
+                    return Err(bad("an ask from another computer is a bg ask"));
+                }
+            } else if origin.is_some() || word(params, "peer").is_some() {
+                return Err(bad("peer and origin need a mode"));
+            }
             open(
                 core,
                 &folders.machine,
@@ -104,6 +174,51 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
             let id = need(params, "id")?;
             settle(core, &folders.machine, id, cost, state, now)?
                 .ok_or_else(|| Error::Refused(format!("kith-core: asks: no ask {id}")))
+        }
+        "ask.finish" => {
+            let (folders, _) = core.folders_for(params)?;
+            let callee = word(params, "result").map(|text| Callee {
+                text: text.to_owned(),
+                cost: params.get("cost").and_then(Value::as_f64).unwrap_or(0.0),
+                is_error: flag(params, "isError"),
+                session: word(params, "session").map(str::to_owned),
+            });
+            ledger::finish(
+                core,
+                &folders.machine,
+                &Finish {
+                    id: need(params, "id")?,
+                    out: word(params, "out"),
+                    callee,
+                    session: word(params, "session"),
+                    turn: params.get("turn").and_then(Value::as_i64),
+                },
+                now,
+            )
+        }
+        "ask.post" => {
+            let kind = word(params, "kind").map_or(Some(Kind::Answer), Kind::parse);
+            ledger::post(
+                core,
+                need(params, "id")?,
+                need(params, "text")?,
+                word(params, "as"),
+                kind.ok_or_else(|| bad("kind is answer or progress"))?,
+                now,
+            )
+        }
+        "ask.read" => ledger::read(core, need(params, "id")?, now),
+        "ask.park" => ledger::park(core, need(params, "id")?, Some(need(params, "card")?), now),
+        "ask.unpark" => {
+            let (folders, _) = core.folders_for(params)?;
+            ledger::unpark(
+                core,
+                &folders.machine,
+                need(params, "id")?,
+                word(params, "note"),
+                word(params, "session"),
+                now,
+            )
         }
         "ask.capTold" => {
             let n = cap_told(core, need(params, "chain")?, now)?;
@@ -131,11 +246,81 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                 .collect();
             Ok(json!({ "ended": ended.ids, "sessions": ended.sessions, "kill": kill }))
         }
+        "ask.peerLink" => {
+            let ended = peer::link(
+                core,
+                need(params, "computer")?,
+                need_dir(params)?,
+                need(params, "epoch")?,
+                now,
+            )?;
+            Ok(json!({
+                "computer": need(params, "computer")?,
+                "dir": need_dir(params)?,
+                "epoch": need(params, "epoch")?,
+                "linked": true,
+                "ended": ended.ids,
+                "sessions": ended.sessions,
+                "kill": kills(&ended.kill),
+            }))
+        }
+        "ask.endPeer" => {
+            let (computer, dir) = (need(params, "computer")?, need_dir(params)?);
+            let ended = peer::end(core, computer, dir, now)?;
+            Ok(json!({
+                "computer": computer,
+                "dir": dir,
+                "ended": ended.ids,
+                "sessions": ended.sessions,
+                "kill": kills(&ended.kill),
+            }))
+        }
+        "ask.peerApply" => {
+            let (folders, _) = core.folders_for(params)?;
+            let mut rows = Vec::new();
+            for r in params
+                .get("rows")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let kind = word(r, "kind").and_then(Kind::parse);
+                let (Some(n), Some(kind), Some(text)) =
+                    (r.get("n").and_then(Value::as_i64), kind, word(r, "text"))
+                else {
+                    return Err(bad(
+                        "a row needs n, kind (answer, progress or lost) and text",
+                    ));
+                };
+                rows.push(InRow {
+                    n,
+                    who: word(r, "as").map(str::to_owned),
+                    kind,
+                    text: text.to_owned(),
+                    at_ms: r.get("at").and_then(Value::as_i64),
+                });
+            }
+            peer::apply(
+                core,
+                &folders.machine,
+                &Apply {
+                    id: need(params, "id")?,
+                    epoch: need(params, "epoch")?,
+                    rows,
+                    state: word(params, "state"),
+                    cost: params.get("cost").and_then(Value::as_f64),
+                },
+                now,
+            )
+        }
+        "ask.peerOwed" => peer::owed(core),
         "ask.to" => {
             let id = need(params, "id")?;
             check_to(core.conn(), id)?;
             Ok(json!({ "id": id, "ok": true }))
         }
+        // The revoke order is Unix only (the authority tables it reads are).
+        #[cfg(unix)]
         "ask.revokeEverywhere" => {
             let out = crate::revoke_order::revoke_everywhere(
                 core,

@@ -6,6 +6,7 @@
 # required: the job fails if it is missing. pending: shipped when it builds, a loud warning when it does not (and a
 # failure on a v* tag, KITH_WINDOWS_STRICT=1). When a pending program lands, change its status to required: one line.
 kith.exe           kith-serve    required  W2a
+kith-serve.exe     kith-serve    required  W18a(kith-servew.exe-starts-it;same-source-as-kith.exe)
 kith-servew.exe    kith-serve    required  W2a
 kith-holder.exe    kith-holder   required  W2a
 kith-stub.exe      kith-stub     required  W2a
