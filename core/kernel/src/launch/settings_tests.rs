@@ -107,19 +107,19 @@ impl Tree {
         )
     }
 
-    /// The owner typed the mode on the command line at their own terminal (`Input::typed_bypass`).
+    /// The owner's own launch at their terminal (`Input::owner_via_terminal`), `caller_mode` typed on the command line
+    /// (`""`: nothing typed).
     fn settings_typed(
         &self,
         member: &Member,
         caller_mode: &str,
     ) -> Result<settings::Output, settings::Refusal> {
-        let typed = caller_mode == "bypassPermissions";
         self.settings_bin(
             member,
             caller_mode,
             Some("2.1.309"),
             "/usr/local/bin/kith",
-            typed,
+            true,
         )
     }
 
@@ -129,7 +129,7 @@ impl Tree {
         caller_mode: &str,
         claude_version: Option<&str>,
         kith_bin: &str,
-        typed_bypass: bool,
+        owner_via_terminal: bool,
     ) -> Result<settings::Output, settings::Refusal> {
         let p = self.paths();
         let kernel = self.root.join("kernel");
@@ -164,7 +164,8 @@ impl Tree {
             threads_bin: self.threads_bin,
             plugins_json: "[]",
             owner_terminal: false,
-            typed_bypass,
+            owner_via_terminal,
+            typed_bypass: owner_via_terminal && caller_mode == "bypassPermissions",
             api_helper: "",
             once_id: "0123456789abcdef0123456789abcdef",
             developer_dir: "",
@@ -374,6 +375,7 @@ fn guest_without_a_readfence_program_does_not_run() {
         threads_bin: None,
         plugins_json: "[]",
         owner_terminal: false,
+        owner_via_terminal: false,
         typed_bypass: false,
         api_helper: "",
         once_id: "x",
@@ -423,6 +425,7 @@ fn guest_work_dir_is_never_the_home_folder() {
         threads_bin: None,
         plugins_json: "[]",
         owner_terminal: false,
+        owner_via_terminal: false,
         typed_bypass: false,
         api_helper: "",
         once_id: "x",
@@ -471,6 +474,7 @@ fn guest_without_the_memory_check_does_not_run() {
         threads_bin: None,
         plugins_json: "[]",
         owner_terminal: false,
+        owner_via_terminal: false,
         typed_bypass: false,
         api_helper: "",
         once_id: "x",
@@ -500,7 +504,7 @@ fn owner_is_held_to_auto_when_the_agent_reads_other_peoples_text() {
 }
 
 #[test]
-fn owner_bypass_typed_at_the_terminal_wins_over_the_reader_cap_and_nothing_else_does() {
+fn owner_bypass_at_the_terminal_typed_or_this_macs_wins_over_the_reader_cap_and_nothing_else_does() {
     let t = Tree::new();
     // typed on the command line at the owner's terminal: kept, though the agent reads other people's text
     let out = t
@@ -511,13 +515,24 @@ fn owner_bypass_typed_at_the_terminal_wins_over_the_reader_cap_and_nothing_else_
     // the same mode from an entry point (KITH_PERMISSION_MODE): held to auto
     let out = t.settings(&Member::owner(), "bypassPermissions").unwrap();
     assert_eq!(out.permission_mode.as_deref(), Some("auto"));
-    // this Mac's choice for the agent: held to auto
+    // this Mac's choice for the agent: kept when the owner launched it at their terminal with nothing typed
     t.put(
         "kith/state/settings.json",
         r#"{"agents": {"echo": {"permission_mode": "bypassPermissions"}}}"#,
     );
+    let out = t.settings_typed(&Member::owner(), "").unwrap();
+    assert_eq!(out.permission_mode.as_deref(), Some("bypassPermissions"));
+    assert_eq!(out.mode_arg, "bypassPermissions");
+    // and held to auto for any other launch (an entry point, a run another run started)
     let out = t.settings(&Member::owner(), "").unwrap();
     assert_eq!(out.permission_mode.as_deref(), Some("auto"));
+    // kith's global mode is not a choice for this agent: its defaultMode stays held to auto
+    t.put(
+        "kith/state/settings.json",
+        r#"{"permission_mode": "bypassPermissions"}"#,
+    );
+    let s = t.settings_typed(&Member::owner(), "").unwrap().settings.unwrap();
+    assert_eq!(s["permissions"]["defaultMode"], json!("auto"));
     // a guest's mode is the membership's, whatever was typed
     let out = t
         .settings_typed(&t.guest("sam", "default"), "bypassPermissions")

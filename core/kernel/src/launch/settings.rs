@@ -157,8 +157,11 @@ pub struct Input<'a> {
     pub plugins_json: &'a str,
     /// The owner at their own terminal: their plugins stay as their settings have them.
     pub owner_terminal: bool,
-    /// The owner typed `--bypass` (or `--permission-mode bypassPermissions`) on the command line at their own terminal
-    /// (`KITH_VIA` terminal, not started by another run): kept for an agent that reads other people's text too.
+    /// The owner's own launch at their terminal (`KITH_VIA` terminal, not started by another run), interactive or a
+    /// one-shot: this Mac's choice of bypass for the agent is kept for an agent that reads other people's text too.
+    pub owner_via_terminal: bool,
+    /// `owner_via_terminal`, and the owner typed `--bypass` (or `--permission-mode bypassPermissions`) on the command line:
+    /// kept for an agent that reads other people's text too.
     pub typed_bypass: bool,
     /// The `apiKeyHelper` of a claude-api backup (`""` for none).
     pub api_helper: &'a str,
@@ -479,14 +482,18 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     let mut warnings: Vec<String> = vec![];
 
     // The agent's defaultMode is its author's suggestion: this Mac's choice wins over it, the caller's over both. An owner's
-    // run of an agent that reads other people's text never starts in bypass unless the owner typed it at their terminal;
-    // anyone else's mode is the membership's.
+    // run of an agent that reads other people's text never starts in bypass unless the owner typed it at their terminal,
+    // or, with nothing typed, this Mac chose it for the agent and the owner launched it there; anyone else's mode is the
+    // membership's.
     let mut perm = i.caller_mode.to_owned();
+    let mut macs = false;
     if perm.is_empty() {
         perm = machine::agent_permission_mode(&p.machine, i.agent);
+        macs = true;
     }
     let reads_others = machine::reads_others(&i.pkg.join("capabilities.yaml"));
-    if owner && perm == "bypassPermissions" && reads_others && !i.typed_bypass {
+    let owners_word = i.typed_bypass || (i.owner_via_terminal && macs);
+    if owner && perm == "bypassPermissions" && reads_others && !owners_word {
         perm = "auto".to_owned();
     }
     if !owner {
