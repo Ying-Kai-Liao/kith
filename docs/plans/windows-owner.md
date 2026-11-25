@@ -310,11 +310,11 @@ They need `uv` on Windows. Their launchd jobs become agent routines (D3). The `k
 Fields: size (S under a day, M one to three PRs, L a design plus several PRs) · depends · files · start.
 Every package adds or extends one scenario in the Windows e2e (W18), and its PR names the scenario.
 
-- [ ] **W0. Fake model server.** Owner: unowned. Status: not started. S. Depends: none. Files: new `serve/host/tests/support/fakemodel/` (a Rust test binary that speaks
+- [x] **W0. Fake model server.** Owner: windows-owner-build. Status: done, #1160 merged 0a643964a. S. Depends: none. Files: new `serve/host/tests/support/fakemodel/` (a Rust test binary that speaks
   the Anthropic Messages API, streaming, from a JSON script: text, `tool_use` for Bash/Write/Read, `end_turn`). Real Claude Code
   runs against it through `ANTHROPIC_BASE_URL` with a dummy key, which is how every Windows e2e runs Claude for free. Mac e2e can
   use it too. **Start now.**
-- [ ] **W1. Claude Code on Windows probe.** Owner: unowned. Status: not started. S. Depends: W0. Files: `.github/workflows/windows-probe.yml`, `docs/windows-facts.md`
+- [x] **W1. Claude Code on Windows probe.** Owner: windows-owner-build. Status: done, #1161 merged 15764d089. S. Depends: W0. Files: `.github/workflows/windows-probe.yml`, `docs/windows-facts.md`
   (committed output).
   - On `windows-2025`, install Claude Code (npm and `install.ps1`) and run it against W0 with probe hooks. Record:
     - which shell runs hook and status-line commands
@@ -329,7 +329,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     - for W15: whether renaming a folder that holds a running exe fails (P-W15, the premise W15's prune rule is checked
       under)
   - W6, W9, W10 and W13 cite this file. **Start now.**
-- [ ] **W2. The host builds and tests on Windows.** Owner: unowned. Status: not started. L, in two PRs. Depends: none.
+- [ ] **W2. The host builds and tests on Windows.** Owner: windows-owner-build. Status: W2a done (#1153) merged 4f8550b69; W2b open (#1177), in progress. L, in two PRs. Depends: none.
   - **W2a: compile and clippy.** `cargo build/clippy -p kith-serve` joins the `windows` job. Changes:
     - gate host.sock (`runauth.rs:869-950`) and `screen.sock` to Unix, with a refusal on Windows (guest-only, WI6)
     - gate the host's links to Unix-only kernel modules (`launch_cmd`, `threads_cmd`, `pkg_cmd`, `lifecycle_cmd`)
@@ -340,29 +340,29 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - Files: `serve/host/src/**` (cfg only), `serve/host/build.rs` (manifest), `ci.yml:763-812`.
   - Rule WI1: every gated path refuses with a named reason. Conflict risk with P1/P3 work in serve/host: moderate, cfg lines
     only. **Start now.**
-- [ ] **W3. Paths and home.** Owner: unowned. Status: not started. S. Depends: none. Files: `core/kernel/src/paths.rs:146-195,324-344`, `serve/host/src/core_front.rs`,
+- [x] **W3. Paths and home.** Owner: windows-owner-build. Status: done, #1151 merged 0890c25ac. S. Depends: none. Files: `core/kernel/src/paths.rs:146-195,324-344`, `serve/host/src/core_front.rs`,
   `service/mod.rs` (one home source). `process_home` falls back to USERPROFILE on Windows; drive roots and `\\?\` are handled;
   D1 is written in the paths docstring. **Start now.**
-- [ ] **W4. `core/winsys`: native DACL, Credential Manager, process tree, stop event.** Owner: unowned. Status: not started. M. Depends: none.
+- [x] **W4. `core/winsys`: native DACL, Credential Manager, process tree, stop event.** Owner: windows-owner-build. Status: done, #1154 merged f016c72a3. M. Depends: none.
   - Files: new `core/winsys/`; `core/runtime/src/perms.rs` (native check replaces `icacls`, `:3-6` TODO);
     `core/runtime/src/secrets/keystore.rs:55-72` (Windows backend); `core/runtime/src/runs.rs:318-328` (`descends` via
     Toolhelp32); `ci.yml:1186-1191` (core-keystore matrix gains Windows); the boundary check allows the new crate.
   - Lets run tokens bind on Windows (`call.rs:189-195`). That isn't needed for owners, but it costs nothing.
   - **Start now.**
-- [ ] **W5a. Kernel modules build on Windows: settings, project, room_ledger, pkg, cost ledger.** Owner: unowned. Status: not started. M. Depends: W3.
+- [x] **W5a. Kernel modules build on Windows: settings, project, room_ledger, pkg, cost ledger.** Owner: windows-owner-build. Status: done, #1163 merged ca9b5dd34. M. Depends: W3.
   - Files: `core/kernel/src/lib.rs:6-44`, the modules' mode and flock sites (flock becomes fs2 LockFileEx, modes become
     WI4 via winsys, `cp` becomes a Rust copy in `pkg/store.rs:210`), and the `MODULES` list (`lib.rs:51-84`).
   - Cost's person views and anything that spawns `kith-auth` stay refused on Windows until P3-1.
   - **Start now** (after W3; parallel with P1).
-- [ ] **W5b. Permit on Windows, and its channel to the host over a named pipe.** Owner: unowned. Status: not started. M. Depends: W2a, W5a.
+- [ ] **W5b. Permit on Windows, and its channel to the host over a named pipe.** Owner: windows-owner-build. Status: in progress. M. Depends: W2a, W5a.
   - Files: `core/kernel/src/permit/{host,apply,issue,scrub}.rs`, the host's permit listener, and the host restart through the
     service rather than launchd (`permit/host.rs:221-225`).
   - The door and bug halves stay refused on Windows (P3-12, P4-17).
   - **Start after W2a.**
-- [ ] **W6. Engines and accounts.** Owner: unowned. Status: not started. S. Depends: W1 (claude.exe location). Files: `core/kernel/src/launch/assemble.rs:348-356`
+- [x] **W6. Engines and accounts.** Owner: windows-owner-build. Status: done, #1162 merged 99d689760. S. Depends: W1 (claude.exe location). Files: `core/kernel/src/launch/assemble.rs:348-356`
   (`which_in` with PATHEXT, no mode bits), `core/kernel/src/accounts.rs:132`, `core/kernel/src/accounts/mirror.rs:103-111`
   (junction for folders, copy for files). **Start now** (the probe answer lands in a day).
-- [ ] **W7. Windows release build.** Owner: unowned. Status: not started. S. Depends: W2a.
+- [x] **W7. Windows release build.** Owner: windows-owner-build. Status: done, #1183 merged b75c0b487. S. Depends: W2a.
   - Files: `release.yml` (a job building `kith-<ver>-windows-x64.zip`: `kith.exe`, `kith-holder.exe`, `kith-stub.exe`,
     `kith-servew.exe`, `kith-shim.exe`, `project-id.exe`, `share\kith\…`), `scripts/stage-kernel.sh` (Windows data only:
     no `kernel/bin`, no `kernel/lib`), `serve/host/src/update/release.rs:21-26`.
@@ -375,6 +375,8 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     spellings); `serve/host/src/agent/hq.rs:329-358,777-812` and `channels/run.rs:397-408` (call `kith_kernel::launch` in
     process instead of `bin/kith --launch-json`); `cards/resume.rs:906-944`.
   - Adds the WI7 golden (Windows settings vs Mac settings, normalised).
+  - Follow-ups: when W8 lifts launch's `cfg(unix)` gate, the non-Unix spawn starts the launcher inside its named job object in
+    one call (W12's rule). W8 needs architect review.
 - [ ] **W9. Hook commands in one shell-neutral form (WI3).** Owner: unowned. Status: not started. M. Depends: W1, W8.
   - Files: `settings.rs:537-563,779-801,1007-1019`; `service/mod.rs` `wrap`; the verbs gain never-fail and missing-folder
     exits (`kernel cost tag`, `threads record`, `memory hook`, `room-ledger`, `permit once`).
@@ -485,7 +487,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     not `sh`), `:266` and `shared/host-service.ts:68` (a Windows restart path), `ci.yml` (a `desktop-win` job running
     `dist:win` on `windows-2025`), `release.yml` (`desktop-win` job, electron-updater NSIS).
   - Unsigned for Kai's own use; signed before a public release (Q2).
-- [ ] **W17. Windows router: every owner verb in Rust or a named refusal.** Owner: unowned. Status: not started. M. Depends: W2a.
+- [ ] **W17. Windows router: every owner verb in Rust or a named refusal.** Owner: windows-owner-build. Status: in progress, #1182. M. Depends: W2a.
   - Files: `serve/host/src/kernel.rs:47-77,280-301`. On Windows, `Route::Kernel` answers from a table: a verb that is ported
     runs, and any other answers "not on Windows yet: <verb> (retire-python Pn-m)". There is no bash fallback on Windows.
   - Ships `project-id.exe`.
@@ -509,7 +511,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     - (i) `kith serve stop` and uninstall
     - (j) a guest launch refused (WI6)
   - Within the 40-minute job limit (`ci.yml:767`), with `rust-cache`. No paid runners, no API key.
-- [ ] **W19. Manual checklist for a real Windows 11 machine.** Owner: unowned. Status: not started. S, doc only now. Depends: none. File: `docs/windows-checklist.md`.
+- [x] **W19. Manual checklist for a real Windows 11 machine.** Owner: windows-owner-build. Status: done, #1148 merged 403fad8fa. S, doc only now. Depends: none. File: `docs/windows-checklist.md`.
   - The checks:
     - start at sign-in (CI can't sign in)
     - sleep and wake during a turn
@@ -523,6 +525,15 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - It runs on a free UTM VM on the Mac with Windows 11 ARM, the x64 build under emulation (default for Q3, pending Kai's confirmation). A check that can't be
     judged under emulation is marked as needing x64 hardware. It runs before any public Windows release, together with
     signing (Q2).
+
+### Unowned gaps (found 2026-11-25)
+
+Files the Windows zip leaves out that no package owns. They are listed in the windows comment of `scripts/stage-kernel.sh` (#1183).
+
+- `kith-shim.exe`: named in W16, but no crate builds it.
+- `requires-switched.txt`
+- `kith-env.sh`
+- `guest-env.sh`
 
 ### Marks
 - **MODEL FIRST (done):** W12 (claims, held terminals and host turns with the Job Object as S4's group, `model-w12/`) and W15
