@@ -22,10 +22,8 @@ pub mod paths;
 // Unix only, like `cost` and `secrets`: it runs `kith-auth` through the secrets module's timeout helper.
 #[cfg(unix)]
 pub mod people;
-pub mod pkg;
-// Unix only: the run socket is a Unix socket and the one-shots are modes.
-#[cfg(unix)]
 pub mod permit;
+pub mod pkg;
 pub mod procstart;
 pub mod project;
 // Unix only in the module list below: the hook is written into a unix launch's settings.
@@ -63,6 +61,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "engine-run",
         "engines",
         "launch",
+        // `kernel launch-exec`: a one-shot run in this process (the entry's one-shot branch). A token of its own: an older
+        // program that lists `launch` must not be sent `--exec`.
+        "launch-exec",
         "lifecycle",
         "paths",
         "permit",
@@ -99,6 +100,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "engine-run",
         "engines",
         "paths",
+        // Owner runs only: the hooks, `issue`, and the MCP server's `approve` and key/access cards, over the host's named pipe.
+        // The guest halves (apply, door, helper, bug) are refused by name.
+        "permit",
         "pkg",
         "project",
         "room-ledger",
@@ -119,7 +123,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engines","launch","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim"]}"#
         );
     }
 }

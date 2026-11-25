@@ -10,6 +10,7 @@
 
 pub mod args;
 pub mod assemble;
+pub mod exec;
 pub mod facets;
 pub mod guard;
 pub mod json;
@@ -22,7 +23,9 @@ pub mod prompt;
 pub mod pyport;
 pub mod room;
 pub mod runenv;
+pub mod session;
 pub mod settings;
+pub mod start;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::many_single_char_names)]
@@ -31,6 +34,10 @@ mod tests;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::many_single_char_names)]
 mod settings_tests;
+
+#[cfg(all(test, unix))]
+#[allow(clippy::unwrap_used)]
+mod start_tests;
 
 // The golden's /kt/... paths are not absolute on Windows.
 #[cfg(all(test, unix))]

@@ -589,6 +589,13 @@ enum KernelCmd {
         #[command(subcommand)]
         what: LaunchCmd,
     },
+    /// `AGENT [--kernel DIR] ARGS...`: a one-shot run in this process (`kith AGENT "task"`), the claims and the engine of
+    /// `kernel/bin/kith`'s one-shot branch. `kernel/bin/kith` routes to it while `launch-exec` is in `lib/core-switched.txt`.
+    #[command(name = "launch-exec", hide = true, disable_help_flag = true)]
+    LaunchExec {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
     /// kith's own settings, the command line of `kernel/lib/kith_settings.py`: `KEY [AGENT]`, `call_model`, `accounts`, `pin`,
     /// `limit AGENT`, `delegation.chain_cost_cap_usd`, `cap MODE CAPS_FILE`, `reads-others CAPS_FILE` and the writes `set permission_mode|
     /// call_model|at_limit [AGENT] VALUE`, `set limit AGENT N|none`, `set delegation.chain_cost_cap_usd N|none|default`. Prints what
@@ -1057,7 +1064,6 @@ fn print_cost(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
 }
 
 /// `kith kernel permit ARGS...`: what `kith-permit`'s verbs print, with its exit codes. The hooks read their payload from stdin.
-#[cfg(unix)]
 fn print_permit(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use std::io::Write as _;
     let home = kith_kernel::paths::process_home();
@@ -1143,7 +1149,7 @@ fn print_settings(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
 }
 
 /// The kernel verbs whose modules are Unix-only in kith-kernel, with what to tell a Windows caller. Their ports are
-/// windows-owner W5a (secrets, settings, people, cost), W5b (permit), W12 (threads, lifecycle) and retire-python P1
+/// windows-owner W5a (secrets, settings, people, cost), W12 (threads, lifecycle) and retire-python P1
 /// (launch, pkg, project-id, room-ledger).
 #[cfg(not(unix))]
 fn unix_only_verb(cmd: &KernelCmd) -> Option<&'static str> {
@@ -1158,8 +1164,8 @@ fn unix_only_verb(cmd: &KernelCmd) -> Option<&'static str> {
         KernelCmd::ProjectId { .. } => "kernel project-id (retire-python P1)",
         KernelCmd::RoomLedger { .. } => "kernel room-ledger (retire-python P1)",
         KernelCmd::Pkg { .. } => "kernel pkg (retire-python P1)",
-        KernelCmd::Permit { .. } => "kernel permit (windows-owner W5b)",
         KernelCmd::Launch { .. } => "kernel launch (retire-python P1)",
+        KernelCmd::LaunchExec { .. } => "kernel launch-exec (retire-python P1)",
         _ => return None,
     })
 }
@@ -1772,12 +1778,15 @@ async fn main() -> Result<()> {
             if let KernelCmd::Pkg { kernel, args } = cmd {
                 std::process::exit(pkg_cmd::run(kernel, &args));
             }
-            #[cfg(unix)]
             if let KernelCmd::Permit { kernel, args } = cmd {
                 std::process::exit(print_permit(kernel, &args));
             }
             // The launch asks the core itself (who the run is for, once authority is the core's), so it must not run inside an
             // embedded core held here: that call would find the lock taken by its own process.
+            #[cfg(unix)]
+            if let KernelCmd::LaunchExec { args } = cmd {
+                std::process::exit(launch_cmd::run_exec(&args));
+            }
             #[cfg(unix)]
             if let KernelCmd::Launch { what: LaunchCmd::Whole(args) } = cmd {
                 std::process::exit(launch_cmd::print_whole(&args));
@@ -1872,6 +1881,7 @@ async fn main() -> Result<()> {
                     | KernelCmd::AccountState { .. }
                     | KernelCmd::Account { .. }
                     | KernelCmd::Secrets { .. }
+                    | KernelCmd::LaunchExec { .. }
                     | KernelCmd::Launch { what: LaunchCmd::Whole(_) | LaunchCmd::Mcp { .. } }
                     | KernelCmd::CoreMigrate { .. }
                     | KernelCmd::Cutover { .. }
