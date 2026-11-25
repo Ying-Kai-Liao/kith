@@ -47,7 +47,7 @@ pub mod wake;
 pub const ABI: u32 = 1;
 
 /// The modules this build has, as `kith kernel version` lists them. A verb in `kernel/lib/core-switched.txt` moves to
-/// the core only when its module is here (`threads-writer`: every `kith-sessions` verb but `run`, in Files and in Writer mode; `threads-run`: that `run`; the older `threads` is the Files-mode port and is not what `kernel/bin/kith` routes to; `acp`: the `run-once` verb, whose code lives in the kith-acp crate; `engine-run`: the non-Claude one-shot `kernel/bin/kith` runs through it (`kith kernel engine-run`); `launch`: `kith AGENT --launch-json`; `lifecycle`: `kith-lifecycle`, the sweep that compacts or ends sessions nobody runs).
+/// the core only when its module is here (`threads-writer`: every `kith-sessions` verb but `run`, in Files and in Writer mode; `threads-run`: that `run`; the older `threads` is the Files-mode port and is not what `kernel/bin/kith` routes to; `acp`: the `run-once` verb, whose code lives in the kith-acp crate; `engine-run`: the non-Claude one-shot `kernel/bin/kith` runs through it (`kith kernel engine-run`); `engine-run-tui`: its `--interactive`, the engine's own terminal session; `launch`: `kith AGENT --launch-json`; `lifecycle`: `kith-lifecycle`, the sweep that compacts or ends sessions nobody runs).
 pub const MODULES: &[&str] = if cfg!(unix) {
     &[
         "account",
@@ -61,6 +61,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "cost-ledger",
         "delegation",
         "engine-run",
+        "engine-run-tui",
         "engines",
         "launch",
         // `kernel launch-exec`: a one-shot run in this process (the entry's one-shot branch). A token of its own: an older
@@ -106,6 +107,7 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "cost-ledger",
         "delegation",
         "engine-run",
+        "engine-run-tui",
         "engines",
         "paths",
         // Owner runs only: the hooks, `issue`, and the MCP server's `approve` and key/access cards, over the host's named pipe.
@@ -132,7 +134,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
         );
     }
 }
