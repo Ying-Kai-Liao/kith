@@ -178,11 +178,11 @@ Check 'createInvite refuses today: sign in to a Kith account first' ($inv.Status
 $people = Api 'people'
 Log "people -> $($people.Status) $($people.Body)"
 # FLIPS: W22b (core authority on Windows) plus retire-python P3-1 (kith-auth in Rust): people then answers 200 with a list.
-Check 'people refuses today: kith-auth not found' ($people.Status -eq 400 -and $people.Body -match 'kith-auth not found')
+Check 'people refuses today: kith-auth wasn't found' ($people.Status -eq 400 -and $people.Body -match "kith-auth wasn't found")
 $rev = Api 'revokePerson' @{ personId = 'sam' }
 Log "revokePerson -> $($rev.Status) $($rev.Body)"
 # FLIPS: same as people (W22b, P3-1); W28 then adds the mid-run revoke (a running guest run is cut off).
-Check 'revokePerson refuses today: kith-auth not found' ($rev.Status -eq 400 -and $rev.Body -match 'kith-auth not found')
+Check 'revokePerson refuses today: kith-auth wasn't found' ($rev.Status -eq 400 -and $rev.Body -match "kith-auth wasn't found")
 $after = Api 'hello'
 Check 'the host still answers after the refused invite and revoke' ($after.Status -eq 200) "$($after.Status)"
 
