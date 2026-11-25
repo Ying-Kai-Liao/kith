@@ -637,7 +637,7 @@ def run_all(cases, prefixes, intended, jobs=4, keep=False, out=sys.stdout):
             print(f'ok    {name}' + (f'  ({n} intended difference(s))' if n else ''), file=out)
     ran = [c['name'] for c in cases]
     stale = [e for i, e in enumerate(intended)
-             if i not in used and any(fnmatch.fnmatchcase(n, e['case']) for n in ran)]
+             if i not in used and (WITH_DAEMON or not e.get('daemon_only')) and any(fnmatch.fnmatchcase(n, e['case']) for n in ran)]
     for e in stale:
         print(f'STALE intended difference no longer occurs: case {e["case"]!r} facet {e["facet"]!r} ({e["why"]})', file=out)
     for st in summary.values():

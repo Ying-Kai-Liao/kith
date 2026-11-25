@@ -379,7 +379,7 @@ Git noise: `.git/index`, `.git/objects/*`, `.git/hooks/*` and `.git/config` are 
 `intended.json` is a list of `{"case": glob, "facet": glob, "why": text}`. Facets are named `stepN.exit`,
 `stepN.stdout` / `stepN.json`, `stepN.stderr`, `state:<path under the side root>` and `fakes`. A difference that
 matches no entry fails. An entry that matches no difference in the cases that ran is reported as `STALE` and fails the
-run, so the list shrinks when a difference goes away. Every entry needs a reason (a ticket, a B-step of the plan).
+run, so the list shrinks when a difference goes away (an entry with `"daemon_only": true` is checked for staleness in the `--daemon` pass alone, where its cases run). Every entry needs a reason (a ticket, a B-step of the plan).
 
 An entry may carry `same_after`: `{"old": [[pattern, replacement]..], "new": [..]}`. It then excuses only the difference those
 rewrites explain: each side must have something to rewrite (so each side still shows which form it took), and the two texts must be
