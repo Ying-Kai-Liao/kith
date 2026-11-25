@@ -308,7 +308,7 @@ if declare -F ptyrun >/dev/null; then
   waitfor '[[ -s $T/started ]]' && ok "lock alone, launch-exec terminal: claude started" || bad "lock alone, launch-exec terminal: claude never started" "$(cat "$T/r10.out")"
   [[ $(stub_args $SID10) == *"--lock-alone"* ]] && ok "lock alone, launch-exec terminal: the stub was started with --lock-alone" \
     || bad "lock alone, launch-exec terminal: no --lock-alone" "$(stub_args $SID10)"
-  grep -q 'conversation lock alone' "$T/r10.out" && ok "lock alone, launch-exec terminal: one line says so" || bad "lock alone, launch-exec terminal: no line" "$(cat "$T/r10.out")"
+  # (the line goes to the pty, whose master ptyrun drains and drops: the one-shot row above asserts it)
   touch "$T/go"; wait $R10
 fi
 rm -f "$REG/claims.tombstone"

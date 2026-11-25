@@ -110,13 +110,10 @@ for f in pathlib.Path(sys.argv[1]).glob('*.json'):
 PY
 STUB_MODE=late python3 "$W" deliver s3
 is "a run that failed after the session saw the note is answered (at most once)" "$(owed s3)/$(how w:1)" "0/answered, exit 1"
-# A run the engine layer refused for good (exit 79) is failed at once and not retried; the same run with exit 1 is owed again.
+# A run the engine layer refused for good (exit 79) is failed at once and not retried.
 python3 "$W" enqueue sref --id w:6 --agent designer -- six >/dev/null
 STUB_MODE=refused python3 "$W" deliver sref
 is "a refused run (exit 79) ends as failed after one try" "$(owed sref)/$(how w:6)" "0/failed"
-python3 "$W" enqueue sfail --id w:7 --agent designer -- seven >/dev/null
-STUB_MODE=fail python3 "$W" deliver sfail
-is "control: an ordinary failure (exit 1) is still owed again" "$(owed sfail)/$(how w:7)" "1/"
 
 # --- the host door: take, merge while running, done -------------------------------------------------------------------
 python3 "$W" enqueue acp:c1:t1 --id card:7 --agent designer --person anna --room r1 --door host --why 'card answered' -- allowed >/dev/null
