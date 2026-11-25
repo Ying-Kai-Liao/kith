@@ -34,7 +34,7 @@ pub mod readfence;
 pub mod room_ledger;
 pub mod schedule;
 // Unix only, whole: the access decision runs `kith-auth`, reads the password database and writes auth.json with modes. Windows
-// has just the pieces the other modules stand on (`pyjson`, the timeout helper): see `secrets_win.rs`.
+// has just the pieces the other modules stand on (`pyjson`, the timeout helper, the portable `access` re-export): see `secrets_win.rs`.
 #[cfg(unix)]
 pub mod secrets;
 #[cfg(not(unix))]

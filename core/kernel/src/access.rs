@@ -22,6 +22,8 @@ pub use packages::{
     AgentFacts, Found, PackageSource, Packages, note_disk_read, on_disk_read, read_names,
 };
 pub use rules::Rules;
+// Only the Unix exec path (`secrets/exec.rs`) names these; the Windows build has no caller until W22b.
+#[cfg_attr(not(unix), allow(unused_imports))]
 pub(crate) use rules::{access_of, row_of};
 
 /// A refusal `kith-auth` would `die` with: its message and exit code.
@@ -41,6 +43,7 @@ pub(crate) fn die<T>(msg: impl Into<String>) -> R<T> {
 }
 
 /// The tables `load_auth` gives every auth.json, in order.
+#[cfg_attr(not(unix), allow(dead_code))] // only the Unix `fill_tables` reads it off tests
 pub(crate) const TABLES: [&str; 9] = [
     "profiles", "grants", "env", "people", "presets", "members", "invites", "retired", "once",
 ];

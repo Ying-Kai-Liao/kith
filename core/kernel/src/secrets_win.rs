@@ -1,4 +1,4 @@
-//! The Windows build of `secrets`: only the pieces other modules stand on. The access decision itself (auth.json with its
+//! The Windows build of `secrets`: only the pieces other modules stand on (`pyjson`, the timeout helper, the portable `access` re-export). The access decision itself (auth.json with its
 //! flock and modes, the password database, `kith-auth`) stays Unix-only until retire-python P3 puts it in the core; nothing
 //! that spawns `kith-auth` is reachable from here, and the callers that would are refused by name where they start.
 
