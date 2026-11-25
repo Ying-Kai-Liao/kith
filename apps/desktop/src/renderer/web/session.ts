@@ -1,3 +1,4 @@
+import type { InviteLink } from '../../shared/invite.ts'
 import type { Unsupported } from './detect.ts'
 
 /**
@@ -10,7 +11,7 @@ export interface WebSession {
   /** Why this browser can't hold the device key, or null when it can. */
   support(): Promise<Unsupported | null>
   /** The invite waiting to be joined: which computer it is for, and the same invite as an app link (its token stays on this page). Null when none. */
-  pendingLink(): Promise<{ computerId: string; appLink?: string } | null>
+  pendingLink(): Promise<{ computerId: string; appLink?: string; link?: InviteLink } | null>
   /** Drops the waiting invite once the join ended or the person closed it. */
   discardPending(): Promise<void>
   /** "Sign in again": ends the Clerk session only. The key and the kept invite stay, so nothing is proven twice. */

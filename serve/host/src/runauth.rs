@@ -567,7 +567,7 @@ pub async fn grant_for_env_async(
 /// ~/.kith on this Mac's own layout, ~/.config/kith under the old link layout. Read in process by the kernel's rules
 /// (`kith-kernel` paths, what `kith kernel paths` prints).
 pub fn socket_path() -> PathBuf {
-    crate::kernel::machine_dir(&dirs::home_dir().unwrap_or_default()).join("run").join("host.sock")
+    crate::kernel::machine_dir(&kith_kernel::paths::known_home().unwrap_or_default()).join("run").join("host.sock")
 }
 
 // ---- requests

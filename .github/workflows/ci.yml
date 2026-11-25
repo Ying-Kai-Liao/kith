@@ -792,6 +792,7 @@ jobs:
           cargo test --manifest-path host/Cargo.toml -p kith-core --locked
           cargo clippy --manifest-path host/Cargo.toml -p kith-api --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-api --locked
+          cargo clippy --manifest-path host/Cargo.toml -p kith-kernel --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-kernel --locked --no-fail-fast
       # kith-stub (core/stub) joins the same proof once it exists on the branch.
       - name: Stub tests
@@ -987,6 +988,7 @@ jobs:
             checks: |
               Core parity (difftest --rust --daemon)|kernel/tests/difftest/kith-difftest --rust --daemon --bin "$PWD/serve/host/target/debug/kith"
               kith-launch-once-race-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
+              Run kind check, launch-exec on (the one-shot in one process)|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-kind-check
               kith-launch-engines-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-engines-check
               kith-auth-mixed-race-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
               kith-account-state-switch-check|KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-account-state-switch-check

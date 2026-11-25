@@ -111,6 +111,7 @@ try {
     check(!(await v.page.url()).includes('#') && !(await v.page.url()).includes(TOKEN), 'the invite fragment is gone from the address bar')
     const scroll = await v.page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }))
     check(scroll.sw <= scroll.iw, `no horizontal scroll at 375px (scrollWidth ${scroll.sw}, width ${scroll.iw})`)
+    await v.page.getByRole('button', { name: 'Continue in browser' }).click()
     const text = await v.page.innerText('body')
     check(/invited/i.test(text) && /Google/.test(text) && /GitHub/.test(text), 'the join screen offers Google and GitHub for an invited person')
     const cloudRequests = v.requests.filter((r) => r.url.startsWith(CLOUD))

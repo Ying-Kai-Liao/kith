@@ -3,7 +3,9 @@
 # A3): `KITH_PERSON=sam KITH_AGENT=echo kith other --launch-json` twice in parallel, the grant being sam's
 # helper_once for `other`. Exactly one consumes it (exit 0), the other is refused (exit 3), the grant is gone, and auth.json
 # is still valid JSON with its other contents. The same on the Python path and, with a kith program, on the Rust path
-# (switched through lib/core-switched.txt), and with one launch on each path racing for the one grant. The router falls
+# (switched through lib/core-switched.txt), and with one launch on each path racing for the one grant. The same for the helper's
+# one-shot run (`KITH_PERSON=sam KITH_AGENT=echo kith other "task"`), which spends the grant after the claim: run by the script
+# (the `launch-exec` line off) and by the program in one process (`kith kernel launch-exec`, the line on in a copy of the kernel). The router falls
 # back to Python without a word, so the Rust path is proved by a marker: the kith program is reached through a wrapper
 # that records each `kernel launch` it is asked to run. Throwaway HOME / KITH_HOME; a fake claude.
 #
@@ -32,7 +34,7 @@ chmod +x "$T/bin/claude"
 # The kith program as the launches find it (KITH_BIN): a wrapper that notes each `kernel launch` and runs the real one,
 # so a launch the router quietly gave to Python leaves no note.
 if [[ -n $BIN ]]; then
-  printf '#!/bin/sh\n[ "$1 $2" = "kernel launch" ] && echo launch >> "%s/rust-ran"\nexec "%s" "$@"\n' "$T" "$BIN" > "$T/bin/kith-wrapped"
+  printf '#!/bin/sh\n[ "$1 $2" = "kernel launch" ] && echo launch >> "%s/rust-ran"\n[ "$1 $2" = "kernel launch-exec" ] && echo exec >> "%s/exec-ran"\nexec "%s" "$@"\n' "$T" "$T" "$BIN" > "$T/bin/kith-wrapped"
   chmod +x "$T/bin/kith-wrapped"
 fi
 
@@ -99,6 +101,47 @@ if [[ -n $BIN ]]; then
   for n in 1 2 3; do
     round "mixed round $n (python, rust)" python rust 1
     round "mixed round $n (rust, python)" rust python 1
+  done
+fi
+
+# The helper's one-shot: two at once on the one grant, each by the script (KERNEL, the line off) or by the program (ON, the line on).
+if [[ -n $BIN ]]; then
+  cp -R "$KERNEL" "$T/kernel-on"
+  printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt"
+  check "the program lists launch-exec" "'$BIN' kernel version | grep -q '\"launch-exec\"'"
+  # raceexec KERNEL0 CORE0 KERNEL1 CORE1: sets $codes, $out0/$out1 and $exec_ran (how many of them the program ran in one process)
+  raceexec() {
+    local kernels=("$1" "$3") cores=("$2" "$4") i
+    world
+    rm -f "$T/exec-ran"
+    codes=()
+    for i in 0 1; do
+      ( cd "$T/w" && env -i HOME="$T/w/home" KITH_HOME="$T/w/kith" KITH_STATE="$T/w/kith/state" TMPDIR="$T/w/tmp" \
+          PATH="$T/bin:/usr/bin:/bin:$(dirname "$(command -v python3)")" LANG=C.UTF-8 KITH_CORE="${cores[$i]}" KITH_BIN="$T/bin/kith-wrapped" KITH_STUB_BIN="$T/none" \
+          GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com \
+          KITH_PERSON=sam KITH_AGENT=echo "${kernels[$i]}/bin/kith" other "do it" > "$T/out$i" 2> "$T/err$i"; echo $? > "$T/code$i" ) &
+    done
+    wait
+    exec_ran=0; [[ -f $T/exec-ran ]] && exec_ran=$(wc -l < "$T/exec-ran" | tr -d ' ')
+    codes=("$(cat "$T/code0")" "$(cat "$T/code1")")
+  }
+  roundexec() {
+    local name=$1 want=$6 sorted won
+    raceexec "$2" "$3" "$4" "$5"
+    sorted=$(printf '%s\n' "${codes[@]}" | sort | tr '\n' ' ')
+    check "$name: one run took the grant, the other was refused (exits: $sorted)" "[ '$sorted' = '0 3 ' ]"
+    won=1; [[ ${codes[0]} == 0 ]] && won=0
+    check "$name: the winner ran claude" "grep -q '^claude ' '$T/out$won'"
+    check "$name: the loser ran nothing" "[ ! -s '$T/out$((1 - won))' ]"
+    check "$name: the grant is used up and auth.json is valid" \
+      "python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); m=d[\"members\"][\"echo\"][\"sam\"]; sys.exit(1 if m.get(\"helper_once\", {}).get(\"other\") else 0 if m.get(\"mode\") == \"acceptEdits\" and \"kai\" in d[\"people\"] else 1)' '$AUTH'"
+    check "$name: the program ran $want of the one-shots in one process (it ran $exec_ran)" "[ '$exec_ran' = '$want' ]"
+  }
+  for n in 1 2 3; do
+    roundexec "one-shot, script round $n" "$KERNEL" python "$KERNEL" python 0
+    roundexec "one-shot, program round $n" "$T/kernel-on" rust "$T/kernel-on" rust 2
+    roundexec "one-shot, mixed round $n (script, program)" "$KERNEL" python "$T/kernel-on" rust 1
+    roundexec "one-shot, mixed round $n (program, script)" "$T/kernel-on" rust "$KERNEL" python 1
   done
 fi
 exit $fail
