@@ -118,6 +118,14 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+# Lean debug info: file and line tables (enough for backtraces and panics) for this workspace's crates, none for the
+# dependencies. A host rebuild takes about 30 s instead of 31-58 s and the debug binary is about 7% smaller.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 # Every host start hashes its own executable (`service::capture_binary_identity`, the `binaryHash` the desktop app and the
 # updater check). A debug kith-serve is about 530 MB on Linux, and an unoptimized SHA-256 took many seconds of CPU per start
 # on a CI runner running four e2e hosts at once, enough to miss the e2e start deadline. Only the hash crate is optimized.
