@@ -96,7 +96,8 @@ def request(path, body, timeout=30):
     try:
         token = (data / 'token').read_text().strip()
     except OSError as e:
-        raise HostUnreachable(f'the Kith host is not installed here ({e.__class__.__name__})', down=True) from None
+        raise HostUnreachable(f'the Kith host is not installed here ({e.__class__.__name__})', down=True,
+                              name=e.__class__.__name__) from None
     if '\r' in token or '\n' in token:
         raise HostUnreachable('the serve token is not a token')
     conn = _Conn(data, timeout)
@@ -122,7 +123,8 @@ def stream(path, timeout=30):
     try:
         token = (data / 'token').read_text().strip()
     except OSError as e:
-        raise HostUnreachable(f'the Kith host is not installed here ({e.__class__.__name__})', down=True) from None
+        raise HostUnreachable(f'the Kith host is not installed here ({e.__class__.__name__})', down=True,
+                              name=e.__class__.__name__) from None
     if '\r' in token or '\n' in token:
         raise HostUnreachable('the serve token is not a token')
     conn = _Conn(data, timeout)
