@@ -15,6 +15,8 @@ pub enum Row {
     Ported(&'static [&'static str]),
     /// Not yet: the retire-python package (`Pn-m`) that ports it.
     Refused(&'static str),
+    /// A guest verb: refused with the shared guest message, not a package (the sandbox is parked, not queued).
+    Guests,
 }
 
 /// The verbs `kernel/bin/kith` knows, grouped by what they share. `FALLBACK` answers anything else: a word that is no
@@ -31,7 +33,7 @@ pub const ROWS: &[(&[&str], Row)] = &[
     (&["skills", "skill"], Row::Refused("P4-3")),
     (&["scratch"], Row::Refused("P4-4")),
     (&["project"], Row::Refused("P4-5")),
-    (&["group", "bot"], Row::Refused("P4-6")),
+    (&["group"], Row::Refused("P4-6")),
     (&["connector"], Row::Refused("P4-7")),
     (&["serve", "link", "unlink"], Row::Refused("P4-8")),
     (&["new"], Row::Refused("P4-11")),
@@ -43,8 +45,9 @@ pub const ROWS: &[(&[&str], Row)] = &[
     (&["remote"], Row::Refused("P4-20")),
     (&["acp"], Row::Refused("P4-21")),
     (&["auth", "connect", "disconnect", "connectors"], Row::Refused("P3-2")),
-    (&["cost", "people", "invite"], Row::Refused("P3-1")),
-    (&["door"], Row::Refused("P3-12")),
+    (&["cost"], Row::Refused("P3-1")),
+    // Every verb that makes, admits or starts a guest or a bot guest (windows-owner: guests are parked).
+    (&["people", "invite", "door", "bot", "guests", "members", "bots"], Row::Guests),
     (&["allow"], Row::Refused("P3-5")),
     (&["cards"], Row::Refused("P3-6")),
     (&["send-to"], Row::Refused("P3-7")),
@@ -79,6 +82,7 @@ pub fn answer(args: &[OsString]) -> Answer {
             Answer::Run(lead.iter().map(OsString::from).chain(args[1..].iter().cloned()).collect())
         }
         Some(Row::Refused(package)) => refusal(&verb, package),
+        Some(Row::Guests) => Answer::Refuse(kith_kernel::GUESTS_NOT_ON_WINDOWS.to_owned()),
         None => refusal(&verb, FALLBACK),
     }
 }
@@ -125,6 +129,7 @@ mod tests {
                     assert!(p.starts_with('P') && n.parse::<u32>().is_ok() && m.parse::<u32>().is_ok(), "{p}");
                 }
                 Row::Ported(lead) => assert_ne!(lead.len(), 0),
+                Row::Guests => {}
             }
         }
     }
@@ -147,6 +152,7 @@ mod tests {
             let Route::Kernel(routed) = route(&argv) else { continue };
             kernel_lines += 1;
             match answer(&routed) {
+                Answer::Refuse(m) if m == kith_kernel::GUESTS_NOT_ON_WINDOWS => {}
                 Answer::Refuse(m) => assert!(m.starts_with("not on Windows yet: ") && m.ends_with(')'), "{m}"),
                 Answer::Run(a) => assert_eq!(a, v(&["kernel", "engines", "x"])),
             }
@@ -166,6 +172,13 @@ mod tests {
             Answer::Refuse("not on Windows yet: coder (retire-python P1-12)".into())
         );
         assert_eq!(answer(&v(&[])), Answer::Refuse("not on Windows yet: (no verb) (retire-python P1-12)".into()));
+    }
+
+    #[test]
+    fn every_guest_verb_says_guests_arent_on_windows() {
+        for verb in ["people", "invite", "door", "bot", "guests", "members", "bots"] {
+            assert_eq!(answer(&v(&[verb, "x"])), Answer::Refuse(kith_kernel::GUESTS_NOT_ON_WINDOWS.into()), "{verb}");
+        }
     }
 
     #[test]

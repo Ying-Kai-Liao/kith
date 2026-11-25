@@ -125,6 +125,33 @@ pub fn withdraw_person(f: &Paths, persons: &[String]) {
     log("withdraw", write(f, "wake.withdrawPerson", &json!({"persons": persons})));
 }
 
+/// The host's clock for the queue: the core settles, unparks and takes what is due, and answers what it did.
+pub fn tick(f: &Paths) -> anyhow::Result<Value> {
+    ask(f, "wake.tick", &json!({}), false, true)
+}
+
+/// The turn the run `run` is, from the queue's item that holds it.
+pub fn turn_of(f: &Paths, run: &str, note: &str) -> Option<Turn> {
+    let items = ls(f)?;
+    let item = items.iter().find(|it| {
+        it["turn"]["run"] == run || it["requests"].as_array().is_some_and(|rs| rs.iter().any(|r| r["run"] == run))
+    })?;
+    let text = |v: &Value, k: &str| v[k].as_str().unwrap_or_default().to_owned();
+    let carried: Vec<&Value> = item["requests"].as_array()?.iter().filter(|r| r["run"] == run).collect();
+    Some(Turn {
+        run: run.to_owned(),
+        session: text(item, "session"),
+        agent: text(item, "agent"),
+        person: item["person"].as_str().filter(|p| !p.is_empty()).map(str::to_owned),
+        ids: carried.iter().map(|r| text(r, "id")).collect(),
+        requests: carried
+            .iter()
+            .map(|r| super::Asked { id: text(r, "id"), why: text(r, "why"), text: text(r, "text") })
+            .collect(),
+        note: note.to_owned(),
+    })
+}
+
 /// The core's clock does what `kith-wake drain` did: recovers the turns whose holder is gone.
 #[cfg(test)]
 pub fn recover(f: &Paths) {

@@ -926,6 +926,8 @@ def reply(argv):
         print('kith ask: %s was ended; nothing to resume' % mid, file=sys.stderr)
         return 0
     box(mid, 'parked').unlink(missing_ok=True)
+    # KITH_TURN_CLAIM (the host's claim of this resume, passed on by bin/kith for --reply only) stays in the environment: the inner
+    # launch attaches its own pid to it. The host's report names this process's pid, which the core ignores; end_gone ends the claim.
     env = dict(os.environ, KITH_OUTPUT='json', KITH_LAUNCH_ASK_ID=mid)
     proc = subprocess.run([str(KITH / 'bin/kith'), agent, '--resume', session, '--', note], env=env,
                           stdin=subprocess.DEVNULL, capture_output=True, text=True)

@@ -454,6 +454,12 @@ pub fn plan(
     let mut ctmp = String::new();
     let mut ctmp_note = String::new();
     if !p_owner {
+        // Guests are parked on Windows (this module is Unix-only today; the refusal waits for the lift of its gate).
+        #[cfg(windows)]
+        {
+            say(&format!("kith: {}", crate::GUESTS_NOT_ON_WINDOWS));
+            return Err(3);
+        }
         let plain = p_id.starts_with(|c: char| c.is_ascii_lowercase())
             && p_id
                 .chars()

@@ -44,6 +44,11 @@ zeroize = "1"
 [target.'cfg(windows)'.dependencies]
 kith-winsys = { path = "../winsys" }
 
+[features]
+# The host's tests start a core with no holder and open its claims by hand (`Daemon::mark_reconciled_without_holder`). Off in
+# every build of a binary: only serve/host's dev-dependencies turn it on.
+test-support = []
+
 [dev-dependencies]
 tempfile = "3"
 # Generated checks of the run socket's rules (the port of the host's runauth_props.rs). Pinned like the host's.
