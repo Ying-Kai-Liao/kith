@@ -52,6 +52,16 @@ for flag in --print --launch-json; do
   grep -q "a turn claim is for a run" "$T/err" && ok "$flag says why" || bad "$flag: no reason" "$(cat "$T/err")"
 done
 
+# A card's resume is `kith ask --reply ID AGENT --resume SESSION -- NOTE`: kith-ask hands the claim to its inner launch (which, on
+# this Python rollback, refuses it: that refusal naming the claim proves the inner kith saw KITH_TURN_CLAIM). Any other ask form
+# refuses the claim and starts nothing.
+rm -f "$STUB_OUT"
+KITH_TURN_CLAIM=claim-1 "$KERNEL/bin/kith" ask --reply r-1 designer --resume s-1 -- "do it" >"$T/out" 2>"$T/err"; rc=$?
+grep -q "turn claim" "$T/err" && ok "an ask --reply resume's inner launch sees the claim" || bad "inner kith saw no claim" "rc=$rc $(cat "$T/err")"
+[[ ! -e $STUB_OUT ]] && ok "and starts no engine here" || bad "engine started" "$(cat "$STUB_OUT")"
+KITH_TURN_CLAIM=claim-1 "$KERNEL/bin/kith" ask ls >"$T/out" 2>"$T/err"; rc=$?
+is "a claimed ask (not --reply) exits 10" "$rc" 10
+
 # The Rust threads program (KITH_BIN: a program that lists `turn-claim`); the claim needs a core, so these rows end before one is asked.
 KB=${KITH_BIN:-}
 if [[ -n $KB && -x $KB ]] && "$KB" kernel version 2>/dev/null | grep -q '"turn-claim"'; then

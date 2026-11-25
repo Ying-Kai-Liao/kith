@@ -234,6 +234,7 @@
     "hello.store.error": "null",
     "hello.store.unsaved": "number",
     "hello.store.writable": "bool",
-    "hello.version": "string"
+    "hello.version": "string",
+    "hello.wakeRunner": "bool"
   }
 }
