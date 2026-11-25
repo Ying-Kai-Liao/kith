@@ -136,13 +136,37 @@ pub fn session_modes(engine: &str, reach: Reach) -> &'static [&'static str] {
         ("codex", Reach::ReadOnly) => &["read-only"],
         ("codex", Reach::Workspace) => &["workspace-write", "auto"],
         ("codex", Reach::Full) => &["agent-full-access", "full-access"],
-        // `hermes acp` (never started with --accept-hooks): accept_edits allows edits in the workspace and still asks for
-        // the rest; dont_ask is the no-asking mode a bypass run needs.
-        ("hermes", Reach::ReadOnly) => &["default"],
-        ("hermes", Reach::Workspace) => &["accept_edits"],
+        // `hermes acp`: its modes (default, accept_edits, dont_ask) are edit-approval policies only, not a fence for shell
+        // commands (see [`refuses_unbypassed`]). So while that refuses, only dont_ask is used.
+        ("hermes", Reach::ReadOnly) if !HERMES_REFUSES_WITHOUT_BYPASS => &["default"],
+        ("hermes", Reach::Workspace) if !HERMES_REFUSES_WITHOUT_BYPASS => &["accept_edits"],
         ("hermes", Reach::Full) => &["dont_ask"],
         _ => &[],
     }
+}
+
+/// THE switch for refusing Hermes runs that are not in bypass mode. Kai's decision (2026-11-27: "Refuse"), not a default. Flip it to `false` to get Hermes as it was before
+/// (such runs start in `accept_edits` / `default`); nothing else needs to change but the Hermes tests that pin the refusal
+/// (here and in serve/host/src/runonce.rs).
+///
+/// Why true: Hermes's ACP modes only gate file edits. Shell approval follows `approvals.mode` in `~/.hermes/config.yaml`
+/// (default "smart": a guardian model approves flagged commands before any ACP ask), which Kith leaves alone and no
+/// env or ACP call overrides. A non-bypass run once ran `rm -rf` unasked.
+pub const HERMES_REFUSES_WITHOUT_BYPASS: bool = true;
+
+/// Whether a run without bypass must be refused on `engine` before it is spawned, because no mode or sandbox Kith can
+/// set holds it to its folders. Every caller (run-once, engine-run) asks here; an empty [`session_modes`] alone would
+/// not do, since an empty list means "leave the engine's own mode". Interactive terminal sessions never ask.
+pub fn refuses_unbypassed(engine: &str) -> bool {
+    HERMES_REFUSES_WITHOUT_BYPASS && engine == "hermes"
+}
+
+/// What to tell the person when [`refuses_unbypassed`] stops a run.
+pub fn refusal(engine: &str) -> String {
+    format!(
+        "{engine} can't be held to its folders unless the agent is in bypass mode: its permission modes cover file edits, \
+         not shell commands, so this run was not started. Run the agent in bypass mode, or use another engine."
+    )
 }
 
 /// Whether a run without approval may still allow (once) the agent's ask to run a tool of an MCP server the owner granted
@@ -1004,9 +1028,22 @@ mod tests {
         assert!(matches!(h.oneshot, Oneshot::Acp));
         assert!(h.enforces.per_run_mcp && !h.enforces.tool_hooks && !h.serves_guests());
         assert_eq!(h.enforces.role_prompt, RolePrompt::FirstMessage);
-        assert_eq!(session_modes("hermes", Reach::Workspace), ["accept_edits"]);
         assert_eq!(session_modes("hermes", Reach::Full), ["dont_ask"]);
-        assert_eq!(session_modes("hermes", Reach::ReadOnly), ["default"]);
+        // Its modes gate edits, not shell commands: only the run that asks for nothing is held to anything.
+        assert_eq!(
+            session_modes("hermes", Reach::Workspace).is_empty(),
+            HERMES_REFUSES_WITHOUT_BYPASS
+        );
+        assert_eq!(
+            session_modes("hermes", Reach::ReadOnly).is_empty(),
+            HERMES_REFUSES_WITHOUT_BYPASS
+        );
+        assert_eq!(refuses_unbypassed("hermes"), HERMES_REFUSES_WITHOUT_BYPASS);
+        assert!(
+            !refuses_unbypassed("codex")
+                && !refuses_unbypassed("claude")
+                && !refuses_unbypassed("pi")
+        );
     }
 
     #[test]

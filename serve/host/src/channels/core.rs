@@ -383,6 +383,13 @@ impl Core {
             }
             return Ok(());
         };
+        // A person who isn't the owner is a guest, and guests aren't on Windows: this also answers one stored by a copied store.
+        if cfg!(windows) && !w.owner {
+            if m.private || m.addressed || th.is_some() {
+                ad.reply(m, kith_kernel::GUESTS_NOT_ON_WINDOWS).await?;
+            }
+            return Ok(());
+        }
         if w.revoked {
             // Their handle is kept so they hear why; nothing else happens.
             if m.private || m.addressed || th.is_some() {

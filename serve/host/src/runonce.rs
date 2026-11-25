@@ -81,10 +81,24 @@ pub(crate) fn modes(engine: &engines::Engine, approve: bool) -> Vec<String> {
         .collect()
 }
 
+/// Why a run without `approve` must not start on `engine` (see [`engines::refuses_unbypassed`], the one switch):
+/// refused before the engine is spawned, never started in its own mode.
+pub(crate) fn cannot_hold(engine: &engines::Engine, approve: bool) -> Option<String> {
+    (!approve && engines::refuses_unbypassed(engine.id)).then(|| engines::refusal(engine.id))
+}
+
 /// Runs it and returns the exit code.
 pub async fn run(a: Args) -> Result<i32> {
     let engine =
         engines::find(&a.engine).ok_or_else(|| anyhow!("no engine called {} (kith engines lists them)", a.engine))?;
+    if let Some(why) = cannot_hold(engine, a.approve) {
+        if a.json {
+            println!("{}", json!({"error": why, "kind": "error", "resets_at": null, "cost_usd": null}));
+        } else {
+            eprintln!("kith: {}: {why}", engine.id);
+        }
+        return Ok(1);
+    }
     let Some(command) = acp_command(engine, a.acp_command.clone()).await? else {
         return Ok(NOT_AVAILABLE);
     };
@@ -197,10 +211,30 @@ mod tests {
     }
 
     #[test]
-    fn hermes_runs_over_its_own_acp_with_accept_edits_or_dont_ask() {
+    fn hermes_runs_over_its_own_acp_in_dont_ask_and_has_no_mode_for_a_run_without_bypass() {
         let hermes = engines::find("hermes").unwrap();
         assert!(hermes.local.is_some() && matches!(hermes.oneshot, Oneshot::Acp));
-        assert_eq!(modes(hermes, false), ["accept_edits"]);
+        assert_eq!(modes(hermes, false).is_empty(), engines::HERMES_REFUSES_WITHOUT_BYPASS);
         assert_eq!(modes(hermes, true), ["dont_ask"]);
+    }
+
+    #[tokio::test]
+    async fn a_hermes_run_without_bypass_is_refused_before_the_engine_starts() {
+        if !engines::HERMES_REFUSES_WITHOUT_BYPASS {
+            return;
+        }
+        // A command that leaves a mark if it is ever started: the refusal must come first.
+        let dir = std::env::temp_dir().join(format!("kith-hermes-refuse-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mark = dir.join("started");
+        let mut a = args("hermes");
+        a.acp_command = Some(format!("touch {}", crate::shell::quote(&mark.to_string_lossy())));
+        assert_eq!(run(a).await.unwrap(), 1);
+        assert!(!mark.exists(), "the engine was started");
+        let _ = std::fs::remove_dir_all(&dir);
+        let hermes = engines::find("hermes").unwrap();
+        assert!(cannot_hold(hermes, false).unwrap().contains("bypass"));
+        assert!(cannot_hold(hermes, true).is_none());
+        assert!(cannot_hold(engines::find("codex").unwrap(), false).is_none());
     }
 }

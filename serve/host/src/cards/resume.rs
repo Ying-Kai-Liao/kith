@@ -39,6 +39,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+mod wake_clock;
+
 /// How long the kernel's one-shot waits for a held session before it exits 1 with "held by ..." (`KITH_CLAIM_WAIT`, #244,
 /// default 5). The spawn gets it explicitly so the rule below doesn't depend on the kernel's default.
 const CLAIM_WAIT_S: u64 = 5;
@@ -535,7 +537,10 @@ pub fn run_taker(hub: &Arc<Hub>) {
                 }
             }
             settle_queue(&hub).await;
-            drive(&hub).await;
+            // A switched `wake` module is the core's queue: the host drives its clock and begins its turns by id (WK4b).
+            if !wake_clock::step(&hub).await {
+                drive(&hub).await;
+            }
         }
     });
 }

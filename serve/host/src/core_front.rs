@@ -167,6 +167,11 @@ impl TestDaemon {
     pub fn stop(self) {
         self.0.stop();
     }
+
+    /// The holder's first hello, for a test core that has none: the claims wait for it.
+    pub fn reconciled(&self) {
+        self.0.mark_reconciled_without_holder().expect("the reconcile mark");
+    }
 }
 
 /// `kith migrate step authority` over `folders` (the file at `folders.secrets/auth.json`), in this process; the lines it
