@@ -181,16 +181,24 @@ helper `boxprobe.exe`). Raw output: artifact `windows-guest-probe-output`. Ident
 STANDARD local user (not an Administrator) on `windows-2025`; the boxed child is an AppContainer process (Low integrity,
 only custom capabilities) in a job object. Admin-only steps (grants, `CheckNetIsolation`) ran as `runneradmin`. The Claude
 Code probes (F11, F19, F20, F21 part) ran as `runneradmin`: what Claude Code does with these settings does not depend on
-the account. Claude Code 2.1.331. Run for F12-F22 unless stated: __RUN1__ (earlier run 45524581007, which had a TEMP/cwd
-bug that left P-G3 survivors, P-G4 cmd, P-G5 squat, pair test and P-G10 unmeasured; those come from __RUN2__).
+the account. Claude Code 2.1.331. Run for F12-F22 unless stated: [45524581007](https://github.com/Ying-Kai-Liao/kith/actions/runs/45524581007) (an earlier run, which had a TEMP/cwd
+bug that left P-G3 survivors, P-G4 cmd, P-G5 squat, pair test and P-G10 unmeasured). Run [45526277104](https://github.com/Ying-Kai-Liao/kith/actions/runs/45526277104) is the rerun with
+those fixed and is the evidence for F11b, F13, F14 cmd, F15, F22, F23; both runs are green (a failing premise is a recorded
+result, not a red job).
 
-### F11. P-G1: `CLAUDE_CODE_GIT_BASH_PATH` selects the Bash tool's shell (partial, see F11b when rerun)
+### F11. P-G1: `CLAUDE_CODE_GIT_BASH_PATH` selects the shell for the Bash tool AND hooks (HOLDS when Git is off PATH)
 
-Premise: setting the variable to a kith shim `bash.exe` makes Claude Code's Bash tool (and hooks) run through it.
-Observed (run 45524581007): with the variable set to a logging stand-in, to a non-bash exe, to a missing path and to the
-real `C:\Program Files\Git\bin\bash.exe`, the Git bash found on PATH always ran and the stand-in's log stayed empty. So
-the variable was NOT honoured while Git for Windows is on PATH. Hooks (PreToolUse, SessionStart) fire. Result: partial
-(unproven either way); the Git-off-PATH retry is F11b. Identity: runneradmin.
+Premise: setting the variable to a kith shim named `bash.exe` makes Claude Code run the Bash tool and hooks through it.
+Observed, Git for Windows on PATH (run 45524581007, 5 variants): the Git bash on PATH always ran and the stand-in's log
+stayed empty, so the variable is ignored while Git is findable on PATH. Observed, Git removed from PATH (run
+[45526277104](https://github.com/Ying-Kai-Liao/kith/actions/runs/45526277104), `g1b-*`): with the variable set to `C:\probe\fakegit\bin\bash.exe` (a copy of the logging stand-in that
+proxies to the real bash) the stand-in was called 6 times: the SessionStart hook (`-c "echo HOOK_RAN_SESSIONSTART"`), the
+PreToolUse hook (`-c "echo HOOK_RAN_PRETOOL"`), `-c env`, `-lc 'echo "$PATH"'`, the shell-snapshot setup
+(`-c -l SNAPSHOT_FILE=...`) and the tool command itself (`-c "source <snapshot> ... && eval <command>"`), all with
+cwd `C:\probe\cwd`. So hooks and the Bash tool use the same shell. The control (Git off PATH, variable unset) still ran
+Git bash: Claude Code also finds Git at its default install path. Result: HOLDS only when Git is not on PATH, so a kith
+guest launch must also scrub Git from the child's PATH (or the shim is bypassed). The shim must accept `-c`, `-lc` and
+`-c -l <script>` and pass `$0`-style argv through. Identity: runneradmin.
 
 ### F12. P-G2: what runs inside the AppContainer box (FAILS for Git Bash)
 
@@ -200,17 +208,23 @@ fails: `msys-2.0 fatal error NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0S
 through bash fails the same way. `git.exe` alone: `could not open '/dev/null': Permission denied`. The box cannot open
 the NUL device (Rust null stdin: os error 5; `cmd start >nul`: Access denied). Python fails 0xC0000135 (cannot load its
 DLLs) until an admin grants ALL APPLICATION PACKAGES read on its folder; Git, cmd and System32 already grant it, node and
-Python folders do not (node ran anyway). Result: FAILS for Git Bash as is. What it needs is in F12b. Identity: kithguest
+Python folders do not (node ran anyway). Result: FAILS for Git Bash as is. What it needs: F12b. Identity: kithguest
 (standard), boxed.
 
-### F13. P-G3: a boxed process cannot leave the job (see F13b for the measured rerun)
+### F13. P-G3: a boxed process cannot leave the job (UNPROVEN, probe method broken)
 
-Observed (run 45524581007): no survivor for the 7 start methods tried (`cmd start`, `sc create`, `schtasks`, WMI denied or
-"Class not registered"; Start-Process, ShellExecute and WScript.Run reported ok), but nothing was alive after the box
-exited (`job_active_after_exit=0`), and the box cannot open NUL, so it is unclear whether those children ever started.
-Result: partial/unclear until the rerun.
+Observed (both runs): zero survivors after the box job was terminated (`job_active_after_exit=0`), but the measurement is
+weak. The rerun showed why: Windows PowerShell inside the AppContainer cannot use its FileSystem provider ("Cannot find
+drive. A drive with the name 'Microsoft.PowerShell.Core\FileSystem' does not exist"), so the `cmd start`, `Start-Process`,
+`schtasks` and service attempts threw before they ever tried; WMI was denied ("Access to a CIM resource was not
+available"); `Shell.Application.ShellExecute` and `WScript.Shell.Run` returned ok but no process was alive afterwards,
+so whether they started is still unknown. Result: unproven. A box built on cmd.exe or a native probe (not PowerShell) is
+the next try. Do not rely on "cannot escape the job" without it: rule 3 should treat job kill as a belt, not the proof.
 
 ### F14. P-G4: what a boxed process can open of the user's unboxed world (HOLDS, with a registry caveat)
+
+Cmd checks added in run [45526277104](https://github.com/Ying-Kai-Liao/kith/actions/runs/45526277104): `cmdkey /list` in the box prints `NONE` (it sees an empty store, not the owner's), and
+`tasklist`/`taskkill` style cross-process control returns `Access is denied` (g4e).
 
 Observed: opening an unboxed same-user process: err 5 for every access mask; Credential Manager (CredRead): err 5;
 `HKCU\Software\kithprobe`: denied. BUT `HKCU\Environment` and `HKCU\Software\Microsoft\Windows\CurrentVersion` open for
@@ -221,7 +235,10 @@ private keys; partial for registry. Identity: kithguest, boxed.
 
 Observed: a boxed process cannot create a named pipe (err 5, with or without FILE_FLAG_FIRST_PIPE_INSTANCE). So the host
 side of every box-to-host pipe is created by the host. The squat test (box racing the owner for the name) is moot for
-the box; see F15b for the owner SID check. Result: holds (box cannot squat).
+the box; Run [45526277104](https://github.com/Ying-Kai-Liao/kith/actions/runs/45526277104): the box got err 5 creating `kith-host-g5test` (first instance) and `kith-run-g5test`; when the HOST then
+created the same name as first instance it succeeded and the pipe's owner SID equals the host user's SID
+(`S-1-5-21-...-1003`), so the owner SID is a usable identity check. A box connecting to the not-yet-existing name gets
+err 2. Result: holds (box cannot squat; host can verify the owner).
 
 ### F16. P-G6: host pipe reachable from the box by ACE (HOLDS)
 
@@ -263,7 +280,31 @@ Observed: `chrome-headless-shell --no-sandbox` in the box takes a screenshot (49
 nested it hangs (90 s); ffmpeg (libx264) works; `WSADuplicateSocket` into a boxed child works. Result: Chrome needs
 `--no-sandbox` inside the box.
 
-__MORE__
+### F22. Box against box and against the host (rule 2: one AppContainer SID per run) (HOLDS)
+
+Run [45526277104](https://github.com/Ying-Kai-Liao/kith/actions/runs/45526277104). A process inside box A can open its own box's processes with every access mask (QUERY, VM_READ, DUP_HANDLE,
+TERMINATE, ALL_ACCESS). A process in a different box B opens none of A's (err 5 on every mask). The unboxed host (same
+user) opens A's process with every mask, so the host can always signal and kill a run. Result: holds, so one AppContainer
+SID per run separates runs from each other; it also means two runs sharing an SID share process access, so do not reuse an
+SID across guests. The cost is F17 (loopback needs an admin exemption per SID).
+
+### F23. P-G10: TerminateJobObject on the run job with a box in a nested job (PARTIAL)
+
+Run [45526277104](https://github.com/Ying-Kai-Liao/kith/actions/runs/45526277104). The outer job showed 2 active processes; `TerminateJobObject(outer)` brought `ActiveProcesses` to 0 in about
+0.2 ms. An immediate liveness check of the two pre-kill pids still reported both alive (termination is asynchronous; the
+check was a single zero-wait). The boxed child inside the nested job printed only `Access is denied` (it did not run a
+real workload: same NUL/PowerShell limits as F12/F13), so the kill of a working box tree was not exercised. Result: the
+job count drops at once; a poll of process handles after the kill is needed to say when the tree is really gone.
+
+### F12b. P-G2: what Git Bash needs (MSYS cannot be granted; no non-MSYS shell tested)
+
+Run [45526277104](https://github.com/Ying-Kai-Liao/kith/actions/runs/45526277104). The failure is the MSYS runtime making a named object directly in `\BaseNamedObjects` (a fixed global name
+`msys-2.0S5-<hash>`); an AppContainer is only allowed its own `\Sessions\N\AppContainerNamedObjects\<SID>` directory,
+so no file grant or capability we hold fixes it. Setting `MSYS=winsymlinks:nativestrict` and `MSYS2_NOSTART=1` made no
+difference (same 0xC0000022; Git's `bash.exe` and `usr\bin\bash.exe` alike). The busybox-w32 try did not run: the
+download in the admin step failed (`ERROR in busybox` in `guest-admin.log`, Invoke-WebRequest error), so
+a non-MSYS shell is untested. Result: Git Bash cannot run in the box; the guest Bash tool needs a different shell or a
+box that is not an AppContainer (a restricted token and job, as on W21's fallback), to be decided by the design.
 
 
 ## Not determinable here
