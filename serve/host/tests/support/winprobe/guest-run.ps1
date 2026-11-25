@@ -83,6 +83,9 @@ Log ((icacls $R /grant "*${capR}:(OI)(CI)(RX)") -join "`n")
 # created after the grant, so they inherit it
 New-Item -ItemType Directory -Force "$W\tmp", "$W\g3" | Out-Null
 Log ((icacls $W) -join "`n")
+# the guest user's own TEMP is not readable to a box, and a box starts in the parent's cwd: give both a place it can use
+$env:TEMP = "$W\tmp"; $env:TMP = "$W\tmp"
+Set-Location $R
 
 # --- P-G2 ------------------------------------------------------------------------------------------------------------
 Section 'P-G2 token of a box: AppContainer with only custom capabilities'
