@@ -16,3 +16,6 @@ room-ledger	room-ledger
 threads	threads-writer
 lifecycle	lifecycle
 permit	permit
+# `kith AGENT "task"` (a one-shot) runs in the program (`kith kernel launch-exec`, one process, claims and engine) when this line is here and the program lists `launch-exec`.
+# Shipped off (retire-python P1-12 R3a): the line is commented out until R4 switches it on after the live soak; KITH_CORE=python keeps bash either way.
+#launch-exec	launch-exec

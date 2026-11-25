@@ -9,6 +9,8 @@
 //! The wake record stays the record of what is owed: when a run leaves it (done, given back, recovered, withdrawn) the
 //! turn that was waiting for it is closed in the same transaction, so no waiting turn outlives its run. A turn that already
 //! has a claim is the claim's to finish. Nothing runs the turns until the switch (I14): the Python host still delivers.
+//!
+//! A Stop reaches a run that has not started (R5, `stop_unstarted_in`): its turn is cancelled and the run given back.
 
 use rusqlite::{OptionalExtension as _, Transaction};
 use serde_json::Value;
@@ -72,10 +74,32 @@ pub(crate) fn fail_foreign_in(tx: &Transaction<'_>, st: &mut State, now: f64) ->
 }
 
 /// Creates the turn for the run `turn` (the JSON `queue::take` answered) and parks it when a writer holds the session.
-/// `sid` is the session the caller resumes, when it said (the conversation otherwise).
+/// `sid` is the session the caller resumes, when it said (the conversation otherwise). The claim files count as writers
+/// too (`wake.take`, until the switch).
 pub(crate) fn start_in(
     tx: &Transaction<'_>,
     out: &dyn Outside,
+    turn: &Value,
+    sid: Option<&str>,
+    now: f64,
+) -> Result<i64> {
+    start_with_in(tx, Some(out), turn, sid, now)
+}
+
+/// [`start_in`] for the tick: the claim rows are the only writers it asks (the `claims` module is switched), so it reads no
+/// file.
+pub(crate) fn start_claims_in(
+    tx: &Transaction<'_>,
+    turn: &Value,
+    sid: Option<&str>,
+    now: f64,
+) -> Result<i64> {
+    start_with_in(tx, None, turn, sid, now)
+}
+
+fn start_with_in(
+    tx: &Transaction<'_>,
+    files: Option<&dyn Outside>,
     turn: &Value,
     sid: Option<&str>,
     now: f64,
@@ -124,12 +148,14 @@ pub(crate) fn start_in(
         )?,
     };
     tx.execute(
-        "INSERT OR IGNORE INTO wake_turns (run, session, turn_id) VALUES (?1, ?2, ?3)",
-        rusqlite::params![run, session, id],
+        "INSERT OR IGNORE INTO wake_turns (run, session, turn_id, revoke_seen) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![run, session, id, claims::revoke_epoch_in(tx, person)?],
     )?;
     // The claim files are the writers until the switch (the Python's `writer_live`); the claim rows are what the core knows.
     let writer = sid.filter(|s| !s.is_empty()).unwrap_or(session);
-    if out.writer_live(writer) || claims::person_writer_live_in(tx, session)? {
+    if files.is_some_and(|out| out.writer_live(writer))
+        || claims::person_writer_live_in(tx, session)?
+    {
         claims::park_in(tx, id, "terminal_live", at)?;
     }
     Ok(id)
@@ -170,4 +196,101 @@ pub(crate) fn close_gone_in(
         }
     }
     Ok(())
+}
+
+/// The turn that carries `run`, through the link.
+pub(crate) fn linked_turn_in(tx: &rusqlite::Connection, run: &str) -> Result<Option<i64>> {
+    Ok(tx
+        .query_row(
+            "SELECT turn_id FROM wake_turns WHERE run = ?1",
+            [run],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+/// R5: a Stop that reaches a run whose turn has not started (`queued`, `parked`, or `claimed` with no process) cancels the
+/// turn and gives the run back, in the Stop's transaction; the Stop then withdraws what it names (`queue::withdraw`) and
+/// the rest stays owed, not a failed try. `id` is the one request the Stop names (none: all of them); a Stop that names
+/// another request leaves the run alone. A running turn is not touched: its prompt was delivered, so the requests stay
+/// with it. A run with no link (imported, with a deliverer's pid) is the old rule's.
+pub(crate) fn stop_unstarted_in(
+    tx: &rusqlite::Connection,
+    st: &mut State,
+    now: f64,
+    session: &str,
+    id: Option<&str>,
+) -> Result<()> {
+    let Some(it) = st.items.get(session) else {
+        return Ok(());
+    };
+    let Some(run) = it.turn.as_ref().map(|t| t.run.clone()) else {
+        return Ok(());
+    };
+    let named = id.is_none_or(|i| {
+        it.requests
+            .iter()
+            .any(|r| r.run.as_deref() == Some(&run) && r.id == i)
+    });
+    if !named {
+        return Ok(());
+    }
+    let Some(turn) = linked_turn_in(tx, &run)? else {
+        return Ok(());
+    };
+    // A turn that is already cancelled and never ran (a revoke cancelled it, or the claim was refused) is as unstarted as a
+    // waiting one: the run goes back all the same.
+    if claims::cancel_waiting_in(tx, &[turn], "stopped", ms(now))?.is_empty()
+        && !cancelled_unran_in(tx, turn)?
+    {
+        return Ok(());
+    }
+    super::queue::unrun(st, session);
+    Ok(())
+}
+
+/// The turn is `cancelled` or `expired`, and no claim of it ever ran or still holds the conversation.
+fn cancelled_unran_in(tx: &rusqlite::Connection, turn: i64) -> Result<bool> {
+    Ok(tx.query_row(
+        "SELECT state IN ('cancelled', 'expired') AND NOT EXISTS
+                (SELECT 1 FROM claims k WHERE k.turn = turns.id
+                   AND (k.running_at IS NOT NULL OR k.state IN ('claimed', 'running', 'ending')))
+         FROM turns WHERE id = ?1",
+        [turn],
+        |r| r.get(0),
+    )?)
+}
+
+/// The runs that have a turn.
+pub(crate) fn linked_runs_in(
+    tx: &rusqlite::Connection,
+) -> Result<std::collections::BTreeSet<String>> {
+    let mut st = tx.prepare("SELECT run FROM wake_turns")?;
+    let rows = st.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<std::result::Result<_, _>>()?)
+}
+
+/// A Stop of `session` (`wake.withdraw`): [`stop_unstarted_in`], then the withdrawal. Answers how many went.
+pub(crate) fn withdraw_in(
+    tx: &rusqlite::Connection,
+    st: &mut State,
+    now: f64,
+    session: &str,
+    id: Option<&str>,
+) -> Result<usize> {
+    stop_unstarted_in(tx, st, now, session, id)?;
+    Ok(super::queue::withdraw(st, now, session, id))
+}
+
+/// A revoke or removal (`wake.withdrawPerson`): a Stop of every session of these people.
+pub(crate) fn withdraw_person_in(
+    tx: &rusqlite::Connection,
+    st: &mut State,
+    now: f64,
+    persons: &[String],
+) -> Result<usize> {
+    for s in super::queue::sessions_of(st, persons) {
+        stop_unstarted_in(tx, st, now, &s, None)?;
+    }
+    Ok(super::queue::withdraw_person(st, now, persons))
 }

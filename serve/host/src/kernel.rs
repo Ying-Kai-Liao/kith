@@ -8,6 +8,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+#[cfg(not(test))]
 use kith_kernel::helpers::executable;
 
 /// The kernel's command, relative to the kernel folder. The only place that names it: change it here when
@@ -240,9 +241,7 @@ const STUB_ENV: &str = "KITH_STUB_BIN";
 /// [`STUB_ENV`]'s program for a host at `exe` with `kith` first on PATH, symlinks resolved before looking beside either:
 /// beside the host or in the Mac app's CLI folder (`kith_kernel::helpers::beside`), else beside the `kith` on PATH.
 pub fn find_stub(exe: Option<&Path>, kith: Option<&Path>) -> Option<PathBuf> {
-    let name = if cfg!(windows) { "kith-stub.exe" } else { "kith-stub" };
-    let from_kith = kith.and_then(|k| k.canonicalize().ok()).and_then(|k| k.parent().map(|d| d.join(name)));
-    exe.and_then(|e| kith_kernel::helpers::beside(e, name)).or_else(|| from_kith.filter(|p| executable(p)))
+    kith_kernel::helpers::find_stub(exe, kith)
 }
 
 /// `kith-holder` (the process holder Writer mode connects to) for a host at `exe`. Unlike the stub there is no PATH

@@ -32,18 +32,58 @@ use crate::{accounts, engines, paths, secrets};
 
 /// What the plan is for: the launch object the host asks for, or a run in this terminal.
 #[derive(Clone, Debug, Default)]
-pub enum Mode {
+pub enum Mode<'a> {
     /// `--launch-json`: no prompts, no state-picked account, no origin from the host.
     #[default]
     LaunchJson,
     /// A run that starts here (the terminal, a one-shot, `--print`).
-    Exec(ExecOpts),
+    Exec(ExecOpts<'a>),
+}
+
+/// What `--resume` named, once its claim is taken.
+#[derive(Debug, Default)]
+pub struct Resumed {
+    /// The Claude session id.
+    pub sid: String,
+    /// The folder the session ran in ("" for none).
+    pub cwd: String,
+    /// What the caller named (`--resume THREAD`), for the line that tells how to run it on another account.
+    pub thread: String,
+    /// What the session started with (the cost ledger's row): a built-in agent's thread keeps its engine and model.
+    pub run: Option<accounts::SessionRun>,
+}
+
+/// The steps of a run here that sit between the plan's own: they take claims and start processes, which the plan does not.
+/// The executor (`launch::exec`) supplies them, in the order of `kernel/bin/kith`.
+pub trait ExecHooks {
+    /// `--resume`, `-r`, `-c`: names the session and takes its writer claim for this process (`resolve`), after who the run is
+    /// for and before the account, the limit and the prompt. The error is the exit code, said already.
+    fn resume(&self, agent: &str) -> Result<Resumed, i32>;
+    /// The owner's one-shot that no host is picking the account for (another run's `kith ask`, a schedule) walks the accounts
+    /// that can run: each attempt is a whole run of its own. The code is the last attempt's.
+    fn walk(&self, agent: &str, agent_md: &Path, argv: &[String]) -> i32;
+}
+
+/// The hooks of an exec plan, or none (the plans of `--plan-exec` and the tests take no claims).
+#[derive(Clone, Copy, Default)]
+pub struct Hooks<'a>(pub Option<&'a dyn ExecHooks>);
+
+impl std::fmt::Debug for Hooks<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() {
+            "Hooks(..)"
+        } else {
+            "Hooks(none)"
+        })
+    }
 }
 
 /// What `kith AGENT [args]` knows about its own run that the flags do not say.
 #[derive(Clone, Debug, Default)]
 #[allow(clippy::struct_excessive_bools)]
-pub struct ExecOpts {
+pub struct ExecOpts<'a> {
+    /// What the run takes claims and starts processes with (none for a plan alone).
+    pub hooks: Hooks<'a>,
     /// A task was given (`$# -gt 0` after the flags): a one-shot, not a terminal.
     pub task: bool,
     /// `--held`: the session is held by a holder, which has a tty of its own.
@@ -58,7 +98,7 @@ pub struct ExecOpts {
     pub resume_thread: String,
 }
 
-impl ExecOpts {
+impl ExecOpts<'_> {
     /// The options of this process: the ttys are the real ones.
     pub fn from_process(task: bool, held: bool, resume_sid: &str) -> Self {
         let (i, o, e) = (
@@ -73,6 +113,7 @@ impl ExecOpts {
             prompt_tty: i && e,
             resume_sid: resume_sid.to_owned(),
             resume_thread: String::new(),
+            hooks: Hooks::default(),
         }
     }
 }
@@ -119,6 +160,22 @@ pub struct Plan {
     pub owner_terminal: bool,
     /// The pinned package folder (its `mcp.json` is the terminal's own MCP config).
     pub pkg: PathBuf,
+    /// The agent's own folder (`pkg` is a snapshot of it, or it).
+    pub src_pkg: PathBuf,
+    /// Who the run is for, as kith-auth named them ("" for the owner): the claims are theirs.
+    pub person_id: String,
+    /// Another run started this one (`KITH_AGENT` was set).
+    pub nested: bool,
+    /// The caller's agent name ("" for none or itself).
+    pub caller: String,
+    /// The Claude session the run continues (`--resume`, or the caller's `KITH_RESUME`), "" for a new one.
+    pub resume: String,
+    /// The caller's `KITH_OUTPUT` (`json` asks for `--output-format json`).
+    pub out_format: String,
+    /// `{"mcpServers": {"kithpermit": ...}}`, inline: how a run reaches the permit tools (a guest's only server).
+    pub permit_mcp: String,
+    /// The shared services the owner is granted, as `{"mcpServers": {...}}` (the file a run here hands Claude Code).
+    pub granted: Value,
 }
 
 /// `kith AGENT [args]` up to the launch object: the plan on success, or the exit code (what was said is already on stderr).
@@ -129,7 +186,7 @@ pub fn plan(
     argv: &[String],
     kernel: &Path,
     env0: Env,
-    mode: &Mode,
+    mode: &Mode<'_>,
 ) -> Result<Plan, i32> {
     let exec = match mode {
         Mode::LaunchJson => None,
@@ -494,6 +551,51 @@ pub fn plan(
         say("kith: --resume is for the owner's own sessions");
         return Err(1);
     }
+    // --resume takes the session's claim here and goes to the folder it ran in (before the account, the limit and the prompt, as
+    // the entry does); a built-in agent's thread keeps the engine and model it started with unless -H/-m say otherwise.
+    let hooks = exec.and_then(|x| x.hooks.0);
+    let mut resumed: Option<Resumed> = None;
+    if a.resume
+        && let Some(h) = hooks
+    {
+        let r = h.resume(agent)?;
+        if !r.cwd.is_empty() {
+            std::env::set_current_dir(&r.cwd).map_err(|_| 1)?;
+        }
+        if src_pkg.starts_with(kernel.join("agents"))
+            && let Some(s) = &r.run
+        {
+            if a.harness.is_none() && get(&env, "KITH_HARNESS").is_empty() {
+                env.insert("KITH_HARNESS".to_owned(), s.harness.clone());
+            }
+            let model_ok = a.model.is_none() && get(&env, "KITH_MODEL").is_empty();
+            if model_ok
+                && let Some(m) = &s.model
+                && a.harness.as_deref().unwrap_or(get(&env, "KITH_HARNESS")) == s.harness
+            {
+                env.insert("KITH_MODEL".to_owned(), m.clone());
+            }
+            if a.effort.is_none()
+                && get(&env, "KITH_EFFORT").is_empty()
+                && let Some(e) = &s.effort
+            {
+                env.insert("KITH_EFFORT".to_owned(), e.clone());
+            }
+        }
+        resumed = Some(r);
+    }
+    // The owner's one-shot of another run or a schedule walks the accounts that can run, each attempt a run of its own.
+    if let Some(h) = hooks
+        && a.task
+        && a.backup.is_empty()
+        && !a.print
+        && !a.resume
+        && get(&env, "KITH_CHAIN_CHILD").is_empty()
+        && p_owner
+        && (nested || !get(&env, "KITH_BACKUP_CHAIN").is_empty())
+    {
+        return Err(h.walk(agent, &src_pkg.join("agent.md"), argv));
+    }
     let mut kith_model = a
         .model
         .clone()
@@ -629,13 +731,21 @@ pub fn plan(
 
     // ---- run files: the snapshot is held by --hold's pid
     if pkg != src_pkg {
-        let hold = a.hold.clone().unwrap_or_else(parent_pid);
+        // A run here is held by its own pid (the marker named for the shell in the entry); a launch for a program by --hold's.
+        let (hold, marker) = if exec.is_some() {
+            let pid = std::process::id().to_string();
+            (pid.clone(), pid)
+        } else {
+            let hold = a.hold.clone().unwrap_or_else(parent_pid);
+            let marker = format!("{hold}.launch");
+            (hold, marker)
+        };
         if hold.is_empty() || !hold.chars().all(|c| c.is_ascii_digit()) {
             say("kith: --hold needs a process id");
             return Err(1);
         }
         let _ = fs::create_dir_all(pkg.join(".runs"));
-        let _ = fs::write(pkg.join(".runs").join(format!("{hold}.launch")), "");
+        let _ = fs::write(pkg.join(".runs").join(marker), "");
     }
 
     // ---- harness and login
@@ -696,7 +806,11 @@ pub fn plan(
     let bget = |be: &HashMap<String, String>, k: &str| be.get(k).cloned().unwrap_or_default();
     // The account a session was made under (the cost ledger's): --resume runs under it, a handed-on session (KITH_RESUME) is
     // continued on it when it is a ready candidate.
-    let r_sid = exec.map_or("", |x| x.resume_sid.as_str());
+    let r_sid = resumed
+        .as_ref()
+        .map(|r| r.sid.as_str())
+        .or_else(|| exec.map(|x| x.resume_sid.as_str()))
+        .unwrap_or_default();
     let made = {
         let sid = if r_sid.is_empty() {
             get(&env, "KITH_RESUME")
@@ -763,7 +877,11 @@ pub fn plan(
             acct = bget(&be, "backup_account");
             account_id = made.split('@').next().unwrap_or_default().to_owned();
         } else if !r_sid.is_empty() {
-            let thread = exec.map_or("", |x| x.resume_thread.as_str());
+            let thread = resumed
+                .as_ref()
+                .map(|r| r.thread.as_str())
+                .or_else(|| exec.map(|x| x.resume_thread.as_str()))
+                .unwrap_or_default();
             say(&format!(
                 "kith: that session was made under {made}, not {}: kith {agent} --resume {thread} --account {made}",
                 a.backup
@@ -821,6 +939,7 @@ pub fn plan(
     env.insert("KITH_MODEL".to_owned(), kith_model.clone());
     env.insert("KITH_EFFORT".to_owned(), kith_effort.clone());
     env.insert("KITH_PROJECT".to_owned(), project.clone());
+    let out_format = get(&env, "KITH_OUTPUT").to_owned();
     for k in [
         "KITH_HARNESS",
         "KITH_OUTPUT",
@@ -832,6 +951,16 @@ pub fn plan(
         "HQ_PERMISSION_MODE",
     ] {
         env.remove(k);
+    }
+    // --resume THREAD wins over a caller's KITH_RESUME, and only Claude sessions can be taken up.
+    if !r_sid.is_empty() {
+        if harness != "claude" {
+            say(&format!(
+                "kith: --resume continues Claude sessions; {agent} runs on {harness}"
+            ));
+            return Err(1);
+        }
+        resume = r_sid.to_owned();
     }
     // a guest continues only a session the cost ledger has as theirs
     if !p_owner && !resume.is_empty() && !resume.contains(':') {
@@ -862,6 +991,7 @@ pub fn plan(
             say(&format!(
                 "kith: session {resume} is not one of {person}'s with {agent}; starting a new one"
             ));
+            resume.clear();
         }
     }
     for k in [
@@ -876,6 +1006,14 @@ pub fn plan(
         "KITH_LAUNCH_SID_FILE",
         "KITH_CLAUDE_ARGS",
         "HQ_CLAUDE_ARGS",
+        // (the twins `sync_env` made: it would fill the KITH_ names back from them)
+        "HQ_LAUNCH_KIND",
+        "HQ_LAUNCH_LABEL",
+        "HQ_RUN_KIND",
+        "HQ_RUN_LABEL",
+        "HQ_LAUNCH_ASK_ID",
+        "HQ_ASK_ID",
+        "HQ_LAUNCH_SID_FILE",
     ] {
         env.remove(k);
     }
@@ -1057,7 +1195,9 @@ pub fn plan(
     {
         env.insert("KITH_BIN".to_owned(), b.clone());
     }
+    // (A run here applies them after its claim instead: a once grant is spent by the one run about to start.)
     if claude
+        && exec.is_none()
         && !p_owner
         && !get(&env, "KITH_RUN_TOKEN").is_empty()
         && !get(&env, "KITH_RUN_SOCKET").is_empty()
@@ -1170,6 +1310,14 @@ pub fn plan(
         launch: exec.is_none(),
         owner_terminal: is_terminal,
         pkg,
+        src_pkg,
+        person_id: p_id,
+        nested,
+        caller,
+        resume,
+        out_format,
+        permit_mcp: guest_mcp_arg(permit_bin.as_deref(), kernel),
+        granted: granted.unwrap_or_else(|| json!({"mcpServers": {}})),
     })
 }
 
@@ -1189,7 +1337,7 @@ fn parent_pid() -> String {
 mod tests {
     use super::*;
 
-    fn opts(task: bool, held: bool, tty: bool) -> ExecOpts {
+    fn opts(task: bool, held: bool, tty: bool) -> ExecOpts<'static> {
         ExecOpts {
             task,
             held,
