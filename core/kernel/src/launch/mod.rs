@@ -25,6 +25,8 @@ pub mod prompt;
 pub mod pyport;
 pub mod room;
 pub mod runenv;
+// Unix only, like `exec`, which is its one caller: it attaches the host's claim for a turn (`threads`) and holds fds.
+#[cfg(unix)]
 pub mod sched_turn;
 pub mod session;
 pub mod settings;
