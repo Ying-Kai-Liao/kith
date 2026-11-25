@@ -216,3 +216,4 @@ Check 'uninstall removes the Run key' ($un.Code -eq 0 -and $runVal2 -notmatch 'k
 
 if ($script:Failed.Count) { Dump-HostLogs; Log "FAILED: $($script:Failed -join ' | ')"; exit 1 }
 Log 'all checks passed'
+exit 0   # a native command above (reg query) leaves a non-zero $LASTEXITCODE that the step would otherwise return
