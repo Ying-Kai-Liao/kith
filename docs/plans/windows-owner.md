@@ -384,7 +384,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     WI4 via winsys, `cp` becomes a Rust copy in `pkg/store.rs:210`), and the `MODULES` list (`lib.rs:51-84`).
   - Cost's person views and anything that spawns `kith-auth` stay refused on Windows until P3-1.
   - **Start now** (after W3; parallel with P1).
-- [ ] **W5b. Permit on Windows, and its channel to the host over a named pipe.** Owner: windows-owner-build. Status: #1189 open, architect-approved, CI fixes in progress. M. Depends: W2a, W5a.
+- [x] **W5b. Permit on Windows, and its channel to the host over a named pipe.** Owner: windows-owner-build. Status: merged (#1189). M. Depends: W2a, W5a.
   - #1189's `permit/refused.rs` refusals (apply, scrub, door, helper) and its `!cfg!(windows)` guard in `handle_request` are now
     **temporary**. W23, W24b, W26 and W27 remove them, each one only when its dependency lands (WI1).
   - Files: `core/kernel/src/permit/{host,apply,issue,scrub}.rs`, the host's permit listener, and the host restart through the
@@ -392,11 +392,15 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - The door and bug halves stay refused on Windows (P3-12, P4-17).
   - Divergence accepted by the architect: `apply`, `scrub`, `door`, `bug` and `helper` are not built on Windows and refuse by name (`permit/refused.rs`), because they serve guests only (WI6) and lean on the Unix-only launch.
   - **Start after W2a.**
-- [ ] **W5c. The core's owner-pipe client on `kith_winsys::pipe::connect`, and a sweep of every Windows pipe or socket client.**
-  Owner: unowned. Status: not started. S-M. Depends: W5b. Architect review before merge.
+- [x] **W5c. The core's owner-pipe client on `kith_winsys::pipe::connect`, and a sweep of every Windows pipe or socket client.**
+  Owner: unowned. Status: merged (#1200). S-M. Depends: W5b. Architect review before merge.
   - The core's owner-pipe client moves onto `kith_winsys::pipe::connect`: server identity and pipe-owner SID check, with
     Administrators allowed.
   - Sweep: every Windows pipe and socket client checks the same way.
+- [ ] **W5d. Owner tools reach the host only over a channel that proves who serves it.** Owner: unowned. Status: in progress (standing answer q271: build now). S-M. Depends: W5b, W5c.
+  - Owner tools send the host's full owner token as a Bearer over `127.0.0.1:<port>`. Callers: `core/kernel/src/launch/runenv.rs:69`, `permit/host.rs:145` and `:251`, `people/system.rs:149`, `serve/host/src/threads_cmd.rs:84`.
+  - Any other local account that binds the port while the host is down receives the token, on the Mac and on Windows.
+  - **Fix:** owner callers reach the host only over a channel that proves who serves it: a Unix socket 0600 in a 0700 folder on the Mac, a checked named pipe on Windows. One shared helper. No Bearer over loopback.
 - [x] **W6. Engines and accounts.** Owner: windows-owner-build. Status: done, #1162 merged 99d689760. S. Depends: W1 (claude.exe location). Files: `core/kernel/src/launch/assemble.rs:348-356`
   (`which_in` with PATHEXT, no mode bits), `core/kernel/src/accounts.rs:132`, `core/kernel/src/accounts/mirror.rs:103-111`
   (junction for folders, copy for files). **Start now** (the probe answer lands in a day).
@@ -406,12 +410,12 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     no `kernel/bin`, no `kernel/lib`), `serve/host/src/update/release.rs:21-26`.
   - Unsigned here. W7s adds signing (Q2, answered 2026-11-25).
   - **Start after W2a.**
-- [ ] **W7s. Signing in the release job (Azure Trusted Signing).** Owner: windows-owner-build. Status: PR #1191 open. S. Depends: W7.
+- [ ] **W7s. Signing in the release job (Azure Trusted Signing).** Owner: windows-owner-build. Status: SSL.com eSigner merged (#1204); unsigned for now (Kai 2026-11-27, section 7). S. Depends: W7.
   - Files: `release.yml` (a signing step on the Windows zip's exes). It skips cleanly without the signing secrets.
   - Service and setup: Q2, answered 2026-11-25. Kai's Azure setup steps are in `docs/windows-signing.md` (on #1191). The
     organisation validation in Australia takes 1-30 business days.
   - W16 signs the installer later with the same account.
-- [ ] **W8. The launch builds on Windows, and the host launches in process.** Owner: windows-owner-build. Status: in progress. L.
+- [ ] **W8. The launch builds on Windows, and the host launches in process.** Owner: windows-owner-build. Status: open (#1198). L.
   - **WAITS P1-12 R0 and R1** (the plan/emit split and the accounts chain in Rust) and **P1-15 M1** (`assemble.rs` runs
     `kith-auth mcp-config` today).
   - Files: `core/kernel/src/launch/*` (lib.rs gate off; Windows env list; `realpath`; the deny rules with Windows path
@@ -531,13 +535,13 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     not `sh`), `:266` and `shared/host-service.ts:68` (a Windows restart path), `ci.yml` (a `desktop-win` job running
     `dist:win` on `windows-2025`), `release.yml` (`desktop-win` job, electron-updater NSIS).
   - Signed with the same Azure account as W7s (Q2, answered 2026-11-25).
-- [ ] **W17. Windows router: every owner verb in Rust or a named refusal.** Owner: windows-owner-build. Status: #1182 open. M. Depends: W2a.
+- [ ] **W17. Windows router: every owner verb in Rust or a named refusal.** Owner: windows-owner-build. Status: merged (#1182). M. Depends: W2a.
   - Files: `serve/host/src/kernel.rs:47-77,280-301`. On Windows, `Route::Kernel` answers from a table: a verb that is ported
     runs, and any other answers "not on Windows yet: <verb> (retire-python Pn-m)". There is no bash fallback on Windows.
   - Ships `project-id.exe`.
   - The full route table is P5-1 (REDESIGN there). W17 is only its Windows refusal slice and needs no design.
   - **Start after W2a.**
-- [ ] **W18. Windows end-to-end on free runners.** Owner: windows-owner-build. Status: W18a in progress (the workflow skeleton). M, grown by every package. Depends: W0, W2a.
+- [ ] **W18. Windows end-to-end on free runners.** Owner: windows-owner-build. Status: W18a merged (#1192) (the workflow skeleton). M, grown by every package. Depends: W0, W2a.
   - Files: `.github/workflows/windows-e2e.yml` (nightly, `workflow_dispatch`, and PRs touching the Windows paths filter;
     `windows-2025`, plus a nightly `windows-2022` row), `serve/host/tests/windows_e2e/`.
   - Each run installs from the built zip with `install.ps1` into a throwaway profile (`KITH_HOME`, `KITH_STATE`,
@@ -614,7 +618,8 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
 - **On Windows today:** that `sandbox` key makes Claude Code refuse to start ("feature gate off", F8). So the Windows box has to
   be kith's own, unless Claude Code's sandbox opens (W21 candidate B).
 
-- [ ] **W20. Guest box probe.** Owner: windows-owner-build. Status: proposed (architect 2026-11-25), in progress. S-M. Depends: W0, W1 (both done).
+- [x] **W20. Guest box probe.** Owner: windows-owner-build. Status: merged (#1197, facts F11-F23). S-M. Depends: W0, W1 (both done).
+  - W20b: #1206 closed, parked (Kai 2026-11-27). Its findings F24-F38 stay on branch `flow/windows-owner-build-2-w20b`.
   - Files:
     - `.github/workflows/windows-probe.yml` (a `guest` job)
     - `serve/host/tests/support/winprobe/` (a test-only `boxprobe.exe`: an AppContainer profile, capability SIDs and a job, with
@@ -648,6 +653,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     - **P-G12.** Can Claude Code's own Windows sandbox be switched on (F8)? If so, which `sandbox` keys does it honour?
   - **Start now.**
 - [ ] **W21. Guest box design.** Owner: architect. **REDESIGN.** M. Depends: W20. Status: proposed (architect 2026-11-25).
+  - **Status: parked (Kai 2026-11-27).** Not deleted. See section 7, "Kai's answers (2026-11-27)".
   - **Candidates.**
     - **A (recommended): kith boxes the Bash tool's shell.** `CLAUDE_CODE_GIT_BASH_PATH` points at `kith-boxsh.exe`. If P-G1 says
       no, a PreToolUse rewrite wraps each command instead.
@@ -690,7 +696,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - **Model.** None, as long as rules 1 and 2 hold: nothing mutable is shared on the widening side. **MODEL FIRST** only if W21
     ends up with per-run ACE edits, or with a broker that creates boxes on request (then start, revoke and broker restart depend
     on order).
-- [ ] **W22. Access rules, authority and secret grants in the core on Windows (born switched).** Owner: windows-owner-build (W22a in progress). Status: proposed (architect 2026-11-25). M-L, two PRs. Depends: W4, W5a (done). **First in the guest order, and on α's path:** owner secret cards and W2b's host tests need it.
+- [ ] **W22. Access rules, authority and secret grants in the core on Windows (born switched).** Owner: windows-owner-build (W22a merged #1195; W22b open #1205). Status: proposed (architect 2026-11-25). M-L, two PRs. Depends: W4, W5a (done). **First in the guest order, and on α's path:** owner secret cards and W2b's host tests need it.
   - **Why the core refuses `people.*` on Windows.**
     - The core's `authority`, `asks`, `cutover`, `doors`, `import`, `revoke_order` and the real `packages` are built only under `cfg(unix)` (`core/runtime/src/lib.rs:34-40,50-63,74-75,82-87,93-95`).
     - So `people.addPerson` falls through to `NotServed("kith-core: people.addPerson is not answered in the core yet")` (`core/runtime/src/call.rs:50-53`). That fails closed.
@@ -723,6 +729,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - **Review:** the architect reviews the split boundary and the WI13 function before merge.
   - **Start now.**
 - [ ] **W23. Run pipes open to guests, with server proof.** Owner: unowned. Status: proposed (architect 2026-11-25). M.
+  - **Status: parked (Kai 2026-11-27).** Not deleted. See section 7, "Kai's answers (2026-11-27)".
   - Depends: W5b (#1189), W5c, W21 rule 5, W22. **WAITS P3-8 and P3-9** for the `kith recall` and `kith memory search` clients.
   - Files:
     - `serve/host/src/runauth.rs`: remove #1189's `!cfg!(windows)` guard in `handle_request`. The guest pipe gets a Low label and
@@ -745,6 +752,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - `KITH_RUN_SOCKET` and `KITH_CORE_RUN_SOCKET` carry the pipe names (`runauth.rs:68`, `launch/json.rs:56`).
   - **Review:** architect, interrogate pass on the handshake. No TLA+.
 - [ ] **W24. The guest box.** Owner: unowned. Status: proposed (architect 2026-11-25). L, in two PRs.
+  - **Status: parked (Kai 2026-11-27).** Not deleted. See section 7, "Kai's answers (2026-11-27)".
   - **WAITS:** W8, W9, W12, P3-1. **Depends:** W21, W22, W23.
   - **W24a: the winsys box API and `kith-boxsh.exe`.**
     - The API: profile create and delete with the sweep; capability SIDs; ensure an ACE and a deny ACE; create in the job in one
@@ -759,11 +767,13 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - Keeps WI6, WI8, WI9, WI10, WI12.
   - **Review:** architect reviews W24a's API before W24b builds on it, and W24b before merge.
 - [ ] **W25. Guest network on Windows.** Owner: unowned. Status: proposed (architect 2026-11-25). M. Depends: W24, Q6.
+  - **Status: parked (Kai 2026-11-27).** Not deleted. See section 7, "Kai's answers (2026-11-27)".
   - A host CONNECT proxy reached over the hello'd pipe. If P-G7 holds, an in-box relay on loopback provides `HTTPS_PROXY`.
   - It admits only the run's `allowedDomains` (fixed at start, plus `consumeAccess` domains), keyed by the run's token. The proxy
     resolves DNS, not the box.
   - If P-G7 fails and Q6 is "no admin": a guest's domains are refused by name on Windows, and that is recorded as a divergence.
 - [ ] **W26. Permit's guest branch on Windows.** Owner: unowned. Status: proposed (architect 2026-11-25). M.
+  - **Status: parked (Kai 2026-11-27).** Not deleted. See section 7, "Kai's answers (2026-11-27)".
   - Each part goes when its dependency lands:
     - **`apply`** (`permit/apply.rs`): grants become capability SIDs plus Read and Edit rules. Goes in W24b.
     - **`scrub`** (`permit/scrub.rs`): plus WI12 (PATH, PATHEXT, working folder, `SetDefaultDllDirectories`). Goes in W24b.
@@ -773,6 +783,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - Each refusal in #1189's `refused.rs` stays until its own part lands.
   - **H10 (the helper MCP and the plugin hooks guests also load) WAITS P4-23.**
 - [ ] **W27. Doors on Windows.** Owner: unowned. Status: proposed (architect 2026-11-25). L. **WAITS** the P3-12 design and Q7. **MODEL FIRST.**
+  - **Status: parked (Kai 2026-11-27).** Not deleted. See section 7, "Kai's answers (2026-11-27)".
   - **The model:** P3-12's TLC model gains a Windows variant.
     - Start: a core claim row, then a job named by the claim, then the door box created in it in one call.
     - Sweep: TerminateJobObject by name.
@@ -788,6 +799,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     - **Rendering** needs P-G11.
     - **`kith door prepare`** gets an owner box with outbound 443 only.
 - [ ] **W28. Revoke reaches a Windows guest run.** Owner: unowned. Status: proposed (architect 2026-11-25). S, plus W18 (k). Depends: W22, W24.
+  - **Status: parked (Kai 2026-11-27).** Not deleted. See section 7, "Kai's answers (2026-11-27)".
   - **No Windows variant of `RevokeDoors.tla`.** Its steps are logic: MayP, MayB, HelperGate and its in-sync wait, the Deliver re-checks. Only one step is OS work: Stop's kill.
   - **On Windows, Stop is TerminateJobObject on the run's job.** That is one complete step only under W12 rules 1-3, 8 and 9 (already checked in WinClaims) and WI10 (P-G3, P-G10).
   - **The in-sync wait guards a helper's start and has no OS part,** so it does not interact with the kill.
@@ -871,24 +883,24 @@ flowchart TD
   P2[P2-2 P2-3 P2-4] --> W12
   W22a[W22a access split] --> W22b[W22b core on Windows]
   W4 --> W22a
-  W22b --> W23[W23 run pipes]
+  W22b --> W23[W23 run pipes, parked]
   W5b --> W23
   W5c[W5c pipe clients] --> W23
-  W20[W20 box probe] --> W21[W21 box design]
+  W20[W20 box probe] --> W21[W21 box design, parked]
   W21 --> W23
-  W21 --> W24a[W24a winsys box API]
+  W21 --> W24a[W24a winsys box API, parked]
   W23 --> W24a
-  W24a --> W24b[W24b guest branch]
-  W24b --> W25[W25 guest network]
-  W24b --> W26[W26 permit guest branch]
-  W24b --> W28[W28 revoke reaches guests]
-  P3[P3-12 doors design, Q7] --> W27[W27 doors on Windows]
+  W24a --> W24b[W24b guest branch, parked]
+  W24b --> W25[W25 guest network, parked]
+  W24b --> W26[W26 permit guest branch, parked]
+  W24b --> W28[W28 revoke reaches guests, parked]
+  P3[P3-12 doors design, Q7] --> W27[W27 doors on Windows, parked]
   W22b --> W24b
 ```
 
 **Ordered package list:** W0, W1, W2a, W3, W4, W5a, W6, W17, W2b, W5b, W7, W18 (skeleton), W13, W11, W14, W10, W8, W9, W12,
 W16, W15, W19 (run).
-**Guest path (δ), in the architect's order (2026-11-25):** W22a, then W22b, in parallel with W20; then W21, W23, W24a, W24b
+**Guest path (δ), parked 2026-11-27. Was the architect's order (2026-11-25):** W22a, then W22b, in parallel with W20; then W21, W23, W24a, W24b
 (with W26 `apply`/`scrub` and the W28 rows), W25, W26 helper, W27. W18 grows with each.
 
 **Milestones.**
@@ -897,7 +909,7 @@ W16, W15, W19 (run).
   cards and terminal need all of them. W22 joins α (with P3-2, for owner secret cards); W2b's 26 tests wait on it.
 - **β: schedules, wake and ask.** P2-1 to P2-6, W12's schedule path, W11's daemon timers, W18 (f, g).
 - **γ: operator tools and update parity.** The rest of P3 and P4 that the owner uses, W15, W18 (h), W19.
-- **δ: guests on Windows** (proposed 2026-11-25, architect). W20-W28, plus α, P2-3, P3-8, P3-9, P3-12 and P4-23. Kai's word:
+- **δ: guests on Windows: PARKED (Kai 2026-11-27).** Was proposed 2026-11-25 by the architect; the guest box is parked, see section 7. W20-W28, plus α, P2-3, P3-8, P3-9, P3-12 and P4-23. Kai's word:
   "no windows should work finely like mac" (Q1).
 
 **Can start now, in parallel with P1:** W0, W1, W2a, W3, W4, W5a, W6, W19 (the doc). Right after W2a: W2b, W5b, W7, W17 and the
@@ -923,3 +935,25 @@ serve/host (W2a) and the `kith-kernel` module list (W5a); retire-python managers
 - **Q7 (new). The P3-12 doors.** Keep them and port them to Windows (W27). Answered 2026-11-25 by standing answer likewise; Kai
   may overturn.
 - **Testing.** Kai: "CI is enough, reduce local runners and tests as much as posible". Windows is checked in CI only.
+
+### Kai's answers (2026-11-27)
+
+Relayed by main. Kai's words, verbatim:
+- Guest box and doors: "lets drop the sandbox thing for now. Its too complicated for now"
+- Signing: "not buying"
+
+What this changes:
+- This changes the earlier answer that guests work on Windows like Mac (Q1) to **later**.
+- The guest box is **parked, not deleted**: W21, W23, W24a and W24b, W25, W26 (its guest branch), and W28. W27 (doors on Windows) is parked too.
+- On Windows, guests and bot guests are refused by name ("guests aren't on Windows yet"). Package windows-owner-build-2-guestrefuse builds that refusal.
+- Q6 (the one UAC prompt, `kith guests enable`) and the repeat prompt for new toolchain folders are parked. Q8 is parked with them. Section 7 had no Q8 entry before this answer, so this subsection records it.
+- Doors (P3-12) are dropped. On the Mac they stay until their Python goes, then they are removed. The retire-python plan records the P3-12 drop itself.
+- Signing: unsigned for now. See `docs/windows-signing.md`.
+- Owner milestone α carries on. Milestone δ is parked.
+
+Still standing: owner tools must not send the full owner token as a Bearer over loopback. That is W5d, in progress (standing answer q271: build now).
+
+Status as of 2026-11-27:
+- Merged: W5b (#1189), W5c (#1200), W17 (#1182), W18a (#1192), W20 (#1197, facts F11-F23), W22a (#1195), signing via SSL.com (#1204).
+- W20b: #1206 closed, parked. Its findings F24-F38 stay on branch `flow/windows-owner-build-2-w20b`.
+- Open: W8 (#1198), W2b (#1177), W22b (#1205).
