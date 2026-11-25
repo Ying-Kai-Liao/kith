@@ -1,5 +1,5 @@
 //! M3 lane (wake, M3-7): the wake queue and the waiters in the core (tables in `core/runtime/src/migrations/wake/`).
-//! Experimental, owner only, not in `released.json`. The core answers them (`wake::call` in kith-core, the daemon routes
+//! Experimental, owner only (except `wake.tick`, the host's), not in `released.json`. The core answers them (`wake::call` in kith-core, the daemon routes
 //! them), but nothing calls them yet: `kernel/bin/kith-wake` stays the writer of the queue files until the switch (M3-10),
 //! so the core's copy is only what `import` last read plus what a test wrote. The daemon runs no drain and fires no waiter.
 //!
@@ -169,6 +169,20 @@ pub(super) const ROWS: &[Method] = &[
             VIA,
         ],
         &["wake", "wait"],
+    ),
+    wake(
+        "wake.tick",
+        "The host's clock for the wake queue (every few seconds, and after a kick): fires the waiters whose thing happened, settles each finished run against its turn (answered, withdrawn or given back), unparks the wake turns of conversations nothing holds, takes what is due (both doors) as one run and one turn each, and settles the asks no one reported (a `--bg` ask whose turn ended, a `fg` ask whose caller process is gone: the ask design's R4) and forgets settled asks older than 31 days. `gh`, process probes and transcript reads run with no core lock held. Answers `fired`, `settled`, `unparked`, `taken` (the runs' turns, `queued` or `parked`) and `asks` (the asks settled).",
+        &[],
+        &["wake", "tick"],
+    )
+    .principals(HOST)
+    .no_cli(),
+    wake(
+        "wake.released",
+        "A terminal let go of a conversation: its parked wake turns go back to queued when nothing else holds it. A lost call is caught by the next `wake.tick`. Answers `unparked`, the turns woken.",
+        &[pos("session", "string", true, "The conversation that was released.")],
+        &["wake", "released"],
     ),
 ];
 

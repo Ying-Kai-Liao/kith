@@ -8,6 +8,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+#[cfg(not(test))]
 use kith_kernel::helpers::executable;
 
 /// The kernel's command, relative to the kernel folder. The only place that names it: change it here when
@@ -240,9 +241,7 @@ const STUB_ENV: &str = "KITH_STUB_BIN";
 /// [`STUB_ENV`]'s program for a host at `exe` with `kith` first on PATH, symlinks resolved before looking beside either:
 /// beside the host or in the Mac app's CLI folder (`kith_kernel::helpers::beside`), else beside the `kith` on PATH.
 pub fn find_stub(exe: Option<&Path>, kith: Option<&Path>) -> Option<PathBuf> {
-    let name = if cfg!(windows) { "kith-stub.exe" } else { "kith-stub" };
-    let from_kith = kith.and_then(|k| k.canonicalize().ok()).and_then(|k| k.parent().map(|d| d.join(name)));
-    exe.and_then(|e| kith_kernel::helpers::beside(e, name)).or_else(|| from_kith.filter(|p| executable(p)))
+    kith_kernel::helpers::find_stub(exe, kith)
 }
 
 /// `kith-holder` (the process holder Writer mode connects to) for a host at `exe`. Unlike the stub there is no PATH
@@ -296,9 +295,20 @@ pub fn exec_kernel(args: &[OsString]) -> anyhow::Error {
     anyhow::Error::new(cmd.exec()).context(format!("running {}", entry.display()))
 }
 
+/// Windows has no kernel entry to hand a verb to: the table in `kernel_windows` runs the ported verbs here and refuses
+/// the rest by name. Only returns on failure.
 #[cfg(not(unix))]
-pub fn exec_kernel(_args: &[OsString]) -> anyhow::Error {
-    anyhow::anyhow!("kith: the kernel's commands run on macOS and Linux only")
+pub fn exec_kernel(args: &[OsString]) -> anyhow::Error {
+    use crate::kernel_windows::{Answer, answer};
+    match answer(args) {
+        Answer::Refuse(why) => anyhow::anyhow!("kith: {why}"),
+        Answer::Run(own) => {
+            match std::env::current_exe().and_then(|e| std::process::Command::new(e).args(own).status()) {
+                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+                Err(e) => anyhow::Error::new(e).context("running the verb"),
+            }
+        }
+    }
 }
 
 #[cfg(test)]

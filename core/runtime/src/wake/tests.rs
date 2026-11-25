@@ -585,7 +585,17 @@ fn a_failed_try_waits_a_doubling_pause_and_the_fifth_ends_failed() {
     queue::enqueue(&mut st, T0, &new).unwrap();
     let none = Seen(Vec::new());
     for (try_, pause) in [(1, 5.0), (2, 10.0), (3, 20.0), (4, 40.0)] {
-        let turn = queue::take(&mut st, &f, &none, T0 + 1e6, 7, None, None).unwrap();
+        let turn = queue::take(
+            &mut st,
+            &f,
+            &none,
+            &std::collections::BTreeSet::new(),
+            T0 + 1e6,
+            7,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(turn["run"].is_string(), "try {try_}");
         assert!(queue::give_back(
             &mut st,
@@ -599,13 +609,33 @@ fn a_failed_try_waits_a_doubling_pause_and_the_fifth_ends_failed() {
         );
         assert_eq!(st.items["s1"].tries, try_);
     }
-    let turn = queue::take(&mut st, &f, &none, T0 + 1e6, 7, None, None).unwrap();
+    let turn = queue::take(
+        &mut st,
+        &f,
+        &none,
+        &std::collections::BTreeSet::new(),
+        T0 + 1e6,
+        7,
+        None,
+        None,
+    )
+    .unwrap();
     queue::give_back(&mut st, T0, turn["run"].as_str().unwrap(), false);
     assert!(st.items.is_empty(), "the fifth failed try ends the request");
     assert_eq!(queue::status(&st, "a").0, "failed");
     // A held writer is not a failed try.
     queue::enqueue(&mut st, T0, &queue::New { id: "b", ..new }).unwrap();
-    let turn = queue::take(&mut st, &f, &none, T0 + 1e6, 7, None, None).unwrap();
+    let turn = queue::take(
+        &mut st,
+        &f,
+        &none,
+        &std::collections::BTreeSet::new(),
+        T0 + 1e6,
+        7,
+        None,
+        None,
+    )
+    .unwrap();
     queue::give_back(&mut st, T0, turn["run"].as_str().unwrap(), true);
     assert_eq!(st.items["s1"].tries, 0);
     assert!((st.items["s1"].next - (T0 + queue::HELD_PAUSE)).abs() < 1e-6);

@@ -29,7 +29,7 @@
 
 Options: -c/--continue, --as NAME (a named conversation: -c --as NAME picks it up from anywhere, in its folder),
 -C/--dir DIR (work in DIR), -p PROJECT (its memory, and its folder unless -C says; the current one if it has none),
--m MODEL, -e EFFORT, -H HARNESS (claude, codex, pi, agy, hermes, qwen, dsh, opencode; default the agent's own),
+-m MODEL, -e EFFORT, -H HARNESS (claude, codex, pi, agy, hermes, qwen, opencode; default the agent's own),
 --json (the whole result: answer, session, cost, turns).
 
 The same run as `kith <agent> "task"`: its pinned package, own settings and services, memory and project, tagged
@@ -600,6 +600,14 @@ def alive(pid):
     return True
 
 
+unwithdrawn = {}   # what the last pass of end_asks could not withdraw wakes of -> the words it was refused with (the core did not answer)
+
+
+def why_of(e):
+    """What a refused withdraw says: the SystemExit's own text (the core's words), else that the core did not answer."""
+    return e.code if isinstance(e.code, str) and e.code else 'the Kith core did not answer'
+
+
 def end_asks(sessions=(), persons=()):
     """Stop, revoke and removal in one step (R5, R8): every delegation whose caller is one of `sessions` (reply_to.session) or
     `persons` (the person it was asked for, or the person of the --bg job) ends. Its run is stopped, its record is settled
@@ -640,16 +648,26 @@ def end_asks(sessions=(), persons=()):
     # The runs are stopped with the lock let go and the records already ended: a kith-ask answering TERM settles its own record
     # (stop_record), which needs this lock, and sees ended_at. Holding it through the grace would cost every ask 2 s.
     owed.discard('')
+    unwithdrawn.clear()
 
     def withdraw():
+        # A refused withdraw (the queue is the core's and no daemon answers: a revoke made with kith serve down) must not keep the
+        # runs from being stopped: it is told at the end, and the exit says so.
         for session in sorted(owed):
-            wake.withdraw(session)
+            try:
+                wake.withdraw(session)
+            except SystemExit as e:
+                unwithdrawn['session ' + session] = why_of(e)
         if persons:
-            wake.withdraw_person(sorted(persons))
+            try:
+                wake.withdraw_person(sorted(persons))
+            except SystemExit as e:
+                unwithdrawn.update({'person ' + p: why_of(e) for p in persons})
     # Withdrawn before the runs are stopped as well as after: a --bg run that finishes while this goes on kicks a wake
     # drain, and a follow-up it was owed must not be delivered after the end (kith-wake does not look at ended_at).
     withdraw()
     stop_runs(to_stop)
+    unwithdrawn.clear()   # only the last pass is told: a wake the first could not withdraw and the second could is gone
     withdraw()
     return ended
 
@@ -788,7 +806,7 @@ def follow_ups(mid, end, code):
 def kick_wakes(sid):
     """The run's turn ended: a wake its session is owed (a --to message) is delivered now, not at the next tick."""
     wake = wake_queue()
-    if sid and wake.item_path(sid).exists():
+    if sid and not wake.switched() and wake.item_path(sid).exists():   # switched: the host ticks, and no queue file is read
         wake.spawn_drain()
 
 
@@ -966,6 +984,10 @@ def main(argv):
             else:
                 sys.exit('usage: kith ask --end [--session S]... [--person P]...')
         print('ended %s' % ' '.join(end_asks(sessions, persons)))
+        if unwithdrawn:
+            print('kith ask: the runs are stopped, but the wakes of %s were not withdrawn (%s); run the end again '
+                  'once it does' % (', '.join(sorted(unwithdrawn)), '; '.join(sorted(set(unwithdrawn.values())))), file=sys.stderr)
+            return 1
         return 0
     if argv[0] == 'delegations':   # --json is the only form
         return delegations()
@@ -1138,5 +1160,44 @@ def main(argv):
     return 1 if res.get('is_error') else 0
 
 
+def asks_switched():
+    """Whether the asks are the Kith core's on this Mac: `<machine>/core/cutover/asks.switch` past `stepping` (the last recognised
+    `state=` line, none at all is damaged: switched; a file that cannot be read counts as switched, as the other readers do)."""
+    f = paths()['KITH_MACHINE'] / 'core' / 'cutover' / 'asks.switch'
+    try:
+        if not os.path.lexists(f):
+            return False
+        phase = None
+        for line in f.read_text().splitlines():
+            key, eq, val = line.partition('=')
+            if eq and key == 'state' and val in ('stepping', 'switched', 'rolling-back'):
+                phase = val
+        return phase != 'stepping'
+    except OSError:
+        return True
+
+
+def core_forward(argv):
+    """`kith kernel ask ARGV` answers instead, when the asks are the core's (asks_switched) and the program lists `ask-ledger` (a
+    token of its own: an older program has the core's rows and not this client). Returns only when this file answers.
+    Called under `__main__` and nowhere else: kith-remote loads this file as a module, and a forward at import (or in main(),
+    which every harness that loads the file calls) would run the port instead of the Python under test (lesson R5)."""
+    if os.environ.get('KITH_CORE') == 'python' or not argv or argv[0] in ('-h', '--help') or not asks_switched():
+        return
+    from kith_paths import kith_bin
+    binary = os.environ.get('KITH_BIN') or kith_bin()
+    if not binary:
+        return
+    try:
+        listed = subprocess.run([binary, 'kernel', 'version'], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    if '"ask-ledger"' not in listed:
+        return
+    # `--` first: what follows is kith ask's own command line, whatever it starts with
+    os.execve(binary, [binary, 'kernel', 'ask', '--', *argv], dict(os.environ, KITH_BIN=binary))
+
+
 if __name__ == '__main__':
+    core_forward(sys.argv[1:])
     sys.exit(main(sys.argv[1:]))

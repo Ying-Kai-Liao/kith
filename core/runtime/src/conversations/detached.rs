@@ -14,8 +14,9 @@ use rusqlite::Transaction;
 
 use crate::error::Result;
 
-/// The sources of a turn the host runs as a detached process. A new kind of detached run (the ask) is added here.
-pub(crate) const SOURCES: &[&str] = &["schedule", "wake"];
+/// The sources of a turn the host runs as a detached process: a schedule's, a wake's and a `--bg` ask's callee. A new kind of
+/// detached run is added here, and `claim_run`, `attach` and `hostclaim.queued` cover it.
+pub(crate) const SOURCES: &[&str] = &["schedule", "wake", "ask"];
 
 /// Whether a turn of `source` is a detached run's.
 pub(crate) fn is_source(source: &str) -> bool {

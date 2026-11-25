@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 pub fn beside(exe: &Path, name: &str) -> Option<PathBuf> {
     let exe = exe.canonicalize().ok()?;
     let dir = exe.parent()?;
-    [dir.join(name), dir.join("kith/bin").join(name)]
+    [dir.join(name), dir.join("kith").join("bin").join(name)]
         .into_iter()
         .find(|p| executable(p))
 }
@@ -18,6 +18,22 @@ pub fn beside(exe: &Path, name: &str) -> Option<PathBuf> {
 /// [`beside`] for this process's own program.
 pub fn beside_this(name: &str) -> Option<PathBuf> {
     beside(&std::env::current_exe().ok()?, name)
+}
+
+/// The conversation lock's launcher (`kith-stub`) for a program at `exe`, with `kith` first on PATH, symlinks resolved before
+/// looking beside either: beside `exe` or in the Mac app's CLI folder ([`beside`]), else beside the real path of `kith`
+/// (`install.sh` links only `kith` into `~/.local/bin`). The host and `kith kernel launch --exec` both start Claude under it.
+pub fn find_stub(exe: Option<&Path>, kith: Option<&Path>) -> Option<PathBuf> {
+    let name = if cfg!(windows) {
+        "kith-stub.exe"
+    } else {
+        "kith-stub"
+    };
+    let from_kith = kith
+        .and_then(|k| k.canonicalize().ok())
+        .and_then(|k| k.parent().map(|d| d.join(name)));
+    exe.and_then(|e| beside(e, name))
+        .or_else(|| from_kith.filter(|p| executable(p)))
 }
 
 /// An executable file: on Unix any exec bit, elsewhere any file.

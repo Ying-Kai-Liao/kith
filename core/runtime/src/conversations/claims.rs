@@ -298,7 +298,7 @@ pub(super) fn requeue_turn(tx: &Transaction<'_>, claim_id: i64) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn cancel_turn(tx: &Transaction<'_>, claim_id: i64, now: i64) -> Result<()> {
+pub(super) fn cancel_turn(tx: &rusqlite::Connection, claim_id: i64, now: i64) -> Result<()> {
     tx.execute(
         "UPDATE turns SET state = 'cancelled', finished_at = ?2
          WHERE claim_id = ?1 AND state IN ('claimed', 'running')",
@@ -321,6 +321,8 @@ pub(crate) enum Fence {
     Stopped(String),
     /// The turn is a schedule's and its job is paused (level-triggered: pause wins over a turn that was already queued).
     Paused,
+    /// The turn is an ask from another computer whose pairing epoch has ended (`ask.endPeer`): nothing of it starts.
+    Cut(String),
     /// The person's revoke epoch moved after the caller's may check. The turn stays as it is for a fresh claim.
     Revoked,
 }
@@ -331,13 +333,14 @@ impl Fence {
         match self {
             Self::Stopped(_) => "stopped",
             Self::Paused => "paused",
+            Self::Cut(_) => "cut",
             Self::Revoked => "revoked",
         }
     }
 
     /// Whether the turn is cancelled for this fence (a stopped ask's, a paused job's).
     fn cancels(&self) -> bool {
-        matches!(self, Self::Stopped(_) | Self::Paused)
+        matches!(self, Self::Stopped(_) | Self::Paused | Self::Cut(_))
     }
 
     pub(crate) fn refusal(&self, req: &NewClaim<'_>) -> Error {
@@ -352,6 +355,9 @@ impl Fence {
                 "kith-core: the job of turn {:?} is paused; the turn is cancelled",
                 req.turn
             )),
+            Self::Cut(computer) => Error::Refused(format!(
+                "kith-core: the link to {computer} ended; the turn of its ask is cancelled"
+            )),
             Self::Revoked => Error::Refused(format!(
                 "kith-core: {} was revoked after the may check",
                 req.person
@@ -363,7 +369,7 @@ impl Fence {
 /// The stopped-ask fence of a turn: a stopped or ended ask's conversation takes no new automated turn (the durable half
 /// of the stop: a wake given back or left by a crash, a card resume). A person's turn to that thread stays allowed.
 /// Mirrors kith-ask:472, :834 and :430.
-fn stopped_in(tx: &rusqlite::Connection, turn: i64) -> Result<Option<String>> {
+pub(crate) fn stopped_in(tx: &rusqlite::Connection, turn: i64) -> Result<Option<String>> {
     Ok(tx
         .query_row(
             "SELECT a.id FROM turns t JOIN asks a ON a.conversation = t.conversation
@@ -399,6 +405,10 @@ fn fence_in(tx: &Transaction<'_>, req: &NewClaim<'_>) -> Result<Option<Fence>> {
 fn held_in(tx: &rusqlite::Connection, turn: i64) -> Result<Option<Fence>> {
     if let Some(ask) = stopped_in(tx, turn)? {
         return Ok(Some(Fence::Stopped(ask)));
+    }
+    // PeerFence: an ask from a computer whose pairing ended starts nothing (read in the claim's own transaction).
+    if let Some(computer) = crate::asks::cut_origin_in(tx, turn)? {
+        return Ok(Some(Fence::Cut(computer)));
     }
     Ok(super::sched_run::paused_in(tx, turn)?.then_some(Fence::Paused))
 }
@@ -1219,9 +1229,22 @@ pub(crate) fn unpark_ready(
     conversation: &str,
     lock_free: bool,
     terminal_live: bool,
-    _now: i64,
+    now: i64,
 ) -> Result<Vec<i64>> {
     let tx = core.claim_tx()?;
+    let woken = unpark_ready_in(&tx, conversation, lock_free, terminal_live, now)?;
+    tx.commit()?;
+    Ok(woken)
+}
+
+/// [`unpark_ready`] inside a transaction the caller holds (the wake tick unparks in the transaction that settles and takes).
+pub(crate) fn unpark_ready_in(
+    tx: &rusqlite::Connection,
+    conversation: &str,
+    lock_free: bool,
+    terminal_live: bool,
+    _now: i64,
+) -> Result<Vec<i64>> {
     let held: i64 = tx.query_row(
         "SELECT count(*) FROM claims WHERE conversation = ?1 AND state IN ('claimed', 'running', 'ending')",
         [conversation],
@@ -1255,7 +1278,6 @@ pub(crate) fn unpark_ready(
             }
         }
     }
-    tx.commit()?;
     Ok(woken)
 }
 
@@ -1308,7 +1330,7 @@ pub(crate) fn expire_turns_in(tx: &Transaction<'_>, ids: &[i64], now: i64) -> Re
 /// claim has no process yet has its claim ended with the same check-and-set `revoke_person` uses (a later redeem then
 /// fails) and is cancelled. A `running` turn (or a claim with a process) is left alone. Returns the turns cancelled.
 pub(crate) fn cancel_waiting_in(
-    tx: &Transaction<'_>,
+    tx: &rusqlite::Connection,
     ids: &[i64],
     reason: &str,
     now: i64,
@@ -1347,7 +1369,7 @@ pub(crate) fn cancel_waiting_in(
 }
 
 /// [`revoke_epoch`] inside a transaction.
-pub(crate) fn revoke_epoch_in(tx: &Transaction<'_>, person: &str) -> Result<i64> {
+pub(crate) fn revoke_epoch_in(tx: &rusqlite::Connection, person: &str) -> Result<i64> {
     epoch(tx, person)
 }
 
