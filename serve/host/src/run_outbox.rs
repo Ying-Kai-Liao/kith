@@ -72,6 +72,23 @@ pub fn for_chat(agent: &str, person: Option<&str>) -> Result<PathBuf> {
     make(&root().context("no home folder")?, agent, person)
 }
 
+/// The outbox of one scheduled run (`<machine>/outbox/sched-AGENT-JOB-NS/`), as `kith-sched`'s `run_outbox` made it: the run
+/// leaves what it sends with `kith-send` here and who it is for is in `<run>.json` beside it, out of the run's reach.
+pub fn for_schedule(agent: &str, job: &Value, person: Option<&str>) -> Result<PathBuf> {
+    let root = root().context("no home folder")?;
+    let id = job["id"].as_str().unwrap_or_default();
+    let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let run = clean(&format!("sched-{agent}-{id}-{ns}"));
+    let dir = root.join(&run);
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let meta = json!({"agent": agent, "person": person, "via": "schedule", "job": id, "cron": job["cron"], "at": at});
+    let tmp = root.join(format!(".{run}.json.tmp"));
+    std::fs::write(&tmp, meta.to_string())?;
+    std::fs::rename(&tmp, root.join(format!("{run}.json")))?;
+    Ok(dir)
+}
+
 fn make(root: &Path, agent: &str, person: Option<&str>) -> Result<PathBuf> {
     // A hash, so no two people's chats can ever share a folder however their ids are spelled.
     let who = files::digest_hex(&Sha256::digest(format!("{agent}\0{}", person.unwrap_or("\0owner"))));

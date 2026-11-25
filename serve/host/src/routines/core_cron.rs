@@ -18,6 +18,8 @@
 
 use super::core_runs::Ops;
 use super::run_door::{Launch, Run, Started, detach, start};
+use super::sched_launch;
+use crate::hub::Hub;
 use crate::terminal::core_writer::CoreWriter;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -38,7 +40,7 @@ impl Ops for Live {
         self.0.cancel_turn(turn, why)
     }
 
-    fn cron(&self, t: &Value, job: &str) -> Started {
+    fn cron(&self, hub: &Hub, t: &Value, job: &str) -> Started {
         let (Some(turn), Some(conversation), Some(person)) =
             (t["turn"].as_i64(), t["conversation"].as_str(), t["person"].as_str())
         else {
@@ -51,16 +53,24 @@ impl Ops for Live {
         };
         let agent = t["agent"].as_str().unwrap_or_default();
         let spec = json!({"prompt": t["prompt"], "settings": t["settings"], "person": spec_person});
+        // A program that lists `sched-turn` runs the turn as the launch; one that does not (an older one, a Mac whose program
+        // list lacks it) keeps `kith-sched run-turn` (design 2026-11-24-sched-turn S-R3).
+        let program = sched_launch::program();
         let run = Run {
             turn,
             conversation,
             person,
             kind: "scheduleRun",
-            what: "kith-sched run-turn",
+            what: if program.is_some() { "kith kernel launch" } else { "kith-sched run-turn" },
             ended: "the scheduled run",
         };
         start(&self.0, &run, |claim| {
             let kernel = kernel_here().ok_or_else(|| "no kith kernel here to run the job".to_owned())?;
+            if let Some(program) = &program {
+                let w = sched_launch::Which { agent, job, person: spec_person.as_str(), turn, claim };
+                let built = sched_launch::build(hub, self.0.folders(), program, &kernel, t, &w)?;
+                return Ok(Launch { cmd: built.cmd, stdin: Some(built.spec), err_file: Some(built.log), bind: None });
+            }
             Ok(Launch { cmd: command(&kernel, agent, job, turn, claim), stdin: Some(spec), err_file: None, bind: None })
         })
     }
