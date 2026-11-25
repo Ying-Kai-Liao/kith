@@ -1,0 +1,925 @@
+<!-- Source: architect design 2026-11-24-windows-owner (base bc28df057), brought into the repo as the plan that tracks the Windows owner milestone. -->
+# Windows owner milestone: gap map and packages
+
+Status: **agreed** (2026-11-24, architect) for the gap map, invariants and package order. Workers may start the
+"start now" set (section 6). Some packages are marked **MODEL FIRST**, **REDESIGN** or **WAITS Pn-m**; none of
+those gets a worker until its condition is met (the same rule as retire-python rule 7).
+Asked by: flow manager windows-owner-plan, on Kai's word 2026-11-24: "I want windows to have the full functionality."
+Base: origin/main bc28df057. Every file:line below is on that commit. I re-opened the blocker citations myself this call;
+the rest come from three read-only sweeps run in the same hour against the same commit.
+Read with: `docs/plans/retire-python.md` (P-items), `docs/plans/runtime-design.md` section 8, `docs/plans/one-bot-model.md` M5,
+app plan v5 Phase 6h (K14, the GPU box OS).
+
+Target: Windows 11 x64. Owner path first (α-γ), then invited people and bot guests at Mac parity (δ, W20-W28).
+Kai 2026-11-25 reversed Q1. Kai's answers to section 7 are recorded in section 7 (2026-11-25).
+
+## 0. Corrections to the brief
+
+- **The desktop app is Electron, not Tauri.** `apps/desktop/package.json:44` (`electron ^44.5.1`), `:32` (`dist:win`),
+  `apps/desktop/electron-builder.yml:1,109-129` (NSIS, x64, per-user). The plan keeps Electron.
+- **CI runner: `windows-2025`, not Server 2022** (Q4, answered "ok" 2026-11-25). Reason: Windows 11 24H2 and Server 2025 share one base
+  (build 26100), so ConPTY, job objects and named pipes behave as they do on Kai's target. Today's job says
+  `windows-latest` (`.github/workflows/ci.yml:766`). As far as I know (from memory, not checked this call) that label
+  already resolves to 2025; the first run's "Runner Image" log line confirms it. Pin `windows-2025` and keep one
+  `windows-2022` row in the nightly e2e only. Both are free: the repo is public (`ci.yml` procstart-macos comment).
+- **"Windows works for invitees" is about the client only.** The host that `dist:win` bundles (`kith-serve.exe`,
+  `electron-builder.yml:117-120`) is built by no CI job, and it cannot build on Windows today: `ci.yml:806-808`,
+  `:1610`. So there is no Windows host yet, for owners or anyone else.
+
+## 1. Where Windows stands (evidence)
+
+```mermaid
+flowchart LR
+  subgraph ready["Builds and is tested on Windows CI"]
+    holder["kith-holder: ConPTY, named pipes, job objects"]
+    stub["kith-stub: LockFileEx writer lock, resident pipe"]
+    corert["kith-core (reduced): owner pipe, run pipe, LockFileEx, icacls"]
+    api["kith-api"]
+    attach["kith-attach console client"]
+    kern["kith-kernel subset: accounts, delegation, engines, paths"]
+  end
+  subgraph missing["Does not build or is gated off"]
+    host["serve/host (the host, kith-serve.exe)"]
+    kmods["kernel modules: launch, threads, lifecycle, settings, permit, pkg, project, room_ledger, cost, people, secrets"]
+    rtmods["core modules: authority, asks, cutover, doors, import, revoke_order, transcripts"]
+    bash["kernel/bin/kith (bash) and every Python script"]
+  end
+  host --> kmods
+  host --> bash
+  corert --> rtmods
+```
+
+- Windows CI builds and tests holder, core, api, the kernel subset, stub and attach (`ci.yml:763-812`). It has never compiled
+  the host (`ci.yml:806-808`). One cause sits outside any cfg gate: `serve/host/src/runauth.rs:919-929`
+  (`UnixListener`, `PermissionsExt`).
+- Kernel modules gated to Unix: `core/kernel/src/lib.rs:6-44`. The Windows module list is
+  `account-state, accounts, acp, delegation, engines, paths` (`lib.rs:76-84`).
+- Core modules gated to Unix: `core/runtime/src/lib.rs:34-111`. On Windows, `terminal.open` answers "held terminals are not on
+  this system yet" (`core/runtime/src/terminal.rs:701-705`), and `replay_open_removals` does nothing (`daemon.rs:198-200`).
+- Every kernel verb the host does not own goes to bash. Off Unix that path refuses with "the kernel's commands run on macOS
+  and Linux only" (`serve/host/src/kernel.rs:280-301`). `kith serve start|stop|restart|status` are kernel verbs
+  (`kernel.rs:22`).
+- Windows pieces that exist but are unused: the per-user Run key service and `kith-servew.exe` supervisor
+  (`serve/host/src/service/windows.rs:1-150`, `src/bin/kith-servew.rs`); keep-awake through `SetThreadExecutionState`
+  (`service/mod.rs` `KeepAwake`); PATHEXT and `.cmd` lookup (`agent/backends.rs:161-178`, `holder/src/platform/windows.rs:378-480`);
+  the shell `cmd.exe /d /c` (`serve/host/src/shell.rs:33-52`).
+
+## 2. Invariants (what must stay true; how each is checked is coder's call)
+
+- **WI1. No silent no-op.** A Windows branch does the work or refuses with a named reason.
+  - A bug on Windows today: channel Stop does nothing (`serve/host/src/channels/queue.rs:27-28`).
+  - Not a bug (corrected 2026-11-24): the empty `end_groups` (`core/runtime/src/holder_link.rs:1085-1094`). Every holder
+    spawn is in a job that kills on close and only the holder holds it (`core/holder/src/platform/windows.rs:632-634`), so
+    the holder's death ends the tree. The empty body is correct only while that holds, and W12's model checks it
+    (HolderKillOnClose).
+- **WI2. Nothing kith itself starts on Windows is a script.** No `.py`, `.sh` or `.cmd` of kith's own, whether as a hook, the
+  service, the host's subprocesses or the installer's helpers. Agents' own tools are theirs (retire-python section 4).
+- **WI3. One hook form.** Every hook and status-line command kith writes is `"<absolute exe>" <args>`, with every argument in
+  double quotes and no shell operators. The same line then works under cmd, PowerShell and Git Bash. Shell logic moves into
+  the verbs.
+- **WI4. Owner-only state.** core.db, the sockets/pipes, the secrets and the machine folder are readable by the owner, SYSTEM and
+  Administrators only. This is checked natively, independent of locale, and kith refuses to start otherwise. It is today's
+  rule (`core/runtime/src/perms.rs:1-6`) without `icacls` text parsing.
+- **WI5. I11 holds on Windows: one writer per conversation.** The holder, the stub and the claims use LockFileEx and one job
+  object per spawn. "Gone" means the job has no active process. Section 5.4 has the premise check.
+- **WI6. A guest run on Windows starts only inside a box that the launch built and checked for that run.** Bash is allowed for a
+  guest only when the shell running the command is that box. With no box the launch refuses, with a named reason. There is
+  never an unsandboxed fallback. The `sandbox` key is never relied on while Claude Code's Windows sandbox is gated off: with
+  `failIfUnavailable` set, every run refuses to start (F8).
+- **WI7. A Windows owner run gets the Mac's settings,** except for the hook form (WI3) and how paths are spelled. A golden
+  compares the two with paths normalised, so a rule added on one OS can't go missing on the other.
+- **WI8. A Windows box gets no more than the Mac profile built from the same inputs:** reads, writes, network and sockets. A
+  golden compares the Mac `sandbox` key (`core/kernel/src/launch/settings.rs:1513-1521`) with the Windows box spec, paths
+  normalised. A Mac key with no Windows form refuses the launch by name.
+- **WI9. What a box reaches is fixed when the run starts,** as the Mac profile is. A narrowing applies at the next start. A
+  revoke is a kill.
+- **WI10. Every process of a guest run is in the run's job,** and nothing in the box can start a process outside it.
+- **WI11. A client sends a run token only to a server that has proved it is kith's for that run.**
+- **WI12. No owner-side process started for a guest loads code from a folder the guest can write:** PATH, PATHEXT, the working
+  folder, the DLL search order. This is the Windows twin of `guest_scrub` (`core/kernel/src/permit/scrub.rs:1-3`).
+- **WI13. Born switched.** On Windows the core is the only writer of every store it holds, from the first start: there is no
+  old side, no tombstone and no rollback.
+  - "Switched" is answered by one function, with a per-module constant fixed in code and a test that lists every module's
+    answer. A module is `true` once its core writer is the only one on Windows; authority is `true` from W22.
+  - A module the core doesn't write on Windows yet refuses its verbs by name. It never runs in the unswitched mode, which
+    assumes a Python writer that Windows lacks. Today's stubs answer `false` (`core/runtime/src/accounts/mod.rs:240-242`,
+    `conversations/external.rs:80-82`).
+- **WI14. One copy of the access rules.** Owner, cut off, held, canonical id and take-once are the same Rust functions in the
+  Mac and Windows builds.
+- **WI15. The master key mint is create-if-absent on every OS.**
+  - On Windows, `get`, `write` and the read-back run under one exclusive per-user lock file. Its path comes from the
+    Credential Manager target name, not from the layout, so two layouts of one user share it.
+  - Today Windows does get-then-write. The code says "the two calls are not one step" (`core/runtime/src/secrets/keystore.rs:266`),
+    and the mint adopts whatever key the store holds after its write (`secrets/mod.rs:404-418`). So two cores minting their
+    first key at once can overwrite a key whose records were already sealed.
+  - That is the race the code already names for Linux's `secret-tool` (`mod.rs:407-410`). The Keychain keeps the first key (no
+    `-U`, `keystore.rs:152`).
+  - Guest hardening: if P-G4 shows a box can call CredRead, the stored key is also DPAPI-wrapped, with entropy from a file in
+    the owner-only core folder that no box has an ACE for.
+
+## 3. The shape (decisions)
+
+- **D1. Layout.** Install per user, with no admin.
+  - Programs go in `%LOCALAPPDATA%\Kith\cli\<version>\` (`bin\kith.exe`, `kith-holder.exe`, `kith-stub.exe`, `kith-servew.exe`,
+    `share\kith\…` data).
+  - State stays at `%USERPROFILE%\.kith` and agents at `%USERPROFILE%\kith\agents`, the Mac layout. Claude Code already keeps
+    `%USERPROFILE%\.claude`, and one layout keeps the paths rules and package placeholders unchanged.
+  - Not APPDATA: that would be a second layout that every rule then has to know.
+- **D2. No `cli\current` symlink.** A symlink needs Developer Mode or admin. A junction can't be replaced atomically
+  (remove then create leaves a gap in which a starting hook fails).
+  - Everything kith writes names the **versioned** folder: the Run key value, each launch's hooks, the status line. The
+    status-line wrapper is already repointed when the host moves (`ensure_statusline`, `service/mod.rs`).
+  - `cli\current` becomes a one-line text file, replaced with a file rename.
+  - The user's PATH gets `%LOCALAPPDATA%\Kith\bin\kith.exe`, a small trampoline. It reads `current`, runs that `kith.exe` as a
+    child in a kill-on-close job, and forwards stdio, Ctrl-C and the exit code.
+  - A running exe can't be deleted, but whether its folder can be renamed is W1's P-W15, so pruning does not rest on that
+    alone: it takes only folders older than current and renames one only under the exclusive `use.lock` (W15 rules 2-3).
+    A failed rename or delete counts as "kept". The trampoline re-reads `current` until the folder it names exists.
+- **D3. Service.** Keep the HKCU Run key and `kith-servew` (`runtime-design.md:237`: a session-0 service could not own the user's
+  ConPTYs).
+  - **No Task Scheduler jobs.** The launchd jobs become timers inside the host:
+    - cost sync (retire-python P1-10 already names "the host's own timer")
+    - backup (after P4-14)
+    - the schedule tick, which the host already runs: `routines/switch.rs:151`, `runner.rs:289`
+    - wake drain and ask sweep (after P2-2 and P2-3, in the daemon)
+  - Devops' monitor and uptime become agent routines (core schedules), not OS jobs.
+- **D4. Secrets.** The envelope master key goes in Windows Credential Manager (one generic credential).
+  - Values stay in the envelope in core.db, the core design (`docs/plans/core-design.md:259`).
+  - Credential Manager has no per-program rule, so any process of the same user can read the key, as on Linux
+    (`runtime-design.md:290`). `kith doctor` says so.
+  - The Win32 calls live in a new crate. `kith-core` keeps `forbid(unsafe_code)`, which is why it refuses today
+    (`core/runtime/src/secrets/keystore.rs:66-70`).
+- **D5. One native Windows crate (`core/winsys`)** holds every unsafe Win32 call the core and kernel need:
+  - owner-only DACL set and check
+  - CredReadW and CredWriteW
+  - the process tree walk (Toolhelp32), for `descends` (`core/runtime/src/runs.rs:318-328`)
+  - a named stop event for the host
+
+  The holder keeps its own copy: it must link no kith crate (`scripts/check-holder-deps.sh`).
+- **D6. Stop on Windows has two steps.**
+  - First a graceful cancel: ACP `session/cancel` for a host turn, or Ctrl-C written into the ConPTY for a held terminal.
+    After a grace period, `TerminateJobObject`.
+  - Today `kill_tree` is the hard kill only (`core/holder/src/platform/windows.rs:663-664`).
+  - The transcript reader must accept a torn last line, since a hard kill can cut one.
+- **D7. Bash and PowerShell in owner runs.** Claude Code's Bash tool on Windows runs in Git Bash (my understanding; W1 confirms
+  it), so the bash judge stays the guard.
+  - Owner settings deny Claude Code's PowerShell tool (Q5, answered 2026-11-25). Allowed, it would be an unguarded path around must-ask.
+    No PowerShell judge is planned.
+- **D8. Staging.** Kai asked for full functionality. It ships in three milestones so each one can be used:
+  - **α: an owner runs agents on Windows.** App and channel chats, terminal runs, cards and permits, cost.
+  - **β: schedules, wake and ask.**
+  - **γ: operator tools and update at parity.**
+
+## 4. Gap map by area
+
+Each row gives the gap, its evidence, and the package (W) or retire-python item (P) that closes it.
+
+### 4.1 Install and update
+| Gap | Evidence | Closed by |
+|---|---|---|
+| Installer dies off Darwin; POSIX sh; darwin assets only | `scripts/install.sh:53,85`; `scripts/package-release.sh:6,14`; `packaging/homebrew/kith.rb:15-26` | W14 (`install.ps1`), W7 (zip) |
+| `cli/current` symlink plus `python3 os.replace` swap | `scripts/install.sh:173-192`; Rust names it at `core/kernel/src/launch/settings.rs:708`, `serve/host/src/kernel.rs:141-154` | W14, D2 |
+| Drain (`quiesce.py`) is an inline Python heredoc with launchctl | `scripts/install.sh:211-354,385-386` | W14 (a Rust `kith kernel install drain`, keeping #1145's rule of sparing agent runs); P5-5 on Mac |
+| Cutover gate before the flip | P0-14 (`scripts/install.sh:119`) | W14 runs the same `cutover status --require` with the new program |
+| No Windows release asset | `release.yml` has no Windows job | W7 |
+| Host updater refuses Windows; launches through launchctl; rename-swaps a running exe | `serve/host/src/update/release.rs:21-26`, `update/mod.rs:231-258`, `update/install.rs:18,93-101` | W15 |
+| `kith update self` is Python and only prints a link for the app | `kernel/bin/kith-self-update:1,211` | W15 with P4-15 |
+
+### 4.2 Service and the launchd jobs
+| Gap | Evidence | Closed by |
+|---|---|---|
+| Run key service exists but is never compiled | `service/windows.rs`, `bin/kith-servew.rs`; `one-bot-model.md:387` | W2 |
+| `kith serve start/stop/restart/status` are bash verbs | `kernel.rs:22` | W11 (P4-8 on Mac) |
+| Stop is `taskkill /F /T /IM` plus a PowerShell CIM search | `service/windows.rs:37-74` | W11 (named stop event, D5) |
+| Host only takes SIGTERM on Unix | `serve/host/src/main.rs:1859-1872` | W2 (Ctrl-C plus the stop event) |
+| `--supervise` refused off Unix | `serve/host/src/supervise.rs:45-49` | not needed: `kith-servew` is the supervisor on Windows |
+| launchd jobs serve, cost, sched, backup, monitor | retire-python section 2; `kith-sched:705-720`, `kith-state:251-258` | W11 host timers (D3); sched and wake after P2 |
+| App restart path is Mac or Linux only | `apps/desktop/src/main/host-controller.ts:266`, `shared/host-service.ts:68` | W16 |
+
+### 4.3 Paths and permissions
+| Gap | Evidence | Closed by |
+|---|---|---|
+| `process_home` reads only `$HOME`; Windows has none, so folders come out relative | `core/kernel/src/paths.rs:324-330` (`known_home` falls back to USERPROFILE, `:333-344`, but the daemon folders use `process_home`: `serve/host/src/core_front.rs:43,240,408,837,844`) | W3 |
+| `realpath` and `expanduser` assume `/` | `paths.rs:146-195` | W3 |
+| Owner-only check parses `icacls` text (locale-dependent) and takes `USERNAME` | `core/runtime/src/perms.rs:3-6,153-175,268-345` | W4 (D5) |
+| `chmod` sites | `runauth.rs:923,927` plus many inside gated modules | W2, W5 |
+| Account mirror uses `symlink_dir` (Developer Mode) | `core/kernel/src/accounts/mirror.rs:103-111` | W6 (junction) |
+| Sockets to named pipes | done in core: `core/runtime/src/owner.rs:62-82`, `runsock.rs:33-41`, `attach.rs:873-881`. Missing: host.sock `runauth.rs:869-950` (guest-only, so gated off, WI6), the permit client `core/kernel/src/permit/host.rs:8,53`, `screen.sock` (`screen/helper.rs:55`) | W5b (permit); host.sock is a pipe since W5b (#1189). W23 opens it and the core's run pipe to guests. `screen.sock` stays Unix. |
+| Keychain to Credential Manager | `keystore.rs:66-70`; host vault `market/vault.rs:291` | W4 (D4) |
+| Long paths (MAX_PATH 260) under `.kith\store\…` and agents' worktrees | none: no manifest sets `longPathAware` (inference: nothing in the tree sets it) | W2 (manifest on every kith exe) |
+
+### 4.4 Holder and terminal
+| Gap | Evidence | Closed by |
+|---|---|---|
+| Held terminals refused on Windows | `core/runtime/src/terminal.rs:701-705`, `open_held` Unix-only | W12 |
+| Host turns: `hostclaim.turn` NotServed; `warm_stub` Unix-only | `core/runtime/src/hostclaim.rs:462-537`; `one-bot-model.md:525` | W12 |
+| Old-instance group kill does nothing: correct for holder spawns (kill-on-close jobs, `holder/src/platform/windows.rs:632-634`); detached runs the host starts outside the holder have no group stand-in for `recorded_gone` (`conversations/claims.rs:997-1006`) | `holder_link.rs:1085-1094` | W12 (named job per detached run; the probe asks the job) |
+| Kernel tools' group kill | `core/runtime/src/runtools.rs:212-216,271-277` | W12 |
+| `ps`, `pgrep` and `lstart` liveness in the host | `serve/host/src/terminal/claim.rs:472,607-632`, `terminal/registry.rs:214`, `agent/bot/lifecycle.rs:225-260,357` | W12 (procstart's GetProcessTimes, `core/procstart/src/lib.rs:422-497`) |
+| Graceful stop | `holder/src/platform/windows.rs:663-664` (hard only) | W12 (D6) |
+| Console client | `core/attach` is tested on Windows CI (`ci.yml:809-812`) | ready |
+
+### 4.5 Hook commands
+The owner's Claude Code settings, from `core/kernel/src/launch/settings.rs`, with the bash twin in `kernel/bin/kith`:
+
+| # | Event | Today's command | Shell parts to move into the verb |
+|---|---|---|---|
+| H1 | SessionStart | `<bin> kernel cost --kernel <k> tag` (`:779-788`) | `%q` quoting only |
+| H2 | SessionStart | `<bin> kernel threads --kernel <k> record`, else `"<k>/bin/kith-sessions" record` (`:790-801`) | the Python fallback goes (P1-19) |
+| H3 | Pre/PostToolUse Write\|Edit\|MultiEdit | `<kith> memory hook pre\|post …` (`:552-563`) | `\|\| true` becomes the verb's own never-fail |
+| H4 | Pre/PostToolUse, same matcher | `<bin> kernel room-ledger … pre\|post … \|\| true` (`:537-550`) | `\|\| true`, and the sh-stub fallback goes |
+| H5 | PermissionDenied (auto) | `<permit> denied --dir '<machine>/run/once/<id>'` (`:1007-1018`) | single quotes; the Python fallback `bin/kith-permit` goes |
+| H6 | PreToolUse (auto) | `[ -d <once> ] \|\| exit 0; exec <permit> once --dir <once>` (`:1019`) | `permit once` exits 0 itself when the folder is missing |
+| H7 | PreToolUse Bash (guests) | `printf %s '<allow>'` (`:813-815`) | guest-only: W24b. On Windows it becomes the box self-check (W21 rule 7); the Mac form stays |
+| H8 | PreToolUse Read… (guests) | `out=$(… readfence …) \|\| out=…; printf …` (`:1461-1498`) | guest-only, as H7: W24b, in the WI3 form |
+| H9 | statusLine | `'<host>' statusline [-- orig]` (`service/mod.rs` `wrap`) | double quotes |
+| H10 | Plugin `register.tsx` helper hooks | `'<k>/bin/kith-auth' helper-mcp …`, `'<k>/bin/kith-helper-allow' …` (`kernel/adapters/claude-code/hooks/register.tsx:116-135`); the plugin also runs `/usr/bin/python3` (`:59,:127,:325,:348`) | P4-23 first, then WI3 |
+
+Quoting today is `bash_q` and `shquote` (`settings.rs:278-318`). The bash launch and the Rust launch must write the same
+bytes until P1-12 R5 deletes the bash body. So W9 writes the WI3 form on Windows first, and the Mac switches to it in one
+small PR after R5. That PR changes the difftest goldens.
+
+### 4.6 Cards and permissions (what stands in for the macOS sandbox)
+- **An owner run is not sandboxed by kith on the Mac either.** Only non-owner runs get the `sandbox` key
+  (`settings.rs:1027-1030,1511-1521`). The owner's guard is auto mode plus the permit hooks (H5, H6), the must-ask judge and
+  the deny rules. Windows keeps the same guard. No Windows sandbox is needed for owner runs.
+- Gaps:
+  - The judge counts a path as absolute only when it starts with `/` (`core/kernel/src/launch/judge.rs:185,845`). `C:\`, `C:/`
+    and Git Bash's `/c/` forms must map to the same rules.
+  - The must-ask, trust and destroy lists are Mac words (`core/kernel/src/launch/guard.rs:180-240`: `security …`,
+    `launchctl …`, `diskutil …`). They need Windows rows: `cmdkey`, `vaultcmd`, `schtasks /create`,
+    `reg add …\CurrentVersion\Run`, `sc create`, `Register-ScheduledTask`, `icacls … /grant`, `takeown`, `format`,
+    `diskpart`, `cipher /w`, `rd /s`, `del /s`, `Remove-Item -Recurse`.
+  - D7 covers the PowerShell tool.
+  - The permit client talks to the host over a Unix socket (`permit/host.rs:8,53`) and restarts the host through launchd
+    (`permit/host.rs:221-225`).
+  - The host's card subprocesses are Python: `cards/access.rs:367`, `cards/autoallow.rs:44`, `cards/history.rs:15` and
+    `cards/secret.rs:146`. They close with P3-1, P3-5, P3-6 and P3-2.
+- Doors (`permit/door.rs:1-7`, `serve/host/src/doors.rs`) are guest-only and need `sandbox-exec`. On Windows they are W27
+  (they were refused under WI6, Q1).
+
+### 4.7 Channels, schedules, wake and ask
+- **Channels.** A chat message runs bash `bin/kith` (`serve/host/src/channels/run.rs:397`), with a POSIX environment list
+  (`run.rs:41-53`) and a Unix process group (`run.rs:407-408`). Stop does nothing off Unix (`queue.rs:27-28`). Per-message
+  who/resolve calls Python `kith-auth` (`channels/hq.rs:32-50,152-170`).
+  - Closed by W8 (in-process launch), W12 (stop through a job), P3-1 (people in process), and the Windows environment list
+    (`USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `SystemRoot`, `PATHEXT`, `ComSpec`, `TEMP`) in W8.
+- **Schedules.** The core fires the job (`core/runtime/src/schedules/fire.rs:758`). Then the host runs Python
+  `kith-sched run-turn` (`serve/host/src/routines/core_cron.rs:195-215`), which relies on `os.execve` so that "the pid IS the
+  run" (`kernel/bin/kith-sched:43,507`). Windows has no exec, so this path can't be ported as it is.
+  - **WAITS P2-4** (the host begins the core-fired turn itself), then W12 runs it as a normal host turn.
+  - The `dev.kith.sched` tick also drains wake and ask (`kith-sched:650-655`): **WAITS P2-2, P2-3**, then a daemon timer (D3).
+- **Wake.** The host runs Python `kith-wake` by path (`serve/host/src/wake.rs:60-73`). Card resume runs bash `bin/kith --resume`
+  (`cards/resume.rs:906,944,1325-1328`). Closed by **WAITS P2-2** plus W8.
+- **Ask.** Python `kith-ask` (`ps`, signals, `/bin/sh -c`: `kith-ask:528-587,821-823`), called by the permit helper
+  (`permit/helper.rs:76`) and delegations (`serve/host/src/delegation.rs:41,65,171,201`). Closed by **WAITS P2-3**.
+- Python start times (`kith_procstart.py:115-179`) have no Windows branch. They go with P2-7; Rust procstart has Windows.
+
+### 4.8 Cost
+- The module is Unix-only because the person views run `kith-auth` (`core/kernel/src/lib.rs:5-7`).
+- Subagent detection matches `"/subagents/"`, so it never matches a backslash path (`core/kernel/src/cost/ledger.rs:290`).
+- Claude project folder names for `C:\…` working folders are handled in Unix-only code
+  (`core/runtime/src/transcripts/project.rs:42,102,114`).
+- Sync reads `~/.claude/projects` and each account's projects (`cost/mod.rs:61-67`, `ledger.rs:250-266`).
+- W13 builds the ledger (tag, record, sync) on Windows. The per-person views refuse on Windows until P3-1.
+
+### 4.9 Engines and accounts
+- The Rust launch's `which_in` has no PATHEXT and checks Unix mode bits (`core/kernel/src/launch/assemble.rs:348-356`), so it
+  can't find `claude.exe` or `claude.cmd`. The accounts port leaves PATHEXT to the host (`core/kernel/src/accounts.rs:132`).
+- The engine table has Windows install lines (Claude's `install.ps1`, `core/kernel/src/engines.rs:335`). Codex and Hermes go
+  through `harness.py` today: P1-16 H1 to H3 moves them to the core's ACP.
+- Host turns start Claude through ACP adapters found by `launch_commands`, with `.cmd` shims handled
+  (`agent/backends.rs:99-103,161-178`). These are portable.
+
+### 4.10 Desktop app as host
+- The NSIS build bundles `kith-serve.exe`, `kith-servew.exe`, `kith-stub.exe` and `kith-holder.exe`
+  (`electron-builder.yml:109-129`, `tools/native-host.mjs:30-44`). It has no `kith.exe` CLI and no `share\kith` data
+  (`native-host.mjs:36` says so).
+- `ensureCli` is Mac-only and runs `sh kith-install.sh` (`host-controller.ts:176`, `shared/cli-install.ts:103-108`).
+- No CI job runs `dist:win`. The desktop job is macOS (`ci.yml:1347,1380`), and release has no Windows desktop job.
+- Windows bits already in the app: the Run key lookup (`host-controller.ts:57-60`), `kith-servew` detection (`:463-464`), the
+  tray and island win32 branches.
+- One program name: the Mac's host and CLI are one program. Windows ships it as `kith.exe` and drops the `kith-serve.exe` name
+  (`service/windows.rs:14`, `electron-builder.yml:117`).
+
+### 4.11 Python and shell still on an owner's daily path after P1 and P2
+After P1 (the run path) and P2 (wake, ask, schedules), these remain. On Windows each is a hard gap (WI2): a verb still on
+this list answers "not on Windows yet (Pn-m)" through W17 until its item lands.
+
+| Script | Daily caller | Item |
+|---|---|---|
+| `bin/kith` router, `lib/kith-core.sh`, `core-switched.txt` | every `kith` verb the host doesn't own (`kernel.rs:47-77`) | P5-1, P5-2; W17 is the Windows slice |
+| `kith-auth` | host per chat message (`channels/hq.rs:50`), cards (`access.rs:367`, `secret.rs:146`), `launch_cmd.rs:82,203,278`, cost views | P3-1, P3-2, P3-4 |
+| `kith-allow`, `kith_allowed.py` | Always-allow cards (`autoallow.rs:44`) | P3-5 (REDESIGN) |
+| `kith-cards` | card history (`history.rs:15`) | P3-6 |
+| `kith-send-to` | room bot guests (`chat/group.rs:797-814`) | P3-7 |
+| `kith-recall`, `kith-memory ls\|search`, `kith_recall.py` | memory tidy (`hqmem/tidy.rs:984`), agents | P3-8, P3-9 |
+| `kith-info` | the app's agent page (`agent/hq.rs:701`) | P3-10 (REDESIGN) |
+| `kith-people`, `kith_people_access.py` | `kith people`, invites | P3-11 |
+| `agent/gate/reclaim.rs:67` runs `python3 res.py` | resource gate | P3-13 |
+| `kith-pkg` (list, set-field, install, …) | the app's agent page (`agent/hq.rs:395,562`), `launch_cmd.rs:67` | P4-1 |
+| `kith-skills`, `kith-scratch`, `kith-project`, `kith-group`, `kith-connector`, `kith-new` | the app and agents | P4-3 to P4-7, P4-11 |
+| `kith-serve` (bash) | serve verbs (`kernel.rs:22`), `permit/host.rs:75` | P4-8; W11 on Windows |
+| `kith-send` (bash) | agents; two agent tools by path | P4-9, P4-24 |
+| `kith-call` | agents | P4-10 |
+| `kith-doctor`, `kith-init` | install, support | P4-12, P4-13 |
+| `kith-state` and `dev.kith.backup` | nightly backup | P4-14, then the W11 timer |
+| `kith-self-update` | `kith update` | P4-15 plus W15 |
+| `kith-keys`, `kith-who`, `kith-bug`, `kith-chain`, `kith-helper-allow` | PROTOCOL.md and skills | P4-16 to P4-19 |
+| `kith-permit` (Python remainder: bug, door, guest helper) | permit fallbacks | P4-17, P3-12 (door: guest-only, refused on Windows) |
+| plugin `register.tsx` (runs python3, kith-pkg, kith-auth) | every owner session (`kith@kith` plugin) | P4-23, then W9 for its hook form |
+| `project-id`, `kith-room-ledger` sh stubs | agents run `project-id` by name; the room-ledger stub is a hook fallback | the room-ledger stub never runs on Windows (always the program, W9). `project-id`: W17 ships it as `project-id.exe` beside `kith.exe` (a WI2-clean twin of the stub) |
+| `scripts/install.sh` with `quiesce.py`, top-level `install.sh` | install | W14 on Windows, P5-5 on Mac |
+| `kith-serve-launch` (uv) | `dev.kith.serve` on Mac | P1-17; not used on Windows (`kith-servew`) |
+
+Outside the series and still Python on Windows: agents' own tools (devops `monitor.py` and `uptime.py`, house, resource-manager).
+They need `uv` on Windows. Their launchd jobs become agent routines (D3). The `kith-uv` Full Disk Access copy is Mac-only.
+
+## 5. Packages
+
+Fields: size (S under a day, M one to three PRs, L a design plus several PRs) · depends · files · start.
+Every package adds or extends one scenario in the Windows e2e (W18), and its PR names the scenario.
+
+- [x] **W0. Fake model server.** Owner: windows-owner-build. Status: done, #1160 merged 0a643964a. S. Depends: none. Files: new `serve/host/tests/support/fakemodel/` (a Rust test binary that speaks
+  the Anthropic Messages API, streaming, from a JSON script: text, `tool_use` for Bash/Write/Read, `end_turn`). Real Claude Code
+  runs against it through `ANTHROPIC_BASE_URL` with a dummy key, which is how every Windows e2e runs Claude for free. Mac e2e can
+  use it too. **Start now.**
+- [x] **W1. Claude Code on Windows probe.** Owner: windows-owner-build. Status: done, #1161 merged 15764d089. S. Depends: W0. Files: `.github/workflows/windows-probe.yml`, `docs/windows-facts.md`
+  (committed output).
+  - On `windows-2025`, install Claude Code (npm and `install.ps1`) and run it against W0 with probe hooks. Record:
+    - which shell runs hook and status-line commands
+    - which quoting forms pass: double-quoted forward-slash paths, backslash paths, single quotes
+    - whether a PowerShell tool exists, and whether `permissions.deny` can remove it
+    - what `sandbox.enabled` with `failIfUnavailable` does (expected: refuses)
+    - the `%USERPROFILE%\.claude\projects` folder name for a `C:\…` working folder
+    - whether a `#!/bin/sh` stub on PATH runs from the Bash tool (Git Bash)
+    - W12's premises: kill Claude Code (`TerminateProcess`) at points across a delivery. Using the fake model server's
+      request log, check that every prompt the server received has at least a torn transcript line holding the marker
+      token (P-W12a), and that no full marker line exists for a prompt the server never received (P-W12b)
+    - for W15: whether renaming a folder that holds a running exe fails (P-W15, the premise W15's prune rule is checked
+      under)
+  - W6, W9, W10 and W13 cite this file. **Start now.**
+- [ ] **W2. The host builds and tests on Windows.** Owner: windows-owner-build. Status: W2a done (#1153) merged 4f8550b69; W2b open (#1177), in progress. L, in two PRs. Depends: none.
+  - **W2a: compile and clippy.** `cargo build/clippy -p kith-serve` joins the `windows` job. Changes:
+    - gate host.sock (`runauth.rs:869-950`) and `screen.sock` to Unix, with a refusal on Windows (guest-only, WI6)
+    - gate the host's links to Unix-only kernel modules (`launch_cmd`, `threads_cmd`, `pkg_cmd`, `lifecycle_cmd`)
+    - gate `terminal/claim.rs` and `terminal/registry.rs` `ps` code
+    - Ctrl-C plus a named stop event instead of SIGTERM (`main.rs:1859-1872`)
+    - a `longPathAware` manifest for `kith.exe` and `kith-servew.exe`
+  - **W2b: the host test suite green on `windows-2025`.** Tests that need Unix are marked with a reason.
+  - Files: `serve/host/src/**` (cfg only), `serve/host/build.rs` (manifest), `ci.yml:763-812`.
+  - Rule WI1: every gated path refuses with a named reason. Conflict risk with P1/P3 work in serve/host: moderate, cfg lines
+    only. **Start now.**
+- [x] **W3. Paths and home.** Owner: windows-owner-build. Status: done, #1151 merged 0890c25ac. S. Depends: none. Files: `core/kernel/src/paths.rs:146-195,324-344`, `serve/host/src/core_front.rs`,
+  `service/mod.rs` (one home source). `process_home` falls back to USERPROFILE on Windows; drive roots and `\\?\` are handled;
+  D1 is written in the paths docstring. **Start now.**
+- [x] **W4. `core/winsys`: native DACL, Credential Manager, process tree, stop event.** Owner: windows-owner-build. Status: done, #1154 merged f016c72a3. M. Depends: none.
+  - Files: new `core/winsys/`; `core/runtime/src/perms.rs` (native check replaces `icacls`, `:3-6` TODO);
+    `core/runtime/src/secrets/keystore.rs:55-72` (Windows backend); `core/runtime/src/runs.rs:318-328` (`descends` via
+    Toolhelp32); `ci.yml:1186-1191` (core-keystore matrix gains Windows); the boundary check allows the new crate.
+  - Lets run tokens bind on Windows (`call.rs:189-195`). That isn't needed for owners, but it costs nothing.
+  - **Start now.**
+- [x] **W5a. Kernel modules build on Windows: settings, project, room_ledger, pkg, cost ledger.** Owner: windows-owner-build. Status: done, #1163 merged ca9b5dd34. M. Depends: W3.
+  - Files: `core/kernel/src/lib.rs:6-44`, the modules' mode and flock sites (flock becomes fs2 LockFileEx, modes become
+    WI4 via winsys, `cp` becomes a Rust copy in `pkg/store.rs:210`), and the `MODULES` list (`lib.rs:51-84`).
+  - Cost's person views and anything that spawns `kith-auth` stay refused on Windows until P3-1.
+  - **Start now** (after W3; parallel with P1).
+- [ ] **W5b. Permit on Windows, and its channel to the host over a named pipe.** Owner: windows-owner-build. Status: #1189 open, architect-approved, CI fixes in progress. M. Depends: W2a, W5a.
+  - #1189's `permit/refused.rs` refusals (apply, scrub, door, helper) and its `!cfg!(windows)` guard in `handle_request` are now
+    **temporary**. W23, W24b, W26 and W27 remove them, each one only when its dependency lands (WI1).
+  - Files: `core/kernel/src/permit/{host,apply,issue,scrub}.rs`, the host's permit listener, and the host restart through the
+    service rather than launchd (`permit/host.rs:221-225`).
+  - The door and bug halves stay refused on Windows (P3-12, P4-17).
+  - Divergence accepted by the architect: `apply`, `scrub`, `door`, `bug` and `helper` are not built on Windows and refuse by name (`permit/refused.rs`), because they serve guests only (WI6) and lean on the Unix-only launch.
+  - **Start after W2a.**
+- [ ] **W5c. The core's owner-pipe client on `kith_winsys::pipe::connect`, and a sweep of every Windows pipe or socket client.**
+  Owner: unowned. Status: not started. S-M. Depends: W5b. Architect review before merge.
+  - The core's owner-pipe client moves onto `kith_winsys::pipe::connect`: server identity and pipe-owner SID check, with
+    Administrators allowed.
+  - Sweep: every Windows pipe and socket client checks the same way.
+- [x] **W6. Engines and accounts.** Owner: windows-owner-build. Status: done, #1162 merged 99d689760. S. Depends: W1 (claude.exe location). Files: `core/kernel/src/launch/assemble.rs:348-356`
+  (`which_in` with PATHEXT, no mode bits), `core/kernel/src/accounts.rs:132`, `core/kernel/src/accounts/mirror.rs:103-111`
+  (junction for folders, copy for files). **Start now** (the probe answer lands in a day).
+- [x] **W7. Windows release build.** Owner: windows-owner-build. Status: done, #1183 merged b75c0b487. S. Depends: W2a.
+  - Files: `release.yml` (a job building `kith-<ver>-windows-x64.zip`: `kith.exe`, `kith-holder.exe`, `kith-stub.exe`,
+    `kith-servew.exe`, `kith-shim.exe`, `project-id.exe`, `share\kith\…`), `scripts/stage-kernel.sh` (Windows data only:
+    no `kernel/bin`, no `kernel/lib`), `serve/host/src/update/release.rs:21-26`.
+  - Unsigned here. W7s adds signing (Q2, answered 2026-11-25).
+  - **Start after W2a.**
+- [ ] **W7s. Signing in the release job (Azure Trusted Signing).** Owner: windows-owner-build. Status: PR #1191 open. S. Depends: W7.
+  - Files: `release.yml` (a signing step on the Windows zip's exes). It skips cleanly without the signing secrets.
+  - Service and setup: Q2, answered 2026-11-25. Kai's Azure setup steps are in `docs/windows-signing.md` (on #1191). The
+    organisation validation in Australia takes 1-30 business days.
+  - W16 signs the installer later with the same account.
+- [ ] **W8. The launch builds on Windows, and the host launches in process.** Owner: windows-owner-build. Status: in progress. L.
+  - **WAITS P1-12 R0 and R1** (the plan/emit split and the accounts chain in Rust) and **P1-15 M1** (`assemble.rs` runs
+    `kith-auth mcp-config` today).
+  - Files: `core/kernel/src/launch/*` (lib.rs gate off; Windows env list; `realpath`; the deny rules with Windows path
+    spellings); `serve/host/src/agent/hq.rs:329-358,777-812` and `channels/run.rs:397-408` (call `kith_kernel::launch` in
+    process instead of `bin/kith --launch-json`); `cards/resume.rs:906-944`.
+  - Adds the WI7 golden (Windows settings vs Mac settings, normalised).
+  - Follow-ups: when W8 lifts launch's `cfg(unix)` gate, the non-Unix spawn starts the launcher inside its named job object in
+    one call (W12's rule). W8 needs architect review.
+- [ ] **W9. Hook commands in one shell-neutral form (WI3).** Owner: unowned. Status: not started. M. Depends: W1, W8.
+  - Files: `settings.rs:537-563,779-801,1007-1019`; `service/mod.rs` `wrap`; the verbs gain never-fail and missing-folder
+    exits (`kernel cost tag`, `threads record`, `memory hook`, `room-ledger`, `permit once`).
+  - The Windows form first. The Mac form flips in a follow-up S PR after **P1-12 R5** (difftest goldens change).
+  - H10 follows P4-23.
+- [ ] **W10. Guard and cards for Windows owner runs.** Owner: unowned. Status: not started. M. Depends: W1, W5b.
+  - Files: `core/kernel/src/launch/judge.rs` (Windows absolute paths, `/c/` mapping), `guard.rs` (Windows rows),
+    `kernel/tests/difftest/golden-lib/guard-must-ask.json` (Windows rows added, frozen), and owner settings that deny the
+    PowerShell tool (D7, Q5 answered 2026-11-25). W1 records the tool's exact name for the deny rule.
+- [ ] **W11. Service verbs and host timers.** Owner: unowned. Status: not started. M. Depends: W2a; the cost timer on W5a and W13; the backup timer on P4-14; the wake
+  and ask timer on P2-2 and P2-3.
+  - Files: `serve/host/src/kernel.rs:22` (on Windows, `serve start|stop|restart|status` are answered by the host);
+    `service/windows.rs:37-150` (stop through the named event, holder found by folder, no `/IM`); a host timer module (cost
+    sync, backup, the daemon's wake drain once it exists).
+  - The same timers can later replace the Mac plists (P1-10, P4-14).
+- [ ] **W12. Claims, held terminals and host turns on Windows.** Owner: unowned. Status: not started. L. **Model passed 2026-11-24** (`model-w12/`, below). Ready for
+  workers once its WAITS are met, and only with the W1 premise answers in hand (P-W12a and P-W12b).
+  - **WAITS P1-19** (no Python claim path left) and P1-12 R5. Depends: W2b, W5a, W8.
+  - Files: `core/runtime/src/terminal.rs:701-705` and `open_held`; `hostclaim.rs:462-537`; `serve/host/src/terminal/warm_stub.rs`
+    (Windows via the resident stub's named pipe, #731); `conversations/claims.rs:997-1006` (`recorded_gone` asks the run's named job on Windows);
+    `runtools.rs:212-216,271-277`; `channels/queue.rs:20-28` (Stop through the job); `terminal/claim.rs`, `registry.rs` and
+    `agent/bot/lifecycle.rs` (liveness via procstart); `core/kernel/src/threads/*` and `lifecycle/*` (LockFileEx, spawn
+    instead of fork); D6 graceful stop; the transcript reader accepts a torn last line.
+  - The core-fired schedule turn runs here as a normal host turn, once P2-4 lands.
+  - **Rules the model needs** (each one's broken run fails; `model-w12/results.md`). The model is `WinClaims.tla`, which
+    extends S4's model with processes and job objects. Workers build these:
+    1. **One named job per detached run,** named by the claim id. It is created without kill-on-close, so the run outlives a
+       host restart.
+    2. **The launcher is created inside the job in one call** (`PROC_THREAD_ATTRIBUTE_JOB_LIST`, as the holder's
+       `create_in_job` does). Never suspend-assign-resume: a host restart between create and resume leaves a launcher
+       suspended in the job for ever (`extra-stranded`). Never assign after it runs: its engine starts outside the job.
+    3. **The job forbids breakaway** (no `BREAKAWAY_OK` or `SILENT_BREAKAWAY_OK`), so no tool child leaves it.
+    4. **`recorded_gone` on Windows asks the job:** the launcher's pid with its start time, and then the job's active process
+       count, opened by name, so it works after a host restart. "Gone" means the name is not found or 0 processes are
+       active. Any error answers "not gone" (S4: safe but stuck until the next probe).
+    5. **R3a stays:** a report puts the claim to `ending`; only `end_gone` ends it.
+    6. **Host-door engines run in a host-held job that kills on close.** On Windows a child does not die with its parent, so
+       without the job a warm engine outlives a host restart while its claim is ended.
+    7. **Holder jobs kill on close,** and only the holder holds them. That is today's code, and it is why the empty
+       `end_groups` is right.
+    8. **Every job handle is non-inheritable.** An inherited handle keeps a kill-on-close job open, so its engine survives.
+    9. **D6 Stop:** cancel, then `TerminateJobObject` on the job, found by name after a restart.
+    10. **The transcript reader counts a torn last line that holds the marker token** as the marker (S4 R4). A strict
+        reader delivers twice after a hard kill. On the Mac the same rule closes the same gap after SIGKILL.
+  - **Premises W1 must confirm before W12 code lands:**
+    - **P-W12a:** the user line holding the marker is on disk no later than the prompt reaches the model. Without it,
+      ExactlyOnce fails even with rule 10: the kill comes after the send and before the line's first byte.
+    - **P-W12b:** a full marker line is never written for a prompt that was not sent. Without it, a request can read
+      answered and never have been delivered.
+
+    The W1 probe kills Claude Code at points across a delivery, using the fake model server's request log. S4 assumes both
+    premises on the Mac too.
+  - **Not re-run:** the repo's `thread-writers`, `writer-lock` and `holder-lease` models. Their steps (take, release on death,
+    kill the group, gone) map one to one onto LockFileEx and the job, except "group", which is what `WinClaims` checks.
+    holder-lease kills guest runs only, and guests are back on Windows (Q1). Its clock already counts sleep on Windows (`QueryInterruptTime`, `core/holder/src/clock.rs:13-14`).
+    Whether to re-run it stays coder's call (W28). When W12's code lands, coder updates those
+    skills' drift lists and decides on their re-runs (coder's call).
+- [ ] **W13. Cost and transcripts on Windows.** Owner: unowned. Status: not started. S. Depends: W1, W5a.
+  - Files: `core/kernel/src/cost/ledger.rs:290` (match path components, not `"/subagents/"`);
+    `core/runtime/src/transcripts/project.rs:42,102,114` (the `C:\` project folder names W1 recorded); the cost sync timer
+    (W11).
+- [ ] **W14. Windows installer.** Owner: unowned. Status: not started. M. Depends: W7.
+  - Files: new `scripts/install.ps1` (`irm … | iex`, per user):
+    - download the zip and check its SHA-256 against the release manifest
+    - stage `cli\<ver>.partial` and rename it into place
+    - run the new program's `kith kernel cutover status --require` (the P0-14 gate)
+    - write `cli\current` (a file rename)
+    - put `bin\kith.exe` (the trampoline, D2) and `project-id.exe` on the user PATH (HKCU Environment). The trampoline
+      follows W15 rules 4 and 5 from its first version (shared `use.lock`, re-read `current` until its folder exists)
+    - `kith serve install` (the Run key)
+  - A Rust `kith kernel install drain` takes the place of `quiesce.py` on Windows. It keeps #1145's rule: agent runs' own
+    wrappers are never stopped, and writers are matched by program, not by command-line text.
+  - No admin, no Python.
+- [ ] **W15. `kith update` on Windows.** Owner: unowned. Status: not started. M. **Model passed 2026-11-24** (`model-w15/`, below). Ready for workers once W14
+  and the P4-15 design are in, with W1's P-W15 answer in hand. Depends: W14, and the P4-15 design (the host updater absorbs
+  `kith-self-update`).
+  - Files: `serve/host/src/update/{mod,install,release}.rs` (a detached updater with breakaway instead of `launchctl submit`,
+    `mod.rs:231-258`; rename-aside for a running exe, `install.rs:93-101`; pruning that treats a failed delete as kept);
+    the trampoline (W14) for rules 4 and 5.
+  - **Model:** `WinUpdate.tla`. Two updaters, supervisors, hosts, agent runs with hooks, a trampoline command, a reboot and
+    sign-in, kills, crashes and gate refusals, in any order. Design passes at K=1 and K=0 (4.8M and 13.4M states), under
+    both rename premises, and its liveness holds (a host ends up serving current). Each rule below has a broken run that
+    fails (`model-w15/results.md`). Workers build these:
+    1. **One install lock** (LockFileEx on `install.lock`) around check, flip, Run key, stop, start and prune. The check
+       refuses a version at or below current, so current never goes back. Staging `<v>.partial` and renaming it to `<v>`
+       needs no lock.
+    2. **A stale updater still repairs (model-added).** An updater whose version is at or below current still, under the
+       lock, sets the Run key to current and restarts the supervisor on current if either differs. Without it, a reboot
+       between the flip and the Run key leaves the old version serving for ever.
+    3. **Prune only folders older than current (model-added).** A newer folder is another updater's staged work: pruning
+       it makes that updater flip to a folder that is gone.
+    4. **The trampoline holds a shared `<v>\use.lock`** from before it starts `<v>\kith.exe` until its child exits, and
+       every agent run keeps one process from its `<v>` (the stub) alive for the run's life. Prune renames a folder to
+       trash only after taking that lock exclusively, never deletes in place (model-added; needed only if P-W15 says a
+       rename succeeds, but build it unless W1 shows the rename fails reliably, antivirus and OneDrive included).
+    5. **The trampoline re-reads `current` until the folder it names exists** (bounded, with a clear error). One retry is
+       not enough (model-added).
+    6. **The Run key is written only after the folder is complete and current flipped.**
+    7. **Stop, then wait until every old supervisor and host is gone, then start the new one.** This is a liveness rule
+       (the new supervisor otherwise gives up its 10 s wait for `hostw.lock` and nothing serves); one supervisor and one
+       host already hold through `hostw.lock` and `host.lock`.
+  - **Not needed:** enumerating processes to skip folders in use. With rules 1-4 the model passes without it, so W15 drops
+    it (a process's image path is not always readable on Windows) and keeps only "never current".
+  - **Premise P-W15 (W1):** whether renaming a folder holding a running exe fails. It decides how much rule 4 carries, not
+    whether the design is safe.
+- [ ] **W16. The desktop app as host on Windows.** Owner: unowned. Status: not started. M. Depends: W7, W11, W14.
+  - Files: `apps/desktop/tools/native-host.mjs:30-44` (bundle `kith.exe`, the shim and the data), `electron-builder.yml:109-129`
+    (`kith.exe` as the one program name), `host-controller.ts:176` (`ensureCli` on Windows runs the bundled installer verb,
+    not `sh`), `:266` and `shared/host-service.ts:68` (a Windows restart path), `ci.yml` (a `desktop-win` job running
+    `dist:win` on `windows-2025`), `release.yml` (`desktop-win` job, electron-updater NSIS).
+  - Signed with the same Azure account as W7s (Q2, answered 2026-11-25).
+- [ ] **W17. Windows router: every owner verb in Rust or a named refusal.** Owner: windows-owner-build. Status: #1182 open. M. Depends: W2a.
+  - Files: `serve/host/src/kernel.rs:47-77,280-301`. On Windows, `Route::Kernel` answers from a table: a verb that is ported
+    runs, and any other answers "not on Windows yet: <verb> (retire-python Pn-m)". There is no bash fallback on Windows.
+  - Ships `project-id.exe`.
+  - The full route table is P5-1 (REDESIGN there). W17 is only its Windows refusal slice and needs no design.
+  - **Start after W2a.**
+- [ ] **W18. Windows end-to-end on free runners.** Owner: windows-owner-build. Status: W18a in progress (the workflow skeleton). M, grown by every package. Depends: W0, W2a.
+  - Files: `.github/workflows/windows-e2e.yml` (nightly, `workflow_dispatch`, and PRs touching the Windows paths filter;
+    `windows-2025`, plus a nightly `windows-2022` row), `serve/host/tests/windows_e2e/`.
+  - Each run installs from the built zip with `install.ps1` into a throwaway profile (`KITH_HOME`, `KITH_STATE`,
+    `USERPROFILE` pointed into the workspace), writes the HKCU Run key on the throwaway runner VM, starts the host, and runs
+    real Claude Code against W0.
+  - Scenarios, each asserting end state:
+    - (a) an owner terminal run held in ConPTY, attached, detached and reattached
+    - (b) an app-API chat turn through ACP
+    - (c) an auto-mode refusal that raises a card, answered through the host API, and the retry passing
+    - (d) Stop ending the whole tree (job empty)
+    - (e) the cost row in the ledger
+    - (f) a schedule fire (after P2-4)
+    - (g) a wake after a card (after P2-2)
+    - (h) an update to a second build, with a run in flight
+    - (i) `kith serve stop` and uninstall
+    - (j) to (o): guest runs, listed below (they replace the WI6 refusal check)
+  - Within the 40-minute job limit (`ci.yml:767`), with `rust-cache`. No paid runners, no API key.
+  - **Guest scenarios (W18 (j) to (o), replace (j); proposed by the architect 2026-11-25).** All of these run as a standard
+    user. People and memberships are added over the owner pipe, with no cloud. The guest scenarios run in their own job so the
+    40-minute limit holds.
+    - **(j) A guest run's box.** The fake model scripts Bash calls. Asserts:
+      - a planted `%USERPROFILE%\.ssh` file, `core.db` and `.kith\secrets` can't be read
+      - writes fail outside `KITH_WORK` and work inside it
+      - `whoami --box` reports the run's AppContainer
+      - `kith recall` answers only the person's audience
+      - the token lifted into a second box is refused
+      - `start`, WMI and `schtasks` from the box stay in the job or fail
+      - CredReadW of kith's master key fails
+      - an unlisted host is unreachable, and a listed one (the fake server under a hosts entry) works after W25
+    - **(k) Revoke mid-run.** A boxed `sleep 600` plus a detached child, then a revoke over the owner pipe. Within N seconds:
+      - the job's ActiveProcesses is 0
+      - the token answers "not authorized"
+      - nothing is delivered
+      - a new message is refused
+
+      Then an undo: a new run gets an equal capability list (R4).
+    - **(l) Squatting.** Stop the host and create the pipe name, first as an owner process and then as a box. The guest client
+      never writes its token.
+    - **(m) A two-person room turn.** The box gets the intersection. When one person leaves, the running box is unchanged and
+      the next start is narrower.
+    - **(n) After W27: a door render, with a revoke during it.** The job empties and the claim ends.
+    - **(o) A bot guest's turn,** if bots can be driven without the relay. Otherwise it goes to W19.
+    - The nightly `windows-2022` row includes (j) and (k).
+- [x] **W19. Manual checklist for a real Windows 11 machine.** Owner: windows-owner-build. Status: done, #1148 merged 403fad8fa. S, doc only now. Depends: none. File: `docs/windows-checklist.md`.
+  - The checks:
+    - start at sign-in (CI can't sign in)
+    - sleep and wake during a turn
+    - SmartScreen and Defender on first run
+    - a non-English display language (the DACL check, WI4)
+    - an OneDrive-redirected profile
+    - a path over 260 characters
+    - antivirus holding a file during the update rename
+    - Windows Terminal attach and resize
+    - Ctrl-C in the trampoline
+  - Q3 (answered 2026-11-25): the scripted checks run as a GitHub Actions e2e (W18) on free `windows-2025` runners, not on a local
+    VM. Only what truly needs a person stays in this list, and a person runs it on real x64 hardware before any public Windows
+    release, together with signing (Q2).
+  - Additions (2026-11-25, architect): Defender and SmartScreen on `kith-boxsh.exe`; ACE propagation in a OneDrive folder; a
+    non-English locale; Windows 11 Home.
+  - Q3 and "CI is enough" (Kai, 2026-11-25): W18 scripts every check that CI can judge. This list keeps only what truly needs
+    a person.
+
+**Guest path (δ): the Mac guest box that Windows must match.** Proposed by the architect 2026-11-25. Read with WI6 to WI15.
+
+- **Bash runs inside Claude Code's own sandbox,** written into the settings (`settings.rs:1513-1521`): `enabled`,
+  `failIfUnavailable`, `allowUnsandboxedCommands: false`, `autoAllowBashIfSandboxed`.
+  - Reads are deny-by-default. They open back the cwd and granted folders, the workspace, uv, `~/.local/bin`, the kith program's
+    link chain, and the system folders (`settings.rs:1318-1388`).
+  - Writes are an allowlist. Rule W paths and secrets are denied below it (`:1395-1440`).
+  - Network: only `allowUnixSockets` (host.sock and `<machine>/core/run.sock`, `:1300-1314`) and the agent's guest domains
+    (`:1500-1511`).
+- **The engine itself is not boxed.** The file tools are fenced by deny rules and the readfence PreToolUse hook (`:1441-1498`).
+- **Workspace variables:** `KITH_WORK` plus `CLAUDE_ENV_FILE=<kernel>/lib/guest-env.sh` (`:1522-1535`).
+- **On Windows today:** that `sandbox` key makes Claude Code refuse to start ("feature gate off", F8). So the Windows box has to
+  be kith's own, unless Claude Code's sandbox opens (W21 candidate B).
+
+- [ ] **W20. Guest box probe.** Owner: windows-owner-build. Status: proposed (architect 2026-11-25), in progress. S-M. Depends: W0, W1 (both done).
+  - Files:
+    - `.github/workflows/windows-probe.yml` (a `guest` job)
+    - `serve/host/tests/support/winprobe/` (a test-only `boxprobe.exe`: an AppContainer profile, capability SIDs and a job, with
+      one `CreateProcess` carrying SECURITY_CAPABILITIES and JOB_LIST)
+    - `docs/windows-facts.md` (F11 onward)
+  - **It runs as a standard user created on the runner.** `runneradmin` is an Administrator, and Kai's target is not.
+  - It records these premises:
+    - **P-G1.** Does the Bash tool honour `CLAUDE_CODE_GIT_BASH_PATH` pointing at a non-Git exe? With which arguments? Do hooks go
+      through the same path, and does Claude Code check the file name?
+    - **P-G2.** Do Git Bash (MSYS2), git, node and python run in an AppContainer that has no capabilities except custom read and
+      write capability SIDs?
+    - **P-G3.** Does nothing in the box start a process outside its job? Try `cmd /c start`, `Start-Process`, WMI
+      `Win32_Process.Create`, `schtasks`, COM/ShellExecute and a service.
+    - **P-G4.** The box must be unable to:
+      - open the engine or host process (VM_READ, DUP_HANDLE)
+      - read Credential Manager (CredReadW of kith's master key, `cmdkey /list`)
+      - read the owner's HKCU keys
+    - **P-G5.** Can the box create `\\.\pipe\kith-host-<hash>` or `kith-run-<hash>` in the global namespace? What owner SID does
+      such a pipe get?
+    - **P-G6.** Can a box client connect to a pipe that has a Low label and a capability ACE, and read the pipe's owner SID from
+      its handle?
+    - **P-G7.** Does loopback work inside one AppContainer (listener and client both boxed) without admin? Does outbound traffic
+      fail without `internetClient`?
+    - **P-G8.** Does a deny ACE for a capability SID beat an inherited allow for the same SID? How long does inheritance take to
+      propagate on a 100k-file checkout?
+    - **P-G9.** Which Claude Code permission-rule path forms match the file tools on Windows (`Read(//c/…)`, `C:\`, `C:/`)?
+    - **P-G10.** Does TerminateJobObject on the run's job end the processes in a nested box job? How long until ActiveProcesses
+      reaches 0?
+    - **P-G11.** Does chrome-headless-shell plus ffmpeg render in a box (Chrome's own sandbox nested, or `--no-sandbox`; GPU)?
+      Does a socket passed in with WSADuplicateSocket work?
+    - **P-G12.** Can Claude Code's own Windows sandbox be switched on (F8)? If so, which `sandbox` keys does it honour?
+  - **Start now.**
+- [ ] **W21. Guest box design.** Owner: architect. **REDESIGN.** M. Depends: W20. Status: proposed (architect 2026-11-25).
+  - **Candidates.**
+    - **A (recommended): kith boxes the Bash tool's shell.** `CLAUDE_CODE_GIT_BASH_PATH` points at `kith-boxsh.exe`. If P-G1 says
+      no, a PreToolUse rewrite wraps each command instead.
+    - **B: Claude Code's own Windows sandbox,** once P-G12 shows it can be switched on and honours the same keys. This is the
+      "subtract" path: if it comes, A goes.
+    - **Rejected: boxing the whole engine.** The engine holds the owner's Claude login and talks to the model. On the Mac only Bash
+      is boxed, so a whole-engine box would either hand the login to guest commands or hand them the engine's network
+      (inference).
+  - **Rules fixed now** (W21 confirms them against W20):
+    1. **Capability SIDs, fixed at start.**
+       - Each granted read folder, write folder and pipe has a capability SID (`kith.r.<hash>`, `kith.w.<hash>`, `kith.pipe`).
+       - The host adds one inheritable ACE for that SID the first time the folder is granted. It is idempotent and applies to
+         owner-owned folders only.
+       - A run's token carries exactly the capabilities its launch computed. No ACE is edited per run.
+       - Revoke and undo touch no ACE: ACEs behave like rows (revoke-access R3, R4).
+       - A room turn gets the intersection of its people's capabilities.
+    2. **One AppContainer SID per run** (`kith.run.<run id>`). Boxes that shared one SID could open each other's processes, and
+       tokens live in those processes' environments. Profiles of dead runs are swept when the host starts.
+    3. **Writes go only to leaf folders with no rule-W path below them.** If a write folder's tree holds one, the launch refuses by
+       name.
+    4. **Deny carve-outs.** Every `denyRead`/`denyWrite` path below an allowed tree gets a deny ACE for that capability, re-applied
+       at each start (needs P-G8). A pattern the start can't express refuses the launch by name.
+    5. **Network.**
+       - No `internetClient`.
+       - Pipes are reached through `kith.pipe`.
+       - Guest domains go through W25.
+       - Low integrity, so the owner's medium pipes and processes stay closed.
+    6. **The box sits in the run's job.**
+       - Each box process is created in a job nested in the run's job, in one `CreateProcess` with SECURITY_CAPABILITIES and
+         JOB_LIST.
+       - No breakaway.
+       - Every handle is non-inheritable (W12 rules 2, 3, 8).
+    7. **The H7 allow comes only from a hook that checks its own token** (TokenIsAppContainer, and its container SID equals the
+       run's). If Claude Code stops routing commands through the box, the hook runs unboxed and answers deny: it fails closed.
+       This needs P-G1 (hooks share the bash path). Otherwise the rewrite form makes the allow.
+    8. **No `failIfUnavailable: true` on Windows while F8 holds.** The golden (WI8) records that difference.
+    9. **Workspace variables:** guest-env.sh's list plus `TEMP` and `TMP`, from one Rust table. The Mac file is checked against it,
+       as `kith-guest-sandbox-check:98` does today.
+    10. **`GIT_CONFIG_GLOBAL`:** today `/dev/null` (`settings.rs:1525-1528`). Check what Git for Windows takes (`NUL`).
+  - **Model.** None, as long as rules 1 and 2 hold: nothing mutable is shared on the widening side. **MODEL FIRST** only if W21
+    ends up with per-run ACE edits, or with a broker that creates boxes on request (then start, revoke and broker restart depend
+    on order).
+- [ ] **W22. Access rules, authority and secret grants in the core on Windows (born switched).** Owner: windows-owner-build (W22a in progress). Status: proposed (architect 2026-11-25). M-L, two PRs. Depends: W4, W5a (done). **First in the guest order, and on α's path:** owner secret cards and W2b's host tests need it.
+  - **Why the core refuses `people.*` on Windows.**
+    - The core's `authority`, `asks`, `cutover`, `doors`, `import`, `revoke_order` and the real `packages` are built only under `cfg(unix)` (`core/runtime/src/lib.rs:34-40,50-63,74-75,82-87,93-95`).
+    - So `people.addPerson` falls through to `NotServed("kith-core: people.addPerson is not answered in the core yet")` (`core/runtime/src/call.rs:50-53`). That fails closed.
+    - Reported effect: 5 `api::authority_props` tests and 21 `remote/cloud.rs` tests fail on windows-2025 (W2b #1177, open at cf7d4d39f; counts as reported, not re-run).
+  - **Correction to the premise.** The envelope already has its Windows twin. W4 put the master key in Credential Manager (`keystore.rs:227-276`), and the core's `secrets` module builds on Windows (`lib.rs:119`). What is Unix-only is `kith_kernel::secrets` (`core/kernel/src/lib.rs:35-41`; Windows gets only `pyjson` and the timeout helper, `secrets_win.rs`). That file mixes two things:
+    - **(a) The access rules,** pure JSON logic: `canonical`, `owner`, `is_owner`, `parent_of`, `cut_off`, `held`, `take_once`, `resolve_taking_once` and `now_ms` (`core/kernel/src/secrets.rs:180,447-553,1189-1262`), plus the package facts (`secrets/packages.rs`).
+    - **(b) Files-mode IO:** auth.json under flock with modes, the `getpwuid` home, and running `kith-auth` (`secrets.rs:18-24,186-194,279-352`).
+
+    The core modules use only (a): 29 `canonical`, 15 `parent_of`, 15 `is_owner` and 10 `cut_off` call sites. The owner path needs no DPAPI work.
+  - **W22a: split, no behaviour change.**
+    - Move (a) into a portable module (for example `kith_kernel::access`). `secrets` re-exports it, so the Mac's callers don't change.
+    - (b) stays Unix-only. `secrets_win.rs` gains the re-export only.
+    - Proof: the Mac's kith-auth difftest goldens are unchanged. Rule WI14: the code moves; it is never copied.
+  - **W22b: the core modules on Windows.**
+    - Lift `cfg(unix)` from `authority`, `asks`, `revoke_order`, `doors` (its rows only; a door start stays refused until W27) and the real `packages` (drop `packages_stub.rs`).
+    - `authority`'s lock and mode sites go through fs2/LockFileEx and winsys (WI4).
+    - `import` and `cutover` stay Unix: a Windows install has nothing to import. `kith migrate`, `rollback` and `cutover step` refuse by name there (WI1).
+    - The run gate opens: `call.rs:189-195` no longer refuses off Unix, and `runs.rs:236,256` becomes live code.
+    - `switched()` goes through WI13's one function.
+    - The mint takes WI15's lock.
+    - The kernel's `people` module (`core/kernel/src/lib.rs:22-24`) joins W22a's split if P3-1 calls it in process.
+  - **Acceptance:**
+    - W2b's 26 tests pass on windows-2025 with no Windows skip.
+    - The core's authority tests run in the `windows` job.
+    - On Windows, `people.addPerson` then `people.suspend` ends that person's tokens inside the same call.
+    - `kith migrate` is refused by name on Windows.
+    - On the windows runner, two threads mint the first key against the real Credential Manager, and both end up with the same key.
+  - **Owner secret cards** on Windows need W22 plus P3-2 (the host's card path into the core). The grant written on save still waits on lane B's grants table (`core/runtime/src/cards/secret.rs:28-29`).
+  - **Conflict:** P3-4 deletes kith-auth's Files mode. W22a should land first, so that P3-4 deletes only half (b).
+  - **Review:** the architect reviews the split boundary and the WI13 function before merge.
+  - **Start now.**
+- [ ] **W23. Run pipes open to guests, with server proof.** Owner: unowned. Status: proposed (architect 2026-11-25). M.
+  - Depends: W5b (#1189), W5c, W21 rule 5, W22. **WAITS P3-8 and P3-9** for the `kith recall` and `kith memory search` clients.
+  - Files:
+    - `serve/host/src/runauth.rs`: remove #1189's `!cfg!(windows)` guard in `handle_request`. The guest pipe gets a Low label and
+      a `kith.pipe` ACE (#1189's pipe is "SY + our SID, ML NRNW").
+    - `core/runtime/src/runsock.rs:33-41` and the `kith_holder::platform` listen: the run pipe gets the same ACL. The owner pipe is
+      unchanged.
+    - `core/winsys/src/pipe.rs`: a box client. It checks that the pipe's owner SID equals its own token's user SID (an
+      AppContainer token keeps the user SID), then runs the hello. #1189's `verify_server` needs `OpenProcess`, which a box can't
+      do (P-G4).
+    - `core/kernel/src/project/guest.rs:49-114` (the Windows client)
+    - the run-tokens skill text
+  - **WI11, the hello (Windows only):**
+    1. The client sends `{"hello": nonce, "run": run_id}`.
+    2. The server answers `HMAC(H(token), nonce)`.
+    3. The client sends its token only if that proof checks.
+
+    This is the holder's mutual-proof pattern (`core/holder/src/client.rs`). It is kept whatever P-G5 says, because pipe names
+    are one namespace for the whole machine. Unix sockets sit in 0700 folders a box can't write, so the Mac needs no change.
+    The server still checks the client with `descends` (`kith_winsys::tree`) and the start time.
+  - `KITH_RUN_SOCKET` and `KITH_CORE_RUN_SOCKET` carry the pipe names (`runauth.rs:68`, `launch/json.rs:56`).
+  - **Review:** architect, interrogate pass on the handshake. No TLA+.
+- [ ] **W24. The guest box.** Owner: unowned. Status: proposed (architect 2026-11-25). L, in two PRs.
+  - **WAITS:** W8, W9, W12, P3-1. **Depends:** W21, W22, W23.
+  - **W24a: the winsys box API and `kith-boxsh.exe`.**
+    - The API: profile create and delete with the sweep; capability SIDs; ensure an ACE and a deny ACE; create in the job in one
+      call; a `kith kernel whoami --box` self-check.
+    - `kith-boxsh.exe` joins the W7 zip and `stage-kernel.sh`.
+    - The holder still links no kith crate.
+  - **W24b: the launch's guest branch on Windows.**
+    - `settings.rs` `guest_sandbox` (`:1246-1536`) writes the Windows box spec in place of the `sandbox` key, plus the WI8 golden.
+    - H7 becomes the self-check (rule 7). H8 takes the WI3 form, with Windows paths (`C:\`, `C:/` and `/c/` mapped as W10's judge does).
+    - It sets `CLAUDE_CODE_GIT_BASH_PATH` and the workspace variable table.
+    - It carries W26's `apply` and `scrub`, and W28's coverage rows.
+  - Keeps WI6, WI8, WI9, WI10, WI12.
+  - **Review:** architect reviews W24a's API before W24b builds on it, and W24b before merge.
+- [ ] **W25. Guest network on Windows.** Owner: unowned. Status: proposed (architect 2026-11-25). M. Depends: W24, Q6.
+  - A host CONNECT proxy reached over the hello'd pipe. If P-G7 holds, an in-box relay on loopback provides `HTTPS_PROXY`.
+  - It admits only the run's `allowedDomains` (fixed at start, plus `consumeAccess` domains), keyed by the run's token. The proxy
+    resolves DNS, not the box.
+  - If P-G7 fails and Q6 is "no admin": a guest's domains are refused by name on Windows, and that is recorded as a divergence.
+- [ ] **W26. Permit's guest branch on Windows.** Owner: unowned. Status: proposed (architect 2026-11-25). M.
+  - Each part goes when its dependency lands:
+    - **`apply`** (`permit/apply.rs`): grants become capability SIDs plus Read and Edit rules. Goes in W24b.
+    - **`scrub`** (`permit/scrub.rs`): plus WI12 (PATH, PATHEXT, working folder, `SetDefaultDllDirectories`). Goes in W24b.
+    - **`ask_helper`** (`permit/helper.rs`): runs `kith ask`, so it **WAITS P2-3**. Its in-sync wait is unchanged (revoke-access HelperGate).
+    - **`door`:** W27.
+    - **`bug`:** P4-17.
+  - Each refusal in #1189's `refused.rs` stays until its own part lands.
+  - **H10 (the helper MCP and the plugin hooks guests also load) WAITS P4-23.**
+- [ ] **W27. Doors on Windows.** Owner: unowned. Status: proposed (architect 2026-11-25). L. **WAITS** the P3-12 design and Q7. **MODEL FIRST.**
+  - **The model:** P3-12's TLC model gains a Windows variant.
+    - Start: a core claim row, then a job named by the claim, then the door box created in it in one call.
+    - Sweep: TerminateJobObject by name.
+    - A door counts as "reaped" only when ActiveProcesses reaches 0, and only the starter, or a sweeper once the starter is gone, may confirm it (rule of 2026-11-19).
+    - A host restart drops the waits.
+  - **Files:**
+    - P3-12's Rust door (`permit/door.rs`, the successor of `kith_door.py`)
+    - `serve/host/src/doors.rs` (today it runs `kith-door` by path; its header calls the sweep's kill "Python's")
+    - the winsys box
+  - **What changes from the Mac door** (`kith_door.py`):
+    - **Process identity:** the job replaces `sandbox_check`, the environment scan and the descendant walk (`kith_door.py:29-33`). This needs P-G3.
+    - **Network:** the Mac passes pre-bound 127.0.0.1 sockets into the box (`kith_door.py:11-16`). On Windows they go in with WSADuplicateSocket and need intra-box loopback (P-G7). Without both, the door refuses by name.
+    - **Rendering** needs P-G11.
+    - **`kith door prepare`** gets an owner box with outbound 443 only.
+- [ ] **W28. Revoke reaches a Windows guest run.** Owner: unowned. Status: proposed (architect 2026-11-25). S, plus W18 (k). Depends: W22, W24.
+  - **No Windows variant of `RevokeDoors.tla`.** Its steps are logic: MayP, MayB, HelperGate and its in-sync wait, the Deliver re-checks. Only one step is OS work: Stop's kill.
+  - **On Windows, Stop is TerminateJobObject on the run's job.** That is one complete step only under W12 rules 1-3, 8 and 9 (already checked in WinClaims) and WI10 (P-G3, P-G10).
+  - **The in-sync wait guards a helper's start and has no OS part,** so it does not interact with the kill.
+  - **Rules:**
+    - A revoke kills at once. D6's cancel-and-grace is for the owner's Stop only.
+    - A run counts as "stopped" when the job's ActiveProcesses reaches 0 (or JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO arrives), never when TerminateJobObject returns, since termination is asynchronous. Until then the claim stays `ending` (R3a).
+  - **Files:**
+    - the revoke-access coverage record gains Windows rows: `cut_off`, then `stop_runs`, then W12's job stop; doors via W27
+    - the run-tokens skill (pipe, hello)
+    - holder-lease's drift list (whether to re-run it is coder's call)
+  - **If P-G3 fails** (a box can start a process outside its job): **REDESIGN plus a model.** The box then needs a sweep like the Mac door's, and Stop is no longer one step.
+
+**Marks and order for the guest path (δ).** See section 6.
+
+### Gaps found 2026-11-25 (owned)
+
+Files the Windows zip leaves out. They are listed in the windows comment of `scripts/stage-kernel.sh` (#1183). Each has an owner now.
+
+- `kith-shim.exe` -> **W16** (W16 adds the crate that builds it; W16 names it already, but no crate built it).
+- `requires-switched.txt` -> **W14** (the installer's gate). With WI13, every module is born switched on Windows, so the file's role there is checked by W22b's one `switched()` function. W14 decides whether the zip still needs the file.
+- `kith-env.sh` -> **W8** (the launch's env on Windows comes from Rust, no `.sh`).
+- `guest-env.sh` -> **W24b** (no Windows file; one Rust table, rule 9 of W21). The Mac file is checked against that table.
+
+### Marks
+- **MODEL FIRST (done):** W12 (claims, held terminals and host turns with the Job Object as S4's group, `model-w12/`) and W15
+  (update versus runs versus prune versus supervisor, `model-w15/`).
+- **MODEL FIRST (guest path, proposed 2026-11-25):** W27 (inside P3-12's model). Conditionally W24 (if W21 departs from rules 1
+  and 2) and W28 (if P-G3 fails). Not modelled: W22, W23, W25, W26.
+- **Model status (2026-11-24): both passed.** W12: design 3,102,425 states pass, liveness pass, ten broken rules fail, and
+  the model added rule 2 (create the launcher in the job in one call). W15: design pass at K=1 and K=0 under both rename
+  premises, liveness pass, and the model added rules 2-5. Both are ready for workers once their WAITS and depends are met.
+  Neither may merge before W1 has answered its premises (P-W12a, P-W12b; P-W15).
+- **REDESIGN:** W21 (the guest box, proposed 2026-11-25). Of the owner milestone, none (the PowerShell judge was dropped, Q5 answered 2026-11-25). Already REDESIGN in retire-python and
+  inherited here: P1-12, P1-15, P1-16, P2-1 to P2-4, P3-5, P3-10, P4-15, P5-1.
+- **WAITS:**
+  - W8 waits P1-12 R0, R1 and P1-15 M1.
+  - W9's Mac flip waits P1-12 R5.
+  - W12 waits P1-19 and P1-12 R5.
+  - Scheduled turns wait P2-4; wake waits P2-2; ask waits P2-3.
+  - The W11 backup timer waits P4-14.
+  - W15 waits P4-15's design.
+  - Guest path: W23 on P3-8 and P3-9; W24 on W8, W9, W12 and P3-1; W26's helper on P2-3; W26's H10 on P4-23; W27 on P3-12 and Q7.
+- **Windows premises the existing models need** (no new TLA+):
+  - **revoke-access:** no Windows variant. Under WI13, a Windows Mac is the model's switched configuration with no `SwitchLag`
+    and no rollback window. That is a subset of rows that already pass (sync f9b5e509f). Coder adds a coverage line saying so,
+    plus W28's Stop line. If WI13 is not kept, that is a different configuration, and those rows no longer cover Windows.
+  - **secret-cards:** no new model. The key store is outside it by its own words (SKILL.md:144-146: "the model cannot see the
+    key store's own state"). Add a premise line: "the key store's add is create-if-absent". It holds on the Keychain, on Windows
+    only with WI15's lock, and is open on Linux (`secrets/mod.rs:407-410`). A test checks it, not TLA+: the lock makes the mint
+    one step.
+
+## 6. Order
+
+```mermaid
+flowchart TD
+  W0[W0 fake model] --> W1[W1 probe]
+  W2a[W2a host compiles] --> W2b[W2b host tests]
+  W3[W3 paths] --> W5a[W5a kernel modules]
+  W4[W4 winsys]
+  W2a --> W5b[W5b permit pipe]
+  W5a --> W5b
+  W1 --> W6[W6 engines, accounts]
+  W2a --> W7[W7 release zip]
+  W2a --> W17[W17 router refusals]
+  P112a[P1-12 R0 R1, P1-15 M1] --> W8[W8 launch in Rust on Windows]
+  W1 --> W9[W9 hook form]
+  W8 --> W9
+  W1 --> W10[W10 guard, cards]
+  W5b --> W10
+  W2a --> W11[W11 serve verbs, timers]
+  P119[P1-19, P1-12 R5] --> W12[W12 claims, held, host turns, model passed]
+  W2b --> W12
+  W8 --> W12
+  W5a --> W13[W13 cost, transcripts]
+  W7 --> W14[W14 install.ps1]
+  W14 --> W15[W15 update, model passed]
+  W14 --> W16[W16 app as host]
+  W11 --> W16
+  W0 --> W18[W18 e2e, grows]
+  W2a --> W18
+  P2[P2-2 P2-3 P2-4] --> W12
+  W22a[W22a access split] --> W22b[W22b core on Windows]
+  W4 --> W22a
+  W22b --> W23[W23 run pipes]
+  W5b --> W23
+  W5c[W5c pipe clients] --> W23
+  W20[W20 box probe] --> W21[W21 box design]
+  W21 --> W23
+  W21 --> W24a[W24a winsys box API]
+  W23 --> W24a
+  W24a --> W24b[W24b guest branch]
+  W24b --> W25[W25 guest network]
+  W24b --> W26[W26 permit guest branch]
+  W24b --> W28[W28 revoke reaches guests]
+  P3[P3-12 doors design, Q7] --> W27[W27 doors on Windows]
+  W22b --> W24b
+```
+
+**Ordered package list:** W0, W1, W2a, W3, W4, W5a, W6, W17, W2b, W5b, W7, W18 (skeleton), W13, W11, W14, W10, W8, W9, W12,
+W16, W15, W19 (run).
+**Guest path (δ), in the architect's order (2026-11-25):** W22a, then W22b, in parallel with W20; then W21, W23, W24a, W24b
+(with W26 `apply`/`scrub` and the W28 rows), W25, W26 helper, W27. W18 grows with each.
+
+**Milestones.**
+- **α: an owner runs agents on Windows.** W0 to W14, W16, W17 and W18 (a to e, i, j), plus these retire-python items: P1-12,
+  P1-13, P1-14, P1-15 M1, P1-16 H1/H2, P1-19, P3-1, P3-2, P3-5, P3-6, P3-10, P4-1, P4-8, P4-23. The app's chat, agent page,
+  cards and terminal need all of them. W22 joins α (with P3-2, for owner secret cards); W2b's 26 tests wait on it.
+- **β: schedules, wake and ask.** P2-1 to P2-6, W12's schedule path, W11's daemon timers, W18 (f, g).
+- **γ: operator tools and update parity.** The rest of P3 and P4 that the owner uses, W15, W18 (h), W19.
+- **δ: guests on Windows** (proposed 2026-11-25, architect). W20-W28, plus α, P2-3, P3-8, P3-9, P3-12 and P4-23. Kai's word:
+  "no windows should work finely like mac" (Q1).
+
+**Can start now, in parallel with P1:** W0, W1, W2a, W3, W4, W5a, W6, W19 (the doc). Right after W2a: W2b, W5b, W7, W17 and the
+W18 skeleton. None of them touches the bash launch or the Python, and none waits on a P item. The only overlap is cfg lines in
+serve/host (W2a) and the `kith-kernel` module list (W5a); retire-python managers should rebase over them, not rework them.
+
+## 7. Kai's answers (2026-11-25)
+- **Q1. Invited people and bot guests on a Windows host.** Kai: "no windows should work finely like mac". They work on a Windows
+  host as on a Mac. This reverses the old default (refusal, WI6). The work is W20-W28, and W18 (j) becomes a guest run.
+- **Q2. Signing.** Kai: "yeah but let sign it asap", and for the service "go fro your recommendation". Azure Trusted Signing (now
+  Azure Artifact Signing) signs in `release.yml` and skips cleanly without secrets: W7s, PR #1191. Kai's Azure setup steps are
+  in `docs/windows-signing.md`; from Australia that means organisation validation, 1-30 business days. W16 signs the installer
+  later with the same account.
+- **Q3. Hand checks.** Kai: "can you make it happen on gh?". They become a scripted GitHub Actions e2e (W18) on free
+  `windows-2025` runners. Only what truly needs a person stays in W19.
+- **Q4. CI runner.** Kai: "ok". `windows-2025`, plus `windows-2022` in the nightly.
+- **Q5. PowerShell tool.** Kai: "not sure about this but as long as it works, fine". The tool stays denied in owner runs (D7,
+  W10), the PowerShell judge REDESIGN stays dropped, and W18 checks that an agent works fully with Bash only. If W1 finds no
+  PowerShell tool, the deny rule is harmless and stays, so a later Claude Code release that adds one is closed from the start.
+- **Q6 (new). A guest box that can't reach a local proxy without admin (P-G7 fails).** One UAC prompt the first time the owner
+  allows guests on this PC, for a loopback exemption. Answered 2026-11-25 by standing answer (conservative default); Kai may
+  overturn.
+- **Q7 (new). The P3-12 doors.** Keep them and port them to Windows (W27). Answered 2026-11-25 by standing answer likewise; Kai
+  may overturn.
+- **Testing.** Kai: "CI is enough, reduce local runners and tests as much as posible". Windows is checked in CI only.

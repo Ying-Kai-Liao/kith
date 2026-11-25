@@ -250,7 +250,22 @@ impl Acp {
         cwd: &str,
         env: &[(String, String)],
     ) -> Result<(Arc<Self>, mpsc::UnboundedReceiver<Incoming>)> {
-        Self::start(shell_command(command), command, cwd, env)
+        Self::spawn_without(command, cwd, env, &[])
+    }
+
+    /// [`Self::spawn`] with these variables of this process left out of the agent's environment (`env` is applied after,
+    /// so it can put one back).
+    pub fn spawn_without(
+        command: &str,
+        cwd: &str,
+        env: &[(String, String)],
+        remove: &[String],
+    ) -> Result<(Arc<Self>, mpsc::UnboundedReceiver<Incoming>)> {
+        let mut process = shell_command(command);
+        for name in remove {
+            process.env_remove(name);
+        }
+        Self::start(process, command, cwd, env)
     }
 
     /// [`Self::spawn`] for a command the caller built (the resident stub's, `resident::spawn_resident`). `what` names it in errors.

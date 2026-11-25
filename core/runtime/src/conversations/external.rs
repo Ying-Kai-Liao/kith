@@ -160,6 +160,7 @@ pub(crate) fn call_at(
         "claim.attach" => super::sched_run::attach(
             core,
             int(p, "claimId")?,
+            p.get("conversation").and_then(Value::as_str),
             pid_of(p)?,
             need(p, "started")?,
             now,

@@ -1,0 +1,7 @@
+{
+  "turns": [
+    {"text": "Running it in Bash.", "tool_use": [{"name": "Bash", "input": {"command": "echo e2e-bash-ok; echo \"shell=$BASH_VERSION\"", "description": "e2e bash turn"}}]},
+    {"match": "e2e-bash-ok", "text": "E2E-REPLY: the Bash tool ran."}
+  ],
+  "fallback": "E2E-FALLBACK: the Bash result never arrived."
+}

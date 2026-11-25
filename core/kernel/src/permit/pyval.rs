@@ -166,6 +166,7 @@ pub fn int(s: &str) -> Option<i64> {
 }
 
 /// The text of an `OSError` as Python prints it: `[Errno 2] No such file or directory: 'path'`.
+#[cfg(unix)]
 pub fn os_error(e: &std::io::Error, path: &str) -> String {
     let text = e.to_string();
     let text = text.split(" (os error").next().unwrap_or(&text);

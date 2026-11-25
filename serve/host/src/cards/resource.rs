@@ -504,6 +504,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_dotdot_after_a_link_is_applied_to_where_the_link_led() {
         // /tmp/l -> <state>/serve : /tmp/l/../secrets/env is <state>/secrets/env, not /tmp/secrets/env.
@@ -553,6 +554,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_card_names_the_resolved_real_path() {
         let dir = std::env::temp_dir().join(format!("kc-{}", uuid::Uuid::new_v4().simple()));

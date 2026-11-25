@@ -6,10 +6,60 @@
 //! process: the queue's files and lock are the kernel's, so the kernel's tick and the host never disagree about them.
 //!
 //! The calls block (a process each); async callers go through [`blocking`].
+//!
+//! Once the `wake` module is switched (its switch record, or the queue's tombstone, is there) the queue is rows of the core and
+//! every call here is a `wake.*` row over the core link ([`via_core`]): no process starts and the folder is not read. A
+//! switched module whose core does not answer fails closed: the call fails (or reads nothing), it never reaches the files.
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+#[cfg(test)]
+mod tests;
+mod via_core;
+
+/// How the calls for `state` go: `Ok(None)` the kernel's files (not switched), `Ok(Some)` the core at those folders, `Err`
+/// the module is switched and the core cannot be named (a state folder that is not this host's), or its switch record
+/// cannot be read: nothing is asked of the files.
+fn via(state: &Path) -> Result<Option<kith_kernel::paths::Paths>, String> {
+    let tombstone = state.join("sessions/queue/.tombstone").exists();
+    let Some(f) = crate::terminal::core_holders::folders_of(state) else {
+        return if tombstone {
+            Err(format!("the wake queue at {} is the core's, and no core is known for it", state.display()))
+        } else {
+            Ok(None)
+        };
+    };
+    if tombstone || switched(&f)? { Ok(Some(f)) } else { Ok(None) }
+}
+
+/// Whether the `wake` switch record says the core is the store. As the core reads it (`cutover/state.rs`): `stepping` is
+/// the import still running with Python the writer, so the files; `switched`, `rolling-back` and a record with no
+/// `state=` line are the core's. A record that cannot be read is not "unswitched".
+fn switched(f: &kith_kernel::paths::Paths) -> Result<bool, String> {
+    let record = f.machine.join("core/cutover/wake.switch");
+    match std::fs::read_to_string(&record) {
+        // Exactly the core's reader: each line split at its first `=`, no trimming, the last recognised `state` wins.
+        Ok(text) => {
+            let mut phase =
+                text.lines().filter_map(|l| l.split_once('=')).filter(|(k, _)| *k == "state").map(|(_, v)| v);
+            Ok(phase.rfind(|v| matches!(*v, "stepping" | "switched" | "rolling-back")) != Some("stepping"))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("the wake switch record {} cannot be read: {e}", record.display())),
+    }
+}
+
+/// Process starts of `kith-wake` per state folder, so a test can prove that a switched module starts none.
+#[cfg(test)]
+pub(crate) fn spawns(state: &Path) -> usize {
+    SPAWNS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(state).copied().unwrap_or_default()
+}
+
+#[cfg(test)]
+static SPAWNS: std::sync::Mutex<std::collections::BTreeMap<PathBuf, usize>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
 
 /// A host-door turn `kith-wake take` handed over: what to start, as which person, and which requests it carries.
 #[derive(Debug, Clone, Deserialize)]
@@ -85,7 +135,16 @@ fn run(state: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
         SAID.call_once(|| tracing::error!("kith-wake not found: card answers and wakes can't reach their sessions"));
         anyhow::bail!("no kith-wake found");
     };
+    #[cfg(test)]
+    {
+        *SPAWNS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(state.to_path_buf()).or_default() += 1;
+    }
     Ok(cmd.args(args).output()?)
+}
+
+/// A call that is refused because the switched queue cannot be reached: logged, and the caller's failure value.
+fn closed(why: &str, what: &str) {
+    tracing::warn!(what, why, "wake: the switched queue is not reachable; nothing is done");
 }
 
 fn said(out: &std::process::Output) -> String {
@@ -96,6 +155,11 @@ fn said(out: &std::process::Output) -> String {
 
 /// One more wake owed to `r.session`; merges with what the session is already owed.
 pub fn enqueue(state: &Path, r: &Request<'_>) -> anyhow::Result<Queued> {
+    match via(state) {
+        Ok(Some(f)) => return via_core::enqueue(&f, r),
+        Err(why) => anyhow::bail!(why),
+        Ok(None) => {}
+    }
     let mut args = vec!["enqueue", r.session, "--id", r.id, "--agent", r.agent, "--door"];
     args.push(if r.host_door { "host" } else { "run" });
     for (flag, v) in [("--person", r.person), ("--room", r.room), ("--why", Some(r.why).filter(|w| !w.is_empty()))] {
@@ -112,14 +176,37 @@ pub fn enqueue(state: &Path, r: &Request<'_>) -> anyhow::Result<Queued> {
 /// Where request `id` is: queued, running, how it was answered (answered, recovered, failed, withdrawn) or unknown.
 /// None: the call itself failed, which says nothing about the request.
 pub fn status(state: &Path, id: &str) -> Option<String> {
+    match via(state) {
+        Ok(Some(f)) => return via_core::status(&f, id),
+        Err(why) => {
+            closed(&why, "status");
+            return None;
+        }
+        Ok(None) => {}
+    }
     let out = run(state, &["status", id]).ok().filter(|o| o.status.success())?;
     let text = String::from_utf8_lossy(&out.stdout);
     Some(text.split_whitespace().next()?.trim_end_matches(',').to_owned())
 }
 
 /// Where every request the queue knows is: queued, running, or how it was answered. Read from the queue's files, so
-/// many cards cost no process; a request the queue has forgotten (its memory is a week) is missing.
-pub fn statuses(state: &Path) -> std::collections::HashMap<String, String> {
+/// many cards cost no process; a request the queue has forgotten (its memory is a week) is missing. None: the switched
+/// queue could not be read, so a missing request is not known to be forgotten.
+pub fn statuses(state: &Path) -> Option<std::collections::HashMap<String, String>> {
+    statuses_for(state, &[])
+}
+
+/// [`statuses`], and each of `ids` the queue does not hold as queued or running is asked for by itself: the core's list has no
+/// answered ids, the files' `answered.json` is read whole anyway.
+pub fn statuses_for(state: &Path, ids: &[String]) -> Option<std::collections::HashMap<String, String>> {
+    match via(state) {
+        Ok(Some(f)) => return via_core::statuses(&f, ids),
+        Err(why) => {
+            closed(&why, "statuses");
+            return None;
+        }
+        Ok(None) => {}
+    }
     let dir = state.join("sessions/queue");
     let mut out = std::collections::HashMap::new();
     let read = |p: &Path| std::fs::read(p).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
@@ -141,11 +228,19 @@ pub fn statuses(state: &Path) -> std::collections::HashMap<String, String> {
             }
         }
     }
-    out
+    Some(out)
 }
 
 /// Whether the queue holds anything at all: a look at its folder, so an idle host starts no process.
 pub fn has_items(state: &Path) -> bool {
+    match via(state) {
+        Ok(Some(f)) => return via_core::has_items(&f),
+        Err(why) => {
+            closed(&why, "has_items");
+            return false;
+        }
+        Ok(None) => {}
+    }
     std::fs::read_dir(state.join("sessions/queue")).is_ok_and(|dir| {
         dir.flatten().any(|e| {
             let name = e.file_name();
@@ -157,6 +252,11 @@ pub fn has_items(state: &Path) -> bool {
 
 /// Starts the next owed host-door turn, held by this process. None: nothing is owed (or nothing is due yet).
 pub fn take(state: &Path) -> anyhow::Result<Option<Turn>> {
+    match via(state) {
+        Ok(Some(f)) => return via_core::take(&f, None),
+        Err(why) => anyhow::bail!(why),
+        Ok(None) => {}
+    }
     let out = run(state, &["take", "--holder", &std::process::id().to_string()])?;
     match out.status.code() {
         Some(0) => Ok(Some(serde_json::from_slice(&out.stdout)?)),
@@ -167,11 +267,21 @@ pub fn take(state: &Path) -> anyhow::Result<Option<Turn>> {
 
 /// The turn `run` started: what it carried is answered. `how`: "withdrawn" for a turn dropped without delivering.
 pub fn done(state: &Path, run_id: &str, how: &str) {
+    match via(state) {
+        Ok(Some(f)) => return via_core::done(&f, run_id, how),
+        Err(why) => return closed(&why, "done"),
+        Ok(None) => {}
+    }
     log_failure("done", run(state, &["done", run_id, "--how", how]));
 }
 
 /// The turn `run` did not start: what it carried is owed again. `held`: a writer had the session (not a failed try).
 pub fn back(state: &Path, run_id: &str, held: bool) {
+    match via(state) {
+        Ok(Some(f)) => return via_core::back(&f, run_id, held),
+        Err(why) => return closed(&why, "back"),
+        Ok(None) => {}
+    }
     let mut args = vec!["back", run_id];
     if held {
         args.push("--held");
@@ -181,6 +291,11 @@ pub fn back(state: &Path, run_id: &str, held: bool) {
 
 /// Stop: `session`'s requests that no running turn carries are dropped, their ids kept. `id`: only that request.
 pub fn withdraw(state: &Path, session: &str, id: Option<&str>) {
+    match via(state) {
+        Ok(Some(f)) => return via_core::withdraw(&f, session, id),
+        Err(why) => return closed(&why, "withdraw"),
+        Ok(None) => {}
+    }
     let mut args = vec!["withdraw", session];
     if let Some(id) = id {
         args.extend(["--id", id]);
@@ -192,6 +307,11 @@ pub fn withdraw(state: &Path, session: &str, id: Option<&str>) {
 pub fn withdraw_person(state: &Path, persons: &[String]) {
     if persons.is_empty() {
         return;
+    }
+    match via(state) {
+        Ok(Some(f)) => return via_core::withdraw_person(&f, persons),
+        Err(why) => return closed(&why, "withdraw_person"),
+        Ok(None) => {}
     }
     let mut args = vec!["withdraw-person"];
     args.extend(persons.iter().map(String::as_str));
@@ -225,6 +345,11 @@ pub fn spawn(f: impl FnOnce() + Send + 'static) {
 /// What the queue holds, as `kith-wake ls --json` says it.
 #[cfg(test)]
 pub fn ls(state: &Path) -> Vec<serde_json::Value> {
+    match via(state) {
+        Ok(Some(f)) => return via_core::ls(&f).unwrap_or_default(),
+        Err(_) => return Vec::new(),
+        Ok(None) => {}
+    }
     let out = run(state, &["ls", "--json"]).expect("kith-wake ls");
     serde_json::from_slice(&out.stdout).unwrap_or_default()
 }
@@ -232,6 +357,11 @@ pub fn ls(state: &Path) -> Vec<serde_json::Value> {
 /// Takes the item of one session, as a door that waits for that thread would.
 #[cfg(test)]
 pub fn take_session(state: &Path, session: &str) -> anyhow::Result<Option<Turn>> {
+    match via(state) {
+        Ok(Some(f)) => return via_core::take(&f, Some(session)),
+        Err(why) => anyhow::bail!(why),
+        Ok(None) => {}
+    }
     let out = run(state, &["take", "--holder", &std::process::id().to_string(), "--session", session])?;
     Ok(if out.status.success() { Some(serde_json::from_slice(&out.stdout)?) } else { None })
 }
@@ -239,5 +369,10 @@ pub fn take_session(state: &Path, session: &str) -> anyhow::Result<Option<Turn>>
 /// The kernel's tick: turns whose holder died are recovered.
 #[cfg(test)]
 pub fn recover(state: &Path) {
+    match via(state) {
+        Ok(Some(f)) => return via_core::recover(&f),
+        Err(_) => return,
+        Ok(None) => {}
+    }
     let _ = run(state, &["drain"]);
 }
