@@ -28,6 +28,19 @@ impl Core {
         Self { home, folders, daemon: Some(daemon) }
     }
 
+    /// Marks the core's generation reconciled, as the holder's first hello does in a live host: the claims wait for it, and
+    /// this core runs with no holder, so without it every claim is answered `waiting` (a turn for later).
+    fn reconciled(&self) {
+        let db = self.folders.machine.join("core/core.db");
+        let conn = rusqlite::Connection::open(db).expect("core.db");
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) SELECT 'claims_reconciled_generation', CAST(value AS TEXT) \
+             FROM counters WHERE name = 'generation'",
+            [],
+        )
+        .expect("the reconcile mark");
+    }
+
     fn state(&self) -> &Path {
         &self.folders.state
     }
@@ -224,6 +237,7 @@ fn the_clock_the_pull_and_the_claim_of_a_wake_turn_run_through_the_cores_rows() 
     );
     // The claim: widened to a wake's turn, on the session the wake resumes.
     let (person, id) = (t["person"].as_str().unwrap(), t["turn"].as_i64().unwrap());
+    core.reconciled();
     let claimed = writer.claim_run_as("wakeRun", "sess-run-1", person, id);
     assert!(matches!(claimed, RunClaim::Claimed(_)), "{claimed:?}");
     assert_eq!(spawns(st), 0, "no kith-wake was started");
