@@ -295,9 +295,20 @@ pub fn exec_kernel(args: &[OsString]) -> anyhow::Error {
     anyhow::Error::new(cmd.exec()).context(format!("running {}", entry.display()))
 }
 
+/// Windows has no kernel entry to hand a verb to: the table in `kernel_windows` runs the ported verbs here and refuses
+/// the rest by name. Only returns on failure.
 #[cfg(not(unix))]
-pub fn exec_kernel(_args: &[OsString]) -> anyhow::Error {
-    anyhow::anyhow!("kith: the kernel's commands run on macOS and Linux only")
+pub fn exec_kernel(args: &[OsString]) -> anyhow::Error {
+    use crate::kernel_windows::{Answer, answer};
+    match answer(args) {
+        Answer::Refuse(why) => anyhow::anyhow!("kith: {why}"),
+        Answer::Run(own) => {
+            match std::env::current_exe().and_then(|e| std::process::Command::new(e).args(own).status()) {
+                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+                Err(e) => anyhow::Error::new(e).context("running the verb"),
+            }
+        }
+    }
 }
 
 #[cfg(test)]

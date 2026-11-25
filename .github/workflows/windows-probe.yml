@@ -45,3 +45,46 @@ jobs:
           name: windows-probe-output
           path: probe-out
           if-no-files-found: warn
+
+  # W20: what a Windows guest sandbox (kith's own AppContainer box) can rest on. Runs the OS probes as a STANDARD local user
+  # (runneradmin is an Administrator; the target machine's user is not), then the Claude Code probes. Evidence only: the
+  # write-up is docs/windows-facts.md F11 onward.
+  guest:
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        shell: bash
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: winprobe-guest
+      - name: Build kith-fakemodel and boxprobe
+        shell: bash
+        working-directory: serve
+        run: cargo build --manifest-path host/Cargo.toml -p kith-fakemodel -p kith-boxprobe --locked
+      - name: Guest box probe (OS premises, as a standard user)
+        shell: pwsh
+        timeout-minutes: 40
+        run: >
+          ./serve/host/tests/support/winprobe/guest.ps1
+          -Boxprobe "$env:GITHUB_WORKSPACE/serve/host/target/debug/boxprobe.exe"
+          -Out "$env:GITHUB_WORKSPACE/guest-out"
+      - name: Guest Claude Code probe (bash path, permission rules, sandbox)
+        if: always()
+        shell: pwsh
+        timeout-minutes: 25
+        run: >
+          ./serve/host/tests/support/winprobe/guest-claude.ps1
+          -Fakemodel "$env:GITHUB_WORKSPACE/serve/host/target/debug/kith-fakemodel.exe"
+          -Boxprobe "$env:GITHUB_WORKSPACE/serve/host/target/debug/boxprobe.exe"
+          -Out "$env:GITHUB_WORKSPACE/guest-out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-guest-probe-output
+          path: guest-out
+          if-no-files-found: warn

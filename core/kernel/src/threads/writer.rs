@@ -44,6 +44,14 @@ impl Holder {
 pub const TURN_CLAIM_REFUSED: &str = "the turn claim was refused";
 pub const TURN_CLAIM_EXIT: i32 = 10;
 
+/// Why [`Taker::attach_run`] did not attach: the claim is no longer this run's (cancelled, adopted, attached by another), or the
+/// core could not say.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AttachErr {
+    Gone(String),
+    Down(String),
+}
+
 /// Why a `proc` claim was not made. `Core` is exit 9: the launcher stops a person's run for it.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProcErr {
@@ -160,6 +168,9 @@ impl<'a> Taker<'a> {
                 || turn_claim.is_some()
                 || (self.c.env)("KITH_REQUIRE_STUB").as_deref() == Some("1")
             {
+                if turn_claim.is_some() {
+                    return Err(format!("{TURN_CLAIM_REFUSED}: {why}"));
+                }
                 return Err(why);
             }
             self.say(&format!("kith: {why}; this run is not claimed"));
@@ -302,6 +313,32 @@ impl<'a> Taker<'a> {
         }
     }
 
+    /// `claim.attach` for a run the host claimed without a conversation of its own to name (a schedule's turn, a non-Claude
+    /// one-shot): this process takes the claim before anything starts, as `kith-sched run-turn` did. The same check-and-set.
+    pub fn attach_run(&self, claim: i64, pid: i64) -> Result<(), AttachErr> {
+        let Some(started) = os::proc_start(pid) else {
+            return Err(AttachErr::Down(format!(
+                "cannot read the start time of pid {pid}"
+            )));
+        };
+        let params = json!({"claimId": claim, "pid": pid, "started": started});
+        match self.ask("claim.attach", &params) {
+            Ok(a) if a.get("attached").is_some_and(truthy) => Ok(()),
+            Ok(a) => {
+                let why = a
+                    .get("state")
+                    .or_else(|| a.get("refused"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                Err(AttachErr::Gone(why.to_owned()))
+            }
+            Err(CoreErr::Refused(e)) => Err(AttachErr::Down(format!("the core refused: {e}"))),
+            Err(CoreErr::NoAnswer(why)) => {
+                Err(AttachErr::Down(format!("the core did not answer: {why}")))
+            }
+        }
+    }
+
     /// [`Self::take`], retried for up to `wait` while a live writer holds the session. `None` when taken (also when `pid`
     /// already holds it), else the live claim that still holds it.
     pub fn claim_waiting(
@@ -351,8 +388,7 @@ impl<'a> Taker<'a> {
         };
         if let Some(held) = self.claim_waiting(sid, pid, &how, wait)? {
             return Err(if held.waiting {
-                "that session is busy: the app's idle agent is still stopping; try again in a moment"
-                    .to_owned()
+                "that session is busy: the app's idle agent is still stopping; try again in a moment".to_owned()
             } else {
                 format!(
                     "that session is busy: held by {} (pid {}); try again in a moment",

@@ -1,0 +1,1739 @@
+[
+ {
+  "name": "ask-fg-answer",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "hello there"
+   ],
+   [
+    "echo",
+    "--json",
+    "second one"
+   ],
+   [
+    "echo",
+    "-c",
+    "follow up"
+   ],
+   [
+    "echo",
+    "-m",
+    "opus",
+    "-e",
+    "high",
+    "--",
+    "with options"
+   ],
+   [
+    "echo",
+    "-C",
+    "{HOME}/proj",
+    "elsewhere"
+   ],
+   [
+    "echo",
+    "-c",
+    "-C",
+    "{HOME}/proj",
+    "elsewhere again"
+   ],
+   [
+    "echo",
+    "--as",
+    "work",
+    "a named one"
+   ],
+   [
+    "echo",
+    "-c",
+    "--as",
+    "work",
+    "and again"
+   ],
+   [
+    "echo",
+    "-c",
+    "--as",
+    "nope",
+    "no such conversation"
+   ],
+   [
+    "echo",
+    "-e",
+    "huge",
+    "x"
+   ],
+   [
+    "echo"
+   ],
+   [
+    "ls"
+   ],
+   [
+    "ls",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "ask-fg-error",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "boom"
+   ],
+   [
+    "echo",
+    "errjson"
+   ],
+   [
+    "echo",
+    "--json",
+    "errjson"
+   ]
+  ]
+ },
+ {
+  "name": "ask-capped",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k",
+   "KITH_ASK_CHAIN": "c1",
+   "KITH_ASK_HOP": "1",
+   "KITH_ASK_COST": "9"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "hi"
+   ],
+   [
+    "--bg",
+    "echo",
+    "hi"
+   ],
+   [
+    "--cap",
+    "20"
+   ],
+   [
+    "echo",
+    "hi again"
+   ]
+  ]
+ },
+ {
+  "name": "ask-hop-limit",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k",
+   "KITH_ASK_CHAIN": "c2",
+   "KITH_ASK_HOP": "9",
+   "KITH_ASK_CROSS": "0"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "hi"
+   ],
+   [
+    "--bg",
+    "echo",
+    "hi"
+   ]
+  ]
+ },
+ {
+  "name": "ask-fg-parked",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "park"
+   ],
+   [
+    "echo",
+    "--json",
+    "park"
+   ]
+  ]
+ },
+ {
+  "name": "ask-bg-start",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "--bg",
+    "echo",
+    "hello"
+   ],
+   [
+    "echo",
+    "--bg",
+    "--",
+    "the task"
+   ],
+   [
+    "--bg",
+    "echo"
+   ],
+   [
+    "--bg",
+    "echo",
+    "-e",
+    "huge",
+    "x"
+   ]
+  ]
+ },
+ {
+  "name": "ask-wait-and-answer",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "env:KITH_AGENT=coder",
+    "env:CLAUDE_CODE_SESSION_ID=s-caller",
+    "echo",
+    "park"
+   ],
+   [
+    "--wait",
+    "@ID",
+    "--timeout",
+    "0"
+   ],
+   [
+    "--answer",
+    "@ID",
+    "--progress",
+    "--",
+    "working on it"
+   ],
+   [
+    "--wait",
+    "@ID",
+    "--timeout",
+    "0"
+   ],
+   [
+    "--answer",
+    "@ID",
+    "--",
+    "done: the answer"
+   ],
+   [
+    "--answer",
+    "@ID",
+    "--",
+    "done: the answer"
+   ],
+   [
+    "--answer",
+    "@ID"
+   ],
+   [
+    "--answer",
+    "--",
+    "x"
+   ],
+   [
+    "--wait",
+    "nope",
+    "--timeout",
+    "0"
+   ],
+   [
+    "--wait"
+   ],
+   [
+    "--wait",
+    "bad/id"
+   ]
+  ]
+ },
+ {
+  "name": "ask-to",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "seed-bg",
+    "b1",
+    "echo",
+    "sess-b1",
+    "kai"
+   ],
+   [
+    "--to",
+    "b1",
+    "more please"
+   ],
+   [
+    "--to",
+    "b1",
+    "more please"
+   ],
+   [
+    "--to",
+    "b1",
+    "another"
+   ],
+   [
+    "--to",
+    "nope",
+    "x"
+   ],
+   [
+    "--to",
+    "b1"
+   ]
+  ]
+ },
+ {
+  "name": "ask-end",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "env:KITH_AGENT=coder",
+    "env:CLAUDE_CODE_SESSION_ID=s-one",
+    "echo",
+    "park"
+   ],
+   [
+    "env:KITH_AGENT=coder",
+    "env:CLAUDE_CODE_SESSION_ID=s-two",
+    "echo",
+    "park"
+   ],
+   [
+    "--end",
+    "--session",
+    "s-one"
+   ],
+   [
+    "--end",
+    "--session",
+    "s-one"
+   ],
+   [
+    "--end"
+   ],
+   [
+    "--end",
+    "--bogus"
+   ],
+   [
+    "env:KITH_AGENT=coder",
+    "--end",
+    "--session",
+    "s-two"
+   ],
+   [
+    "--end",
+    "--session",
+    "s-two"
+   ],
+   [
+    "--answer",
+    "@ID",
+    "--",
+    "late"
+   ]
+  ]
+ },
+ {
+  "name": "ask-delegations",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "echo",
+    "one"
+   ],
+   [
+    "echo",
+    "errjson"
+   ],
+   [
+    "delegations",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "ask-cap",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   }
+  ],
+  "run": [
+   [
+    "--cap"
+   ],
+   [
+    "--cap",
+    "2.5"
+   ],
+   [
+    "--cap"
+   ],
+   [
+    "--cap",
+    "none"
+   ],
+   [
+    "--cap"
+   ],
+   [
+    "--cap",
+    "abc"
+   ],
+   [
+    "--cap",
+    "1",
+    "2"
+   ],
+   [
+    "env:KITH_AGENT=coder",
+    "--cap",
+    "9"
+   ],
+   [
+    "--cap-told"
+   ],
+   [
+    "--cap-told",
+    "bad/chain"
+   ],
+   [
+    "env:KITH_AGENT=coder",
+    "--cap-told",
+    "c1"
+   ]
+  ]
+ },
+ {
+  "name": "ask-remote-answer",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/remotes.json",
+    "text": "{\"mini\": {\"ssh\": \"kai@mini\", \"kith\": \"kith\"}}"
+   },
+   {
+    "fake": "ssh",
+    "script": "#!/bin/sh\n# the other computer: it answers `kith remote _run` with one result and nothing else; down: ssh itself fails\ncase \"$*\" in\n  *\"remote _run\"*) [ -n \"${ASK_SSH_DOWN:-}\" ] && { echo \"ssh: connect to host mini port 22: No route to host\" >&2; exit 255; }\n                   printf '{\"answer\":\"hi from mini\",\"session_id\":\"r1\",\"cost_usd\":0.02}\\n' ;;\n  *) exit 255 ;;\nesac\n"
+   }
+  ],
+  "run": [
+   [
+    "echo@mini",
+    "hello"
+   ],
+   [
+    "echo@mini",
+    "-c",
+    "again"
+   ],
+   [
+    "ls"
+   ],
+   [
+    "echo@nope",
+    "x"
+   ]
+  ]
+ },
+ {
+  "name": "ask-remote-down",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k",
+   "ASK_SSH_DOWN": "1"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/remotes.json",
+    "text": "{\"mini\": {\"ssh\": \"kai@mini\", \"kith\": \"kith\"}}"
+   },
+   {
+    "fake": "ssh",
+    "script": "#!/bin/sh\n# the other computer: it answers `kith remote _run` with one result and nothing else; down: ssh itself fails\ncase \"$*\" in\n  *\"remote _run\"*) [ -n \"${ASK_SSH_DOWN:-}\" ] && { echo \"ssh: connect to host mini port 22: No route to host\" >&2; exit 255; }\n                   printf '{\"answer\":\"hi from mini\",\"session_id\":\"r1\",\"cost_usd\":0.02}\\n' ;;\n  *) exit 255 ;;\nesac\n"
+   }
+  ],
+  "run": [
+   [
+    "echo@mini",
+    "hello"
+   ],
+   [
+    "delegations",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "ask-remote-bg",
+  "command": "ask",
+  "needs": "daemon",
+  "bin_both": true,
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "old"
+   ],
+   "new": [
+    "python3",
+    "{KERNEL}/tests/difftest/ask-driver.py",
+    "new"
+   ]
+  },
+  "env": {
+   "KITH_LOGS": "{HOME}/logs",
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_WAKE_GH": "{HOME}/bin/no-gh",
+   "KITH_WAKE_NO_KICK": "1",
+   "KITH_WAKE_POLL": "0",
+   "ASK_K": "{ROOT}/k"
+  },
+  "mask_keys": [
+   "started_ms",
+   "answered_ms",
+   "capped_ms",
+   "cap_card_ms",
+   "at",
+   "pid_at",
+   "ended_at",
+   "answered_at",
+   "t",
+   "created",
+   "checked",
+   "next",
+   "until"
+  ],
+  "normalize": [
+   [
+    "\\b(bg|ask)-\\d{14}-[0-9a-f]{6}\\b",
+    "<ASKID>"
+   ]
+  ],
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   },
+   {
+    "mkdir": "home/proj"
+   },
+   {
+    "mkdir": "k/bin"
+   },
+   {
+    "link": "k/lib",
+    "to": "{KERNEL}/lib"
+   },
+   {
+    "run": [
+     "cp",
+     "{KERNEL}/bin/kith-ask",
+     "{ROOT}/k/bin/kith-ask"
+    ]
+   },
+   {
+    "link": "k/bin/kith-wake",
+    "to": "{KERNEL}/bin/kith-wake"
+   },
+   {
+    "link": "k/bin/kith-auth",
+    "to": "{KERNEL}/bin/kith-auth"
+   },
+   {
+    "link": "k/bin/kith-remote",
+    "to": "{KERNEL}/bin/kith-remote"
+   },
+   {
+    "link": "k/bin/project-id",
+    "to": "{KERNEL}/bin/project-id"
+   },
+   {
+    "write": "k/bin/kith",
+    "text": "#!/bin/sh\n# difftest stub for bin/kith as kith-ask runs it: kith <agent> [opts] -- <task>, one JSON result (KITH_OUTPUT=json)\nfor last; do :; done\ncase \"$last\" in\n  boom) echo \"agent failed\" >&2; exit 1 ;;\n  errjson) printf '{\"result\":\"it broke\",\"is_error\":true,\"session_id\":\"s-err\",\"total_cost_usd\":0.02,\"num_turns\":2}\\n' ;;\n  park)\n    # what kith-permit does when a card outlives its window: the ask that started the run is parked (the file today, the row once\n    # the asks are the core's; the side that has no daemon ignores the call)\n    machine=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()[\"KITH_MACHINE\"])' \"$ASK_K/lib\")\n    mkdir -p \"$machine/live/ask\"; : > \"$machine/live/ask/$KITH_LAUNCH_ASK_ID.parked\"\n    if [ -n \"${KITH_BIN:-}\" ]; then\n      printf '{\"id\":\"%s\",\"card\":\"c1\"}' \"$KITH_LAUNCH_ASK_ID\" | \"$KITH_BIN\" kernel core-call ask.park --params-stdin >/dev/null 2>&1\n    fi\n    printf '{\"result\":\"waiting\",\"session_id\":\"s-park\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' ;;\n  *) printf '{\"result\":\"answer to: %s\",\"session_id\":\"s1\",\"total_cost_usd\":0.01,\"num_turns\":1}\\n' \"$last\" ;;\nesac\n",
+    "mode": "755"
+   },
+   {
+    "write": "home/.kith/remotes.json",
+    "text": "{\"mini\": {\"ssh\": \"kai@mini\", \"kith\": \"kith\"}}"
+   },
+   {
+    "fake": "ssh",
+    "script": "#!/bin/sh\n# the other computer: it answers `kith remote _run` with one result and nothing else; down: ssh itself fails\ncase \"$*\" in\n  *\"remote _run\"*) [ -n \"${ASK_SSH_DOWN:-}\" ] && { echo \"ssh: connect to host mini port 22: No route to host\" >&2; exit 255; }\n                   printf '{\"answer\":\"hi from mini\",\"session_id\":\"r1\",\"cost_usd\":0.02}\\n' ;;\n  *) exit 255 ;;\nesac\n"
+   }
+  ],
+  "run": [
+   [
+    "--bg",
+    "echo@mini",
+    "hello"
+   ]
+  ]
+ }
+]
