@@ -299,9 +299,12 @@ fn open_ctl(ctl: &Ctl) -> Result<(std::fs::File, std::fs::File), String> {
                     "--ctl-pipe {path:?} is not a local named pipe (\\\\.\\pipe\\...)"
                 ));
             }
+            // Identification only (SECURITY_IDENTIFICATION): whoever serves this name cannot act as us.
+            use std::os::windows::fs::OpenOptionsExt as _;
             let file = OpenOptions::new()
                 .read(true)
                 .write(true)
+                .security_qos_flags(0x0001_0000)
                 .open(path)
                 .map_err(|e| format!("cannot open {path:?}: {e}"))?;
             // A squatter that created the name first would be served as the holder: its server must be our parent.

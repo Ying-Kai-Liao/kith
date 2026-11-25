@@ -909,8 +909,18 @@ fn attempt(
         sent: false,
         why: why.to_owned(),
     };
-    let Ok(stream) = platform::connect(&endpoint(layout)) else {
-        return Attempt::Done(Reached::NoDaemon);
+    let stream = match platform::connect(&endpoint(layout)) {
+        Ok(stream) => stream,
+        // Windows: the pipe's server is not this account (another account made the name first). Nothing was sent. Said
+        // as a mismatch so `kith doctor` and the caller's note show it rather than "no daemon", and done, not retried.
+        #[cfg(windows)]
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Attempt::Done(Reached::Mismatch(format!(
+                "the owner pipe {} is served by something that is not this account's ({e}); it may be squatted, so nothing was sent and this command runs on its own",
+                endpoint(layout).display()
+            )));
+        }
+        Err(_) => return Attempt::Done(Reached::NoDaemon),
     };
     // Without the owner token there is nothing to prove with. A host without the secret still says hello, to learn why
     // (no Host on this daemon, or a Host that is another process): a line worth logging, unlike "no daemon".
