@@ -485,6 +485,9 @@ pub(crate) struct LedgerOpen<'a> {
     pub cont: Option<&'a str>,
     /// `bg`, on the callee's computer: who asked it. The pairing epoch is checked against `ask_peers` in this transaction.
     pub origin: Option<Origin<'a>>,
+    /// `bg`: what `-m -e -C -p` gave (`model`, `effort`, `folder`, `project`), kept on the row as `extra.opts` for the host's run to
+    /// pass on (design 2026-11-24-ask-ledger, A4 precondition). A row without it runs as the host's own defaults, as before.
+    pub opts: Option<Map<String, Value>>,
 }
 
 /// Who asked a `bg` ask from another computer: its name, the caller's ask id (the key) and the pairing epoch it was sent under.
@@ -722,12 +725,25 @@ fn open_checked_in(
         origin_key: origin.map(|og| og.key.to_owned()),
         origin_epoch: origin.map(|og| og.epoch.to_owned()),
     };
-    let ask = match o.ledger.as_ref().and_then(|l| l.cont).filter(|_| peering) {
-        Some(c) => Ask {
-            extra: Some(Map::from_iter([("cont".to_owned(), json!(c))])),
+    let mut kept = Map::new();
+    if let Some(c) = o.ledger.as_ref().and_then(|l| l.cont).filter(|_| peering) {
+        kept.insert("cont".to_owned(), json!(c));
+    }
+    if let Some(opts) = o
+        .ledger
+        .as_ref()
+        .and_then(|l| l.opts.as_ref())
+        .filter(|m| !m.is_empty())
+    {
+        kept.insert("opts".to_owned(), Value::Object(opts.clone()));
+    }
+    let ask = if kept.is_empty() {
+        ask
+    } else {
+        Ask {
+            extra: Some(kept),
             ..ask
-        },
-        None => ask,
+        }
     };
     // A `bg` open is one step with its turn: the host starts the callee from it (R1).
     let ask = match &o.ledger {

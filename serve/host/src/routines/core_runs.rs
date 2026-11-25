@@ -21,6 +21,8 @@
 //!   `fired` and nothing waits silently for its deadline. A keyed turn is never listed (the host actor that enqueued it owns
 //!   it; the strays sweep cancels an orphan).
 //!
+//! - **A `--bg` ask's callee** (source `ask`) is listed by its own pull and runs detached, as a cron job does (`core_ask.rs`).
+//!
 //! An item that ends without its turn having finished (its start failed) cancels the turn: nothing pulls it again.
 
 use super::runner::Prepared;
@@ -140,8 +142,31 @@ impl Routines {
                 return;
             }
         };
-        self.take(hub, &turns, &super::core_cron::Live(core));
+        self.take(hub, &turns, &super::core_cron::Live(core.clone()));
         self.dispatch_pulled(hub);
+        Self::pull_asks(&core);
+    }
+
+    /// The `--bg` asks' callee turns (source `ask`): each through the run door (`core_ask.rs`), not through a bot. Listed apart from the
+    /// schedule's turns so a core that does not know the source costs the cron jobs nothing.
+    fn pull_asks(core: &Arc<crate::terminal::core_writer::CoreWriter>) {
+        let turns = match core.queued_from(&["ask"]) {
+            Ok(t) => t,
+            Err(why) => {
+                tracing::debug!(why, "routines: the core's queued asks can't be read");
+                return;
+            }
+        };
+        if turns.is_empty() {
+            return;
+        }
+        let world = super::core_ask::World {
+            bin: crate::agent::hq::bin(),
+            kernel: crate::kernel::current_kernel(),
+            harness: &super::core_ask::harness_of_agent,
+            runtime: tokio::runtime::Handle::try_current().ok(),
+        };
+        super::core_ask::take(core, &turns, &world);
     }
 
     /// The rule of the module doc over what `hostclaim.queued` listed. `ops` is the core and the system.
