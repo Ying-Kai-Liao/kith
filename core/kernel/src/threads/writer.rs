@@ -168,6 +168,9 @@ impl<'a> Taker<'a> {
                 || turn_claim.is_some()
                 || (self.c.env)("KITH_REQUIRE_STUB").as_deref() == Some("1")
             {
+                if turn_claim.is_some() {
+                    return Err(format!("{TURN_CLAIM_REFUSED}: {why}"));
+                }
                 return Err(why);
             }
             self.say(&format!("kith: {why}; this run is not claimed"));

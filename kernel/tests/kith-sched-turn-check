@@ -67,4 +67,10 @@ KITH_TURN_CLAIM=7 "$KB" kernel launch house --exec --kernel "$KERNEL" -H codex "
 is "a claimed one-shot of another engine, no core: exits 10" "$rc" 10
 [[ ! -e $STUB_OUT ]] && ok "it starts no engine" || bad "engine started"
 grep -q "refused" "$T/err" && ok "and says the claim was refused" || bad "no reason" "$(cat "$T/err")"
+
+# The same for Claude: the one-shot makes a session id, its claim step asks the core, none answers: exit 10, not 1.
+rm -f "$STUB_OUT"
+KITH_TURN_CLAIM=7 "$KB" kernel launch house --exec --kernel "$KERNEL" "do it" >"$T/out" 2>"$T/err"; rc=$?
+is "a claimed one-shot of Claude, no core: exits 10" "$rc" 10
+[[ ! -e $STUB_OUT ]] && ok "it starts no Claude" || bad "Claude started"
 exit "$fail"

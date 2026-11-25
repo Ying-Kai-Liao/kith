@@ -12,7 +12,7 @@ use super::assemble::{Env, get};
 use super::session::{self, Locked};
 use crate::permit;
 use crate::threads::claim_wait;
-use crate::threads::writer::Taker;
+use crate::threads::writer::{TURN_CLAIM_EXIT, TURN_CLAIM_REFUSED, Taker};
 
 /// How the engine starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,7 +111,11 @@ pub fn claude(g: Go<'_>, taker: &Taker<'_>, pid: i64, how: Engine) -> i32 {
         eprint!("{}", taker.said());
         if let Err(m) = claimed {
             eprintln!("kith: {m}");
-            return 1;
+            return if m.starts_with(TURN_CLAIM_REFUSED) {
+                TURN_CLAIM_EXIT
+            } else {
+                1
+            };
         }
         lock_alone |= taker.alone();
     }
