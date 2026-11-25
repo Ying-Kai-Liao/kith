@@ -113,10 +113,17 @@ pub(crate) struct Io {
 
 /// Connects to the relay and runs the session. Returns the exit code.
 pub fn run(endpoint: &Path, opts: &Opts) -> i32 {
+    run_with_notes(endpoint, opts, Box::new(io::stderr()))
+}
+
+/// [`run`] with the one-line messages (and the reasons the client could not start) written to `notes`: the launcher that attaches
+/// in its own process reads them before it says anything of its own.
+pub fn run_with_notes(endpoint: &Path, opts: &Opts, mut notes: Box<dyn Write + Send>) -> i32 {
     let stream = match platform::connect(endpoint) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
+            let _ = writeln!(
+                notes,
                 "cannot reach the terminal relay at {}: {e}",
                 endpoint.display()
             );
@@ -126,7 +133,7 @@ pub fn run(endpoint: &Path, opts: &Opts) -> i32 {
     let (input, tty) = match term::open_input(opts.tty_input) {
         Ok(i) => i,
         Err(e) => {
-            eprintln!("cannot open the terminal for keys: {e}");
+            let _ = writeln!(notes, "cannot open the terminal for keys: {e}");
             return 1;
         }
     };
@@ -134,7 +141,7 @@ pub fn run(endpoint: &Path, opts: &Opts) -> i32 {
     let io = Io {
         input,
         output: Box::new(io::stdout()),
-        notes: Box::new(io::stderr()),
+        notes,
         size,
         raw: Box::new(move || tty.enter_raw()),
     };

@@ -69,6 +69,8 @@ FILES=(
   core/kernel/src/launch/start.rs     # R3a: the claim for this pid (claim_start, oneshot) before the engine, the guest's grants after it (I3), execve keeps the pid (I2); Windows spawns and waits
   core/kernel/src/launch/plan.rs      # R3a: the --resume claim's place in the order (the plan's sync hold, resolve, the account walk)
   core/kernel/src/launch/session.rs   # R3a: the session id (--session-id / --resume / a new uuid), the stub's lock key and --lock-alone
+  core/kernel/src/launch/terminal.rs  # R3b: the terminal's claim (kind terminal) for this pid, not for a resumed session, then `threads run` in process: claude is this pid's child under the stub (I2)
+  core/kernel/src/launch/held.rs      # R3b: `kith_held_launch` in Rust: the resumed claim is given back, then terminal.open (I7); busy 75; exit 5 never repeated; the claim again on the direct fallback
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

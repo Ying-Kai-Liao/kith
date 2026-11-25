@@ -8253,5 +8253,6091 @@
    "/store/",
    "/core/locks/"
   ]
+ },
+ {
+  "name": "launch-exec-term-owner",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-owner-no-tty",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ]
+ },
+ {
+  "name": "launch-exec-term-flags",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--account",
+    "claude",
+    "-m",
+    "haiku",
+    "-e",
+    "low"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--account",
+    "claude",
+    "-m",
+    "haiku",
+    "-e",
+    "low"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--account",
+    "claude",
+    "-m",
+    "haiku",
+    "-e",
+    "low"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-permission-mode",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--permission-mode",
+    "plan"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--permission-mode",
+    "plan"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--permission-mode",
+    "plan"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-bypass",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--bypass"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--bypass"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--bypass"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-direct",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--direct"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--direct"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--direct"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-claude-args",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub",
+   "KITH_CLAUDE_ARGS": "--output-format json --max-turns 3"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-session-id-given",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub",
+   "KITH_CLAUDE_ARGS": "--session-id 22222222-3333-4444-8555-666666666666"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-stub-missing",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/none"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-stub-required",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/none",
+   "KITH_REQUIRE_STUB": "1"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-stub-bad-key",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub",
+   "KITH_CLAUDE_ARGS": "--session-id Bad_Key"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-stub-bad-key-required",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub",
+   "KITH_CLAUDE_ARGS": "--session-id Bad_Key",
+   "KITH_REQUIRE_STUB": "1"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-guest",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub",
+   "KITH_PERSON": "sam"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-guest-refused",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub",
+   "KITH_PERSON": "nobody"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-guest-token-and-socket",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub",
+   "KITH_PERSON": "sam",
+   "KITH_RUN_TOKEN": "tok",
+   "KITH_RUN_SOCKET": "{ROOT}/none.sock"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-room-person-refused",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub",
+   "KITH_PERSON": "room-abc"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-limit-hold",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  ],
+  "run": [
+   [
+    "echo"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {\"echo\": {\"limit\": 0.01, \"at_limit\": \"hold\"}}}"
+   },
+   {
+    "write": "kith/state/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {\"echo\": {\"limit\": 0.01, \"at_limit\": \"hold\"}}}"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table req (id text primary key, session text, ts text, project text, model text, agent text, turn text, input int, output int, cache_read int, cache_write int, cost real); create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text); insert into runs (session, agent) values ('s1', 'echo'); insert into req (id, session, ts, agent, cost) values ('r1', 's1', strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'echo', 5.0);"
+   },
+   {
+    "sqlite": "kith/state/cost.db",
+    "sql": "create table req (id text primary key, session text, ts text, project text, model text, agent text, turn text, input int, output int, cache_read int, cache_write int, cost real); create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text); insert into runs (session, agent) values ('s1', 'echo'); insert into req (id, session, ts, agent, cost) values ('r1', 's1', strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'echo', 5.0);"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-resume",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--resume",
+    "aaaaaaaa-1111-4222-8333-444444444444"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--resume",
+    "aaaaaaaa-1111-4222-8333-444444444444"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--resume",
+    "aaaaaaaa-1111-4222-8333-444444444444"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   },
+   {
+    "write": "home/.claude/projects/-x/aaaaaaaa-1111-4222-8333-444444444444.jsonl",
+    "text": "{}\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-resume-held",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub",
+   "KITH_CLAIM_WAIT": "1"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--resume",
+    "aaaaaaaa-1111-4222-8333-444444444444"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--resume",
+    "aaaaaaaa-1111-4222-8333-444444444444"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--resume",
+    "aaaaaaaa-1111-4222-8333-444444444444"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   },
+   {
+    "write": "home/.claude/projects/-x/aaaaaaaa-1111-4222-8333-444444444444.jsonl",
+    "text": "{}\n"
+   },
+   {
+    "write": "kith/state/live/terminal/aaaaaaaa-1111-4222-8333-444444444444.claim",
+    "text": "{\"pid\": 1, \"kind\": \"terminal\", \"at\": \"2099-01-01T00:00:00Z\"}"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-resume-unknown",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--resume",
+    "no-such-thread"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--resume",
+    "no-such-thread"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--resume",
+    "no-such-thread"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-continue-none",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "-c"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "-c"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "-c"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-held-no-daemon",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--held"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--held"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--held"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-held-no-tty",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--held"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--held"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--held"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ]
+ },
+ {
+  "name": "launch-exec-term-held-resume-no-daemon",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--held",
+    "--resume",
+    "aaaaaaaa-1111-4222-8333-444444444444"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--held",
+    "--resume",
+    "aaaaaaaa-1111-4222-8333-444444444444"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--held",
+    "--resume",
+    "aaaaaaaa-1111-4222-8333-444444444444"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   },
+   {
+    "write": "home/.claude/projects/-x/aaaaaaaa-1111-4222-8333-444444444444.jsonl",
+    "text": "{}\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
+ },
+ {
+  "name": "launch-exec-term-held-guest",
+  "command": "launch-whole",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_CORE": "rust",
+   "KITH_STUB_BIN": "{ROOT}/fakes/kith-stub",
+   "KITH_PERSON": "sam"
+  },
+  "normalize_paths": true,
+  "run_old": [
+   [
+    "echo",
+    "--held"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch-exec",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--held"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--held"
+   ]
+  ],
+  "normalize": [
+   [
+    "[^\"\\n]*kith-room-ledger (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "[^\"\\n]*kernel room-ledger --kernel [^\\n]*? (pre|post) --agent",
+    "<LEDGERHOOK> \\1 --agent"
+   ],
+   [
+    "(?:'[^']*kith-permit'|[^\\s'\\\"]*kith-permit) (denied|once) --dir",
+    "<PERMITHOOK-PYTHON> \\1 --dir"
+   ],
+   [
+    "(?:'[^']*'|[^\\s'\\\"]+) kernel permit --kernel (?:'[^']*'|[^\\s'\\\"]+) (denied|once) --dir",
+    "<PERMITHOOK-RUST> \\1 --dir"
+   ],
+   [
+    "\"command\": \"[^\"]*kernel cost --kernel [^\"]* tag\"",
+    "\"command\": \"<COSTTAG-RUST>\""
+   ],
+   [
+    "^[^\"]*kernel cost --kernel [^\"]* tag$",
+    "<COSTTAG-RUST>"
+   ],
+   [
+    "\"command\": \"\\\\\"[^\"]*kith-sessions\\\\\" record\"",
+    "\"command\": \"<SESSIONSHOOK-PYTHON>\""
+   ],
+   [
+    "\"command\": \"[^\"]*kernel threads --kernel [^\"]* record\"",
+    "\"command\": \"<SESSIONSHOOK-RUST>\""
+   ],
+   [
+    "^\"[^\"]*kith-sessions\" record$",
+    "<SESSIONSHOOK-PYTHON>"
+   ],
+   [
+    "^[^\"]*kernel threads --kernel [^\"]* record$",
+    "<SESSIONSHOOK-RUST>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{32}(?![0-9a-zA-Z])",
+    "<uuid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-zA-Z])",
+    "<sid>"
+   ],
+   [
+    "(?<![0-9a-zA-Z.])\\.runs/[0-9]+\\.",
+    ".runs/<pid>."
+   ],
+   [
+    "/\\.runs/[0-9]+\\.",
+    "/.runs/<pid>."
+   ],
+   [
+    "\\S*/python3 -I '?<KERNEL>'?/lib/kith_readfence\\.py",
+    "<READFENCE>"
+   ],
+   [
+    "\\S*/kith kernel readfence",
+    "<READFENCE>"
+   ],
+   [
+    "pid=[0-9]+",
+    "pid=<n>"
+   ],
+   [
+    "\"pid\": [0-9]+",
+    "\"pid\": <n>"
+   ],
+   [
+    "\"procStart\": \"[^\"]*\"",
+    "\"procStart\": \"<ps>\""
+   ],
+   [
+    "proc-[0-9]+(-[0-9A-Za-z.]*)?",
+    "proc-<pid>"
+   ]
+  ],
+  "json": false,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/work"
+   },
+   {
+    "mkdir": "home/.kith/accounts/claude/other"
+   },
+   {
+    "write": "home/.kith/settings.json",
+    "text": "{\"accounts\": [\"claude:work\", \"claude\"], \"agents\": {}}"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") echo '{\"loggedIn\":true}'; exit 0 ;;\n  \"plugin list\") echo \"[]\"; exit 0 ;;\n  \"--version \"*) echo \"2.1.309 (Claude Code)\"; exit 0 ;;\nesac\necho \"== claude run\"\nprev=\"\"\nfor a in \"$@\"; do\n  case $prev in\n    --append-system-prompt) echo \"arg: <prompt>\" ;;\n    --settings) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"settings-file:\"; cat \"$a\"; echo; fi ;;\n    --mcp-config) echo \"arg: $a\"; if [ -f \"$a\" ]; then echo \"mcp-file:\"; cat \"$a\"; fi ;;\n    *) echo \"arg: $a\" ;;\n  esac\n  prev=$a\ndone\nenv | grep -E '^(KITH_(AGENT|AGENT_VERSION|PROVIDER|ACCOUNT|ACCOUNT_ID|RUN_KIND|RUN_LABEL|RESUMED_FROM|ASK_ID|ASK_TOKEN|ASK_SOCKET|PERSON|OWNER|VIA|MODEL|EFFORT|PROJECT|REVOKE_SEEN|CLAUDE_ARGS|LAUNCH_KIND|LAUNCH_ASK_ID|LAUNCH_SID_FILE|TERMINAL_SESSION|RUN_TOKEN|RUN_SOCKET)|CLAUDE_CODE_ARTIFACT|CLAUDE_CONFIG_DIR)=' | sort\necho \"pid=$$\"\necho \"ppid=$PPID\"\nmine=no\nfor f in \"${KITH_STATE:-/none}\"/live/terminal/*.claim \"${KITH_STATE:-/none}\"/live/terminal/proc-*; do\n  [ -f \"$f\" ] && grep -q \"\\\"pid\\\": *$PPID[,}]\" \"$f\" 2>/dev/null && mine=yes\ndone\necho \"claim-names-parent: $mine\"\necho \"claims: $(ls \"${KITH_STATE:-/none}/live/terminal\" 2>/dev/null | tr '\\n' ' ')\"\nexit 0\n"
+   },
+   {
+    "fake": "kith-stub",
+    "script": "#!/bin/sh\nprintf 'stub:'\nwhile [ \"$1\" != \"--\" ]; do printf ' %s' \"$1\"; shift; done\necho ' --'\nshift\nexec \"$@\"\n"
+   }
+  ],
+  "ignore": [
+   "\\.claim\\.lock$",
+   "/\\.runs/",
+   "/run/once/",
+   "/state/store/",
+   "/run/t",
+   "/store/",
+   "/core/locks/"
+  ],
+  "pty": true,
+  "stderr": false
  }
 ]

@@ -389,3 +389,12 @@ Both sides run with `KITH_CORE=rust` (the hooks are the program's on both) and t
 `kith-run-kind-check`, `kith-owner-launch-check` and `kith-launch-once-race-check`, which run once more with the line switched on in a copy of the
 kernel folder. Not here: a fake host (the run socket's `consumeAccess` and `issueAskToken`), so a guest's grants are compared with no answer.
 
+
+### launch-exec-term (retire-python P1-12 R3b)
+
+`launch-exec-term-*` in the same corpus file compare an interactive run (no task) the same way: OLD is the bash body (`kith AGENT [flags]`), NEW is
+`kith kernel launch-exec AGENT --kernel DIR [flags]`. A case with `"pty": true` runs each side with a pseudo-terminal on all three ends (what a
+terminal run needs), so stdout and stderr are one stream and the case sets `"stderr": false`. The fake `claude` is the launcher's child here, so it
+reports its parent (`ppid`) and whether the claim names that parent. `--held` is compared where no holder answers (the fallback and its one line);
+the real daemon, holder and attach client are `kith-held-check`, which also runs with the line switched on (`KITH_LAUNCH_EXEC=on`, as
+`kith-terminal-flags-check` and `kith-direct-lock-check` do).

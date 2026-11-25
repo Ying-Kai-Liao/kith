@@ -13,6 +13,7 @@ pub mod assemble;
 pub mod exec;
 pub mod facets;
 pub mod guard;
+pub mod held;
 pub mod json;
 pub mod judge;
 pub mod machine;
@@ -26,6 +27,7 @@ pub mod runenv;
 pub mod session;
 pub mod settings;
 pub mod start;
+pub mod terminal;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::many_single_char_names)]

@@ -235,6 +235,37 @@ kith_oneshot_flag() {
   return 1
 }
 
+# kith_term_flag   ARGS...   succeeds when `kith AGENT ARGS` is a run at the terminal the program can run itself
+# (`kith kernel launch-exec`, token `launch-exec-term`): the leading flags (the flag loop of bin/kith) are all there is, no task
+# after them. That is `kith AGENT`, -r, -r ID, -c, --resume ID, --held, --direct and their flags. --print, --launch-json, --inspect,
+# --render, a flag the old body refuses, a flag with no value and any word (a task) stay with the old body.
+kith_term_flag() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --print|--launch-json|--inspect|--render) return 1 ;;
+      --held|--direct|--bypass|-c|--continue) shift ;;
+      --hold|--resume|--account|--backup|-p|--project|-m|--model|-e|--effort|-H|--harness|--permission-mode) shift 2 || return 1 ;;
+      -r) if [[ -n ${2:-} && $2 != -* ]]; then shift 2; else shift; fi ;;
+      --) shift; [[ $# -eq 0 ]]; return ;;
+      *) return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# kith_core_lists MODULE   succeeds when the kith program lists MODULE in `kernel version` (the token a switched verb needs beyond its
+# line: `launch-exec` runs one-shots, `launch-exec-term` also the terminal and --held).
+kith_core_lists() {
+  local bin ver
+  if [[ -n ${_kith_core_primed:-} ]]; then
+    bin=$_kith_core_bin ver=$_kith_core_ver
+  else
+    bin=$(kith_find_bin) && [[ -n $bin ]] || return 1
+    ver=$("$bin" kernel version 2>/dev/null)
+  fi
+  [[ -n $bin && $ver == *"\"$1\""* ]]
+}
+
 # Held terminals (docs/plans/runtime-design.md section 4, M1-7): `kith AGENT --held` asks the core daemon to start the engine in
 # the holder (terminal.open) and attaches to it; `kith attach` comes back to one. The calls go through the hidden Rust verb
 # `kith kernel core-call` (owner socket only; terminal.* methods, and the people.suspend, people.undo, people.removePerson and people.removeBot that kith-auth mirrors); the keys and the screen through `kith kernel attach`.

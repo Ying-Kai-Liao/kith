@@ -35,6 +35,16 @@ unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE HQ_HOME HQ_STATE 
   KITH_CLAUDE_ARGS KITH_REQUIRE_STUB KITH_RUN_TOKEN KITH_ASK_TOKEN
 mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/designer/role" "$CLAUDE_CONFIG_DIR" "$T/bin" "$T/work"
 printf -- '---\nname: designer\ndescription: test agent\n---\nbody\n' > "$KITH_HOME/agents/designer/role/agent.md"
+# KITH_LAUNCH_EXEC=on: the same checks with the runs done by the program (`kith kernel launch-exec`, token launch-exec-term): a copy of the
+# kernel folder with the `launch-exec` line switched on, the program being ${KITH_BIN:-}. Unset (the default): the script's own body.
+if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
+  LE_BIN=${KITH_BIN:-}
+  [[ -n $LE_BIN && -x $LE_BIN ]] || { echo "FAIL launch-exec on: no kith program"; exit 1; }
+  "$LE_BIN" kernel version 2>/dev/null | grep -q '"launch-exec-term"' || { echo "FAIL launch-exec on: $LE_BIN does not list launch-exec-term"; exit 1; }
+  cp -R "$KERNEL" "$T/kernel-on" && printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt" || { echo "FAIL launch-exec on: no kernel copy"; exit 1; }
+  KERNEL=$T/kernel-on; export KITH_BIN=$LE_BIN
+  echo "(launch-exec on: the program runs the terminal and --held)"
+fi
 LOCKS=$KITH_STATE/core/locks
 REG=$KITH_STATE/live/terminal
 SK=$KERNEL/bin/kith-sessions
@@ -226,8 +236,15 @@ sys.exit(p.wait())' "$@"; }
   ( cd "$T/work" && KITH_BIN=$T/kith-wrap KITH_CLAIM_WAIT=1 KITH_CLAUDE_ARGS="--session-id $SID7" ptyrun "$KERNEL/bin/kith" designer ) > "$T/r7.out" 2>&1 &
   R7=$!
   waitfor '[[ -s $T/started ]]' && ok "bin/kith: claude started under the Rust run" || bad "bin/kith: claude never started" "$(cat "$T/r7.out")"
-  [[ $(grep -c "^kernel threads --kernel .* run designer -- .*kith-stub" "$T/kith-calls") == 1 ]] && ok "bin/kith: the last exec is kernel threads run" \
-    || bad "bin/kith: the last exec did not go to the Rust run" "$(cat "$T/kith-calls")"
+  if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
+    # The program runs the whole terminal session in its own process: one launch-exec call, and `run` is not a call of its own.
+    [[ $(grep -c "^kernel launch-exec designer --kernel " "$T/kith-calls") == 1 && $(grep -c ' run designer -- ' "$T/kith-calls") == 0 ]] \
+      && ok "bin/kith: the program ran the terminal in one process (launch-exec)" \
+      || bad "bin/kith: the terminal did not go to launch-exec" "$(cat "$T/kith-calls")"
+  else
+    [[ $(grep -c "^kernel threads --kernel .* run designer -- .*kith-stub" "$T/kith-calls") == 1 ]] && ok "bin/kith: the last exec is kernel threads run" \
+      || bad "bin/kith: the last exec did not go to the Rust run" "$(cat "$T/kith-calls")"
+  fi
   touch "$T/go"; wait $R7; is "bin/kith: the run exits 0 when claude does" "$?" 0
   unheld $SID7 && ok "bin/kith: the claim ended with the run" || bad "bin/kith: claim still held"
   # the rollback: KITH_CORE=python keeps the Python run (the program is not asked for it)
