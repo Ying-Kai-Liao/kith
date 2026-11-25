@@ -762,6 +762,15 @@ fn core_call_dispatch(method: &str, params: &Value) -> CallEnd {
     }
 }
 
+/// One call of a held-terminal method, in process, as `kith kernel core-call` makes it (the one-run-path launch of `kith AGENT --held`).
+/// No time limit: opening a terminal starts an engine. A method that is not one of the callable ones is no answer.
+pub fn core_call_open(method: &str, params: &Value) -> CallEnd {
+    if !CORE_CALL_METHODS.contains(&method) {
+        return CallEnd::NoAnswer(format!("core-call: {method} is not one of {}", CORE_CALL_METHODS.join(", ")), 2);
+    }
+    core_call_dispatch(method, params)
+}
+
 /// [`core_call_dispatch`] for the kernel takers of `kith kernel threads` (the writer claims, the registry's record): the
 /// methods are theirs alone and the call ends within `limit`, because nothing underneath has a deadline of its own that
 /// fits a `SessionStart` hook (five seconds in all) or a launch. Running out of time is no answer, exit 5: the call may have
