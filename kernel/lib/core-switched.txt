@@ -18,6 +18,8 @@ lifecycle	lifecycle
 permit	permit
 # `kith AGENT "task"` (a one-shot) runs in the program (`kith kernel launch-exec`, one process, claims and engine) when this line is here and the program lists `launch-exec`.
 # Shipped off (retire-python P1-12 R3a): the line is commented out until R4 switches it on after the live soak; KITH_CORE=python keeps bash either way.
+# The same line sends the terminal run (`kith AGENT`, -r, -c, --resume ID) and `--held` to it when the program also lists `launch-exec-term` (R3b);
+# --print, --inspect and --launch-json stay on bash. One line is the whole rollback.
 #launch-exec	launch-exec
 # `kith ask`: `kernel/bin/kith-ask` hands its command line to `kith kernel ask` (the thin client of the core's ask rows, retire-python P2-3 A3) under `__main__` only,
 # when the program lists `ask-ledger` AND the `asks` cutover module is switched on the Mac (`<machine>/core/cutover/asks.switch`): the Python reads the switch itself,
