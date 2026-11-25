@@ -42,7 +42,7 @@ used. First run downloads about 60 MB.
 
 ## Sync commit
 
-**Last confirmed to describe the code: `SYNC_R3A_PLACEHOLDER`** (origin/main after #1173, R3a `kith kernel launch-exec` shipped off,
+**Last confirmed to describe the code: `a62aeb29a2fd66507f4c99b74a9a7d736313ae67`** (origin/main after #1173, R3a `kith kernel launch-exec` shipped off,
 2026-11-25; what was read is in "Re-sync 2026-11-25 (R3a)" at the end: `Threads.tla`, `base.consts` and the rows are unchanged).
 
 The sync before it, `f9b5e509f476bb88f6203a125ae863369ba03aa9` (origin/rust-rebuild after #1015, #1016, #1017,
@@ -457,7 +457,7 @@ that remains is the kith agent's. Drift was read for `queue.rs`, `turn.rs`, `ses
 
 ## Re-sync 2026-11-25 (R3a) - model unchanged
 Read: `git diff f9b5e509 HEAD` of every file `drift.sh` lists (42 files, about 7.4k lines, most of it new Rust files) and their
-commits, at origin/main ca9b5dd34 with #1173 merged. Nothing changes who may write the thread: `Threads.tla`, `base.consts`, the
+commits, at origin/main ca9b5dd34 with #1173's head merged; after #1173 landed (a62aeb29a) no covered file differed from that read. Nothing changes who may write the thread: `Threads.tla`, `base.consts`, the
 variants and the rows are unchanged. `drift.sh` gained `serve/host/src/launch_cmd.rs`, `conversations/sched_run.rs`, `detached.rs`.
 - **R3a, `kith kernel launch-exec`** (`launch/exec.rs` `run_with`, `start.rs` `claude`, `plan.rs` `plan`, `session.rs`,
   `launch_cmd.rs` `run_exec`; shipped off, `#launch-exec` in `core-switched.txt`): `bin/kith` `exec`s the program for a one-shot,
