@@ -155,7 +155,10 @@ mod tests {
         let squatter = TcpListener::bind("127.0.0.1:0").unwrap();
         let (env, _) = rig("squat", squatter.local_addr().unwrap().port());
         squatter.set_nonblocking(true).unwrap();
-        assert!(outbox_env("sam", Path::new("/nowhere"), &env).is_empty());
+        assert_eq!(
+            outbox_env("sam", Path::new("/nowhere"), &env),
+            Vec::<(String, String)>::new()
+        );
         match squatter.accept() {
             Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::WouldBlock),
             Ok((mut c, _)) => {

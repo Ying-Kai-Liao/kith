@@ -19,7 +19,12 @@ fn a_call_goes_to_the_hosts_pipe_with_the_token() {
         let mut got = vec![0u8; 4096];
         let n = c.read(&mut got).unwrap();
         let body = r#"{"ok":true}"#;
-        write!(c, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        write!(
+            c,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
         String::from_utf8_lossy(&got[..n]).into_owned()
     });
     let r = post(&data, "/api/ping", "tok", r#"{"a":1}"#, SECS).unwrap();
@@ -32,6 +37,9 @@ fn a_call_goes_to_the_hosts_pipe_with_the_token() {
 #[test]
 fn a_host_that_is_down_is_refused_never_tried_over_tcp() {
     let data = data("down");
-    assert!(matches!(post(&data, "/api/x", "t", "{}", SECS), Err(LocalErr::Down)));
+    assert!(matches!(
+        post(&data, "/api/x", "t", "{}", SECS),
+        Err(LocalErr::Down)
+    ));
     assert_eq!(status(&data, 1), Status::Down);
 }

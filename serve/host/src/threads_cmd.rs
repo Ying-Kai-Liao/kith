@@ -5,7 +5,7 @@
 //! routes its `kith-sessions` calls here while `threads` is in `lib/core-switched.txt`; the host's own claims
 //! (`terminal/claim.rs`) do not go through the crate: the host never switches ahead of the CLI.
 
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
