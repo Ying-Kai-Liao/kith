@@ -100,7 +100,7 @@ $bp = 'C:\probe\bin\boxprobe.exe'
 Section 'P-G14 R: block rules keyed on the box token (-LocalUser SDDL naming the run restricting SID)'
 Try-Do 'fw-r' {
   Set-NetFirewallProfile -Profile Domain, Public, Private -Enabled True
-  $runSid = (& $bp capsid kith.run.net).Trim()
+  $runSid = (& $bp rsid kith.run.net).Trim()
   Log "run SID kith.run.net = $runSid"
   $sd = "D:(A;;CC;;;$runSid)"
   $v4 = '0.0.0.0-126.255.255.255', '128.0.0.0-255.255.255.255'
