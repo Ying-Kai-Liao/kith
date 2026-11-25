@@ -508,7 +508,8 @@ mod tests {
                 .is_none()
         );
         let again = Job::open(&name).unwrap().unwrap();
-        assert_eq!(again.active_processes().unwrap(), 1);
+        // cmd and the ping it started: what the run starts stays in the job.
+        assert!(again.active_processes().unwrap() >= 1);
         again.terminate(7).unwrap();
         assert_eq!(child.wait().unwrap(), 7);
         assert_eq!(again.active_processes().unwrap(), 0);
