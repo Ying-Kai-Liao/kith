@@ -9,9 +9,9 @@ $bp = 'C:\probe\bin\boxprobe.exe'
 $Out = 'C:\guest\out'
 $UP = "$env:SystemDrive\Users\kithguest"
 $DD = '--'
-$K = "$UP\kw"
-$W = "$K\w"
-$R = "$K\r"
+$KW = "$UP\kw"
+$W = "$KW\w"
+$R = "$KW\r"
 $LogFile = "$Out\guest2-$Only.log"
 function Log($m) { Write-Output $m; Add-Content -Path $LogFile -Value $m }
 function Section($t) { Log ''; Log "=== $t ===" }
@@ -36,6 +36,9 @@ $VA = @('--kind', 'a', '--cap', 'kith.r.probe', '--cap', 'kith.w.probe') + $envW
 $VRm = @('--kind', 'r', '--il', 'medium', '--run', 'kith.run.x', '--grant', 'kith.r.probe', '--grant', 'kith.w.probe') + $envW
 $VRl = @('--kind', 'r', '--il', 'low', '--run', 'kith.run.x', '--grant', 'kith.r.probe', '--grant', 'kith.w.probe') + $envW
 $VRr = $VRm + @('--restricted-sid')
+# R with the user SID in the restricting list: the only R in which MSYS bash starts, and it can read whatever the user can
+$VRu = $VRm + @('--user-sid')
+$VRul = $VRl + @('--user-sid')
 $V = [ordered]@{ A = $VA; Rm = $VRm; Rl = $VRl }
 
 # Bx NAME OPTS CMD...: one boxed run; output of the box lands in $Out\NAME.txt and in the log
@@ -61,8 +64,8 @@ function AclPurge($path, $sid) {
   $o.SetAccessControl($acl)
 }
 function Setup-Workspace {
-  New-Item -ItemType Directory -Force $K, $W, $R, "$K\hosttmp" | Out-Null
-  $env:TEMP = "$K\hosttmp"; $env:TMP = "$K\hosttmp"
+  New-Item -ItemType Directory -Force $KW, $W, $R, "$KW\hosttmp" | Out-Null
+  $env:TEMP = "$KW\hosttmp"; $env:TMP = "$KW\hosttmp"
   Log "run SIDs: A caps w=$capW r=$capR ; R arbitrary SIDs w=$rW r=$rR"
   Log ((icacls $W /grant "*${capW}:(OI)(CI)(M)") -join ' ')
   AclAdd $W $rW 'Modify'
@@ -72,8 +75,7 @@ function Setup-Workspace {
   New-Item -ItemType Directory -Force "$W\tmp" | Out-Null
   Set-Content "$R\hello.txt" 'readable'
   Set-Content "$UP\secret.txt" 'SECRETDATA'
-  Set-Content "$W\empty.gitconfig" ''
-  attrib +r "$W\empty.gitconfig"
+  if (-not (Test-Path "$W\empty.gitconfig")) { Set-Content "$W\empty.gitconfig" ''; attrib +r "$W\empty.gitconfig" }
 }
 
 function Do-Net($tag, $optsList) {
@@ -115,11 +117,13 @@ if ($Only -eq 'net-r') {
 }
 if ($Only -eq 'net-wfp-r') {
   Setup-Workspace
-  # the box has Authenticated Users (S-1-5-11) disabled (deny-only); the owner has it enabled: the permit filter matches owners
-  $VRd = @('--kind', 'r', '--il', 'medium', '--run', 'kith.run.wfp', '--disable-sid', 'S-1-5-11') + $envW
-  $VRdl = @('--kind', 'r', '--il', 'low', '--run', 'kith.run.wfp', '--disable-sid', 'S-1-5-11') + $envW
+  # every box token carries the per-install SID kith.install in its restricting list; the filter's block SD names user + that SID
+  # (a restricted token must pass the DACL check twice), the permit SD names the user only (owner tokens pass, box tokens fail the
+  # second check)
+  $VRd = @('--kind', 'r', '--il', 'medium', '--run', 'kith.run.wfp', '--grant', 'kith.install') + $envW
+  $VRdl = @('--kind', 'r', '--il', 'low', '--run', 'kith.run.wfp', '--grant', 'kith.install') + $envW
   $VRe = @('--kind', 'r', '--il', 'medium', '--run', 'kith.run.wfp') + $envW
-  Do-Net 'wfp' ([ordered]@{ 'R-medium-AU-disabled' = $VRd; 'R-low-AU-disabled' = $VRdl; 'R-medium-AU-enabled-control' = $VRe })
+  Do-Net 'wfp' ([ordered]@{ 'R-medium-install-SID' = $VRd; 'R-low-install-SID' = $VRdl; 'R-medium-no-install-SID-control' = $VRe })
   exit 0
 }
 if ($Only -eq 'net-a') {
@@ -145,7 +149,8 @@ if ($Only -eq 'u' -or $Only -eq 'net-wfp-u') {
   Setup-Workspace
   $UO = 'C:\guest\uout'
   New-Item -ItemType Directory -Force $UO | Out-Null
-  $boxSid = (New-Object System.Security.Principal.NTAccount('.\kithbox')).Translate([System.Security.Principal.SecurityIdentifier]).Value
+  $boxSid = (New-Object System.Security.Principal.NTAccount("$env:COMPUTERNAME\kithbox")).Translate([System.Security.Principal.SecurityIdentifier]).Value
+  Log "kithbox.pw visible to the guest user: $(Test-Path C:\guest\kithbox.pw)"
   Log "kithbox SID: $boxSid"
   Log ((icacls $UO /grant 'kithbox:(OI)(CI)(M)' /Q) -join ' ')
   Log ((icacls $W /grant 'kithbox:(OI)(CI)(M)' /Q) -join ' ')
@@ -275,6 +280,8 @@ foreach ($k in $V.Keys) {
   Section "P-G13/P-G2: pinned PortableGit bash in the box: $k"
   Try-Do "bash-$k" { Bx "bash-$k" $V[$k] @($pgit, '-c', $bashScript) 60 }
 }
+Bx 'bash-Ru' $VRu @($pgit, '-c', $bashScript) 60
+Bx 'bash-Rul' $VRul @($pgit, '-c', $bashScript) 60
 Bx 'bash-Rr' $VRr @($pgit, '-c', 'echo BASH_RR_OK; ls /c/Users 2>&1 | head -3') 40
 
 Section 'P-G13 node, python, git (native) in each box'
@@ -297,6 +304,27 @@ foreach ($k in $V.Keys) {
   Bx "wr-ro-$k" $V[$k] @($bp, 'try-open', "$R\hello.txt", 'w') 30
 }
 
+Section 'P-G13: what Ru (user SID in the restricting list) can reach'
+Bx 'rd-secret-Ru' $VRu @($bp, 'try-open', "$UP\secret.txt", 'r') 30
+Bx 'wr-profile-Ru' $VRu @($bp, 'try-open', "$UP\kw\outside-ru.txt", 'c') 30
+Bx 'wr-wintemp-Ru' $VRu @($bp, 'try-open', 'C:\Windows\Temp\box-made-ru.txt', 'c') 30
+Bx 'wr-wintemp-Rm2' $VRm @($bp, 'try-open', 'C:\Windows\Temp\box-made-rm2.txt', 'c') 30
+Bx 'wr-wintemp-Rl2' $VRl @($bp, 'try-open', 'C:\Windows\Temp\box-made-rl2.txt', 'c') 30
+Section 'P-G13: Low IL needs a Low-labelled workspace (new, unique names)'
+New-Item -ItemType Directory -Force "$W\lowzone" | Out-Null
+Log ((icacls "$W\lowzone" /setintegritylevel '(OI)(CI)L') -join ' ')
+Bx 'low-create-lowzone' $VRl @($bp, 'try-open', "$W\lowzone\new-rl.txt", 'c') 30
+Bx 'low-create-W' $VRl @($bp, 'try-open', "$W\new-in-w-rl.txt", 'c') 30
+Bx 'med-create-lowzone' $VRm @($bp, 'try-open', "$W\lowzone\new-rm.txt", 'c') 30
+Bx 'low-write-existing-W' $VRl @($bp, 'try-open', "$W\node.txt", 'w') 30
+Section 'G7: a tool that stats the ancestors of the workspace (git does): git config in the workspace before and after one non-inherited ReadAttributes ACE on each ancestor'
+Bx 'anc-before-Rm' $VRm @('C:\probe\pgit\cmd\git.exe', 'config', '--global', '-l') 30 @('--env', "GIT_CONFIG_GLOBAL=$W\empty.gitconfig")
+foreach ($anc in @($UP, $KW)) {
+  AclAdd $anc $rW 'ReadAttributes, ReadPermissions, Synchronize' 'Allow' 'None'
+  Log ((icacls $anc /grant "*${capW}:(RA,RC,S)" /Q) -join ' ')
+}
+Bx 'anc-after-Rm' $VRm @('C:\probe\pgit\cmd\git.exe', 'config', '--global', '-l') 30 @('--env', "GIT_CONFIG_GLOBAL=$W\empty.gitconfig")
+Bx 'anc-init-Rm' $VRm @('C:\probe\pgit\cmd\git.exe', 'init', '-q', "$W\repo-anc-Rm") 30 @('--env', "GIT_CONFIG_GLOBAL=$W\empty.gitconfig")
 Section 'P-G13 a deny ACE for a restricting SID (does it block a write?) and one-box-versus-another'
 New-Item -ItemType Directory -Force "$W\dn" | Out-Null
 Set-Content "$W\dn\f.txt" 'x'
@@ -415,9 +443,9 @@ foreach ($k in @('A', 'Rm', 'Rl')) {
     Bx "busy-$k-corpus$i" $V[$k] @($busy, 'sh', '-c', $line) 30
   }
 }
-Section 'P-G2d control: the same corpus in real Git Bash in R'
+Section 'P-G2d control: the same corpus in real Git Bash in R (user SID in the restricting list: the only R in which bash starts)'
 $i = 0
-foreach ($line in (Get-Content 'C:\probe\bin\corpus.txt')) { $i++; Bx "bashc-Rm-corpus$i" $VRm @($pgit, '-c', $line) 30 }
+foreach ($line in (Get-Content 'C:\probe\bin\corpus.txt')) { $i++; Bx "bashc-Ru-corpus$i" $VRu @($pgit, '-c', $line) 30 }
 
 # ---- P-G18 NUL -------------------------------------------------------------------------------------------------------------
 Section 'P-G18: NUL, unboxed then in each box (and in A with extra capabilities)'
@@ -464,7 +492,7 @@ Bp p17
 foreach ($k in $V.Keys) {
   Section "G8/G9 carve-outs level by level ($k)"
   Try-Do "carve-$k" {
-    $T = "$K\carve-$k"
+    $T = "$KW\carve-$k"
     New-Item -ItemType Directory -Force "$T\a\b", "$T\a\d", "$T\leaf" | Out-Null
     foreach ($f in 'c.txt', 'a\x.txt', 'a\b\secret.txt', 'a\b\other.txt', 'a\d\y.txt') { Set-Content "$T\$f" 'data' }
     icacls "$T\c.txt" /grant "*${capW}:(R)" /Q | Out-Null
@@ -500,14 +528,14 @@ foreach ($k in $V.Keys) {
   Bx "git4-$k" $V[$k] @('C:\probe\pgit\cmd\git.exe', 'config', '--global', '-l') 30 @('--env', "GIT_CONFIG_GLOBAL=$W\empty.gitconfig")
   Bx "git4init-$k" $V[$k] @('C:\probe\pgit\cmd\git.exe', 'init', '-q', "$W\repo4-$k") 30 @('--env', "GIT_CONFIG_GLOBAL=$W\empty.gitconfig", '--env', 'GIT_CONFIG_NOSYSTEM=1')
 }
-Bx 'git4-bash-Rm' $VRm @($pgit, '-c', "cd $(Msys $W) && git config --global -l; echo rc=`$?; rm -rf r4 && git init -q r4 && cd r4 && echo hi > f && git add f && git -c user.name=a -c user.email=a@b.c commit -q -m first && git log --oneline && echo GIT_OK") 60 @('--env', "GIT_CONFIG_GLOBAL=$(Msys $W)/empty.gitconfig")
+Bx 'git4-bash-Ru' $VRu @($pgit, '-c', "cd $(Msys $W) && git config --global -l; echo rc=`$?; rm -rf r4 && git init -q r4 && cd r4 && echo hi > f && git add f && git -c user.name=a -c user.email=a@b.c commit -q -m first && git log --oneline && echo GIT_OK") 60 @('--env', "GIT_CONFIG_GLOBAL=$(Msys $W)/empty.gitconfig")
 
 Section 'G15: git, npm, pip, node honour TEMP/TMP/HOME and the cache variables (R medium; any other write is denied)'
 $cache = @('--env', "APPDATA=$W\appdata", '--env', "LOCALAPPDATA=$W\local", '--env', "npm_config_cache=$W\npmcache", '--env', "PIP_CACHE_DIR=$W\pipcache",
   '--env', "XDG_CACHE_HOME=$W\xdg", '--env', "UV_CACHE_DIR=$W\uvcache", '--env', "TMPDIR=$(Msys $W)/tmp", '--env', "npm_config_userconfig=$W\npmrc")
 New-Item -ItemType Directory -Force "$W\appdata", "$W\local" | Out-Null
-Bx 'g15-bash' $VRm @($pgit, '-c', "node -e ""const o=require('os');console.log('tmpdir',o.tmpdir(),'home',o.homedir())""; npm config get cache; npm --version; python -c ""import tempfile,os;print('pytmp',tempfile.gettempdir(),os.path.expanduser('~'))""; python -m pip --version; python -m pip config debug 2>&1 | head -5; echo G15_END") 90 $cache
-Bx 'g15-npm-init' $VRm @($pgit, '-c', "cd $(Msys $W) && mkdir -p npmt && cd npmt && npm init -y >/dev/null && npm ls 2>&1 | head -3; echo NPM_RC=`$?") 90 $cache
+Bx 'g15-bash' $VRu @($pgit, '-c', "node -e ""const o=require('os');console.log('tmpdir',o.tmpdir(),'home',o.homedir())""; npm config get cache; npm --version; python -c ""import tempfile,os;print('pytmp',tempfile.gettempdir(),os.path.expanduser('~'))""; python -m pip --version; python -m pip config debug 2>&1 | head -5; echo G15_END") 90 $cache
+Bx 'g15-npm-init' $VRu @($pgit, '-c', "cd $(Msys $W) && mkdir -p npmt && cd npmt && npm init -y >/dev/null && npm ls 2>&1 | head -3; echo NPM_RC=`$?") 90 $cache
 Log 'files the boxed tools made outside the workspace (should be none):'
 Log ((Get-ChildItem "$UP\AppData" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-15) } | Select-Object -First 10 -ExpandProperty FullName) -join "`n")
 
@@ -549,10 +577,37 @@ foreach ($k in $V.Keys) {
   }
 }
 
+foreach ($k in @('A', 'Rm')) {
+  Section "P-G3n ($k): the same escapes from a boxed Windows PowerShell (W20's g3-inbox.ps1: WMI, COM, schtasks, services, ShellExecute)"
+  Try-Do "g3ps-$k" {
+    $d = "$W\g3ps-$k"
+    New-Item -ItemType Directory -Force $d | Out-Null
+    $job = "Local\kith-g3ps-$k"
+    $bx = Start-Process $bp -ArgumentList (Q (@('xbox') + $V[$k] + @('--name', "g3ps$k", '--job-name', $job, '--timeout', '100', '--linger', '12', '--out', "$Out\g3ps-$k.box.txt", '--', 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\probe\bin\g3-inbox.ps1', $d))) -PassThru -WindowStyle Hidden -RedirectStandardOutput "$Out\g3ps-$k.master.txt"
+    for ($i = 0; $i -lt 45 -and -not (Test-Path "$d\g3-done.txt") -and -not $bx.HasExited; $i++) { Start-Sleep -Seconds 2 }
+    Start-Sleep -Seconds 3
+    Log "g3 done file: $(Test-Path "$d\g3-done.txt")"
+    Get-CimInstance Win32_Process -Filter "Name='PING.EXE'" | Where-Object { $_.CommandLine -match 'ping(\.exe)? -n 4[1-7] ' } | ForEach-Object {
+      Log "survivor method=$([regex]::Match($_.CommandLine, '-n (4\d)').Groups[1].Value) pid=$($_.ProcessId) parent=$($_.ParentProcessId)"
+      Bp injob --pid $_.ProcessId --job $job
+    }
+    Log ((Get-Content "$d\g3.log" -ErrorAction SilentlyContinue) -join "`n")
+    $bx.WaitForExit(120000) | Out-Null
+    Log ((Get-Content "$Out\g3ps-$k.master.txt" -ErrorAction SilentlyContinue | Select-Object -First 12) -join "`n")
+    Start-Sleep -Seconds 2
+    Get-CimInstance Win32_Process -Filter "Name='PING.EXE'" | Where-Object { $_.CommandLine -match 'ping(\.exe)? -n 4[1-7] ' } | ForEach-Object {
+      Log "STILL RUNNING after job terminate: method=$([regex]::Match($_.CommandLine, '-n (4\d)').Groups[1].Value) pid=$($_.ProcessId)"
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    schtasks.exe /delete /tn kithprobe44 /f 2>&1 | Out-Null
+    sc.exe delete kithprobesvc 2>&1 | Out-Null
+  }
+}
+
 # ---- F23 again -----------------------------------------------------------------------------------------------------------
 Section 'F23 again, with real work: boxed bash with a child loop and detached children (R), native detached children (A)'
-Bx 'f23-R' $VRm @($pgit, '-c', 'sleep 100 & sleep 101 & (sleep 102 &); nohup sleep 103 >/dev/null 2>&1 & sleep 50') 12 @('--kill-measure')
-Bx 'f23-Rl' $VRl @($pgit, '-c', 'sleep 100 & sleep 101 & (sleep 102 &); sleep 50') 12 @('--kill-measure')
+Bx 'f23-Ru' $VRu @($pgit, '-c', 'sleep 100 & sleep 101 & (sleep 102 &); nohup sleep 103 >/dev/null 2>&1 & sleep 50') 12 @('--kill-measure')
+Bx 'f23-Rul' $VRul @($pgit, '-c', 'sleep 100 & sleep 101 & (sleep 102 &); sleep 50') 12 @('--kill-measure')
 Bx 'f23-A' $VA @($bp, 'kill-test') 10 @('--kill-measure')
 Get-Process sleep -ErrorAction SilentlyContinue | ForEach-Object { Log "LEFTOVER sleep.exe pid=$($_.Id)" }
 
@@ -561,7 +616,7 @@ Section 'P-G19: remove the lowbox/RESTRICTED read on HKCU\Environment, then what
 Try-Do 'g19' {
   setx KITH_PROBE_SECRET sekret | Out-Null
   $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', 'ReadWriteSubTree', 'ChangePermissions')
-  $acl = $key.GetAccessControl()
+  $acl = $key.GetAccessControl('Access')
   Log "before: $($acl.Sddl)"
   Bx 'g19-before-A' $VA @($bp, 'reg-read') 30
   Bx 'g19-before-Rr' $VRr @($bp, 'reg-read') 30
@@ -569,11 +624,11 @@ Try-Do 'g19' {
   foreach ($ace in @('(A;OICI;KR;;;RC)', '(A;OICI;KR;;;AC)')) { $sd = $sd.Replace($ace, '') }
   $sd = [regex]::Replace($sd, '\(A;OICI;KR;;;S-1-15-3-1024-[0-9-]+\)', '')
   Log "new SDDL: $sd"
-  $acl.SetSecurityDescriptorSddlForm($sd)
+  $acl.SetSecurityDescriptorSddlForm($sd, 'Access')
   $key.SetAccessControl($acl)
   $key.Close()
   $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
-  Log "after: $($key.GetAccessControl().Sddl)"
+  Log "after: $($key.GetAccessControl('Access').Sddl)"
   $key.Close()
   Bx 'g19-after-A' $VA @($bp, 'reg-read') 30
   Bx 'g19-after-Rr' $VRr @($bp, 'reg-read') 30

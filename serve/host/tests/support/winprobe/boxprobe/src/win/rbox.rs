@@ -708,8 +708,8 @@ pub unsafe fn cmd_ubox(a: &[String]) -> Res<()> {
     let out_path = opt(a, "--out").ok_or("--out")?;
     let job = make_job(opt(a, "--job-name").as_deref())?;
     let inner = cmdline(&tail(a));
-    let line = format!("cmd.exe /c \"{inner} > \"{out_path}\" 2>&1\"");
     let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
+    let line = format!("{sysroot}\\System32\\cmd.exe /c \"{inner} > \"{out_path}\" 2>&1\"");
     let mut env: Vec<(String, String)> = vec![
         ("SystemRoot".into(), sysroot.clone()),
         ("windir".into(), sysroot.clone()),

@@ -37,11 +37,12 @@ Log "kithbox is in Administrators: $(([bool](net localgroup Administrators | Sel
 New-Item -ItemType Directory -Force C:\guest | Out-Null
 Set-Content -NoNewline C:\guest\kithbox.pw $pw2
 icacls C:\guest\kithbox.pw /inheritance:r /grant 'kithguest:R' /grant 'Administrators:F' /Q | Out-Null
+Log "kithbox.pw exists=$(Test-Path C:\guest\kithbox.pw) len=$((Get-Item C:\guest\kithbox.pw -ErrorAction SilentlyContinue).Length) acl=$((icacls C:\guest\kithbox.pw) -join ' ')"
 
 Section 'files a box can read, owned by the admin'
 Copy-Item $Boxprobe 'C:\probe\bin\boxprobe.exe' -Force
 Copy-Item $Boxprobe 'C:\probe\bin\kith-boxsh.exe' -Force
-foreach ($f in 'g3n.js', 'guest2-run.ps1', 'corpus.txt') { Copy-Item (Join-Path $here $f) "C:\probe\bin\$f" -Force }
+foreach ($f in 'g3n.js', 'g3-inbox.ps1', 'guest2-run.ps1', 'corpus.txt') { Copy-Item (Join-Path $here $f) "C:\probe\bin\$f" -Force }
 icacls C:\probe /grant '*S-1-15-2-1:(OI)(CI)(RX)' /Q | Out-Null
 
 Section 'busybox-w32 (pinned, committed to the repo: no download)'
@@ -123,11 +124,13 @@ Try-Do 'fw-r' {
 Run-Guest 'net-r' 300000
 Try-Do 'fw-r cleanup' { Remove-NetFirewallRule -DisplayName 'kithbox-r-*' -ErrorAction SilentlyContinue }
 
-Section 'P-G14 R: raw persistent WFP filters (loopback is not filtered by Firewall rules): block the user except loopback to :18080, permit owner tokens (Authenticated Users enabled); the box has it disabled'
+Section 'P-G14 R: raw persistent WFP filters (loopback is not filtered by Firewall rules): block user+install-SID tokens except loopback to :18080, permit user-only tokens'
 Try-Do 'wfp-r' {
   $guestSid = (Get-LocalUser kithguest).SID.Value
   Log "kithguest SID: $guestSid"
-  & $bp wfp-install --sd "D:(A;;CC;;;$guestSid)" --permit-sd 'D:(A;;CC;;;S-1-5-11)' --port 18080 2>&1 | ForEach-Object { Log "$_" }
+  $instSid = (& $bp rsid kith.install).Trim()
+  Log "per-install SID in every box's restricting list: $instSid"
+  & $bp wfp-install --sd "D:(A;;CC;;;$guestSid)(A;;CC;;;$instSid)" --permit-sd "D:(A;;CC;;;$guestSid)" --port 18080 2>&1 | ForEach-Object { Log "$_" }
   netsh wfp show filters file=C:\guest\out\wfp-raw-r.xml | Out-Null
   Log ("raw filters in the WFP dump: " + (Select-String -Path C:\guest\out\wfp-raw-r.xml -Pattern 'kithbox-' -SimpleMatch | Measure-Object).Count)
 }
