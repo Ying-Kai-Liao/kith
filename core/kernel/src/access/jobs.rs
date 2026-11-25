@@ -415,10 +415,8 @@ fn lockfile_ok(d: &Item, base: &Path) -> bool {
     let inside = std::fs::canonicalize(&path)
         .ok()
         .zip(std::fs::canonicalize(base).ok())
-        .is_some_and(|(p, b)| {
-            p.to_string_lossy()
-                .starts_with(&format!("{}/", b.to_string_lossy()))
-        });
+        // Component-wise, not a "/" string prefix: Windows paths join with a backslash.
+        .is_some_and(|(p, b)| p != b && p.starts_with(&b));
     is_file && !is_link && inside
 }
 
@@ -433,7 +431,7 @@ fn door_digest(d: &Item, lock: &[u8]) -> String {
     let obj: serde_json::Map<String, Value> =
         kept.into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
     let mut hasher = Sha256::new();
-    hasher.update(super::pyjson::dumps(&Value::Object(obj)).as_bytes());
+    hasher.update(crate::secrets::pyjson::dumps(&Value::Object(obj)).as_bytes());
     hasher.update([0u8]);
     hasher.update(lock);
     let hex = hasher.finalize().iter().fold(String::new(), |mut s, b| {

@@ -4,11 +4,13 @@ use std::ffi::c_void;
 use std::io;
 
 use windows_sys::Win32::Foundation::{HANDLE, LocalFree};
-use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+use windows_sys::Win32::Security::Authorization::{
+    ConvertSidToStringSidW, GetSecurityInfo, SE_KERNEL_OBJECT,
+};
 use windows_sys::Win32::Security::{
     CreateWellKnownSid, EqualSid, GetLengthSid, GetTokenInformation, IsValidSid,
-    SECURITY_MAX_SID_SIZE, TOKEN_QUERY, TOKEN_USER, TokenUser, WELL_KNOWN_SID_TYPE,
-    WinBuiltinAdministratorsSid, WinCreatorOwnerSid, WinLocalSystemSid,
+    OWNER_SECURITY_INFORMATION, SECURITY_MAX_SID_SIZE, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid, WinCreatorOwnerSid, WinLocalSystemSid,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -110,6 +112,33 @@ pub(crate) fn process_user(process: HANDLE) -> io::Result<Sid> {
     // SAFETY: success wrote a TOKEN_USER at the start of `buf`; its SID points into the same buffer.
     let sid = unsafe { (*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid };
     Sid::copy_from(sid)
+}
+
+/// The owner SID of the kernel object `handle` (opened with `READ_CONTROL`, which `GENERIC_READ` carries): who the object
+/// says made it. For a pipe, the account (or `Administrators`, when its maker was elevated) of the process that created it.
+pub(crate) fn object_owner(handle: HANDLE) -> io::Result<Sid> {
+    let mut owner: *mut c_void = std::ptr::null_mut();
+    let mut sd: *mut c_void = std::ptr::null_mut();
+    // SAFETY: `handle` is open; the owner points into the descriptor `sd`, which is freed below after the SID is copied.
+    let code = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &raw mut owner,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &raw mut sd,
+        )
+    };
+    if code != 0 {
+        return Err(crate::win_err(code));
+    }
+    let copied = Sid::copy_from(owner);
+    // SAFETY: `sd` was allocated by GetSecurityInfo (LocalAlloc) and is freed once.
+    unsafe { LocalFree(sd) };
+    copied
 }
 
 fn well_known(kind: WELL_KNOWN_SID_TYPE) -> io::Result<Sid> {

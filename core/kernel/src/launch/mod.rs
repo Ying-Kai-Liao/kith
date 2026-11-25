@@ -23,6 +23,7 @@ pub mod prompt;
 pub mod pyport;
 pub mod room;
 pub mod runenv;
+pub mod sched_turn;
 pub mod session;
 pub mod settings;
 pub mod start;
