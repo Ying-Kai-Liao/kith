@@ -198,7 +198,11 @@ case $1 in
   skills)             exec "$KITH/bin/kith-skills" "$@" ;;
   door)               shift; exec "$KITH/bin/kith-door" "${@:---help}" ;;
   cost)               shift; . "$KITH/lib/kith-core.sh"; kith_cost "${@:-agents}"; exit $? ;;   # `kith kernel cost` on the program
-  ask)                shift; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
+  ask)                shift
+                      # The host's claim goes on only to a `--reply` resume (kith-ask hands it to the inner launch, which attaches it); any other
+                      # form of ask is not a run to attach.
+                      if [[ ${1:-} == --reply ]]; then exec env ${turn_claim:+KITH_TURN_CLAIM=$turn_claim} "$KITH/bin/kith-ask" "$@"; fi
+                      no_turn_claim "kith ask"; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
   allow)              shift; exec "$KITH/bin/kith-allow" "${@:---help}" ;;
   cards)              shift; exec "$KITH/bin/kith-cards" "${@:---help}" ;;
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
