@@ -261,6 +261,12 @@ is "timeout: the waiter gives up with one wake" "$(enqueued "wait:$w")/$(nwaits)
 python3 "$W" wait --on at:+1h --session w7 --agent coder >/dev/null
 is "Stop drops the session's waiters" "$(python3 "$W" withdraw w7)/$(nwaits)" "withdrew 1/0"
 
+# Control for the exit 79 row above: an ordinary failure (exit 1) is still owed again. Last on purpose: the owed wake is never
+# drained after this, so it cannot overwrite an earlier row's stub-note.
+python3 "$W" enqueue sfail --id w:7 --agent designer -- seven >/dev/null
+STUB_MODE=fail python3 "$W" deliver sfail
+is "control: an ordinary failure (exit 1) is still owed again" "$(owed sfail)/$(how w:7)" "1/"
+
 # --- the tick drains ----------------------------------------------------------------------------------------------
 /usr/bin/grep -q "'kith-wake'\|bin/kith-wake" "$KERNEL/bin/kith-sched" && ok "kith-sched tick runs the drain" || bad "tick has no drain"
 
