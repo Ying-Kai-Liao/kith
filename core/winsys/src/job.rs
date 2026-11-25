@@ -529,6 +529,27 @@ mod tests {
     }
 
     #[test]
+    fn a_name_that_is_taken_is_refused_not_shared() {
+        let name = unique("taken");
+        let first = Job::create(&name).unwrap();
+        let e = Job::create(&name).err().unwrap();
+        assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
+        // The first job is untouched: it still takes a run and counts it.
+        let (program, args, env) = sleeper(&[]);
+        let launch = Launch {
+            program: &program,
+            args: &args,
+            env: &env,
+            cwd: None,
+            stdio: None,
+        };
+        let child = spawn_in_job(&first, &launch).unwrap();
+        assert!(first.holds(&child).unwrap());
+        first.terminate(3).unwrap();
+        assert_eq!(child.wait().unwrap(), 3);
+    }
+
+    #[test]
     fn a_name_nobody_made_is_not_found() {
         assert!(Job::open(&unique("none")).unwrap().is_none());
     }
