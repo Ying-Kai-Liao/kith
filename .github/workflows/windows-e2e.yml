@@ -20,6 +20,9 @@
 #   (i) `kith stop` and uninstall                             RUNS: stop, uninstall, Run key removed
 #   (j) a guest launch refused (WI6)                          RUNS: the named refusal; flips to a real guest run when the
 #                                                             Windows guest packages land (Q1 in the plan, a later package)
+# Guest scenarios (architect draft 2026-11-25), each flips from a named refusal when its package lands: (j) guest run and (m) two-person
+# room turn and (o) bot guest turn: W24b; (k) revoke mid-run: W28; (l) pipe squatting: W23; (n) door render: W27; people.* is
+# NotServed until W22b. They will run as a standard (non-admin) user in their own job.
 # Also: `kith init` is asserted to refuse until retire-python P4-13 (kith-init); W10's generated owner settings are
 # replaced for now by a hand-written PowerShell deny rule (TODO W10 in e2e.ps1).
 name: windows-e2e

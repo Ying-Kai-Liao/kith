@@ -88,6 +88,15 @@ Check 'kith.exe --version runs from the unpacked zip' ($ver.Code -eq 0 -and $ver
 Check 'the zip carries the data folder' (Test-Path (Join-Path $Unpacked 'share\kith\kernel\VERSION'))
 Check 'the zip leaves out kernel\bin (Windows data only)' (-not (Test-Path (Join-Path $Unpacked 'share\kith\kernel\bin')))
 
+# The zip carries kith.exe but no kith-serve.exe, and kith-servew.exe starts kith-serve.exe beside itself: installed as is, the
+# host never starts (found by this e2e's first run). Named gap, not a silent pass: W14's install.ps1 must make kith-serve.exe
+# from kith.exe (or W7 must ship it). Until then this step does it, so the rest can run.
+if (-not (Test-Path (Join-Path $Bin 'kith-serve.exe'))) {
+  Write-Host '::warning::the Windows zip has no kith-serve.exe, which kith-servew.exe starts (W7 / W14 gap); the e2e copies kith.exe to it'
+  Log 'GAP: zip lacks kith-serve.exe (W7 / W14); copying kith.exe'
+  Copy-Item $Kith (Join-Path $Bin 'kith-serve.exe')
+}
+
 # --- init -------------------------------------------------------------------------------------------------------------------
 Section 'kith init'
 # kith init is the bash router's verb (kernel/bin/kith) and Windows has no router until retire-python P4-13 (kith-init).
@@ -102,8 +111,8 @@ Check 'kith install writes the Run key and starts the host' ($inst.Code -eq 0) (
 $runVal = (reg query 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' /v KithServe 2>&1) -join ' '
 Check 'HKCU Run key names kith-servew.exe' ($runVal -match 'kith-servew\.exe') $runVal
 $up = $false
-for ($i = 0; $i -lt 60 -and -not $up; $i++) {
-  try { $h = Invoke-RestMethod "http://127.0.0.1:$Port/health" -TimeoutSec 3; $up = [bool]$h.ok } catch { Start-Sleep -Seconds 1 }
+for ($i = 0; $i -lt 45 -and -not $up; $i++) {
+  try { $h = Invoke-RestMethod "http://127.0.0.1:$Port/health" -TimeoutSec 2; $up = [bool]$h.ok } catch { Start-Sleep -Seconds 1 }
 }
 Check 'the host answers /health' $up
 if (-not $up) { Dump-HostLogs; Log 'host did not start; the scenarios below need it'; exit 1 }
@@ -170,6 +179,7 @@ if ($fake) { Stop-Process -Id $fake.Id -Force -ErrorAction SilentlyContinue }
 Section 'invite and revoke'
 $inv = Api 'createInvite' @{ name = 'Sam'; agents = @{} }
 Log "createInvite -> $($inv.Status) $($inv.Body)"
+# people.* in the core is NotServed on Windows until W22b (core authority on Windows): the refusal may be today's answer.
 $rev = Api 'revokePerson' @{ personId = 'sam' }
 Log "revokePerson -> $($rev.Status) $($rev.Body)"
 $after = Api 'people'
@@ -180,7 +190,9 @@ Check 'the host still answers after an invite and a revoke' ($after.Status -eq 2
 # --- guests (refused today, WI6) --------------------------------------------------------------------------------------------
 Section 'guest run (refused today)'
 $launch = Run-Cap $Kith @('kernel', 'launch', 'prompt', 'house', '--person', 'sam') 30 'guest-launch'
-# flips to a real guest run when the Windows guest packages land (WI6 is lifted by a Windows guest sandbox: Q1, a later package)
+# flips to a real guest run (scenario j) when W24b (guest box launch) lands. Guest scenarios will run as a standard
+# (non-admin) user in their own job: k revoke mid-run (W28), l pipe squatting (W23), m two-person room turn (W24b),
+# n door render (W27), o bot guest turn (W24b).
 Check 'a guest launch refuses by name today' ($launch.Code -ne 0 -and ($launch.Err + $launch.Out) -match 'not on Windows yet')
 
 # --- cost row ---------------------------------------------------------------------------------------------------------------
