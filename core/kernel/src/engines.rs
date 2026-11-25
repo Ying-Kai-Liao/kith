@@ -136,13 +136,28 @@ pub fn session_modes(engine: &str, reach: Reach) -> &'static [&'static str] {
         ("codex", Reach::ReadOnly) => &["read-only"],
         ("codex", Reach::Workspace) => &["workspace-write", "auto"],
         ("codex", Reach::Full) => &["agent-full-access", "full-access"],
-        // `hermes acp` (never started with --accept-hooks): accept_edits allows edits in the workspace and still asks for
-        // the rest; dont_ask is the no-asking mode a bypass run needs.
-        ("hermes", Reach::ReadOnly) => &["default"],
-        ("hermes", Reach::Workspace) => &["accept_edits"],
+        // `hermes acp`: its modes (default, accept_edits, dont_ask) are edit-approval policies only. Shell commands go
+        // through `approvals.mode`, which defaults to "smart" (a guardian model approves what it judges safe before the
+        // client is asked) and which only ~/.hermes/config.yaml sets. So no mode holds a run to its folders: only
+        // dont_ask, the mode that asks for nothing, is used (see `holds`).
         ("hermes", Reach::Full) => &["dont_ask"],
         _ => &[],
     }
+}
+
+/// Whether `engine` can hold a run to `reach` at all. False: no mode or sandbox Kith can set does it, so such a run is
+/// refused instead of started in the engine's own mode (an empty [`session_modes`] means "leave it", for engines Kith
+/// has no modes for). Hermes: its modes gate file edits only, and its shell approval is a config file Kith leaves alone.
+pub fn holds(engine: &str, reach: Reach) -> bool {
+    !(engine == "hermes" && reach != Reach::Full)
+}
+
+/// What to tell the person when `engine` can't hold a run to a reach below full (see [`holds`]).
+pub fn cannot_hold(engine: &str) -> String {
+    format!(
+        "{engine} can't be held to its folders unless the agent is in bypass mode: its permission modes cover file edits, \
+         not shell commands, so this run was not started. Put the agent in bypass mode, or use another engine."
+    )
 }
 
 /// Whether a run without approval may still allow (once) the agent's ask to run a tool of an MCP server the owner granted
@@ -1004,9 +1019,20 @@ mod tests {
         assert!(matches!(h.oneshot, Oneshot::Acp));
         assert!(h.enforces.per_run_mcp && !h.enforces.tool_hooks && !h.serves_guests());
         assert_eq!(h.enforces.role_prompt, RolePrompt::FirstMessage);
-        assert_eq!(session_modes("hermes", Reach::Workspace), ["accept_edits"]);
         assert_eq!(session_modes("hermes", Reach::Full), ["dont_ask"]);
-        assert_eq!(session_modes("hermes", Reach::ReadOnly), ["default"]);
+        // Its modes gate edits, not shell commands: only the run that asks for nothing is held to anything.
+        assert!(session_modes("hermes", Reach::Workspace).is_empty());
+        assert!(session_modes("hermes", Reach::ReadOnly).is_empty());
+        assert!(
+            holds("hermes", Reach::Full)
+                && !holds("hermes", Reach::Workspace)
+                && !holds("hermes", Reach::ReadOnly)
+        );
+        assert!(
+            holds("codex", Reach::Workspace)
+                && holds("claude", Reach::Workspace)
+                && holds("pi", Reach::ReadOnly)
+        );
     }
 
     #[test]

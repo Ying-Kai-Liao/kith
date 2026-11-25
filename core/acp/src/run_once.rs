@@ -275,9 +275,11 @@ async fn session(
     if let Some(id) = spec.resume.as_deref().filter(|_| !loadable) {
         eprintln!("kith: this agent cannot resume session {id}; starting a new session");
     }
-    let (created, sid) = if let Some(id) = resumed {
+    let mut resumed = resumed;
+    let mut loaded = None;
+    if let Some(id) = resumed {
         new_session["sessionId"] = json!(id);
-        let loaded = acp.request("session/load", new_session).await?;
+        let answer = acp.request("session/load", new_session.clone()).await?;
         // The agent replays the session's history before it answers: none of it is this run's answer or cost.
         let (mut old_text, mut old_cost) = (String::new(), None);
         while let Ok(inc) = rx.try_recv() {
@@ -288,6 +290,21 @@ async fn session(
         }
         // Only calls made in this run count towards an ask, not the ones the history replay reported.
         asks.servers.clear();
+        if answer.is_object() {
+            loaded = Some(answer);
+        } else {
+            // Null: the agent does not know the session (Hermes only loads the ones it made over ACP, not a native
+            // `hermes chat` one). It would list no modes either, so say so and start over instead of failing on that.
+            eprintln!(
+                "kith: this agent cannot resume session {id} (it was not started over ACP); starting a new session"
+            );
+            if let Some(o) = new_session.as_object_mut() {
+                o.remove("sessionId");
+            }
+            resumed = None;
+        }
+    }
+    let (created, sid) = if let (Some(id), Some(loaded)) = (resumed, loaded) {
         (loaded, id.to_owned())
     } else {
         let created = acp.request("session/new", new_session).await?;
