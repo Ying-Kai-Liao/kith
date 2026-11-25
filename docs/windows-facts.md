@@ -314,3 +314,29 @@ box that is not an AppContainer (a restricted token and job, as on W21's fallbac
 - Behaviour with no Git for Windows installed, or with `CLAUDE_CODE_GIT_BASH_PATH` pointing elsewhere.
 - Interactive-mode behaviour (everything above is `claude -p`).
 - Project folder naming for paths with spaces, dots or non-ASCII (F10).
+
+## Guest box facts, round 2 (W20b: A = AppContainer, R = restricted token, U = second local account) — DRAFT, handoff
+
+Source: `guest2` job of `windows-probe.yml` (`guest2.ps1`, `guest2-run.ps1`, `boxprobe xbox/ubox/watch/g3n-box/objdir-hold/wfp-install`).
+Identity: probes run as `kithguest` (standard user); admin steps as `runneradmin`. PortableGit 2.56.1 (sha256-checked), busybox-w32 pinned in
+`pinned/`. Runs: [45564093216](https://github.com/Ying-Kai-Liao/kith/actions/runs/45564093216), [45565519132](https://github.com/Ying-Kai-Liao/kith/actions/runs/45565519132),
+[45566929880](https://github.com/Ying-Kai-Liao/kith/actions/runs/45566929880), [45568261500](https://github.com/Ying-Kai-Liao/kith/actions/runs/45568261500),
+[45569554059](https://github.com/Ying-Kai-Liao/kith/actions/runs/45569554059). Holds / fails / partial per entry.
+
+- **F24 (R, holds):** a restricted token starts only with the logon SID (or RESTRICTED) in its restricting list (else 0xC0000142). Capability SIDs are refused as restricting SIDs (err 87); use arbitrary `S-1-5-21-...` SIDs (icacls cannot name them; use .NET/SetNamedSecurityInfo).
+- **F25 (R, FAILS):** Git Bash in R dies with `couldn't create signal pipe, Win32 error 5` (MSYS makes the pipe with a DACL of user/SYSTEM/Admins; the restricted second check fails). Only with the user's own SID in the restricting list does bash run (all 15 bash-isms pass), and then the box reads the profile secret and writes anywhere the user can. Low IL limits writes to Low-labelled folders but not reads.
+- **F26 (A, FAILS):** Git Bash in A: host can pre-create `\BaseNamedObjects\msys-2.0S5-<key>` and `\Sessions\BNOLINKS\2\...` (P-G2c), then the same signal-pipe error. Key depends on install path: junction and copy of PortableGit give different keys (P-G2e holds).
+- **F27 (P-G2f):** A cannot create a named pipe, anonymous CreatePipe works; R can create named pipes (owner = host user SID).
+- **F28 (P-G18):** `\Device\Null` DACL has Everyone but no ALL APPLICATION PACKAGES ACE; A cannot open NUL with any capability set (none, custom, 85, 87). R and U open it. Hence `/dev/null` fails in A (git, busybox).
+- **F29 (P-G2d):** busybox-w32 runs in A and R; Claude's argv forms work; 12/15 corpus items pass; arrays, here-strings, `declare -A` fail, `shopt` missing, no `$BASH_VERSION`. In A `/dev/null` fails.
+- **F30 (P-G3n):** in A and R every routes that could run stayed in the job (breakaway denied, schtasks/sc/BITS/cscript fail; PowerShell and cscript do not start in R: HKCU closed). WMI/COM untested in A and R. In U, WMI `Win32_Process.Create` started a process outside the job that survived TerminateJobObject (U fails G11).
+- **F31 (P-G7b, A, holds):** in-box listen plus a second process of the same box connecting works with no capability and with 87/86; internet only with internetClientServer; LAN inconclusive (timeouts for all sets). N1 is possible at the OS level but A has no shell.
+- **F32 (P-G17, partial):** one AC SID with explicit process SD + token default DACL: box B cannot open box A's process; a named mutex of A is opened by B.
+- **F33 (P-G14):** Firewall rules never filter loopback and did not match an R box by restricting SID. Raw persistent WFP filters (`wfp` feature): A (package SID + LoopbackExempt) reaches only 127.0.0.1:18080; R works with a per-install restricting SID in every box token (block SD user+install SID, permit SD user only); U keyed on the kithbox user works. Owner processes unaffected. Reboot survival is W19.
+- **F34 (R vs premises):** profile reads and writes denied; `C:\Windows\Temp` writable at Medium (Users create), denied at Low; Low needs a Low-labelled workspace; deny ACE for a restricting SID blocks writes (not in A); CredRead and HKCU denied; other run SID cannot open the box's processes; ancestors of a grant need a non-inherited ReadAttributes ACE (git stat).
+- **F35 (G8/G9, holds in A and R):** level-by-level carve-outs: carved file denied, siblings readable, later files invisible, recreated carved file still denied.
+- **F36 (F23 again):** after TerminateJobObject all pre-opened handles signalled within 1-2 ms (A; R with real bash children). In U the host cannot open descendant pids (err 5).
+- **F37 (P-G19, holds):** removing the RESTRICTED, ALL APPLICATION PACKAGES and ALL RESTRICTED APPLICATION PACKAGES read ACEs on HKCU\Environment (no admin) closes it to the box; unboxed reads and new processes unaffected; Calculator not on the image.
+- **F38 (U, mixed):** CreateProcessWithLogonW + AssignProcessToJobObject on the suspended child works; OS ACLs isolate profile, Cred store, HKCU; node/python/npm fine; fails F30 and F36. Final U bash result: see the last run of this PR.
+
+**Verdict:** both A and R FAIL as designed (A: no POSIX shell runs; R: bash runs only without isolation). Network is solvable in A (N2) and R (G6-R) with raw WFP. Windows guests wait for Claude Code's own sandbox unless U (or another design) is ratified.
