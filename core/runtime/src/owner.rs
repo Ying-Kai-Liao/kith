@@ -916,7 +916,7 @@ fn attempt(
         #[cfg(windows)]
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
             return Attempt::Done(Reached::Mismatch(format!(
-                "the owner pipe {} is served by something that is not this account's ({e}); it may be squatted, so nothing was sent and this command runs on its own",
+                "the owner pipe {} is served by something that is not this account's ({e}); it may be squatted, so nothing was sent",
                 endpoint(layout).display()
             )));
         }

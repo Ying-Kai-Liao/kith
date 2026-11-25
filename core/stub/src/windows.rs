@@ -102,6 +102,46 @@ pub fn pipe_server_pid(pipe: &std::fs::File) -> Option<u32> {
     (ok != 0).then_some(pid)
 }
 
+/// True when the pipe was made by this account or by `BUILTIN\Administrators` (an elevated process owns its objects that
+/// way). The parent-pid check alone has the reused-pid gap: the pipe's owner is what its maker was. Unreadable is false.
+pub fn pipe_owned_by_us(pipe: &std::fs::File) -> bool {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
+    use windows_sys::Win32::Security::OWNER_SECURITY_INFORMATION;
+    let Ok(ours) = my_sid() else { return false };
+    let mut owner = null_mut();
+    let mut sd = null_mut();
+    // SAFETY: the handle is an open pipe (read access carries READ_CONTROL); the owner points into `sd`, freed below
+    // once the text is copied.
+    unsafe {
+        let code = GetSecurityInfo(
+            pipe.as_raw_handle() as HANDLE,
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut sd,
+        );
+        if code != 0 || owner.is_null() {
+            return false;
+        }
+        let mut text = null_mut();
+        let ok = ConvertSidToStringSidW(owner, &mut text) != 0;
+        let s = if ok {
+            let len = (0..).take_while(|&i| *text.add(i) != 0).count();
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+            LocalFree(text.cast());
+            Some(s)
+        } else {
+            None
+        };
+        LocalFree(sd);
+        s.is_some_and(|s| s == ours || s == "S-1-5-32-544")
+    }
+}
+
 /// The pid of the process that started this one.
 pub fn parent_pid() -> Option<u32> {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;

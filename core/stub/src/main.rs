@@ -314,6 +314,9 @@ fn open_ctl(ctl: &Ctl) -> Result<(std::fs::File, std::fs::File), String> {
                     "--ctl-pipe {path:?} is served by pid {server:?}, not by the parent {parent:?}"
                 ));
             }
+            if !kith_stub::pipe_owned_by_us(&file) {
+                return Err(format!("--ctl-pipe {path:?} was made by another account"));
+            }
             let w = file.try_clone().map_err(|e| e.to_string())?;
             Ok((file, w))
         }
