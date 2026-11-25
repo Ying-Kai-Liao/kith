@@ -174,6 +174,98 @@ Inferred from this one sample: `:` and `\` each become `-`, so `C:\probe\cwd` ->
 spaces, long paths and non-ASCII is not determined here. With `CLAUDE_CONFIG_DIR` set, `projects` lives under it
 rather than under `%USERPROFILE%\.claude`.
 
+## Guest box facts (W20: what a Windows guest sandbox can rest on)
+
+Source: the `guest` job of `windows-probe.yml` (scripts `guest.ps1`, `guest-run.ps1`, `g3-inbox.ps1`, `guest-claude.ps1`,
+helper `boxprobe.exe`). Raw output: artifact `windows-guest-probe-output`. Identity: the OS probes run as `kithguest`, a
+STANDARD local user (not an Administrator) on `windows-2025`; the boxed child is an AppContainer process (Low integrity,
+only custom capabilities) in a job object. Admin-only steps (grants, `CheckNetIsolation`) ran as `runneradmin`. The Claude
+Code probes (F11, F19, F20, F21 part) ran as `runneradmin`: what Claude Code does with these settings does not depend on
+the account. Claude Code 2.1.331. Run for F12-F22 unless stated: __RUN1__ (earlier run 45524581007, which had a TEMP/cwd
+bug that left P-G3 survivors, P-G4 cmd, P-G5 squat, pair test and P-G10 unmeasured; those come from __RUN2__).
+
+### F11. P-G1: `CLAUDE_CODE_GIT_BASH_PATH` selects the Bash tool's shell (partial, see F11b when rerun)
+
+Premise: setting the variable to a kith shim `bash.exe` makes Claude Code's Bash tool (and hooks) run through it.
+Observed (run 45524581007): with the variable set to a logging stand-in, to a non-bash exe, to a missing path and to the
+real `C:\Program Files\Git\bin\bash.exe`, the Git bash found on PATH always ran and the stand-in's log stayed empty. So
+the variable was NOT honoured while Git for Windows is on PATH. Hooks (PreToolUse, SessionStart) fire. Result: partial
+(unproven either way); the Git-off-PATH retry is F11b. Identity: runneradmin.
+
+### F12. P-G2: what runs inside the AppContainer box (FAILS for Git Bash)
+
+Premise: Git Bash (or any shell) runs as the Bash tool inside the box with a minimal grant set.
+Observed: the box token is AppContainer, Low IL, only the custom capabilities. `node` and `whoami` run. Real Git Bash
+fails: `msys-2.0 fatal error NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0S5-...) 0xC0000022` (access denied); git
+through bash fails the same way. `git.exe` alone: `could not open '/dev/null': Permission denied`. The box cannot open
+the NUL device (Rust null stdin: os error 5; `cmd start >nul`: Access denied). Python fails 0xC0000135 (cannot load its
+DLLs) until an admin grants ALL APPLICATION PACKAGES read on its folder; Git, cmd and System32 already grant it, node and
+Python folders do not (node ran anyway). Result: FAILS for Git Bash as is. What it needs is in F12b. Identity: kithguest
+(standard), boxed.
+
+### F13. P-G3: a boxed process cannot leave the job (see F13b for the measured rerun)
+
+Observed (run 45524581007): no survivor for the 7 start methods tried (`cmd start`, `sc create`, `schtasks`, WMI denied or
+"Class not registered"; Start-Process, ShellExecute and WScript.Run reported ok), but nothing was alive after the box
+exited (`job_active_after_exit=0`), and the box cannot open NUL, so it is unclear whether those children ever started.
+Result: partial/unclear until the rerun.
+
+### F14. P-G4: what a boxed process can open of the user's unboxed world (HOLDS, with a registry caveat)
+
+Observed: opening an unboxed same-user process: err 5 for every access mask; Credential Manager (CredRead): err 5;
+`HKCU\Software\kithprobe`: denied. BUT `HKCU\Environment` and `HKCU\Software\Microsoft\Windows\CurrentVersion` open for
+read, so HKCU is partly readable (environment variables of the user are visible). Result: holds for process, credentials,
+private keys; partial for registry. Identity: kithguest, boxed.
+
+### F15. P-G5: named pipes (the box cannot create one)
+
+Observed: a boxed process cannot create a named pipe (err 5, with or without FILE_FLAG_FIRST_PIPE_INSTANCE). So the host
+side of every box-to-host pipe is created by the host. The squat test (box racing the owner for the name) is moot for
+the box; see F15b for the owner SID check. Result: holds (box cannot squat).
+
+### F16. P-G6: host pipe reachable from the box by ACE (HOLDS)
+
+Observed: a box connects to a host-created pipe whose DACL has an ACE for the capability SID (variants A, B, E) or for the
+AppContainer SID (D); err 5 with no ACE (C). No Low mandatory label is needed. The pipe's owner SID, read from the handle,
+equals the host user. Result: holds.
+
+### F17. P-G7: loopback to the host (BREAKS without admin)
+
+Observed: a box connecting to an unboxed host listener on 127.0.0.1 times out (6 s) even with `internetClient`; it works
+(95 ms) after `CheckNetIsolation LoopbackExempt -a -p=<AppContainer SID>` run as admin. Inside one box loopback works. The
+box cannot listen (err 5). With no `internetClient`: DNS fails and 1.1.1.1 gives 10013; with it, both work. The exemption
+is per AppContainer SID, so a fresh SID per run needs an admin step per run. Result: FAILS for a per-run SID unless the
+exemption is made once for a stable SID (or the box talks to the host only over a pipe, F16). Identity: kithguest for the
+box, runneradmin for the exemption.
+
+### F18. P-G8: deny ACE on a capability SID (FAILS)
+
+Observed: with a DENY(write) ACE for the capability SID on a folder and on a file, write and create still succeed; only
+removing the allow ACE blocks them. icacls of one (OI)(CI) ACE over 100,000 files: 15.7 s; revoke 15.8 s. Untested:
+deny on the AppContainer SID itself, `/inheritance:d`. Result: a deny ACE cannot carve holes; protect by not granting.
+
+### F19. P-G9: permission-rule path forms (partial)
+
+Observed (guest-claude, run 45524581007): `Read(//c/probe/secret/**)`, `Read(C:\probe\secret\**)` and
+`Read(C:/probe/secret/**)` each deny reads of every spelling tried (backslash, forward slash, `/c/`, upper/lower case,
+`..`); `Read(//C:/probe/secret/**)` and `Read(/c/probe/secret/**)` deny nothing (read returned the secret). Result:
+write deny rules as `//c/...`, `C:\...` or `C:/...`.
+
+### F20. P-G12: Claude Code's own Windows sandbox (OFF)
+
+Observed: `sandbox.enabled` gives "Windows sandbox is not active on this session (feature gate off)" and commands run
+unsandboxed; `failIfUnavailable` refuses to start; none of four env-name guesses flips it. Result: kith must box the
+guest's Bash itself.
+
+### F21. P-G11: tools inside the box (partial)
+
+Observed: `chrome-headless-shell --no-sandbox` in the box takes a screenshot (4917 bytes); with Chrome's own sandbox
+nested it hangs (90 s); ffmpeg (libx264) works; `WSADuplicateSocket` into a boxed child works. Result: Chrome needs
+`--no-sandbox` inside the box.
+
+__MORE__
+
+
 ## Not determinable here
 
 - Status line shell (F5).
