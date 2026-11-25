@@ -23,7 +23,7 @@ use crate::wake::{Check, Civil, Outside, PrView, Transcripts, World};
 const HOST: &str = "kith-serve-host/1-a";
 
 /// The world: a process table the test fills, and the clock. Every probe notes whether its thread held the core lock.
-struct Fake {
+pub(super) struct Fake {
     procs: Mutex<BTreeMap<i64, String>>,
     under_lock: AtomicUsize,
     seq: AtomicU64,
@@ -104,15 +104,15 @@ impl Liveness for Gone {
 }
 
 /// The daemon goes first and the machine folder last: a daemon that outlives its folder cannot stop.
-struct Rig {
-    d: Daemon,
-    f: Arc<Fake>,
-    state: PathBuf,
-    tmp: tempfile::TempDir,
+pub(super) struct Rig {
+    pub(super) d: Daemon,
+    pub(super) f: Arc<Fake>,
+    pub(super) state: PathBuf,
+    pub(super) tmp: tempfile::TempDir,
 }
 
 impl Rig {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let (t, m) = machine();
         let d = Daemon::spawn_with(
             &paths(&m),
@@ -153,22 +153,27 @@ impl Rig {
         }
     }
 
-    fn call(&self, who: Principal, method: &str, params: &Value) -> Result<Value, Error> {
+    pub(super) fn call(
+        &self,
+        who: Principal,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, Error> {
         self.d.shared().dispatch(who, method, params)
     }
 
-    fn owner(&self, method: &str, params: &Value) -> Value {
+    pub(super) fn owner(&self, method: &str, params: &Value) -> Value {
         self.call(Principal::Owner, method, params)
             .unwrap_or_else(|e| panic!("{method}: {e}"))
     }
 
-    fn host(&self, method: &str, params: &Value) -> Value {
+    pub(super) fn host(&self, method: &str, params: &Value) -> Value {
         self.call(Principal::Host, method, params)
             .unwrap_or_else(|e| panic!("{method}: {e}"))
     }
 
     /// One tick, and the check that none of its probes ran under the core lock.
-    fn tick(&self) -> Value {
+    pub(super) fn tick(&self) -> Value {
         let v = self.host("wake.tick", &json!({}));
         assert_eq!(
             self.f.under_lock.load(Ordering::SeqCst),
@@ -179,7 +184,7 @@ impl Rig {
     }
 
     /// The caller's view: agent `boss`, in session `sess-1`, from a terminal.
-    fn env(&self, extra: &[(&str, &str)]) -> Value {
+    pub(super) fn env(&self, extra: &[(&str, &str)]) -> Value {
         let mut e = json!({
             "KITH_STATE": self.state,
             "KITH_AGENT": "boss",
@@ -192,7 +197,7 @@ impl Rig {
         json!({"env": e})
     }
 
-    fn open(&self, id: &str, mode: &str, extra: &Value, env: &[(&str, &str)]) -> Value {
+    pub(super) fn open(&self, id: &str, mode: &str, extra: &Value, env: &[(&str, &str)]) -> Value {
         let mut p = self.env(env);
         p["id"] = json!(id);
         p["asked"] = json!("echo");
@@ -203,26 +208,30 @@ impl Rig {
         self.owner("ask.open", &p)
     }
 
-    fn open_bg(&self, id: &str) -> Value {
+    pub(super) fn open_bg(&self, id: &str) -> Value {
         self.open(id, "bg", &json!({"task": "do the thing"}), &[])
     }
 
-    fn sql<T: rusqlite::types::FromSql + Send + 'static>(&self, sql: &str, arg: &str) -> T {
+    pub(super) fn sql<T: rusqlite::types::FromSql + Send + 'static>(
+        &self,
+        sql: &str,
+        arg: &str,
+    ) -> T {
         self.d
             .shared()
             .with_core(|c| Ok(c.conn().query_row(sql, [arg], |r| r.get(0))?))
             .unwrap()
     }
 
-    fn ask_state(&self, id: &str) -> String {
+    pub(super) fn ask_state(&self, id: &str) -> String {
         self.sql("SELECT state FROM asks WHERE id = ?1", id)
     }
 
-    fn turn_state(&self, turn: i64) -> String {
+    pub(super) fn turn_state(&self, turn: i64) -> String {
         self.sql("SELECT state FROM turns WHERE id = ?1", &turn.to_string())
     }
 
-    fn rows(&self, id: &str) -> Vec<(String, bool)> {
+    pub(super) fn rows(&self, id: &str) -> Vec<(String, bool)> {
         self.d
             .shared()
             .with_core(|c| {
@@ -238,14 +247,14 @@ impl Rig {
             .unwrap()
     }
 
-    fn wake_state(&self, id: &str, n: i64) -> String {
+    pub(super) fn wake_state(&self, id: &str, n: i64) -> String {
         self.owner("wake.queueStatus", &json!({"id": format!("ask:{id}/{n}")}))["state"]
             .as_str()
             .unwrap()
             .to_owned()
     }
 
-    fn finish(&self, id: &str, out: Option<&Value>) -> Value {
+    pub(super) fn finish(&self, id: &str, out: Option<&Value>) -> Value {
         // The host's report names its turn: the ask's current one.
         let turn: Option<i64> = self
             .d
@@ -266,7 +275,7 @@ impl Rig {
     }
 
     /// The host claims the ask's turn and the callee attaches itself: the turn is `running`. Answers the claim.
-    fn start(&self, id: &str, turn: i64) -> i64 {
+    pub(super) fn start(&self, id: &str, turn: i64) -> i64 {
         let claim = self.claim(id, turn);
         let pid = std::process::id();
         let started = kith_kernel::procstart::start_stamp(pid).expect("a start stamp");
@@ -282,7 +291,7 @@ impl Rig {
     }
 
     /// The host claims the ask's turn: `claimed`, with no process yet.
-    fn claim(&self, id: &str, turn: i64) -> i64 {
+    pub(super) fn claim(&self, id: &str, turn: i64) -> i64 {
         let claimed = self.host(
             "hostclaim.claim",
             &json!({"conversation": format!("ask:{id}"), "kind": "askRun", "turn": turn, "person": "owner",
@@ -294,7 +303,7 @@ impl Rig {
     }
 
     /// The launcher's report and `end_gone`: the claim ends and the turn is `failed` (`exit`) or `done` (`done`).
-    fn report(&self, claim: i64, kind: &str) {
+    pub(super) fn report(&self, claim: i64, kind: &str) {
         self.host(
             "hostclaim.report",
             &json!({"claimId": claim, "kind": kind,
@@ -309,7 +318,7 @@ impl Rig {
     }
 }
 
-fn ms() -> i64 {
+pub(super) fn ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -318,11 +327,11 @@ fn ms() -> i64 {
         .unwrap()
 }
 
-fn answer(text: &str) -> Value {
+pub(super) fn answer(text: &str) -> Value {
     json!({"type": "result", "result": text, "total_cost_usd": 0.25, "session_id": "sid-9", "is_error": false})
 }
 
-fn turn_of(opened: &Value) -> i64 {
+pub(super) fn turn_of(opened: &Value) -> i64 {
     opened["turn"]
         .as_i64()
         .unwrap_or_else(|| panic!("{opened}"))

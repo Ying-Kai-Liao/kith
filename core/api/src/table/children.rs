@@ -57,7 +57,7 @@ pub(super) const ROWS: &[Method] = &[
                 "mode",
                 "string",
                 &["--mode"],
-                "`fg` (the caller's own process runs the callee) or `bg` (a core turn, source `ask`, that the host starts; the open makes the turn in the same transaction). Without it the record is as before the ledger.",
+                "`fg` (the caller's own process runs the callee), `bg` (a core turn, source `ask`, that the host starts; the open makes the turn in the same transaction) or `peer` (the agent lives on another computer: no local turn, the host sends it and follows its rows; only the owner's runs, and only to a computer that is paired). Without it the record is as before the ledger.",
             ),
             flag(
                 "task",
@@ -83,13 +83,44 @@ pub(super) const ROWS: &[Method] = &[
                 &["--engine"],
                 "`bg`: the callee's engine (default: its conversation's, else claude).",
             ),
+            flag(
+                "peer",
+                "string",
+                &["--peer"],
+                "`peer`: the computer the agent lives on. Refused unless this computer is paired with it now.",
+            ),
+            flag(
+                "cont",
+                "string",
+                &["--cont"],
+                "`peer`: the key (ask id) of the earlier ask on that computer whose session this one continues (`-c`).",
+            ),
+            flag(
+                "originComputer",
+                "string",
+                &["--origin-computer"],
+                "`bg`, on the callee's computer: the computer that asked. With `originKey` and `originEpoch`. The open is refused (as a refused row it can read back) unless that pairing epoch is the live one; the same key again answers the row it made.",
+            ),
+            flag(
+                "originKey",
+                "string",
+                &["--origin-key"],
+                "`bg`, on the callee's computer: the asking computer's id for the ask.",
+            ),
+            flag(
+                "originEpoch",
+                "string",
+                &["--origin-epoch"],
+                "`bg`, on the callee's computer: the pairing epoch the ask was sent under.",
+            ),
             sw("checkOnly", &["--check-only"], "Decide, write nothing."),
             KERNEL,
             HOME,
             ENV,
         ],
         &["asks", "open"],
-    ),
+    )
+    .principals(OWNER_HOST),
     ask(
         "ask.settle",
         "The run behind an ask ended a turn at a cost (US$): it joins its chain's cost, and a chain that reaches its cap with this turn is marked once per cap. `--state` answered or stopped settles an open ask (capped when this turn tipped the chain). Settling a settled ask only adds the cost. Answers `{id, state, cost, tipped}`; refuses an id that is no ask.",
@@ -280,6 +311,60 @@ pub(super) const ROWS: &[Method] = &[
         &[pos("id", "string", true, "The ask.")],
         &["asks", "record"],
     ),
+    ask(
+        "ask.peerLink",
+        "A pairing with another computer starts (the host writes this before it writes the pairing): `epoch` is the live one for `computer` in `dir` (`in`: asks that computer sends here, the fence every open, claim and attach of such an ask reads; `out`: asks sent there). A different epoch than the live one ends it first, in the same transaction (as `ask.endPeer`); the live epoch again changes nothing; an epoch that was ended is refused, since it is never made live again. Epochs are the host's pairing ids and have no order. Answers `{computer, dir, epoch, linked, ended, sessions, kill}`.",
+        &[
+            pos("computer", "string", true, "The other computer."),
+            pos("dir", "string", true, "`in` (asks that computer sends here) or `out` (asks sent there): the two directions are two pairings."),
+            pos("epoch", "string", true, "The pairing epoch, as the host stores it (a hash: compared, never ordered)."),
+        ],
+        &["asks", "peer-link"],
+    )
+    .principals(OWNER_HOST),
+    ask(
+        "ask.endPeer",
+        "One pairing with a computer ends (the host calls it before it removes the pairing, and again from its level-triggered reconcile). In one transaction the fence of that direction is down, so nothing of that epoch opens, is claimed or attaches, and: for `in`, the asks that computer sent here are ended (running ones stopped, with the claims to kill, queued and claimed ones refused, each with a row it can read); for `out`, the asks sent there are cut off, each with one notice row and wake, and every stop owed to it is dropped. The other direction is left alone. Safe to repeat. Answers `{computer, dir, ended, sessions, kill}`.",
+        &[
+            pos("computer", "string", true, "The other computer."),
+            pos("dir", "string", true, "`in` ends the asks that computer sent here; `out` cuts off the asks sent there."),
+        ],
+        &["asks", "end-peer"],
+    )
+    .principals(OWNER_HOST),
+    ask(
+        "ask.peerApply",
+        "Copies what another computer says of an ask sent there, in one transaction: each row once (the same call again adds nothing), one owed wake per row, the ask's final state and its cost (booked once). Nothing is copied once the ask was stopped, cut off or final, and its computer's final row and a cut-off notice never both reach the asker; a final state clears the stop owed. The call is the computer answering: the send counts as made and the away wait starts over. An `epoch` other than the ask's is dropped. Answers `{id, applied, rows, state, fetched}`.",
+        &[
+            pos("id", "string", true, "The ask on this computer."),
+            pos("epoch", "string", true, "The pairing epoch the ask was sent under."),
+            flag(
+                "rows",
+                "json",
+                &["--rows"],
+                "Its computer's rows after `fetched`: `[{n, as, kind, text, at}]`, `kind` answer, progress or lost.",
+            ),
+            flag(
+                "state",
+                "string",
+                &["--state"],
+                "The ask's state there: open, answered, capped, stopped, lost or refused. A final one ends the ask here.",
+            ),
+            flag("cost", "json", &["--cost"], "US$ the run and what it asked cost there, in total (read with a final state)."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["asks", "peer-apply"],
+    )
+    .principals(OWNER_HOST),
+    ask(
+        "ask.peerOwed",
+        "What the host owes the link, from the rows (nothing is written): `send` (asked here, not yet answered by its computer: id, key, computer, epoch, agent, task, cont, lineage), `follow` (sent and open: the last row copied, `after`) and `stop` (a stop its computer has not confirmed). Only asks whose pairing is live. Answers `{send, follow, stop}`.",
+        &[],
+        &["asks", "peer-owed"],
+    )
+    .principals(OWNER_HOST),
     ask(
         "ask.limits",
         "The delegation caps: hops on one Mac, hops across Macs, the refused exit code, the default cap and `cap_usd`, the chain cap in force (null for none).",
