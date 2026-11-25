@@ -397,7 +397,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - The core's owner-pipe client moves onto `kith_winsys::pipe::connect`: server identity and pipe-owner SID check, with
     Administrators allowed.
   - Sweep: every Windows pipe and socket client checks the same way.
-- [ ] **W5d. Owner tools reach the host only over a channel that proves who serves it.** Owner: unowned. Status: in progress (standing answer q271: build now). S-M. Depends: W5b, W5c.
+- [ ] **W5d. Owner tools reach the host only over a channel that proves who serves it.** Owner: windows-owner-build-2. Status: in progress (standing answer q271: build now). S-M. Depends: W5b, W5c.
   - Owner tools send the host's full owner token as a Bearer over `127.0.0.1:<port>`. Callers: `core/kernel/src/launch/runenv.rs:69`, `permit/host.rs:145` and `:251`, `people/system.rs:149`, `serve/host/src/threads_cmd.rs:84`.
   - Any other local account that binds the port while the host is down receives the token, on the Mac and on Windows.
   - **Fix:** owner callers reach the host only over a channel that proves who serves it: a Unix socket 0600 in a 0700 folder on the Mac, a checked named pipe on Windows. One shared helper. No Bearer over loopback.
