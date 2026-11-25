@@ -40,7 +40,7 @@ let pending: { computerId: string } | null = empty ? null : { computerId: 'demo-
 provideWebSession({
   ready: async () => {},
   support: async () => null,
-  pendingLink: async () => pending && { ...pending, appLink: 'kith://invite?c=demo-mac-computer-id&i=inv_1&t=tok_12345678' },
+  pendingLink: async () => pending && { ...pending, appLink: 'kith://invite?c=demo-mac-computer-id&i=inv_1&t=tok_12345678', link: { computerId: 'demo-mac-computer-id', inviteId: 'inv_1', token: 'tok_12345678' } },
   discardPending: async () => { calls.push('discardPending'); pending = null },
   signInAgain: async () => {},
 })
@@ -99,14 +99,14 @@ try {
   const [sw, iw] = await waiting.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth])
   check(sw <= iw, `the confirm screen has no horizontal scroll at 375px (${sw}/${iw})`)
   const text = await waiting.innerText('body')
-  check(/Join a computer on Kith\?/.test(text) && /Not now/.test(text), 'the confirm screen asks before joining')
+  check(/invited/.test(text) && /Continue in browser/.test(text) && /Not now/.test(text), 'the confirm screen asks before joining')
   check((await calls(waiting)).length === 0, 'nothing ran before the click: no takePending, accept, requestAccess or proveInvite')
-  const openApp = waiting.getByRole('link', { name: 'Open in the Kith app' })
+  const openApp = waiting.getByRole('link', { name: 'Open in Kith app' })
   check((await openApp.getAttribute('href')) === 'kith://invite?c=demo-mac-computer-id&i=inv_1&t=tok_12345678', 'the app offer is a plain anchor to the kith link')
   await waiting.waitForTimeout(1500)
   check(waiting.url() === base, 'no auto-redirect')
   check((await calls(waiting)).length === 0, 'and still nothing after waiting')
-  await waiting.getByRole('button', { name: 'Join', exact: true }).click()
+  await waiting.getByRole('button', { name: 'Continue in browser' }).click()
   await waiting.waitForTimeout(1500)
   const after = await calls(waiting)
   check(after.includes('takePending'), `Join starts the join (${after.join(', ') || 'no calls'})`)

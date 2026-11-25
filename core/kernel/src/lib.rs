@@ -3,43 +3,42 @@
 //! differential harness (`kernel/tests/difftest`) fails when they differ.
 
 pub mod accounts;
-// Unix only: it runs `kith-auth` through the secrets module's timeout helper.
-#[cfg(unix)]
+// On Windows the ledger (tag, record, sync) and the reports of one agent run; the verbs that ask `kith-auth` for people
+// (`people`, `members`, `bots`) are refused by name until retire-python P3-1.
 pub mod cost;
 pub mod delegation;
 pub mod engines;
 pub mod helpers;
 // Unix only: these write modes with mode(2), sync directories, send signals and read `ps`. The Windows build of this crate
-// (the `windows` CI job) is accounts, delegation, engines and paths; the core runtime needs paths.
+// (the `windows` CI job) is the modules in the Windows list of `MODULES`; the core runtime needs paths.
 #[cfg(unix)]
 pub mod launch;
 // Unix only: it forks the compaction (a parked child) and takes flocks, like `threads`, whose claims it takes.
 #[cfg(unix)]
 pub mod lifecycle;
 pub mod log;
+pub mod ownerfs;
 pub mod paths;
 // Unix only, like `cost` and `secrets`: it runs `kith-auth` through the secrets module's timeout helper.
 #[cfg(unix)]
 pub mod people;
-// Unix only: `resolve` clones with cp, sets modes and asks `kill(2)` whether a run is alive.
-#[cfg(unix)]
 pub mod pkg;
 // Unix only: the run socket is a Unix socket and the one-shots are modes.
 #[cfg(unix)]
 pub mod permit;
 pub mod procstart;
+pub mod project;
 // Unix only in the module list below: the hook is written into a unix launch's settings.
 pub mod readfence;
-// Unix only: it writes projects.json through `secrets::pyjson`.
-#[cfg(unix)]
-pub mod project;
-// Unix only: flock and mode(2), like `project`.
-#[cfg(unix)]
 pub mod room_ledger;
 pub mod schedule;
+// Unix only, whole: the access decision runs `kith-auth`, reads the password database and writes auth.json with modes. Windows
+// has just the pieces the other modules stand on (`pyjson`, the timeout helper): see `secrets_win.rs`.
 #[cfg(unix)]
 pub mod secrets;
-#[cfg(unix)]
+#[cfg(not(unix))]
+#[path = "secrets_win.rs"]
+pub mod secrets;
 pub mod settings;
 #[cfg(unix)]
 pub mod threads;
@@ -66,6 +65,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "engine-run",
         "engines",
         "launch",
+        // `kernel launch-exec`: a one-shot run in this process (the entry's one-shot branch). A token of its own: an older
+        // program that lists `launch` must not be sent `--exec`.
+        "launch-exec",
         "lifecycle",
         "paths",
         "permit",
@@ -99,10 +101,16 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "accounts-main-id",
         "accounts-run-chain",
         "acp",
+        // The ledger's writers; `cost` itself (the per-person views) waits for P3-1, which takes `kith-auth` out of them.
+        "cost-ledger",
         "delegation",
         "engine-run",
         "engines",
         "paths",
+        "pkg",
+        "project",
+        "room-ledger",
+        "settings",
         "wake",
     ]
 };
@@ -120,7 +128,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engines","launch","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","cost","cost-ledger","delegation","engine-run","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
         );
     }
 }
