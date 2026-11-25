@@ -1065,7 +1065,6 @@ fn print_cost(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
 }
 
 /// `kith kernel permit ARGS...`: what `kith-permit`'s verbs print, with its exit codes. The hooks read their payload from stdin.
-#[cfg(unix)]
 fn print_permit(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     use std::io::Write as _;
     let home = kith_kernel::paths::process_home();
@@ -1151,7 +1150,7 @@ fn print_settings(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
 }
 
 /// The kernel verbs whose modules are Unix-only in kith-kernel, with what to tell a Windows caller. Their ports are
-/// windows-owner W5a (secrets, settings, people, cost), W5b (permit), W12 (threads, lifecycle) and retire-python P1
+/// windows-owner W5a (secrets, settings, people, cost), W12 (threads, lifecycle) and retire-python P1
 /// (launch, pkg, project-id, room-ledger).
 #[cfg(not(unix))]
 fn unix_only_verb(cmd: &KernelCmd) -> Option<&'static str> {
@@ -1166,7 +1165,6 @@ fn unix_only_verb(cmd: &KernelCmd) -> Option<&'static str> {
         KernelCmd::ProjectId { .. } => "kernel project-id (retire-python P1)",
         KernelCmd::RoomLedger { .. } => "kernel room-ledger (retire-python P1)",
         KernelCmd::Pkg { .. } => "kernel pkg (retire-python P1)",
-        KernelCmd::Permit { .. } => "kernel permit (windows-owner W5b)",
         KernelCmd::Launch { .. } => "kernel launch (retire-python P1)",
         KernelCmd::LaunchExec { .. } => "kernel launch-exec (retire-python P1)",
         _ => return None,
@@ -1781,7 +1779,6 @@ async fn main() -> Result<()> {
             if let KernelCmd::Pkg { kernel, args } = cmd {
                 std::process::exit(pkg_cmd::run(kernel, &args));
             }
-            #[cfg(unix)]
             if let KernelCmd::Permit { kernel, args } = cmd {
                 std::process::exit(print_permit(kernel, &args));
             }
