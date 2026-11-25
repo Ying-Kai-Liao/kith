@@ -372,7 +372,15 @@ mod on_windows {
     fn a_guest_launch_exits_3_and_starts_nothing() {
         let t = Tree::new();
         let argv = ["--launch-json".to_owned()];
-        for (k, v) in [("KITH_PERSON", "sam"), ("KITH_RUN_TOKEN", "tok")] {
+        for (k, v) in [
+            ("KITH_PERSON", "sam"),
+            ("KITH_PERSON", "room-1"),
+            ("KITH_RUN_TOKEN", "tok"),
+            ("KITH_RUN_SOCKET", "s"),
+            ("KITH_CORE_RUN_SOCKET", "s"),
+            ("KITH_ROOM_MEMBERS", "sam,ann"),
+            ("KITH_ROOM_AUTHOR", "sam"),
+        ] {
             let mut e = env(&t);
             e.insert(k.to_owned(), v.to_owned());
             let got = assemble::launch_in(
@@ -386,6 +394,9 @@ mod on_windows {
         }
         // Nothing of a run was made for them: no folder for the person.
         assert!(!t.root.join("kith/agents/echo/memory/people/sam").exists());
+        // Nothing was written at all: the run's own folders (made right after the plan's checks) are not there.
+        assert!(!t.root.join("kith/agents/echo/memory/projects").exists());
+        assert!(!t.root.join("kith/agents/echo/memory/sessions").exists());
     }
 
     #[test]
