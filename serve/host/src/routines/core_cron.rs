@@ -64,15 +64,27 @@ impl Ops for Live {
             what: if program.is_some() { "kith kernel launch" } else { "kith-sched run-turn" },
             ended: "the scheduled run",
         };
-        start(&self.0, &run, |claim| {
+        let outbox = std::cell::RefCell::new(None);
+        let started = start(&self.0, &run, |claim| {
             let kernel = kernel_here().ok_or_else(|| "no kith kernel here to run the job".to_owned())?;
             if let Some(program) = &program {
                 let w = sched_launch::Which { agent, job, person: spec_person.as_str(), turn, claim };
                 let built = sched_launch::build(hub, self.0.folders(), program, &kernel, t, &w)?;
-                return Ok(Launch { cmd: built.cmd, stdin: Some(built.spec), err_file: Some(built.log), bind: None });
+                *outbox.borrow_mut() = built.outbox;
+                return Ok(Launch {
+                    cmd: built.cmd,
+                    stdin: Some(built.spec),
+                    err_file: Some(built.log),
+                    bind: sched_launch::note_pid(),
+                });
             }
             Ok(Launch { cmd: command(&kernel, agent, job, turn, claim), stdin: Some(spec), err_file: None, bind: None })
-        })
+        });
+        // A launch that never started leaves no run for its outbox to belong to.
+        if let (Started::Cancelled(_), Some(dir)) = (&started, outbox.borrow().as_deref()) {
+            sched_launch::remove_outbox(dir);
+        }
+        started
     }
 }
 

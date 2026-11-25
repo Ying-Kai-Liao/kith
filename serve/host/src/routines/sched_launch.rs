@@ -105,6 +105,35 @@ pub(super) struct Built {
     pub spec: Value,
     /// The run's log: the reason of a refusal is its last line.
     pub log: PathBuf,
+    /// The outbox made for this run: removed by [`remove_outbox`] when the launch never starts.
+    pub outbox: Option<PathBuf>,
+}
+
+/// Removes the outbox (and its meta file) made for a run that did not happen; the launch does the same for one it refuses.
+pub(super) fn remove_outbox(dir: &Path) {
+    let _ = std::fs::remove_dir_all(dir);
+    let mut meta = dir.to_path_buf().into_os_string();
+    meta.push(".json");
+    let _ = std::fs::remove_file(meta);
+}
+
+/// A test makes every launch fail to start (a folder to run in that is not there).
+#[cfg(test)]
+pub(crate) static TEST_BAD_CWD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The pids the host started launches as (a test reads them; a host has no use for the pid: the launch attaches itself).
+#[cfg(test)]
+pub(crate) static SPAWNED: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
+/// Told the started process's pid: kept for a test, nothing for a host.
+pub(super) fn note_pid() -> Option<super::run_door::Bind> {
+    #[cfg(test)]
+    return Some(Box::new(|pid| {
+        SPAWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(pid);
+        Box::new(())
+    }));
+    #[cfg(not(test))]
+    None
 }
 
 /// What a launch is built from.
@@ -127,8 +156,10 @@ pub(super) fn build(
     w: &Which<'_>,
 ) -> Result<Built, String> {
     let job = job_of(folders, w.agent, w.job);
-    let origin = origin_of(hub, w.agent, &job, w.person);
+    // The log first: the outbox is made only for a launch that can be started.
     let (log, log_path) = open_log(folders, w.agent, w.job).map_err(|e| format!("can't open the run's log: {e}"))?;
+    let origin = origin_of(hub, w.agent, &job, w.person);
+    let outbox = origin.get("KITH_RUN_OUTBOX").and_then(Value::as_str).map(PathBuf::from);
     let err = log.try_clone().map_err(|e| format!("can't share the run's log: {e}"))?;
     let mut cmd = Command::new(program);
     #[cfg(test)]
@@ -156,7 +187,11 @@ pub(super) fn build(
     super::run_door::detach(&mut cmd);
     let spec =
         json!({"prompt": t["prompt"], "settings": t["settings"], "person": w.person, "job": job, "origin": origin});
-    Ok(Built { cmd, spec, log: log_path })
+    #[cfg(test)]
+    if TEST_BAD_CWD.load(std::sync::atomic::Ordering::SeqCst) {
+        cmd.current_dir("/nonexistent-kith-test-folder");
+    }
+    Ok(Built { cmd, spec, log: log_path, outbox })
 }
 
 // Unix-only: the stand-ins are shell scripts.

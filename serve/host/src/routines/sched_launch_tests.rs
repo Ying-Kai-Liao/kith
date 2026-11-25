@@ -235,3 +235,22 @@ fn a_launch_that_refuses_ends_the_turn_with_the_last_line_it_wrote_and_exit_code
     );
     assert_eq!(lab.calls("hostclaim.report")[0]["kind"], "exit");
 }
+
+#[test]
+fn a_launch_that_fails_to_start_leaves_no_outbox_behind() {
+    let lab = Lab::new();
+    lab.program("\"sched-turn\"", "true");
+    super::TEST_BAD_CWD.store(true, std::sync::atomic::Ordering::SeqCst);
+    let hub = hub();
+    let started = Live(lab.writer()).cron(&hub, &fired("sam", false), "daily");
+    super::TEST_BAD_CWD.store(false, std::sync::atomic::Ordering::SeqCst);
+    assert!(matches!(&started, Started::Cancelled(why) if why.contains("couldn't start")), "{started:?}");
+    let root = crate::service::default_data_dir().join("outbox");
+    let left: Vec<_> = std::fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("sched-house-daily-"))
+        .collect();
+    assert!(left.is_empty(), "the outbox of a run that never started is removed: {left:?}");
+}

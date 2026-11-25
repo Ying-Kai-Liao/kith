@@ -15,7 +15,7 @@
 use crate::routines::core_cron::{Live, TEST_KERNEL};
 use crate::routines::core_runs::Ops;
 use crate::routines::run_door::Started;
-use crate::routines::sched_launch::{TEST_ENV, TEST_PROGRAM};
+use crate::routines::sched_launch::{SPAWNED, TEST_ENV, TEST_PROGRAM};
 use crate::routines::switch_tests::hub;
 use crate::terminal::core_writer::CoreWriter;
 use kith_kernel::paths::Paths;
@@ -93,6 +93,8 @@ case "$1 $2" in
 esac
 who=$(basename "${CLAUDE_CONFIG_DIR:-default}")
 case " ${FAKE_LIMIT_FOR:-} " in *" $who "*) echo "You've hit your weekly limit · resets 9pm"; exit 1 ;; esac
+while [ -e "$REC/hold" ]; do sleep 0.1; done
+echo "engine-still-writing-after-the-host-restart"
 f="$REC/$who.$$"
 {
   echo "who=$who"
@@ -132,6 +134,7 @@ exit 0
             ("KITH_SERVE_PORT".to_owned(), "1".to_owned()),
             ("TZ".to_owned(), "UTC".to_owned()),
         ]);
+        SPAWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
         let world = Self { dir, folders, rec, env, daemon: None, _held: held };
         world.python(&kernel, &["person", "kai", "owner"]);
         world.python(&kernel, &["person", "sam", "name=Sam"]);
@@ -226,6 +229,13 @@ exit 0
         (turn, claim, runs)
     }
 
+    /// The pid of the process the host started as the launch.
+    fn launch_pid(&self) -> i64 {
+        let spawned = SPAWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(spawned.len(), 1, "the host started one launch: {spawned:?}");
+        i64::from(spawned[0])
+    }
+
     /// The pid the core recorded on the claim.
     fn claim_pid(&self, claim: i64) -> i64 {
         self.db().query_row("SELECT pid FROM claims WHERE claim_id = ?1", [claim], |r| r.get(0)).unwrap()
@@ -263,7 +273,7 @@ fn ancestors(run: &str) -> Vec<i64> {
 
 #[test]
 fn an_owners_job_walks_to_the_second_account_when_the_first_is_out_of_usage() {
-    let w = World::start(&json!([{"id": "walk", "cron": "0 8 * * *", "task": "x"}]));
+    let w = World::start(&json!([{"id": "walk", "cron": "0 8 * * *", "task": "do the walk"}]));
     w.set_child_env(&[("FAKE_LIMIT_FOR", "default")]);
     let (turn, claim, runs) = w.fire_and_run("walk");
     assert_eq!(runs.len(), 1, "only the second account's attempt ran the engine: {runs:?}");
@@ -277,12 +287,12 @@ fn an_owners_job_walks_to_the_second_account_when_the_first_is_out_of_usage() {
     assert_eq!(value_of(run, "KITH_RUN_OUTBOX"), None, "the owner has no app chat with house here: no outbox");
     let argv = value_of(run, "argv").unwrap();
     assert!(argv.contains("Scheduled job \"walk\" of house, cron `0 8 * * *`, core turn"), "{argv}");
-    assert!(
-        ancestors(run).contains(&w.claim_pid(claim)),
-        "the claim's pid is the launch's, which the engine descends from: claim pid {} in {:?} (turn {turn})",
-        w.claim_pid(claim),
-        ancestors(run)
-    );
+    assert_eq!(w.claim_pid(claim), w.launch_pid(), "the claim's pid is the pid the host started (turn {turn})");
+    assert!(ancestors(run).contains(&w.launch_pid()), "the engine descends from the launch: {:?}", ancestors(run));
+    for gone in ["KITH_TURN_CLAIM", "HQ_TURN_CLAIM", "KITH_SCHED_NOW", "KITH_RUN_TOKEN"] {
+        assert_eq!(value_of(run, gone), None, "{gone} does not reach the engine");
+    }
+    assert!(argv.contains("do the walk"), "the job's task is the prompt: {argv}");
     let log = w.log_text();
     assert!(log.starts_with("# ") && log.contains(" house walk (core turn "), "the log is headed once: {log}");
     assert!(log.contains("out of usage; moving to claude:a"), "{log}");
@@ -303,8 +313,71 @@ fn a_guests_job_runs_directly_as_the_guest_with_its_own_outbox() {
         (meta["person"].as_str(), meta["via"].as_str(), meta["job"].as_str()),
         (Some("sam"), Some("schedule"), Some("g"))
     );
-    assert!(ancestors(run).contains(&w.claim_pid(claim)), "claim pid {} in {:?}", w.claim_pid(claim), ancestors(run));
+    assert_eq!(w.claim_pid(claim), w.launch_pid(), "the claim's pid is the pid the host started");
+    assert!(ancestors(run).contains(&w.launch_pid()), "the engine descends from the launch: {:?}", ancestors(run));
+    for gone in ["KITH_TURN_CLAIM", "HQ_TURN_CLAIM", "KITH_SCHED_NOW", "KITH_RUN_TOKEN"] {
+        assert_eq!(value_of(run, gone), None, "{gone} does not reach the engine");
+    }
     assert!(!w.folders.machine.join("sched/state.json").exists(), "no kith-sched ran: its state file is never written");
     let _ = std::fs::remove_dir_all(&outbox);
     let _ = std::fs::remove_file(format!("{outbox}.json"));
+}
+
+#[test]
+fn a_host_restarted_mid_run_leaves_the_run_writing_its_log_and_the_core_ends_the_claim_once_it_is_gone() {
+    use crate::routines::run_door::spawn_cmd;
+    use crate::routines::sched_launch::{Which, build};
+    use crate::terminal::core_writer::RunClaim;
+    let w = World::start(&json!([{"id": "slow", "cron": "0 8 * * *", "task": "do the slow one"}]));
+    w.set_child_env(&[]);
+    // The engine holds until this file is gone.
+    std::fs::write(w.rec.join("hold"), "").unwrap();
+    let fired = w.core("schedule.runNow", &json!({"agent": "house", "id": "slow", "key": "e2e-slow"}));
+    assert_eq!(fired["outcome"], "fired", "{fired}");
+    let host1 = CoreWriter::with_instance(w.folders.clone(), "host-1".to_owned());
+    let turns = host1.queued().expect("the core's queue");
+    let t = turns.iter().find(|t| t["job"] == "slow").expect("the turn");
+    let (turn, conversation, person) = (
+        t["turn"].as_i64().unwrap(),
+        t["conversation"].as_str().unwrap().to_owned(),
+        t["person"].as_str().unwrap().to_owned(),
+    );
+    let RunClaim::Claimed(claim) = host1.claim_run_as("scheduleRun", &conversation, &person, turn) else {
+        panic!("the claim");
+    };
+    // The host's door as `start` does it, without the thread that waits and reports: that thread is what a restart takes away.
+    let which = Which { agent: "house", job: "slow", person: None, turn, claim };
+    let built = build(&hub(), &w.folders, &built_kith(), &repo_kernel(), t, &which).unwrap();
+    let mut child = spawn_cmd(built.cmd, &built.spec).unwrap();
+    let pid = child.id();
+    std::thread::spawn(move || child.wait());
+    until("the launch to attach the claim", 60, || {
+        w.db().query_row("SELECT pid FROM claims WHERE claim_id = ?1", [claim], |r| r.get::<_, Option<i64>>(0)).unwrap()
+            == Some(i64::from(pid))
+    });
+    until("the launch to head the log", 30, || {
+        std::fs::read_to_string(&built.log).unwrap_or_default().starts_with("# ")
+    });
+
+    // The host restarts: another instance adopts. A claim with a live process stays the writer.
+    let host2 = CoreWriter::with_instance(w.folders.clone(), "host-2".to_owned());
+    host2.adopt().expect("adopt");
+    let state = |w: &World| -> String {
+        w.db().query_row("SELECT state FROM turns WHERE id = ?1", [turn], |r| r.get(0)).unwrap()
+    };
+    assert!(!["done", "failed", "cancelled"].contains(&state(&w).as_str()), "the run goes on: {}", state(&w));
+
+    // The run was started with a file for its output, so it still writes after the restart.
+    std::fs::remove_file(w.rec.join("hold")).unwrap();
+    let alive =
+        |pid: u32| std::process::Command::new("kill").args(["-0", &pid.to_string()]).output().unwrap().status.success();
+    until("the run to end", 120, || !alive(pid));
+    let log = std::fs::read_to_string(&built.log).unwrap();
+    assert!(log.contains("engine-still-writing-after-the-host-restart"), "the log kept being written: {log}");
+
+    // Nothing reported it: the core ends the claim once the process is gone.
+    until("the core to end the claim", 60, || {
+        let _ = crate::core_front::call_as_host(&w.folders, "hostclaim.settle", &json!({}));
+        ["done", "failed"].contains(&state(&w).as_str())
+    });
 }
