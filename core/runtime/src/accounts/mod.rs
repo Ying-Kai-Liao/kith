@@ -239,7 +239,7 @@ fn switched(conn: &Connection) -> bool {
 
 #[cfg(not(unix))]
 fn switched(_: &Connection) -> bool {
-    false
+    crate::switched::on_windows("accounts")
 }
 
 /// `mark_out` of `kith_accounts.py`: the entry is out until `until` (default an hour from `now`), epoch seconds. With

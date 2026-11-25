@@ -97,6 +97,37 @@ fn approver_of(
     Ok(Some(by))
 }
 
+/// Why `value` is never granted as a folder, or `None`. Folder grants are for a guest's box, whose Windows twin is W24b:
+/// until then a Windows core refuses them by name (a folder is never granted to a box that is not there).
+#[cfg(unix)]
+fn never_granted(
+    home: &str,
+    life: &Life,
+    secrets_dir: &std::path::Path,
+    value: &str,
+) -> Option<String> {
+    kith_kernel::permit::never_granted(
+        home,
+        &life.kernel.to_string_lossy(),
+        &life.state.to_string_lossy(),
+        &life.machine.to_string_lossy(),
+        &secrets_dir.to_string_lossy(),
+        value,
+    )
+}
+
+#[cfg(not(unix))]
+fn never_granted(
+    _home: &str,
+    _life: &Life,
+    _secrets_dir: &std::path::Path,
+    value: &str,
+) -> Option<String> {
+    Some(format!(
+        "{value}: a folder is not granted on Windows yet (guest boxes arrive with windows-owner W24b)"
+    ))
+}
+
 /// `cmd_access`, the grant: a card's always, for pid on agent. `home` is the caller's.
 pub(crate) fn access_grant(
     auth: &mut Value,
@@ -111,7 +142,7 @@ pub(crate) fn access_grant(
         return usage("access <agent> <id> read|write|domain <path|host> [--by <id>] [--rm]");
     };
     let value = if kind == "domain" {
-        if !kith_kernel::launch::guard::valid_domain(value) {
+        if !secrets::valid_domain(value) {
             return usage(format!(
                 "'{value}' is not a plain host name (no wildcard, address or port)"
             ));
@@ -125,14 +156,7 @@ pub(crate) fn access_grant(
             .to_string_lossy()
             .into_owned();
         let secrets_dir = c.auth.parent().unwrap_or_else(|| std::path::Path::new(""));
-        if let Some(why) = kith_kernel::permit::never_granted(
-            home,
-            &life.kernel.to_string_lossy(),
-            &life.state.to_string_lossy(),
-            &life.machine.to_string_lossy(),
-            &secrets_dir.to_string_lossy(),
-            &value,
-        ) {
+        if let Some(why) = never_granted(home, life, secrets_dir, &value) {
             return usage(why);
         }
         value

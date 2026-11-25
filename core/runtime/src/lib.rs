@@ -29,13 +29,11 @@
     reason = "the import and the rows are its callers; runs switch later"
 )]
 mod accounts;
-// Nothing outside the tests calls it until the host and the CLI are switched to core.db (M2-9 onward). Unix only for
-// now: the rules it reuses (`kith_kernel::secrets`) are.
-#[cfg(unix)]
+// Nothing outside the tests calls it until the host and the CLI are switched to core.db (M2-9 onward). On Windows it is
+// born switched (`switched`): the same rules (`kith_kernel::access`), no import and no cutover.
 #[allow(dead_code)]
 mod authority;
 // The ask tree (M3-8a): nothing calls it but the daemon's `ask.*` rows and the tests; `kith-ask` switches at M3-10.
-#[cfg(unix)]
 #[allow(dead_code, reason = "first callers are the switch of kith-ask (M3-10)")]
 mod asks;
 mod call;
@@ -55,7 +53,7 @@ mod conversations;
 mod cutover;
 mod daemon;
 // Nothing calls the doors but the daemon's `doors.*` rows and the tests: the host's sweep and `kith_door.py` switch later.
-#[cfg(unix)]
+// On Windows only its rows are served: a door's start stays refused by name until W27.
 #[allow(
     dead_code,
     reason = "first callers are the host's door code after the switch"
@@ -79,18 +77,14 @@ mod log;
 mod marker;
 mod migrations;
 mod owner;
-#[cfg(unix)]
-mod packages;
-// Windows has no `kith_kernel::secrets`, so no rule asks for package facts: the stub keeps the daemon's calls the same.
-#[cfg(not(unix))]
-#[path = "packages_stub.rs"]
 mod packages;
 mod perms;
 mod runs;
 mod runsock;
 mod runtools;
+// Which modules are switched, on Windows (born switched, WI13); a Mac reads its cutover records.
+mod switched;
 // The revoke order (M3-10d): claims of the person and their bots, then their ask tree. First caller is the kith-auth bridge (M2-18).
-#[cfg(unix)]
 #[allow(dead_code, reason = "first caller is the kith-auth bridge after M2-18")]
 mod revoke_order;
 // The agents' jobs.json indexed with the run state in core.db (M4-2); the host switches to it at M4-5.
