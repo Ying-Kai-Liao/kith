@@ -37,12 +37,13 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_BYTE,
-    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
-    WaitNamedPipeW,
+    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
+    PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
+    PIPE_WAIT, WaitNamedPipeW,
 };
 use windows_sys::Win32::System::Threading::{
-    CreateEventW, GetCurrentProcess, OpenProcessToken, WaitForSingleObject,
+    CreateEventW, GetCurrentProcess, OpenProcess, OpenProcessToken,
+    PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
 };
 
 use crate::sid::{self, Sid};
@@ -334,6 +335,44 @@ impl Listener {
     }
 }
 
+/// Whether the server's account is ours: the one rule of [`verify_server`], over two SIDs so it can be tested without a second
+/// account. A server run elevated is still our user.
+fn same_account(server: &Sid, ours: &Sid) -> bool {
+    server.is(ours.as_ptr())
+}
+
+/// Refuses a server that is not running as this account (`PermissionDenied`, naming why), and one whose account cannot be read:
+/// a pipe this client cannot vouch for is never written to.
+fn verify_server(pipe: &Pipe) -> io::Result<()> {
+    let refuse = |why: &str| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "kith-winsys: the pipe's server is not this account's ({why}); nothing was sent"
+            ),
+        )
+    };
+    let mut pid = 0u32;
+    // SAFETY: the handle is an open pipe; `pid` is an out-pointer.
+    if unsafe { GetNamedPipeServerProcessId(pipe.raw(), &raw mut pid) } == 0 || pid == 0 {
+        return Err(refuse("its process could not be found"));
+    }
+    // SAFETY: a query-only handle on that process, closed by `Handle`.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return Err(refuse("its process could not be opened"));
+    }
+    let process = Handle(process);
+    let server =
+        sid::process_user(process.0).map_err(|_| refuse("its account could not be read"))?;
+    let ours = sid::current_user().map_err(|_| refuse("our own account could not be read"))?;
+    if same_account(&server, &ours) {
+        Ok(())
+    } else {
+        Err(refuse("another account made this name first"))
+    }
+}
+
 /// Opens the pipe `name` as a client, waiting up to `timeout` while every instance is busy. `NotFound` when nobody listens.
 pub fn connect(name: &str, timeout: Duration) -> io::Result<Stream> {
     let wname = wide(OsStr::new(name));
@@ -352,7 +391,11 @@ pub fn connect(name: &str, timeout: Duration) -> io::Result<Stream> {
             )
         };
         if h != INVALID_HANDLE_VALUE {
-            return Ok(Stream::new(Pipe(Handle(h))));
+            let pipe = Pipe(Handle(h));
+            // Before any byte is written: whoever made the name first is not necessarily the host. Another account can
+            // create the name before the host does (the list on a pipe keeps others from opening it, not from serving it).
+            verify_server(&pipe)?;
+            return Ok(Stream::new(pipe));
         }
         let e = last_err();
         let left = deadline.saturating_duration_since(Instant::now());
@@ -434,6 +477,29 @@ mod tests {
         c.set_read_timeout(Some(Duration::from_secs(5)));
         let n = c.read(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"late");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_server_of_another_account_is_refused() {
+        let ours = sid::current_user().unwrap();
+        // SYSTEM stands in for the foreign account: a SID that is well formed and is not ours
+        let other = sid::system().unwrap();
+        assert!(same_account(&ours, &ours));
+        assert!(!same_account(&other, &ours));
+        assert!(!same_account(&ours, &other));
+    }
+
+    #[test]
+    fn a_server_of_our_own_account_is_accepted() {
+        // the server here is this process: the same account, so the client goes on
+        let name = unique("verify");
+        let l = Arc::new(listen(&name).unwrap());
+        let server = {
+            let l = l.clone();
+            std::thread::spawn(move || drop(l.accept().unwrap()))
+        };
+        assert!(connect(&name, Duration::from_secs(5)).is_ok());
         server.join().unwrap();
     }
 

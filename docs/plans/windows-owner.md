@@ -358,6 +358,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - Files: `core/kernel/src/permit/{host,apply,issue,scrub}.rs`, the host's permit listener, and the host restart through the
     service rather than launchd (`permit/host.rs:221-225`).
   - The door and bug halves stay refused on Windows (P3-12, P4-17).
+  - Divergence accepted by the architect: `apply`, `scrub`, `door`, `bug` and `helper` are not built on Windows and refuse by name (`permit/refused.rs`), because they serve guests only (WI6) and lean on the Unix-only launch.
   - **Start after W2a.**
 - [ ] **W6. Engines and accounts.** Owner: unowned. Status: not started. S. Depends: W1 (claude.exe location). Files: `core/kernel/src/launch/assemble.rs:348-356`
   (`which_in` with PATHEXT, no mode bits), `core/kernel/src/accounts.rs:132`, `core/kernel/src/accounts/mirror.rs:103-111`

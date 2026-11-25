@@ -44,6 +44,22 @@ pub fn is_ask_id(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
 }
 
+/// What a run is told when the host answered but gave no ask token.
+#[cfg(unix)]
+fn no_token() -> String {
+    "kith: no approval cards for this run (the Kith host gave no ask token); asks are refused\n"
+        .to_owned()
+}
+
+/// The same on Windows, with the likely reason named: the host gives no token when it has no run pipe, which is what happens
+/// when another process already holds the pipe's name (the host refuses to share it and says so only in its log).
+#[cfg(windows)]
+fn no_token() -> String {
+    "kith: no approval cards for this run (the Kith host gave no ask token: its run pipe is not listening, for instance because \
+     another process holds the pipe's name; see the host's log); asks are refused\n"
+        .to_owned()
+}
+
 /// What a run is told when the host is down and was not brought back.
 #[cfg(unix)]
 fn not_running(_: &Env, _: &Path) -> String {
@@ -120,7 +136,7 @@ pub fn issue(env: &Env, kernel: &Path, agent: &str, session: &str, pid: &str) ->
     let given = |k: &str| vars.and_then(|e| e.get(k)).filter(|v| truthy(v));
     let (Some(token), Some(socket)) = (given("KITH_ASK_TOKEN"), given("KITH_ASK_SOCKET")) else {
         return Out {
-            stderr: "kith: no approval cards for this run (the Kith host gave no ask token); asks are refused\n".to_owned(),
+            stderr: no_token(),
             code: 1,
             ..Out::default()
         };
