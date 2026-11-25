@@ -9,6 +9,8 @@
 //! - `outside.rs`: what they ask of the world (the clock, the process table, `gh`, the transcripts), as traits.
 //! - `store.rs`: the tables; `call.rs`: the `wake.*` rows.
 //! - `turns.rs`: a run's turn in the conversations lane, written by `take` in the same transaction (M3-10c).
+//! - `tick.rs` and `settle.rs`: `wake.tick`, the host's clock (S4 R1, R2: two phases, nothing slow under the core lock) and
+//!   how a run is settled by its turn (R4).
 //!
 //! One call is one claim transaction over the whole state (a few rows), which replaces the Python's three locks (the ask
 //! box's, `waits/.lock`, `queue/.lock`). `take` marks what is owed as carried, returns the
@@ -21,13 +23,18 @@ mod outside;
 #[cfg(all(test, unix))]
 mod parity_tests;
 mod queue;
+mod settle;
 mod store;
 #[cfg(test)]
 mod tests;
+mod tick;
+#[cfg(all(test, unix))]
+mod tick_tests;
 mod turns;
 mod waiters;
 
 pub(crate) use call::{call, serves};
+pub(crate) use tick::{CoreLock, World, system, tick};
 // The import (Unix only, like the rest of `import`) is the one outside user of the model and the counts.
 pub(crate) use model::State;
 #[cfg(unix)]
@@ -124,12 +131,12 @@ pub(crate) fn withdraw_owed_in(
     let before = load(tx)?;
     let mut after = before.clone();
     after.prune(now);
-    let mut n: usize = sessions
-        .iter()
-        .map(|s| queue::withdraw(&mut after, now, s, None))
-        .sum();
+    let mut n = 0;
+    for s in sessions {
+        n += turns::withdraw_in(tx, &mut after, now, s, None)?;
+    }
     if !persons.is_empty() {
-        n += queue::withdraw_person(&mut after, now, persons);
+        n += turns::withdraw_person_in(tx, &mut after, now, persons)?;
     }
     turns::close_gone_in(tx, &before, &after, now)?;
     save(tx, &before, &after)?;
