@@ -178,3 +178,33 @@ fn in_files_mode_a_claimed_turn_is_refused_and_nothing_is_asked() {
     }
     assert!(core.asked().is_empty(), "{:?}", core.asked());
 }
+
+#[test]
+fn a_run_without_a_conversation_attaches_for_its_own_pid_and_says_why_it_did_not() {
+    use super::writer::AttachErr;
+    let t = switched();
+    let env = run_env(&[]);
+    let c = ctx(&t, &env);
+    // The launch's own pid: the claim names the process the engine descends from (sched-turn S-R1).
+    let me = i64::from(std::process::id());
+    let core = Fake::new(Some(json!({"attached": true})));
+    Taker::new(&c, Some(&core))
+        .attach_run(41, me)
+        .expect("attached");
+    let asked = core.calls.borrow()[0].clone();
+    assert_eq!(asked.0, "claim.attach");
+    assert_eq!(asked.1["claimId"], 41);
+    assert_eq!(asked.1["pid"], me);
+    assert!(asked.1["started"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(asked.1.get("conversation").is_none());
+    let gone = Fake::new(Some(json!({"refused": "gone", "state": "cancelled"})));
+    assert_eq!(
+        Taker::new(&c, Some(&gone)).attach_run(41, me),
+        Err(AttachErr::Gone("cancelled".to_owned()))
+    );
+    let down = Fake::new(None);
+    assert!(matches!(
+        Taker::new(&c, Some(&down)).attach_run(41, me),
+        Err(AttachErr::Down(_))
+    ));
+}

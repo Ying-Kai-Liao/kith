@@ -255,6 +255,8 @@ pub(crate) fn settle_in(
             super::settle_in(tx, machine, ask, *cost, None, now)?;
         }
     }
+    // The asks of other computers: one whose link ended, or whose computer is away past the wait, is cut off (D4).
+    settled.extend(super::peer::cut_off_in(tx, st, now)?);
     rows::forget_old_in(tx, now)?;
     Ok(settled)
 }

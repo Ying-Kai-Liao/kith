@@ -335,15 +335,44 @@ impl Listener {
     }
 }
 
-/// Whether the server's account is ours: the one rule of [`verify_server`], over two SIDs so it can be tested without a second
-/// account. A server run elevated is still our user.
-fn same_account(server: &Sid, ours: &Sid) -> bool {
-    server.is(ours.as_ptr())
+/// Who a client trusts to serve a pipe: the one account it runs as, and the group whose members the pipe may be owned by
+/// instead (an elevated process creates its objects owned by `Administrators`). Held apart so a test can name others.
+struct Trust {
+    ours: Sid,
+    admins: Sid,
 }
 
-/// Refuses a server that is not running as this account (`PermissionDenied`, naming why), and one whose account cannot be read:
-/// a pipe this client cannot vouch for is never written to.
-fn verify_server(pipe: &Pipe) -> io::Result<()> {
+impl Trust {
+    fn this_account() -> io::Result<Self> {
+        Ok(Self {
+            ours: sid::current_user()?,
+            admins: sid::administrators()?,
+        })
+    }
+}
+
+/// The rule of [`verify_server`] over what was read, so it is testable without a second account: the server process runs as
+/// us, and the pipe says it was made by us or by `Administrators`. The second is what survives a pid that was reused (the
+/// process check reads whoever has that pid now). Anything unreadable is a refusal.
+fn judge(
+    server: io::Result<Sid>,
+    owner: io::Result<Sid>,
+    trust: &Trust,
+) -> Result<(), &'static str> {
+    let server = server.map_err(|_| "its account could not be read")?;
+    let owner = owner.map_err(|_| "the pipe's owner could not be read")?;
+    if !server.is(trust.ours.as_ptr()) {
+        return Err("another account made this name first");
+    }
+    if !(owner.is(trust.ours.as_ptr()) || owner.is(trust.admins.as_ptr())) {
+        return Err("the pipe belongs to another account");
+    }
+    Ok(())
+}
+
+/// Refuses a server that is not running as this account and a pipe that is not owned by it (`PermissionDenied`, naming why),
+/// and one whose account cannot be read: a pipe this client cannot vouch for is never written to.
+fn verify_server(pipe: &Pipe, trust: &Trust) -> io::Result<()> {
     let refuse = |why: &str| {
         io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -359,22 +388,21 @@ fn verify_server(pipe: &Pipe) -> io::Result<()> {
     }
     // SAFETY: a query-only handle on that process, closed by `Handle`.
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if process.is_null() {
-        return Err(refuse("its process could not be opened"));
-    }
-    let process = Handle(process);
-    let server =
-        sid::process_user(process.0).map_err(|_| refuse("its account could not be read"))?;
-    let ours = sid::current_user().map_err(|_| refuse("our own account could not be read"))?;
-    if same_account(&server, &ours) {
-        Ok(())
+    let server = if process.is_null() {
+        Err(last_err())
     } else {
-        Err(refuse("another account made this name first"))
-    }
+        let process = Handle(process);
+        sid::process_user(process.0)
+    };
+    judge(server, sid::object_owner(pipe.raw()), trust).map_err(refuse)
 }
 
 /// Opens the pipe `name` as a client, waiting up to `timeout` while every instance is busy. `NotFound` when nobody listens.
 pub fn connect(name: &str, timeout: Duration) -> io::Result<Stream> {
+    connect_trusting(name, timeout, &Trust::this_account()?)
+}
+
+fn connect_trusting(name: &str, timeout: Duration, trust: &Trust) -> io::Result<Stream> {
     let wname = wide(OsStr::new(name));
     let deadline = Instant::now() + timeout;
     loop {
@@ -394,7 +422,7 @@ pub fn connect(name: &str, timeout: Duration) -> io::Result<Stream> {
             let pipe = Pipe(Handle(h));
             // Before any byte is written: whoever made the name first is not necessarily the host. Another account can
             // create the name before the host does (the list on a pipe keeps others from opening it, not from serving it).
-            verify_server(&pipe)?;
+            verify_server(&pipe, trust)?;
             return Ok(Stream::new(pipe));
         }
         let e = last_err();
@@ -480,14 +508,78 @@ mod tests {
         server.join().unwrap();
     }
 
+    fn trust_of(ours: Sid, admins: Sid) -> Trust {
+        Trust { ours, admins }
+    }
+
+    fn unreadable() -> io::Result<Sid> {
+        Err(io::Error::other("unreadable"))
+    }
+
     #[test]
-    fn a_server_of_another_account_is_refused() {
-        let ours = sid::current_user().unwrap();
+    fn the_judgement_refuses_another_account_and_what_it_cannot_read() {
+        let me = || sid::current_user().unwrap();
+        let admins = || sid::administrators().unwrap();
         // SYSTEM stands in for the foreign account: a SID that is well formed and is not ours
-        let other = sid::system().unwrap();
-        assert!(same_account(&ours, &ours));
-        assert!(!same_account(&other, &ours));
-        assert!(!same_account(&ours, &other));
+        let other = || sid::system().unwrap();
+        let t = trust_of(me(), admins());
+        assert!(judge(Ok(me()), Ok(me()), &t).is_ok());
+        // an elevated maker owns its objects as Administrators
+        assert!(judge(Ok(me()), Ok(admins()), &t).is_ok());
+        assert!(judge(Ok(other()), Ok(me()), &t).is_err());
+        // a reused pid: the process now is ours, the pipe is not
+        assert!(judge(Ok(me()), Ok(other()), &t).is_err());
+        assert!(judge(unreadable(), Ok(me()), &t).is_err());
+        assert!(judge(Ok(me()), unreadable(), &t).is_err());
+    }
+
+    #[test]
+    fn an_impostor_server_is_refused_before_a_byte_is_written() {
+        // The server is this process (so a real pipe, a real server pid and a real owner); the client is told to trust
+        // SYSTEM only, which makes the server an impostor to it. The server records every byte it is sent.
+        let name = unique("impostor");
+        let l = Arc::new(listen(&name).unwrap());
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let server = {
+            let (l, got) = (l.clone(), got.clone());
+            std::thread::spawn(move || {
+                let mut s = l.accept().unwrap();
+                let mut buf = [0u8; 64];
+                // the client drops its end after the refusal: end of stream, with nothing before it
+                while let Ok(n) = s.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    got.lock().unwrap().extend_from_slice(&buf[..n]);
+                }
+            })
+        };
+        let system = || sid::system().unwrap();
+        let e = connect_trusting(&name, Duration::from_secs(5), &trust_of(system(), system()))
+            .err()
+            .unwrap();
+        assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
+        assert!(e.to_string().contains("nothing was sent"), "{e}");
+        server.join().unwrap();
+        assert!(got.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_pipe_reports_its_owner() {
+        // The owner read back from a live pipe is ours or Administrators (an elevated runner), never unreadable.
+        let name = unique("owner");
+        let l = Arc::new(listen(&name).unwrap());
+        let server = {
+            let l = l.clone();
+            std::thread::spawn(move || drop(l.accept().unwrap()))
+        };
+        let c = connect(&name, Duration::from_secs(5)).unwrap();
+        let owner = sid::object_owner(c.pipe.raw()).unwrap();
+        assert!(
+            owner.is(sid::current_user().unwrap().as_ptr())
+                || owner.is(sid::administrators().unwrap().as_ptr())
+        );
+        server.join().unwrap();
     }
 
     #[test]
