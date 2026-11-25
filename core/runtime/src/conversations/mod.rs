@@ -5,6 +5,9 @@ pub(crate) mod basis;
 #[cfg(test)]
 mod basis_tests;
 pub(crate) mod claims;
+pub(crate) mod detached;
+#[cfg(test)]
+mod detached_tests;
 pub(crate) mod external;
 #[cfg(test)]
 mod props;

@@ -13,6 +13,9 @@
 //!    claim. The check-and-set is what makes `cancel_waiting_in`'s "no pid yet" rule true: a claim a rollback or a pause
 //!    ended can never be attached, so no run starts that they cannot see.
 //!
+//! Both steps serve every detached source (`detached::SOURCES`: a schedule's turn, a wake's), and a report on the attached
+//! claim does not end it (`detached`, R3a).
+//!
 //! A schedule turn's claim also reads the job's paused row ([`paused_in`], `Fence::Paused`): the pause is level-triggered, so a
 //! turn queued before the pause (or put back by a restart) is cancelled as it is claimed, not run.
 
@@ -50,8 +53,9 @@ pub(crate) fn paused_in(tx: &rusqlite::Connection, turn: i64) -> Result<bool> {
     }
 }
 
-/// Step 1: claims a pulled schedule turn for a run that has no process yet. Refused for any turn of another source (the
-/// other kinds of turn go through `claim_next`, which picks their account).
+/// Step 1: claims a pulled detached turn (a schedule's or a wake's: [`super::detached::SOURCES`]) for a run that has no
+/// process yet. Refused for any turn of another source (the other kinds of turn go through `claim_next`, which picks their
+/// account).
 pub(crate) fn claim_run(
     core: &mut Core,
     conversation: &str,
@@ -81,9 +85,9 @@ pub(crate) fn claim_run(
                 |r| r.get(0),
             )
             .optional()?;
-        if source.as_deref() != Some("schedule") {
+        if !source.as_deref().is_some_and(super::detached::is_source) {
             return Err(Error::Refused(format!(
-                "kith-core: turn {turn} is not waiting for {person} in conversation {conversation} as a schedule's"
+                "kith-core: turn {turn} is not waiting for {person} in conversation {conversation} as a detached run's"
             )));
         }
         let claimed = claims::claim_checked_in(&tx, generation, &req, now)?;
@@ -106,6 +110,7 @@ pub(crate) fn claim_run(
 pub(crate) fn attach(
     core: &mut Core,
     claim_id: i64,
+    conversation: Option<&str>,
     pid: u32,
     started: &str,
     now: i64,
@@ -116,19 +121,57 @@ pub(crate) fn attach(
         ));
     }
     let tx = core.claim_tx()?;
+    // A run names its own conversation: a claim whose turn is another conversation's is refused, not attached. Only a
+    // schedule's turn may omit it (the Python `kith-sched run-turn` still does).
     let n = tx.execute(
-        "UPDATE claims SET kind = 'external', state = 'running', running_at = ?2, pid = ?3, pid_started = ?4
-         WHERE claim_id = ?1 AND kind = 'turn' AND state = 'claimed' AND pid IS NULL AND account IS NULL
-           AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = ?1 AND t.source = 'schedule' AND t.state = 'claimed')",
-        params![claim_id, now, pid, started],
+        &format!(
+            "UPDATE claims SET kind = 'external', state = 'running', running_at = ?2, pid = ?3, pid_started = ?4
+             WHERE claim_id = ?1 AND kind = 'turn' AND state = 'claimed' AND pid IS NULL AND account IS NULL
+               AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = ?1 AND t.source IN {} AND t.state = 'claimed'
+                           AND (?5 IS NULL OR t.conversation = ?5)
+                           AND (?5 IS NOT NULL OR t.source = 'schedule')
+                           AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.turn = t.id AND a.origin_computer IS NOT NULL
+                                           AND NOT EXISTS (SELECT 1 FROM ask_peers p WHERE p.computer = a.origin_computer
+                                                           AND p.dir = 'in' AND p.epoch = a.origin_epoch AND p.live = 1)))",
+            super::detached::sources_sql()
+        ),
+        params![claim_id, now, pid, started, conversation],
     )?;
     if n == 1 {
         tx.execute(
             "UPDATE turns SET state = 'running', started_at = ?2 WHERE claim_id = ?1 AND state = 'claimed'",
             params![claim_id, now],
         )?;
+        // A `--bg` ask's callee: its record learns the claim and the process (so `ask.end` finds the run exactly) and the
+        // session it runs in (so `-c` resumes it), in the attach's own transaction (ask design R2, O2).
+        tx.execute(
+            "UPDATE asks SET claim_id = ?1, pid = ?2, pid_at_ms = ?3, session = COALESCE(session, conversation)
+             WHERE turn = (SELECT id FROM turns WHERE claim_id = ?1 AND source = 'ask')",
+            params![claim_id, pid, now],
+        )?;
         tx.commit()?;
         return Ok(json!({ "attached": true }));
+    }
+    // The fence on attach (PeerFence `FenceAttach`): the claim of an ask whose pairing ended is ended and its turn
+    // cancelled in this transaction, so the run is refused and its engine is never started.
+    let cut: Option<i64> = tx
+        .query_row(
+            "SELECT t.id FROM turns t WHERE t.claim_id = ?1 AND t.state = 'claimed'",
+            [claim_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(turn) = cut
+        && crate::asks::cut_origin_in(&tx, turn)?.is_some()
+    {
+        claims::cancel_turn(&tx, claim_id, now)?;
+        tx.execute(
+            "UPDATE claims SET state = 'ended', ended_at = ?2, end_reason = 'cut'
+             WHERE claim_id = ?1 AND state = 'claimed' AND pid IS NULL",
+            params![claim_id, now],
+        )?;
+        tx.commit()?;
+        return Ok(json!({ "refused": "gone", "state": "ended" }));
     }
     refusal(&tx, claim_id, pid, started)
 }

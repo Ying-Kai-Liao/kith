@@ -2,17 +2,23 @@
 //! apps and helpers (loopback + `Authorization: Bearer <token>`), and `GET /channel`, the
 //! direct end-to-end encrypted channel phones use (see `channel`).
 
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod access_core_tests;
 mod accounts;
 pub mod authority;
 #[cfg(test)]
 pub(crate) mod authority_props;
 mod backups;
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod bot_guests_tests;
 pub mod botguests;
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod botguests_props;
 mod bots;
 mod calls;
@@ -28,7 +34,9 @@ mod error_tests;
 mod events;
 mod files;
 mod folders;
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod guard_props;
 mod host;
 mod http;
@@ -39,7 +47,9 @@ mod kith_new;
 pub(crate) mod kith_tools;
 mod marketplace;
 pub(crate) mod native_export;
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod native_guard_tests;
 mod peers;
 #[cfg(test)]
@@ -50,12 +60,16 @@ mod people_tests;
 #[cfg(test)]
 mod proof_tests;
 mod remote;
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod revoke_tests;
 #[cfg(test)]
 pub(crate) mod rig;
 pub mod roles;
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod roles_props;
 #[cfg(test)]
 mod roles_tests;
@@ -78,7 +92,9 @@ mod room_turn_tests;
 #[cfg(test)]
 mod room_withdraw_tests;
 mod scratch;
+// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
 #[cfg(test)]
+#[cfg(unix)]
 mod stepped_e2e_tests;
 mod threads;
 

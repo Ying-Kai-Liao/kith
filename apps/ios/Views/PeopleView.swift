@@ -11,49 +11,6 @@ func agentsOffered(on store: BotStore, plus extra: some Sequence<String> = [Stri
     Array(Set(store.bots.values.compactMap(\.hqAgent).filter { !$0.isEmpty }).union(extra)).sorted()
 }
 
-/// Settings → People: who the owner invited to this computer. Hidden on a host that doesn't know invites.
-struct PeopleSection: View {
-    let store: BotStore
-    @State private var people: PeopleStore
-    @State private var showing = false
-
-    init(store: BotStore) {
-        self.store = store
-        #if DEBUG
-        _people = State(initialValue: DemoScreens.active ? PeopleStore.demo() : PeopleStore(store: store))
-        #else
-        _people = State(initialValue: PeopleStore(store: store))
-        #endif
-    }
-
-    var body: some View {
-        Group {
-            if !people.unsupported {
-                CardSection("People", footer: "Invite a friend or teammate to use some of your agents on \(store.hostName).") {
-                    Button { showing = true } label: {
-                        LinkRow {
-                            Label(summary, systemImage: "person.2")
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .task { await people.load(); await store.botGuests.refresh() }
-        .kithSheet(isPresented: $showing) { PeopleView(people: people, store: store) }
-    }
-
-    private var summary: String {
-        guard people.loaded else { return "People" }
-        let count = people.people.count
-        let people = count == 0 ? "Invite someone" : count == 1 ? "1 person" : "\(count) people"
-        let bots = store.botGuests.liveCount
-        let summary = bots == 0 ? people : "\(count == 0 ? "0 people" : people) · \(bots == 1 ? "1 bot" : "\(bots) bots")"
-        let asking = store.accessRequests.count
-        return asking == 0 ? summary : "\(summary) · \(asking) waiting"
-    }
-}
-
 /// The people, their agents and roles, what is waiting to be accepted, and the way to invite someone.
 struct PeopleView: View {
     let people: PeopleStore
@@ -64,37 +21,13 @@ struct PeopleView: View {
     @State private var botSheet: BotSheetTarget?
 
     private var guests: BotGuestStore { store.botGuests }
-    @State private var answering: Set<String> = []
-    @State private var answerError: String?
-
-    private func requester(_ request: MemberAccessRequest) -> String {
-        request.personId.flatMap { people.person($0)?.name } ?? request.email ?? "Someone you invited"
-    }
-
-    /// Approving lets a new device in, so it asks for Face ID (or the passcode) first; Deny doesn't.
-    private func answer(_ request: MemberAccessRequest, approve: Bool) {
-        Task {
-            answerError = nil
-            if approve, !(await ownerConfirms("Let \(requester(request))'s \(request.deviceName) use \(store.hostName)")) { return }
-            answering.insert(request.id)
-            answerError = await store.decideAccessRequest(request, approve: approve)
-            answering.remove(request.id)
-        }
-    }
 
     var body: some View {
         CardForm {
-            if let error = people.error ?? answerError {
+            if let error = people.error {
                 Text(error).font(.footnote).foregroundStyle(Palette.danger)
             }
-            if !store.accessRequests.isEmpty {
-                CardSection("Asking to connect", footer: "Approve only if the code matches the one on their screen.") {
-                    ForEach(store.accessRequests) { request in
-                        AccessRequestRow(request: request, name: requester(request), busy: answering.contains(request.id),
-                                         approve: { answer(request, approve: true) }, deny: { answer(request, approve: false) })
-                    }
-                }
-            }
+            AccessRequestsSection(store: store, name: { people.person($0)?.name })
             CardSection("People", footer: people.people.isEmpty
                         ? "Nobody yet. They sign in to Kith with their own account, so you can see who did what."
                         : "Members and guests can only use the agents you pick. Tap a person to change that.") {
@@ -125,24 +58,7 @@ struct PeopleView: View {
                 .buttonStyle(.plain)
             }
 
-            if !guests.unsupported {
-                CardSection("Your bots", footer: "Bots from Grok and other apps can ask the agents you pick. They never act as you.") {
-                    ForEach(BotGuestStore.live(guests.mine)) { bot in
-                        BotGuestRow(bot: bot, viewer: .owner, store: store,
-                                    open: { botSheet = BotSheetTarget(store: store, kind: .detail($0)) },
-                                    newLink: { bot in Task { if let next = await BotSheetTarget.newLink(for: bot, on: store) { botSheet = next } } })
-                    }
-                    Button { botSheet = .invite(on: store) } label: {
-                        Label("Invite a bot", systemImage: "plus")
-                            .foregroundStyle(Palette.accent)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if !guests.mine.isEmpty { BotsCapRow(store: store) }
-                    EndedBots(bots: BotGuestStore.ended(guests.mine), viewer: .owner, store: store)
-                }
-            }
+            YourBotsSection(store: store, botSheet: $botSheet)
 
             let pending = people.pending
             if !pending.isEmpty {
@@ -170,6 +86,73 @@ struct PeopleView: View {
         .kithSheet(isPresented: $inviting) { InviteSheet(people: people, store: store) }
         .kithSheet(item: $editing) { person in EditPersonSheet(person: person, people: people, store: store) }
         .kithSheet(isPresented: $showActivity) { ActivitySheet(people: people) }
+    }
+}
+
+/// Members' new devices asking to connect, with Approve (behind Face ID) and Deny. Shows nothing when none ask.
+struct AccessRequestsSection: View {
+    let store: BotStore
+    /// A person's name from their id, when known.
+    let name: (String) -> String?
+    @State private var answering: Set<String> = []
+    @State private var answerError: String?
+
+    private func requester(_ request: MemberAccessRequest) -> String {
+        request.personId.flatMap(name) ?? request.email ?? "Someone you invited"
+    }
+
+    /// Approving lets a new device in, so it asks for Face ID (or the passcode) first; Deny doesn't.
+    private func answer(_ request: MemberAccessRequest, approve: Bool) {
+        Task {
+            answerError = nil
+            if approve, !(await ownerConfirms("Let \(requester(request))'s \(request.deviceName) use \(store.hostName)")) { return }
+            answering.insert(request.id)
+            answerError = await store.decideAccessRequest(request, approve: approve)
+            answering.remove(request.id)
+        }
+    }
+
+    var body: some View {
+        if let answerError {
+            Text(answerError).font(.footnote).foregroundStyle(Palette.danger)
+        }
+        if !store.accessRequests.isEmpty {
+            CardSection("Asking to connect", footer: "Approve only if the code matches the one on their screen.") {
+                ForEach(store.accessRequests) { request in
+                    AccessRequestRow(request: request, name: requester(request), busy: answering.contains(request.id),
+                                     approve: { answer(request, approve: true) }, deny: { answer(request, approve: false) })
+                }
+            }
+        }
+    }
+}
+
+/// Your bots (bots from Grok and other apps that ask the agents you pick): the People screen and Sharing > More.
+struct YourBotsSection: View {
+    let store: BotStore
+    @Binding var botSheet: BotSheetTarget?
+
+    private var guests: BotGuestStore { store.botGuests }
+
+    var body: some View {
+        if !guests.unsupported {
+            CardSection("Your bots", footer: "Bots from Grok and other apps can ask the agents you pick. They never act as you.") {
+                ForEach(BotGuestStore.live(guests.mine)) { bot in
+                    BotGuestRow(bot: bot, viewer: .owner, store: store,
+                                open: { botSheet = BotSheetTarget(store: store, kind: .detail($0)) },
+                                newLink: { bot in Task { if let next = await BotSheetTarget.newLink(for: bot, on: store) { botSheet = next } } })
+                }
+                Button { botSheet = .invite(on: store) } label: {
+                    Label("Invite a bot", systemImage: "plus")
+                        .foregroundStyle(Palette.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if !guests.mine.isEmpty { BotsCapRow(store: store) }
+                EndedBots(bots: BotGuestStore.ended(guests.mine), viewer: .owner, store: store)
+            }
+        }
     }
 }
 
@@ -250,14 +233,14 @@ private struct PersonRow: View {
 
 /// Face ID, Touch ID or the passcode; false when cancelled or this iPhone has none set up.
 @MainActor
-private func ownerConfirms(_ reason: String) async -> Bool {
+func ownerConfirms(_ reason: String) async -> Bool {
     let context = LAContext()
     guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { return false }
     return (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
 }
 
 /// A member's new device: who, what it is, its code, and the answer buttons (Approve once it showed its code).
-private struct AccessRequestRow: View {
+struct AccessRequestRow: View {
     let request: MemberAccessRequest
     let name: String
     let busy: Bool
@@ -601,7 +584,7 @@ private struct EditPersonSheet: View {
 
 // MARK: - activity
 
-private struct ActivitySheet: View {
+struct ActivitySheet: View {
     let people: PeopleStore
 
     var body: some View {

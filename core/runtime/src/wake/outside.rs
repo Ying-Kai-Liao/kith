@@ -58,6 +58,18 @@ pub(crate) trait Outside {
     fn ci_poll(&self) -> f64 {
         CI_POLL
     }
+    /// A file's text (the ask design's out file, read by the tick with no lock held); `None` when it cannot be read. Capped
+    /// so a runaway file cannot fill the host's memory.
+    fn read_text(&self, path: &Path) -> Option<String> {
+        use std::io::Read as _;
+        let mut text = String::new();
+        std::fs::File::open(path)
+            .ok()?
+            .take(16 * 1024 * 1024)
+            .read_to_string(&mut text)
+            .ok()?;
+        Some(text)
+    }
 }
 
 pub(crate) trait Transcripts {
@@ -77,6 +89,36 @@ pub(crate) fn random_id() -> String {
     })
 }
 
+/// Where `gh` is: on `path` (as `gh`, or `gh.exe` on Windows), else where the installers put it (Homebrew's two folders, and
+/// `%ProgramFiles%\GitHub CLI` on Windows; the host's PATH is launchd's or a service's, which is short). `gh` itself when
+/// it is nowhere, so the spawn fails and the waiter waits.
+pub(super) fn gh_in(
+    path: Option<&std::ffi::OsStr>,
+    program_files: Option<&std::ffi::OsStr>,
+    fixed: &[&str],
+) -> PathBuf {
+    let names: &[&str] = if cfg!(windows) {
+        &["gh.exe", "gh"]
+    } else {
+        &["gh"]
+    };
+    let on_path = path.and_then(|paths| {
+        std::env::split_paths(paths)
+            .flat_map(|d| names.iter().map(move |n| d.join(n)))
+            .find(|p| p.is_file())
+    });
+    let mut known: Vec<PathBuf> = fixed.iter().map(PathBuf::from).collect();
+    if let Some(pf) = program_files {
+        known.push(PathBuf::from(pf).join("GitHub CLI").join("gh.exe"));
+    }
+    on_path
+        .or_else(|| known.into_iter().find(|p| p.exists()))
+        .unwrap_or_else(|| PathBuf::from("gh"))
+}
+
+/// Where Homebrew puts `gh` (Apple silicon, Intel).
+const HOMEBREW_GH: &[&str] = &["/opt/homebrew/bin/gh", "/usr/local/bin/gh"];
+
 /// The real world.
 pub(crate) struct System {
     /// `$KITH_STATE`: the terminals' claim files are under `live/terminal/`.
@@ -90,19 +132,11 @@ impl System {
         if let Some(p) = &self.gh {
             return p.clone();
         }
-        let on_path = std::env::var_os("PATH").and_then(|paths| {
-            std::env::split_paths(&paths)
-                .map(|d| d.join("gh"))
-                .find(|p| p.is_file())
-        });
-        on_path
-            .or_else(|| {
-                ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
-                    .into_iter()
-                    .map(PathBuf::from)
-                    .find(|p| p.exists())
-            })
-            .unwrap_or_else(|| PathBuf::from("gh"))
+        gh_in(
+            std::env::var_os("PATH").as_deref(),
+            std::env::var_os("ProgramFiles").as_deref(),
+            HOMEBREW_GH,
+        )
     }
 
     /// `gh ARGS`, its stdout as JSON; `None` for a failure to run, a timeout (20 s) or output that is not JSON.

@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 #[cfg(unix)]
 mod backups;
+pub mod chain;
 mod change;
 #[cfg(test)]
 mod change_tests;
@@ -55,7 +56,7 @@ pub use state::{
     FileState, Fixed, Snapshot, StateHold, StateSource, hold, out_marks_from, record_started,
     replace, snapshot, state_file, tombstoned,
 };
-pub use verbs::{VERBS, Verb, pick_value, run_verb};
+pub use verbs::{VERBS, Verb, accounts_json, pick_value, run_verb};
 
 type Map = serde_json::Map<String, Value>;
 
@@ -105,7 +106,7 @@ impl Outside for System {
         if agent.is_empty() {
             return Vec::new();
         }
-        let auth = self.kernel.join("bin/kith-auth");
+        let auth = self.kernel.join("bin").join("kith-auth");
         match run_with_timeout(
             &[&auth.to_string_lossy(), "granted", "--for", agent, service],
             &[],
@@ -116,23 +117,9 @@ impl Outside for System {
     }
 
     fn on_path(&self, program: &str) -> bool {
-        let Some(path) = std::env::var_os("PATH") else {
-            return false;
-        };
-        std::env::split_paths(&path).any(|d| is_executable(&d.join(program)))
+        std::env::var_os("PATH")
+            .is_some_and(|path| crate::paths::which_on(program, &path).is_some())
     }
-}
-
-#[cfg(unix)]
-fn is_executable(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-/// Windows has no execute bit; `which` there also tries the extensions in PATHEXT, which this port leaves to the host.
-#[cfg(not(unix))]
-fn is_executable(p: &Path) -> bool {
-    std::fs::metadata(p).is_ok_and(|m| m.is_file())
 }
 
 /// `subprocess.run(..., capture_output, timeout=20, stdin=DEVNULL)`: stdout only; stderr is dropped.
@@ -724,7 +711,7 @@ pub fn main_json(ctx: &Ctx<'_>, agent: &str) -> J {
 
 /// The apiKeyHelper command: prints the key on demand, run by Claude Code, so the key never passes through us.
 fn api_helper(ctx: &Ctx<'_>, agent: &str, name: &str) -> String {
-    let auth = ctx.kernel.join("bin/kith-auth");
+    let auth = ctx.kernel.join("bin").join("kith-auth");
     let profile = format!("anthropic/{name}");
     [
         auth.to_string_lossy().as_ref(),

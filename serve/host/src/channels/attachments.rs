@@ -53,6 +53,7 @@ pub fn prune(root: &Path, now: SystemTime, keep: Duration) -> usize {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn old_files_go_new_ones_stay_and_links_are_left_alone() {
         let dir = std::env::temp_dir().join(format!("kith-prune-{}", uuid::Uuid::new_v4()));
