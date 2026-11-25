@@ -28,7 +28,7 @@ TESTS = 'kernel/tests/'
 
 # Names that are ordinary words elsewhere: search by a longer spelling.
 # (regex text; the shim is run by its bare name, `PATH=$here/shim:$PATH` in claude-via-kith)
-GENERIC = {'kernel/adapters/acp/shim/claude': r'shim/claude|[/}]shim(?![\w-])', 'kernel/adapters/harness.py': r'harness\.py'}
+GENERIC = {'kernel/adapters/acp/shim/claude': r'shim/claude|[/}]shim(?![\w-])'}
 
 LOADER = re.compile(r'SourceFileLoader|spec_from_file_location')
 
