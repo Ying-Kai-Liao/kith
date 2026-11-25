@@ -1040,10 +1040,9 @@ fn the_tick_books_the_cost_of_a_parked_bg_turn_whose_report_was_lost_once() {
     let claim = r.start("a1", turn);
     r.tick();
     assert!(cost_of(&r, "a1").abs() < 1e-9);
-    // The tick looks in its own machine folder for the first turn's `<id>.out`.
-    let dir = r.tmp.path().join("machine/core/asks");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("a1.out"), answer("waiting on a card").to_string()).unwrap();
+    let out = PathBuf::from(o["out"].as_str().unwrap());
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    std::fs::write(&out, answer("waiting on a card").to_string()).unwrap();
     r.report(claim, "done");
     r.tick();
     assert!((cost_of(&r, "a1") - 0.25).abs() < 1e-9);
@@ -1073,11 +1072,66 @@ fn a_host_report_that_names_no_turn_does_not_book_a_cost_the_tick_books_later() 
     );
     assert_eq!(said["settled"], json!(false));
     assert!(cost_of(&r, "a1").abs() < 1e-9);
-    let dir = r.tmp.path().join("machine/core/asks");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("a1.out"), answer("waiting").to_string()).unwrap();
+    let out = PathBuf::from(o["out"].as_str().unwrap());
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    std::fs::write(&out, answer("waiting").to_string()).unwrap();
     r.report(claim, "done");
     r.tick();
     r.tick();
     assert!((cost_of(&r, "a1") - 0.25).abs() < 1e-9);
+}
+
+#[test]
+fn a_resumed_fg_asks_ended_turn_with_no_result_does_not_book_the_cli_runs_cost_again() {
+    let r = Rig::new();
+    r.open(
+        "f1",
+        "fg",
+        &json!({"cliPid": 4242, "cliStart": "gone"}),
+        &[],
+    );
+    r.owner("ask.park", &json!({"id": "f1", "card": "c1"}));
+    let dir = r.tmp.path().join("machine/core/asks");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("f1.out"), answer("waiting").to_string()).unwrap();
+    let un = r.owner("ask.unpark", &json!({"id": "f1", "note": "approved"}));
+    let t2 = un["turn"].as_i64().unwrap();
+    // The resume's engine was killed: its turn ended and its own out file never came.
+    let claim = r.start("f1", t2);
+    r.report(claim, "exit");
+    r.tick();
+    r.tick();
+    // Only the CLI run's cost (key 0) was booked, once.
+    assert!((cost_of(&r, "f1") - 0.25).abs() < 1e-9);
+}
+
+#[test]
+fn a_bg_ask_on_a_named_conversation_has_its_lost_reports_cost_booked_once() {
+    let r = Rig::new();
+    let o = r.open(
+        "n1",
+        "bg",
+        &json!({"task": "go", "conversation": "named-conv"}),
+        &[],
+    );
+    let turn = turn_of(&o);
+    let claimed = r.host(
+        "hostclaim.claim",
+        &json!({"conversation": "named-conv", "kind": "askRun", "turn": turn, "person": "owner",
+                "revokeSeen": 0, "holderInstance": HOST}),
+    );
+    let claim = claimed["claimId"].as_i64().unwrap();
+    let pid = std::process::id();
+    let started = kith_kernel::procstart::start_stamp(pid).unwrap();
+    r.d.shared()
+        .with_core(|c| sched_run::attach(c, claim, Some("named-conv"), pid, &started, ms()))
+        .unwrap();
+    let out = PathBuf::from(o["out"].as_str().unwrap());
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    std::fs::write(&out, answer("here").to_string()).unwrap();
+    r.report(claim, "done");
+    r.owner("ask.park", &json!({"id": "n1", "card": "c1"}));
+    r.tick();
+    r.tick();
+    assert!((cost_of(&r, "n1") - 0.25).abs() < 1e-9);
 }

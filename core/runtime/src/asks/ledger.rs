@@ -149,6 +149,10 @@ fn new_turn_in(
         .join(name)
         .to_string_lossy()
         .into_owned();
+    tx.execute(
+        "INSERT INTO ask_turns (ask, turn, out_path) VALUES (?1, ?2, ?3)",
+        rusqlite::params![ask.id, turn, out],
+    )?;
     Ok((turn, out, conversation))
 }
 

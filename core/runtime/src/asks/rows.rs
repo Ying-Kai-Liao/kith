@@ -159,6 +159,11 @@ pub(super) fn forget_old_in(tx: &Connection, now: i64) -> Result<usize> {
         [before],
     )?;
     tx.execute(
+        "DELETE FROM ask_turns WHERE ask IN
+            (SELECT id FROM asks WHERE state <> 'open' AND COALESCE(answered_ms, ended_ms, at_ms, 0) < ?1)",
+        [before],
+    )?;
+    tx.execute(
         "DELETE FROM ask_costs WHERE ask IN
             (SELECT id FROM asks WHERE state <> 'open' AND COALESCE(answered_ms, ended_ms, at_ms, 0) < ?1)",
         [before],

@@ -48,7 +48,12 @@ pub(crate) struct CostSeen {
     paths: Vec<PathBuf>,
     /// The process that must be gone first (key 0).
     cli: Option<(i64, Option<String>)>,
+    /// When the turn ended (ms; key 0: none). A run that gave no answer in [`GRACE_MS`] after it is booked at no cost.
+    ended_ms: Option<i64>,
 }
+
+/// How long after a turn ended its out file may still show up (a host restart, a slow disk) before the tick gives up on it.
+const GRACE_MS: i64 = 10 * 60 * 1000;
 
 /// What phase 1 read.
 #[derive(Default)]
@@ -98,7 +103,7 @@ pub(crate) fn seen_in(tx: &Connection, machine: &Path) -> Result<Seen> {
             })
         })?
         .collect::<std::result::Result<_, _>>()?;
-    // Runs whose cost no report booked: a `fg` CLI's own run (key 0), and each finished turn of the ask's own conversation.
+    // Runs whose cost no report booked: a `fg` CLI's own run (key 0), and each finished turn made for an ask (`ask_turns`).
     let mut costs = Vec::new();
     let mut st = tx.prepare(
         "SELECT id, cli_pid, cli_start FROM asks
@@ -118,33 +123,30 @@ pub(crate) fn seen_in(tx: &Connection, machine: &Path) -> Result<Seen> {
             ask: id,
             key: 0,
             cli: Some((pid, start)),
+            ended_ms: None,
         });
     }
     let mut st = tx.prepare(&format!(
-        "SELECT a.id, t.id,
-                t.id = (SELECT MIN(x.id) FROM turns x WHERE x.conversation = t.conversation AND x.source = 'ask')
-         FROM asks a JOIN turns t ON t.conversation = 'ask:' || a.id AND t.source = 'ask'
+        "SELECT k.ask, k.turn, k.out_path, t.finished_at
+         FROM ask_turns k JOIN turns t ON t.id = k.turn
          WHERE t.state IN {FINAL}
-           AND NOT EXISTS (SELECT 1 FROM ask_costs c WHERE c.ask = a.id AND c.turn = t.id) ORDER BY a.id, t.id"
+           AND NOT EXISTS (SELECT 1 FROM ask_costs c WHERE c.ask = k.ask AND c.turn = k.turn) ORDER BY k.ask, k.turn"
     ))?;
     for r in st.query_map([], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, i64>(1)?,
-            r.get::<_, bool>(2)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, Option<i64>>(3)?,
         ))
     })? {
-        let (id, turn, first) = r?;
-        // The first turn's file is `<id>.out`; a resume's is `<id>-<turn>.out`.
-        let mut paths = vec![dir.join(format!("{id}-{turn}.out"))];
-        if first {
-            paths.push(dir.join(format!("{id}.out")));
-        }
+        let (id, turn, out_path, ended) = r?;
         costs.push(CostSeen {
             ask: id,
             key: turn,
-            paths,
+            paths: vec![PathBuf::from(out_path)],
             cli: None,
+            ended_ms: Some(ended.unwrap_or(0)),
         });
     }
     Ok(Seen { bg, fg, costs })
@@ -153,6 +155,8 @@ pub(crate) fn seen_in(tx: &Connection, machine: &Path) -> Result<Seen> {
 /// Between the phases, with no lock held: the out files and the process table.
 pub(crate) fn look(seen: &Seen, out: &dyn Outside) -> Looked {
     let mut looked = Looked::default();
+    #[allow(clippy::cast_possible_truncation)]
+    let now_ms = (out.now() * 1000.0) as i64;
     for b in &seen.bg {
         let answer = b
             .out_path
@@ -179,6 +183,9 @@ pub(crate) fn look(seen: &Seen, out: &dyn Outside) -> Looked {
             .find_map(|p| out.read_text(p).and_then(|t| ledger::parse_callee(&t)));
         if let Some(callee) = said {
             looked.costs.insert((c.ask.clone(), c.key), callee.cost);
+        } else if c.ended_ms.is_some_and(|e| now_ms - e > GRACE_MS) {
+            // No answer after the grace: the run gave none, so it is booked once at no cost and not looked for again.
+            looked.costs.insert((c.ask.clone(), c.key), 0.0);
         }
     }
     looked

@@ -83,6 +83,15 @@ pub(super) const MIGRATION: Migration = Migration {
         ) WITHOUT ROWID;
 
         -- The turns whose run's cost joined the chain (0: the run of an ask with no turn): a cost is counted once per turn.
+        -- Each turn made for an ask's callee, with the file its run writes the answer to: what the tick reads to book the cost
+        -- of a run whose report was lost, whatever conversation the turn is on.
+        CREATE TABLE ask_turns (
+            ask TEXT NOT NULL,
+            turn INTEGER NOT NULL,
+            out_path TEXT NOT NULL,
+            PRIMARY KEY (ask, turn)
+        ) WITHOUT ROWID;
+
         CREATE TABLE ask_costs (
             ask TEXT NOT NULL,
             turn INTEGER NOT NULL,
