@@ -3,7 +3,9 @@
 # a stale writer whose command line names neither kith-auth nor kith_settings is stopped, a loaded KeepAlive launchd job
 # is restarted with launchctl (not killed bare), a job that runs the installer itself is left alone, an agent run's own
 # wrappers (kith ask --bg, run-chain, kith-sessions run, the harness adapter) are left alone but `kith ask --cap` is not,
-# a process that starts after the swap is left alone, and both locks are free afterwards. Throwaway HOME and PREFIX, a fake launchctl.
+# a writer counts by its program only (an engine whose prompt names kith-auth is left alone), a process that starts after
+# the swap is left alone, and both locks are free afterwards. Throwaway HOME and PREFIX, a fake launchctl, and
+# KITH_QUIESCE_PIDS so the drain looks only at this check's own processes, never at a real one on this Mac.
 #
 #   kernel/tests/kith-install-drain-check     about 10 seconds; prints each check, exits 1 when one fails
 set -uo pipefail
@@ -34,8 +36,11 @@ while True:
     time.sleep(0.1)
 PY
 cat > "$T/spawn.py" <<'PY'
-import subprocess, sys   # detached like a daemon: own session, no terminal
-p = subprocess.Popen(sys.argv[1:], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+import os, subprocess, sys   # detached like a daemon: own session, no terminal; ARGV0 names the program as ps shows it
+args, exe = sys.argv[1:], sys.argv[1]
+if os.environ.get('ARGV0'):
+    args = [os.environ.pop('ARGV0')] + args[1:]
+p = subprocess.Popen(args, executable=exe, start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 print(p.pid)
 PY
 spawn() { python3 "$T/spawn.py" python3 "$K/bin/stale-writer" "$1" "$T/settings.json"; }
@@ -89,6 +94,24 @@ detach chain python3 "$K/lib/kith_accounts.py" run-chain coder "$K/agent.md" "$K
 detach harness python3 "$K/adapters/harness.py" codex -p brief
 detach launch bash "$K/bin/kith" coder -p brief
 detach cap python3 "$K/bin/kith-ask" --cap 5
+# writers by program, outside the kernel (a path with a space, as on an external disk): kith-auth as argv[0], a
+# kith_settings.py script, a kith binary's `kernel secrets`. An agent's engine and its stub carry kith-auth and
+# `kith kernel settings` in their system prompt argument, and `kith kernel threads` has them in a later argument: those stay.
+W="$T/writer bin"; mkdir -p "$W"
+printf '#!/usr/bin/env python3\nimport time\ntime.sleep(300)\n' > "$W/kith"; chmod +x "$W/kith"
+printf 'import time\ntime.sleep(300)\n' > "$W/kith_settings.py"
+PROMPT='decisions: the owner list lives in kith-auth and; run kith kernel settings set x; /p/bin/kith-auth grant'
+# ARGV0 programs are sleep and perl: a framework python re-execs itself and loses the name
+ARGV0=kith-auth detach auth sleep 300
+detach settings python3 "$W/kith_settings.py" get permission_mode
+detach secrets "$W/kith" kernel secrets set x
+ARGV0=claude detach engine perl -e 'sleep 300' -- --append-system-prompt "$PROMPT"
+ARGV0="$T/bin/kith-stub" detach stub perl -e 'sleep 300' -- --lock-dir "$T/locks" -- claude --append-system-prompt "$PROMPT"
+detach threads "$W/kith" kernel threads --brief "$PROMPT"
+# not one of this check's processes: a writer by the rule. The check looks only at its own pids, so it must survive.
+ARGV0=kith-auth python3 "$T/spawn.py" sleep 300 > "$T/bystander.pid"; bystander=$(cat "$T/bystander.pid")
+export KITH_QUIESCE_PIDS="${pids[*]}"
+pids+=("$bystander")
 sleep 1.5                                                                            # all of them started before the swap
 printf 'touch "%s/swapped"\n' "$T" > "$T/swap.sh"
 before=$(grep -c old "$T/settings.json")
@@ -116,6 +139,13 @@ check "its kith_accounts.py run-chain is left alone" "kill -0 \$(cat '$T/chain.p
 check "a run through the harness adapter is left alone" "kill -0 \$(cat '$T/harness.pid')"
 check "bin/kith that execs into kith-sessions run mid-drain is left alone" "kill -0 \$(cat '$T/launch.pid') && ps -o command= -p \$(cat '$T/launch.pid') | grep -q 'kith-sessions run'"
 check "kith-ask --cap, which writes settings.json, is still stopped" "! kill -0 \$(cat '$T/cap.pid')"
+check "a kith-auth program is stopped" "! kill -0 \$(cat '$T/auth.pid')"
+check "a kith_settings.py script is stopped" "! kill -0 \$(cat '$T/settings.pid')"
+check "a kith binary running kernel secrets is stopped" "! kill -0 \$(cat '$T/secrets.pid')"
+check "an engine whose prompt names kith-auth and kith kernel settings is left alone" "ps -o command= -p \$(cat '$T/engine.pid') | grep -q '^claude .*kith-auth and; run kith kernel settings'"
+check "its kith-stub, with the same prompt after --, is left alone" "ps -o command= -p \$(cat '$T/stub.pid') | grep -q '^$T/bin/kith-stub .*kith kernel settings'"
+check "kith kernel threads with those words in a later argument is left alone" "ps -o command= -p \$(cat '$T/threads.pid') | grep -q 'kith kernel threads .*kith kernel settings'"
+check "a process this check did not start is never looked at, though the rule would stop it" "ps -o command= -p $bystander | grep -q '^kith-auth 300'"
 wait "$wrapper"; sleep 2.5
 check "once the installer is done the job it ran inside is restarted" "grep -q 'kickstart.*dev.kith.self' '$T/ls/calls'"
 pids+=("$(cat "$T/ls/dev.kith.self.pid")")
@@ -125,16 +155,5 @@ check "both locks are free afterwards" "python3 -c \"
 import fcntl
 for n in ('auth', 'settings'):
     f = open('$T/locks/%s.json.lock' % n, 'a'); fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\""
-
-# the default regex (no KITH_QUIESCE_MATCH): the Rust settings/secrets verbs count as writers, lookalikes do not
-check "the default match covers kith-auth, kith_settings and the Rust settings/secrets verbs only" "python3 - <<'PYM'
-import re
-src = open('$T/quiesce.py').read()
-rx = re.compile(re.search(r\"or (r'.*?')\\)\", src).group(1)[2:-1] if False else eval(re.search(r\"or (r'[^\\n]*?')\\)\", src).group(1)))
-yes = ['kith-auth set x', '/p/kith-auth', 'python3 /p/kith_settings.py get', 'kith kernel settings set a b', '/p/bin/kith kernel secrets set x', 'kith kernel settings']
-no = ['kith kernel settingsfoo', 'kith kernel secretsx', 'kith kernel doctor', 'kith run settings', 'xkith kernel settings']
-assert all(rx.search(c) for c in yes), [c for c in yes if not rx.search(c)]
-assert not any(rx.search(c) for c in no), [c for c in no if rx.search(c)]
-PYM"
 
 exit $fail

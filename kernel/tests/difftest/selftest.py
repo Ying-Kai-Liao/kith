@@ -199,6 +199,13 @@ class SelfTest(unittest.TestCase):
         want = "api_helper='<KERNEL>/bin/kith-auth get --for echo'"
         self.assertEqual(n.text(plain), want)
         self.assertEqual(n.text(spaced), want)
+        # shlex.quote of the root alone, then the rest of the path (the read fence hook's command): same record either way.
+        fence = "/usr/bin/python3 -I {}/lib/kith_readfence.py --root /x"
+        want = "/usr/bin/python3 -I <KERNEL>/lib/kith_readfence.py --root /x"
+        self.assertEqual(n.text(fence.format(D.KERNEL)), want)
+        self.assertEqual(n.text(fence.format(f"'{D.KERNEL}'")), want)
+        # A quote that a plain path needs too (a space after the path) is kept.
+        self.assertEqual(n.text(f"'{D.KERNEL}/bin/x y'"), "'<KERNEL>/bin/x y'")
 
     def test_unswitched_golden_cases_are_skipped_out_loud_until_required(self):
         """A golden replay on the Rust program skips a case marked unswitched and says so; --require-switched runs it."""
