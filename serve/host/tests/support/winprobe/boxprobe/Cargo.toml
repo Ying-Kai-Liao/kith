@@ -1,0 +1,32 @@
+[package]
+name = "kith-boxprobe"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Test-only Windows probe (W20): an AppContainer box with custom capabilities in a job, and the checks run inside it"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "boxprobe"
+path = "src/main.rs"
+
+# Windows only, like core/winsys; off Windows the binary only says so.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Networking_WinSock",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Credentials",
+  "Win32_Security_Isolation",
+  "Win32_Storage_FileSystem",
+  "Win32_System_JobObjects",
+  "Win32_System_Pipes",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+] }
+
+# A throwaway probe, never shipped: the unsafe Win32 calls are the point.
+[lints.rust]
+unsafe_code = "allow"

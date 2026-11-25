@@ -1,4 +1,4 @@
-//! The Windows build of `secrets`: only the pieces other modules stand on. The access decision itself (auth.json with its
+//! The Windows build of `secrets`: only the pieces other modules stand on (`pyjson`, the timeout helper, the portable `access` re-export). The access decision itself (auth.json with its
 //! flock and modes, the password database, `kith-auth`) stays Unix-only until retire-python P3 puts it in the core; nothing
 //! that spawns `kith-auth` is reachable from here, and the callers that would are refused by name where they start.
 
@@ -15,6 +15,9 @@ use serde_json::Value;
 
 pub use cmd::run_command_with_timeout;
 
+// The access rules are portable (`kith_kernel::access`); the Unix build re-exports them from here too, so a caller names one path.
+pub use crate::access::*;
+
 // ---- what the launch asks of `kith-auth`, and the answers it gets here ---------------------------------------------------
 //
 // The launch's plan asks `kith-auth` three things: who a run is for (`resolve`: an invited person, a bot guest, a room's
@@ -22,17 +25,19 @@ pub use cmd::run_command_with_timeout;
 // (retire-python P3-1 puts the people and the grants in the core), so the first is a refusal by name (the launch also refuses
 // a guest before it asks, with the sentence the owner reads) and the second leaves the run without shared services, saying so.
 
-/// What the launch needs to know about this run, of the full module's `Ctx`: the person it is for.
-#[derive(Clone, Debug, Default)]
-pub struct Ctx {
-    /// `KITH_PERSON`: unset or empty is the owner.
-    pub person: Option<String>,
-}
-
 impl Ctx {
-    pub fn from_process(_kernel: &Path) -> Ctx {
+    /// This process, for the launch: only the person matters here (nothing reads auth.json on Windows until P3-1).
+    pub fn from_process(kernel: &Path) -> Ctx {
+        let p = crate::paths::from_process(kernel);
         Ctx {
+            auth: p.secrets.join("auth.json"),
+            agents: p.agents,
+            kernel: kernel.to_path_buf(),
             person: std::env::var("KITH_PERSON").ok().filter(|v| !v.is_empty()),
+            now_ms: now_ms(),
+            sandbox: Sandbox::Fixed(false),
+            serve: ServeDir::Fixed(p.state.join("serve")),
+            packages: Packages::Disk,
         }
     }
 }
@@ -54,13 +59,6 @@ pub fn run(_c: &Ctx, verb: &str, _args: &[String]) -> Outcome {
         ),
         code: 1,
     }
-}
-
-/// A refusal `kith-auth` would `die` with: its message and exit code.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Die {
-    pub msg: String,
-    pub code: i32,
 }
 
 /// How a shared service's server is started (decided once per launch).
