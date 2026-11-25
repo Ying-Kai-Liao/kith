@@ -99,6 +99,12 @@ fn every_row_is_well_formed() {
                 "ask.finish",
                 "ask.park",
                 "ask.unpark",
+                // A5a: the host opens the asks other computers send, and carries the rows of the asks sent to them.
+                "ask.open",
+                "ask.peerLink",
+                "ask.endPeer",
+                "ask.peerApply",
+                "ask.peerOwed",
             ]
             .contains(&m.name)
         {
