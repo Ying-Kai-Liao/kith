@@ -1,0 +1,13 @@
+# The inputs of each model check in CI: a full run over the same inputs gives the same verdict, so CI remembers a pass
+# by a hash of them (verification/model-keys.sh, the `changes` job in .github/workflows/ci.yml) and re-runs the full
+# rows only when the hash has no pass yet. Every run.sh reads only its inputs (kernel/tests/kith-model-keys-check).
+# A model's drift.sh is never an input: a SYNC bump changes no verdict.
+#
+# marker	CI job	inputs (git pathspecs, space separated)
+revoke	revoke-access	verification/revoke verification/threads/run.sh
+writer-lock	writer-lock	verification/writer-lock verification/threads/run.sh
+threads	thread-writers	verification/threads
+threads-slow	thread-writers-slow	verification/threads
+schedule-fire	schedule-fire	verification/schedule-fire
+lease	holder-lease	verification/lease
+secrets	secret-cards	verification/secrets verification/threads/run.sh
