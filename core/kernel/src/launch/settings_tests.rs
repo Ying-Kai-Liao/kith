@@ -504,7 +504,8 @@ fn owner_is_held_to_auto_when_the_agent_reads_other_peoples_text() {
 }
 
 #[test]
-fn owner_bypass_at_the_terminal_typed_or_this_macs_wins_over_the_reader_cap_and_nothing_else_does() {
+fn owner_bypass_at_the_terminal_typed_or_this_macs_wins_over_the_reader_cap_and_nothing_else_does()
+{
     let t = Tree::new();
     // typed on the command line at the owner's terminal: kept, though the agent reads other people's text
     let out = t
@@ -531,7 +532,11 @@ fn owner_bypass_at_the_terminal_typed_or_this_macs_wins_over_the_reader_cap_and_
         "kith/state/settings.json",
         r#"{"permission_mode": "bypassPermissions"}"#,
     );
-    let s = t.settings_typed(&Member::owner(), "").unwrap().settings.unwrap();
+    let s = t
+        .settings_typed(&Member::owner(), "")
+        .unwrap()
+        .settings
+        .unwrap();
     assert_eq!(s["permissions"]["defaultMode"], json!("auto"));
     // a guest's mode is the membership's, whatever was typed
     let out = t
