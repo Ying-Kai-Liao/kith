@@ -23,7 +23,10 @@ struct Fake {
 
 impl Fake {
     fn new(attach: Option<Value>) -> Self {
-        Self { attach, calls: RefCell::new(Vec::new()) }
+        Self {
+            attach,
+            calls: RefCell::new(Vec::new()),
+        }
     }
 
     fn asked(&self) -> Vec<String> {
@@ -33,7 +36,9 @@ impl Fake {
 
 impl Core for Fake {
     fn call(&self, method: &str, params: &Value, _: Option<Duration>) -> Result<Value, CoreErr> {
-        self.calls.borrow_mut().push((method.to_owned(), params.clone()));
+        self.calls
+            .borrow_mut()
+            .push((method.to_owned(), params.clone()));
         match (method, &self.attach) {
             ("claim.attach", Some(a)) => Ok(a.clone()),
             ("claim.attach", None) => Err(CoreErr::NoAnswer("no core daemon answers".to_owned())),
@@ -59,9 +64,19 @@ fn the_claim_is_attached_for_the_launchers_pid_before_claim_external_and_again_o
     let taker = Taker::new(&c, Some(&core));
     // `resolve` takes the claim, then the one-shot's `claim` step asks again for the same pid.
     for _ in 0..2 {
-        taker.claim_start("s-1", holder.pid(), "oneshot", Duration::ZERO, None, None).expect("claim_start");
+        taker
+            .claim_start("s-1", holder.pid(), "oneshot", Duration::ZERO, None, None)
+            .expect("claim_start");
     }
-    assert_eq!(core.asked(), ["claim.attach", "claim.external", "claim.attach", "claim.external"]);
+    assert_eq!(
+        core.asked(),
+        [
+            "claim.attach",
+            "claim.external",
+            "claim.attach",
+            "claim.external"
+        ]
+    );
     let first = core.calls.borrow()[0].1.clone();
     assert_eq!(first["claimId"], 41);
     assert_eq!(first["conversation"], "s-1");
@@ -81,14 +96,34 @@ fn a_refused_attach_starts_nothing_and_exits_with_its_own_code() {
     // Cancelled, adopted by a host restart, or another conversation's: the core answers `gone` for each.
     for state in ["cancelled", "queued", "claimed"] {
         let core = Fake::new(Some(json!({"refused": "gone", "state": state})));
-        let o = cli::run(&c, &NoHost, Some(&core), &args(&["claim", "s-1", &pid]), &String::new);
+        let o = cli::run(
+            &c,
+            &NoHost,
+            Some(&core),
+            &args(&["claim", "s-1", &pid]),
+            &String::new,
+        );
         assert_eq!(o.code, TURN_CLAIM_EXIT, "{state}: {}", o.stderr);
-        assert!(o.stderr.contains("the turn claim was refused") && o.stderr.contains(state), "{}", o.stderr);
-        assert_eq!(core.asked(), ["claim.attach"], "no claim.external after a refusal");
+        assert!(
+            o.stderr.contains("the turn claim was refused") && o.stderr.contains(state),
+            "{}",
+            o.stderr
+        );
+        assert_eq!(
+            core.asked(),
+            ["claim.attach"],
+            "no claim.external after a refusal"
+        );
     }
     // A core that does not answer is no attach either.
     let down = Fake::new(None);
-    let o = cli::run(&c, &NoHost, Some(&down), &args(&["terminal", "s-1", &pid]), &String::new);
+    let o = cli::run(
+        &c,
+        &NoHost,
+        Some(&down),
+        &args(&["terminal", "s-1", &pid]),
+        &String::new,
+    );
     assert_eq!(o.code, TURN_CLAIM_EXIT, "{}", o.stderr);
     assert_eq!(down.asked(), ["claim.attach"]);
     // Not a claim id.
@@ -127,9 +162,19 @@ fn in_files_mode_a_claimed_turn_is_refused_and_nothing_is_asked() {
     let holder = Sleeper::new();
     let pid = holder.pid().to_string();
     for verb in ["claim", "terminal"] {
-        let o = cli::run(&c, &NoHost, Some(&core), &args(&[verb, "s-1", &pid]), &String::new);
+        let o = cli::run(
+            &c,
+            &NoHost,
+            Some(&core),
+            &args(&[verb, "s-1", &pid]),
+            &String::new,
+        );
         assert_eq!(o.code, TURN_CLAIM_EXIT, "{verb}: {}", o.stderr);
-        assert!(o.stderr.contains("the turn claim was refused"), "{}", o.stderr);
+        assert!(
+            o.stderr.contains("the turn claim was refused"),
+            "{}",
+            o.stderr
+        );
     }
     assert!(core.asked().is_empty(), "{:?}", core.asked());
 }
@@ -143,7 +188,9 @@ fn a_run_without_a_conversation_attaches_for_its_own_pid_and_says_why_it_did_not
     // The launch's own pid: the claim names the process the engine descends from (sched-turn S-R1).
     let me = i64::from(std::process::id());
     let core = Fake::new(Some(json!({"attached": true})));
-    Taker::new(&c, Some(&core)).attach_run(41, me).expect("attached");
+    Taker::new(&c, Some(&core))
+        .attach_run(41, me)
+        .expect("attached");
     let asked = core.calls.borrow()[0].clone();
     assert_eq!(asked.0, "claim.attach");
     assert_eq!(asked.1["claimId"], 41);
@@ -151,7 +198,13 @@ fn a_run_without_a_conversation_attaches_for_its_own_pid_and_says_why_it_did_not
     assert!(asked.1["started"].as_str().is_some_and(|s| !s.is_empty()));
     assert!(asked.1.get("conversation").is_none());
     let gone = Fake::new(Some(json!({"refused": "gone", "state": "cancelled"})));
-    assert_eq!(Taker::new(&c, Some(&gone)).attach_run(41, me), Err(AttachErr::Gone("cancelled".to_owned())));
+    assert_eq!(
+        Taker::new(&c, Some(&gone)).attach_run(41, me),
+        Err(AttachErr::Gone("cancelled".to_owned()))
+    );
     let down = Fake::new(None);
-    assert!(matches!(Taker::new(&c, Some(&down)).attach_run(41, me), Err(AttachErr::Down(_))));
+    assert!(matches!(
+        Taker::new(&c, Some(&down)).attach_run(41, me),
+        Err(AttachErr::Down(_))
+    ));
 }

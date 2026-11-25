@@ -95,8 +95,8 @@ impl Flags {
                     f.resume = Some(Pick::Latest);
                     1
                 }
-                "--hold" | "--account" | "--backup" | "-p" | "--project" | "-m" | "--model" | "-e" | "--effort"
-                | "-H" | "--harness" | "--permission-mode" => 2,
+                "--hold" | "--account" | "--backup" | "-p" | "--project" | "-m" | "--model"
+                | "-e" | "--effort" | "-H" | "--harness" | "--permission-mode" => 2,
                 "--bypass" => 1,
                 "--" => {
                     // The plan needs it too: what follows is a task even when it starts like a flag.
@@ -107,7 +107,8 @@ impl Flags {
                 _ => break,
             };
             if !matches!(x, "--held" | "--direct") {
-                f.plan_argv.extend(argv[i..(i + step).min(argv.len())].iter().cloned());
+                f.plan_argv
+                    .extend(argv[i..(i + step).min(argv.len())].iter().cloned());
             }
             i += step;
         }
@@ -161,7 +162,11 @@ impl ExecHooks for Steps<'_> {
             let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
             let out = threads::cli::run_with(self.ctx, host, core, &args, &stdin, &ask);
             eprint!("{}", out.stderr);
-            if out.code == 0 { Ok(out.stdout.trim().to_owned()) } else { Err(1) }
+            if out.code == 0 {
+                Ok(out.stdout.trim().to_owned())
+            } else {
+                Err(1)
+            }
         };
         let thread = match &self.flags.resume {
             Some(Pick::Id(id)) => id.clone(),
@@ -178,7 +183,12 @@ impl ExecHooks for Steps<'_> {
                 eprint!("{}", t.said);
                 *self.alone.borrow_mut() = t.alone;
                 let run = accounts::session_run(&self.machine, &t.resolved.sid);
-                Ok(Resumed { sid: t.resolved.sid, cwd: t.resolved.cwd, thread, run })
+                Ok(Resumed {
+                    sid: t.resolved.sid,
+                    cwd: t.resolved.cwd,
+                    thread,
+                    run,
+                })
             }
             Err(m) => {
                 eprintln!("kith: {m}");
@@ -198,8 +208,15 @@ impl ExecHooks for Steps<'_> {
             eprintln!("kith: can't find this program to start the attempts");
             return 1;
         };
-        let base = [me.to_string_lossy().into_owned(), "kernel".to_owned(), "launch-exec".to_owned()];
-        let tail = ["--kernel".to_owned(), self.kernel.to_string_lossy().into_owned()];
+        let base = [
+            me.to_string_lossy().into_owned(),
+            "kernel".to_owned(),
+            "launch-exec".to_owned(),
+        ];
+        let tail = [
+            "--kernel".to_owned(),
+            self.kernel.to_string_lossy().into_owned(),
+        ];
         accounts::chain::run_with(
             &self.accounts_ctx,
             agent,
@@ -219,7 +236,13 @@ pub fn run(argv: &[String], kernel: &Path, env0: Env, deps: &Deps<'_>) -> i32 {
 }
 
 /// [`run`], with the way the engine starts named (the tests wait for it).
-pub fn run_with(argv: &[String], kernel: &Path, mut env0: Env, deps: &Deps<'_>, how: Engine) -> i32 {
+pub fn run_with(
+    argv: &[String],
+    kernel: &Path,
+    mut env0: Env,
+    deps: &Deps<'_>,
+    how: Engine,
+) -> i32 {
     let Some((agent, rest)) = argv.split_first() else {
         eprintln!("usage: kith kernel launch-exec AGENT [--kernel DIR] ARGS...");
         return 2;
@@ -235,26 +258,40 @@ pub fn run_with(argv: &[String], kernel: &Path, mut env0: Env, deps: &Deps<'_>, 
     sched.map_or(code, |s| s.finish(code))
 }
 
-fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Engine, sched: Option<&Sched>) -> i32 {
+fn run_one(
+    argv: &[String],
+    kernel: &Path,
+    env0: &Env,
+    deps: &Deps<'_>,
+    how: Engine,
+    sched: Option<&Sched>,
+) -> i32 {
     let Some((agent, rest)) = argv.split_first() else {
         return 2;
     };
     let flags = Flags::parse(rest);
     if flags.no_run || flags.task.is_empty() {
-        eprintln!("kith: --exec runs a task (kith {agent} \"...\"); --print and --launch-json answer elsewhere");
+        eprintln!(
+            "kith: --exec runs a task (kith {agent} \"...\"); --print and --launch-json answer elsewhere"
+        );
         return 2;
     }
     let person = get(env0, "KITH_PERSON").to_owned();
     // A room person (the meet of everyone in a room with people) has no row in auth.json: only the Rust launch builds its grant, and
     // it is the host's launch that starts those runs, not this one.
     if super::room::is_room_person(&person) {
-        eprintln!("kith: {person} is a room person; it only launches through the Rust launch, not this script");
+        eprintln!(
+            "kith: {person} is a room person; it only launches through the Rust launch, not this script"
+        );
         return 3;
     }
     let home_dir = PathBuf::from(get(env0, "HOME"));
     let p = {
         let mut e = env0.clone();
-        e.insert("KITH_ROOT".to_owned(), kernel.to_string_lossy().into_owned());
+        e.insert(
+            "KITH_ROOT".to_owned(),
+            kernel.to_string_lossy().into_owned(),
+        );
         paths::paths(&home_dir, kernel, &move |k| e.get(k).cloned())
     };
     let seen = RefCell::new(String::new());
@@ -264,8 +301,12 @@ fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Eng
         }
         env0.get(k).cloned()
     };
-    let ctx =
-        Ctx { state: Some(p.state.clone()), machine: Some(p.machine.clone()), home: home_dir.clone(), env: &lookup };
+    let ctx = Ctx {
+        state: Some(p.state.clone()),
+        machine: Some(p.machine.clone()),
+        home: home_dir.clone(),
+        env: &lookup,
+    };
     let taker = Taker::new(&ctx, deps.core);
     let pid = i64::from(std::process::id());
     // I1: a person's revoke epoch is read BEFORE the plan decides they may run, and travels with every claim of this run
@@ -280,7 +321,9 @@ fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Eng
             }
         }
     }
-    let system = accounts::System { kernel: kernel.to_path_buf() };
+    let system = accounts::System {
+        kernel: kernel.to_path_buf(),
+    };
     let steps = Steps {
         ctx: &ctx,
         deps,
@@ -291,7 +334,9 @@ fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Eng
         pwd: {
             let cwd = std::env::current_dir().unwrap_or_default();
             match env0.get("PWD").filter(|d| !d.is_empty()) {
-                Some(d) if std::fs::canonicalize(d).ok() == std::fs::canonicalize(&cwd).ok() => d.clone(),
+                Some(d) if std::fs::canonicalize(d).ok() == std::fs::canonicalize(&cwd).ok() => {
+                    d.clone()
+                }
                 _ => cwd.to_string_lossy().into_owned(),
             }
         },
@@ -313,10 +358,25 @@ fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Eng
     let ask_id = get(env0, "KITH_LAUNCH_ASK_ID").to_owned();
     let sid_file = get(env0, "KITH_LAUNCH_SID_FILE").to_owned();
     let claude_args = get(env0, "KITH_CLAUDE_ARGS").to_owned();
-    let via = if get(env0, "KITH_VIA").is_empty() { "terminal".to_owned() } else { get(env0, "KITH_VIA").to_owned() };
-    let opts = ExecOpts { hooks: Hooks(Some(&steps)), ..ExecOpts::from_process(true, flags.held, "") };
-    let plan = match plan::plan(agent, &flags.plan_argv, kernel, env0.clone(), &Mode::Exec(opts)) {
+    let via = if get(env0, "KITH_VIA").is_empty() {
+        "terminal".to_owned()
+    } else {
+        get(env0, "KITH_VIA").to_owned()
+    };
+    let opts = ExecOpts {
+        hooks: Hooks(Some(&steps)),
+        ..ExecOpts::from_process(true, flags.held, "")
+    };
+    let plan = match plan::plan(
+        agent,
+        &flags.plan_argv,
+        kernel,
+        env0.clone(),
+        &Mode::Exec(opts),
+    ) {
         Ok(p) => p,
+        // A turn's run that the plan refuses (the person's auth did not resolve, or was revoked) is `refused()` to the host: 3.
+        Err(1) if sched.is_some() => return sched_turn::REFUSED,
         Err(code) => return code,
     };
     let mut env = plan.env.clone();
@@ -379,7 +439,10 @@ fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Eng
             return 1;
         }
     };
-    let (settings_file, mcp_file) = (runs.join(format!("{pid}.settings.json")), runs.join(format!("{pid}.mcp.json")));
+    let (settings_file, mcp_file) = (
+        runs.join(format!("{pid}.settings.json")),
+        runs.join(format!("{pid}.mcp.json")),
+    );
     // Run files: in the snapshot (so cleanup sees the run), or a temp dir when running the live folder.
     let _ = std::fs::write(&mcp_file, format!("{}\n", pyjson::dumps(&plan.granted)));
     let task = flags.task_text();
@@ -393,7 +456,10 @@ fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Eng
             return code;
         }
         if flags.held {
-            eprintln!("kith: --held holds claude sessions only; {} runs here (--direct)", plan.harness);
+            eprintln!(
+                "kith: --held holds claude sessions only; {} runs here (--direct)",
+                plan.harness
+            );
         }
         return other_engine(&plan, kernel, env, &runs, pid, task, how);
     }
@@ -403,7 +469,10 @@ fn run_one(argv: &[String], kernel: &Path, env0: &Env, deps: &Deps<'_>, how: Eng
     if let Some(s) = &plan.settings {
         let _ = std::fs::write(&settings_file, pj_indent1(s));
     }
-    let files = Files { settings: &settings_file.to_string_lossy(), mcp: &mcp_file.to_string_lossy() };
+    let files = Files {
+        settings: &settings_file.to_string_lossy(),
+        mcp: &mcp_file.to_string_lossy(),
+    };
     let mut engine_args = run_args(&plan, &files);
     // Extra claude flags from a caller such as kith serve (e.g. --output-format json --resume <session>); for them only.
     engine_args.extend(session::extra_args(&claude_args, owner));
@@ -468,22 +537,54 @@ fn other_engine(
         mcp.push('\n');
         mcp.push_str(&own.to_string_lossy());
     }
-    env.insert("KITH_RUN_PROMPT".to_owned(), prompt_file.to_string_lossy().into_owned());
+    env.insert(
+        "KITH_RUN_PROMPT".to_owned(),
+        prompt_file.to_string_lossy().into_owned(),
+    );
     env.insert("KITH_RUN_DIRS".to_owned(), dirs.join("\n"));
     env.insert("KITH_RUN_MCP".to_owned(), mcp);
     // Global skills load unless the role turned them off.
-    env.insert("KITH_RUN_GLOBAL_SKILLS".to_owned(), if plan.out.disable_slash_commands { "0" } else { "1" }.to_owned());
+    env.insert(
+        "KITH_RUN_GLOBAL_SKILLS".to_owned(),
+        if plan.out.disable_slash_commands {
+            "0"
+        } else {
+            "1"
+        }
+        .to_owned(),
+    );
     let mut flags = vec!["--".to_owned()];
     if !plan.out_format.is_empty() {
-        flags = ["--output", plan.out_format.as_str()].into_iter().map(str::to_owned).chain(flags).collect();
+        flags = ["--output", plan.out_format.as_str()]
+            .into_iter()
+            .map(str::to_owned)
+            .chain(flags)
+            .collect();
     }
     if !plan.resume.is_empty() {
-        flags = ["--resume", plan.resume.as_str()].into_iter().map(str::to_owned).chain(flags).collect();
+        flags = ["--resume", plan.resume.as_str()]
+            .into_iter()
+            .map(str::to_owned)
+            .chain(flags)
+            .collect();
     }
     if !plan.out.mode_arg.is_empty() {
-        flags = ["--permission-mode", plan.out.mode_arg.as_str()].into_iter().map(str::to_owned).chain(flags).collect();
+        flags = ["--permission-mode", plan.out.mode_arg.as_str()]
+            .into_iter()
+            .map(str::to_owned)
+            .chain(flags)
+            .collect();
     }
-    start::other(Adapter { kernel, env, harness: plan.harness.clone(), flags, task }, how)
+    start::other(
+        Adapter {
+            kernel,
+            env,
+            harness: plan.harness.clone(),
+            flags,
+            task,
+        },
+        how,
+    )
 }
 
 #[cfg(test)]
@@ -507,7 +608,11 @@ mod tests {
     #[test]
     fn the_chat_turn_argv_ends_its_flags_at_the_dashes() {
         let f = Flags::parse(&v(&["--backup", "acct", "--", "-r", "text"]));
-        assert_eq!(f.task, v(&["-r", "text"]), "a task may start with a flag's name");
+        assert_eq!(
+            f.task,
+            v(&["-r", "text"]),
+            "a task may start with a flag's name"
+        );
         assert!(f.resume.is_none());
         assert_eq!(f.plan_argv, v(&["--backup", "acct", "--", "-r", "text"]));
         assert_eq!(f.task_text(), "-r text");
@@ -518,7 +623,10 @@ mod tests {
         let f = Flags::parse(&v(&["--resume", "sid1", "note"]));
         assert_eq!(f.resume, Some(Pick::Id("sid1".to_owned())));
         assert_eq!(f.task, v(&["note"]));
-        assert_eq!(Flags::parse(&v(&["-r", "sid2", "x"])).resume, Some(Pick::Id("sid2".to_owned())));
+        assert_eq!(
+            Flags::parse(&v(&["-r", "sid2", "x"])).resume,
+            Some(Pick::Id("sid2".to_owned()))
+        );
         // `-r` followed by a flag picks.
         let f = Flags::parse(&v(&["-r", "-m", "opus", "x"]));
         assert_eq!(f.resume, Some(Pick::Choose));

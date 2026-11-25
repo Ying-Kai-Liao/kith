@@ -20,7 +20,7 @@ use crate::threads::writer::{AttachErr, TURN_CLAIM_EXIT, Taker};
 
 /// The exits `run-turn` has, which the host reads.
 const BAD: i32 = 2;
-const REFUSED: i32 = 3;
+pub const REFUSED: i32 = 3;
 const GONE: i32 = 4;
 const NO_ANSWER: i32 = 5;
 
@@ -97,7 +97,13 @@ fn now_minute(env: &Env) -> String {
 
 /// Reads the turn from `spec` into `env` (the run's environment, as `run_env` built it) and returns the task text.
 /// `Err` is the exit code, said on stderr.
-fn build(agent: &str, turn: i64, spec: &Value, kernel: &Path, env: &mut Env) -> Result<(String, String), i32> {
+fn build(
+    agent: &str,
+    turn: i64,
+    spec: &Value,
+    kernel: &Path,
+    env: &mut Env,
+) -> Result<(String, String), i32> {
     let say = |code: i32, m: &str| {
         eprintln!("kith: sched turn: {m}");
         code
@@ -119,10 +125,15 @@ fn build(agent: &str, turn: i64, spec: &Value, kernel: &Path, env: &mut Env) -> 
     }
     let [model, effort, harness, person] = run.map(|(_, v)| v);
     // The claim is swept by the turn's person: a run as another one would be missed by that person's revoke.
-    if spec.get("person").is_some() && who(person) != who(spec.get("person").and_then(Value::as_str)) {
+    if spec.get("person").is_some()
+        && who(person) != who(spec.get("person").and_then(Value::as_str))
+    {
         return Err(say(
             REFUSED,
-            &format!("the job runs as {person:?}, not as the turn's person {:?}", spec.get("person")),
+            &format!(
+                "the job runs as {person:?}, not as the turn's person {:?}",
+                spec.get("person")
+            ),
         ));
     }
     let why = format!("core turn {turn}");
@@ -133,9 +144,12 @@ fn build(agent: &str, turn: i64, spec: &Value, kernel: &Path, env: &mut Env) -> 
         kernel.display()
     );
     let header = format!("# {} {agent} {id} ({why})\n", now_minute(env));
-    for (k, v) in
-        [("KITH_VIA", "schedule"), ("KITH_SCHED_JOB", id), ("KITH_LAUNCH_KIND", "schedule"), ("KITH_LAUNCH_LABEL", id)]
-    {
+    for (k, v) in [
+        ("KITH_VIA", "schedule"),
+        ("KITH_SCHED_JOB", id),
+        ("KITH_LAUNCH_KIND", "schedule"),
+        ("KITH_LAUNCH_LABEL", id),
+    ] {
         env.insert(k.to_owned(), v.to_owned());
     }
     // Unset: the agent's mode, else kith's default.
@@ -167,7 +181,11 @@ fn build(agent: &str, turn: i64, spec: &Value, kernel: &Path, env: &mut Env) -> 
             }
         }
     }
-    for (k, v) in [("KITH_MODEL", model), ("KITH_EFFORT", effort), ("KITH_HARNESS", harness)] {
+    for (k, v) in [
+        ("KITH_MODEL", model),
+        ("KITH_EFFORT", effort),
+        ("KITH_HARNESS", harness),
+    ] {
         if let Some(v) = v {
             env.insert(k.to_owned(), v.to_owned());
         }
@@ -205,12 +223,19 @@ impl Sched {
                 BAD
             })?;
         let (task, header) = build(agent, turn, &spec, kernel, env)?;
-        let outbox = Some(get(env, "KITH_RUN_OUTBOX")).filter(|b| !b.is_empty()).map(PathBuf::from);
+        let outbox = Some(get(env, "KITH_RUN_OUTBOX"))
+            .filter(|b| !b.is_empty())
+            .map(PathBuf::from);
         let home = get(env, "HOME").to_owned();
         if !home.is_empty() && std::env::set_current_dir(&home).is_ok() {
             env.insert("PWD".to_owned(), home);
         }
-        let sched = Self { claim, header, outbox, attached: Cell::new(false) };
+        let sched = Self {
+            claim,
+            header,
+            outbox,
+            attached: Cell::new(false),
+        };
         Ok(Some((sched, vec!["--".to_owned(), task])))
     }
 
@@ -223,7 +248,10 @@ impl Sched {
         match taker.attach_run(self.claim, pid) {
             Ok(()) => {}
             Err(AttachErr::Gone(state)) => {
-                eprintln!("kith: sched turn: claim {} is gone ({state}); nothing ran", self.claim);
+                eprintln!(
+                    "kith: sched turn: claim {} is gone ({state}); nothing ran",
+                    self.claim
+                );
                 return Err(GONE);
             }
             Err(AttachErr::Down(why)) => {
@@ -235,7 +263,11 @@ impl Sched {
         if let Ok(fd) = std::io::stdout().as_fd().try_clone_to_owned() {
             // The log is a file the host opened without truncating; stdout and stderr share its offset.
             let mut log = std::fs::File::from(fd);
-            if log.set_len(0).and_then(|()| log.seek(SeekFrom::Start(0))).is_err() {
+            if log
+                .set_len(0)
+                .and_then(|()| log.seek(SeekFrom::Start(0)))
+                .is_err()
+            {
                 eprintln!("kith: sched turn: can't reset the log");
             }
             let _ = log.write_all(self.header.as_bytes());
@@ -267,15 +299,22 @@ pub fn attach_env_claim(env: &Env, taker: &Taker<'_>, pid: i64) -> Option<i32> {
     let claim = match raw.parse::<i64>() {
         Ok(c) if c > 0 => c,
         _ => {
-            eprintln!("kith: the turn claim was refused: KITH_TURN_CLAIM \"{raw}\" is not a claim id");
+            eprintln!(
+                "kith: the turn claim was refused: KITH_TURN_CLAIM \"{raw}\" is not a claim id"
+            );
             return Some(TURN_CLAIM_EXIT);
         }
     };
     match taker.attach_run(claim, pid) {
         Ok(()) => None,
-        Err(AttachErr::Gone(s) | AttachErr::Down(s)) => {
+        // Same exits as a schedule turn's attach: 4 the claim is gone, 5 the core did not answer.
+        Err(AttachErr::Gone(s)) => {
             eprintln!("kith: the turn claim was refused: claim {claim}: {s}; nothing was started");
-            Some(TURN_CLAIM_EXIT)
+            Some(GONE)
+        }
+        Err(AttachErr::Down(s)) => {
+            eprintln!("kith: the turn claim was refused: claim {claim}: {s}; nothing was started");
+            Some(NO_ANSWER)
         }
     }
 }
@@ -297,10 +336,23 @@ mod tests {
     #[test]
     fn the_flags_are_the_two_numbers_and_nothing_else() {
         assert!(flags(&v(&["x"])).is_none());
-        assert_eq!(flags(&v(&["--turn", "7", "--claim", "9"])).unwrap().unwrap(), (7, 9));
+        assert_eq!(
+            flags(&v(&["--turn", "7", "--claim", "9"]))
+                .unwrap()
+                .unwrap(),
+            (7, 9)
+        );
         assert!(flags(&v(&["--turn", "7"])).unwrap().is_err());
-        assert!(flags(&v(&["--turn", "7", "--claim", "0"])).unwrap().is_err());
-        assert!(flags(&v(&["--turn", "7", "--claim", "9", "x"])).unwrap().is_err());
+        assert!(
+            flags(&v(&["--turn", "7", "--claim", "0"]))
+                .unwrap()
+                .is_err()
+        );
+        assert!(
+            flags(&v(&["--turn", "7", "--claim", "9", "x"]))
+                .unwrap()
+                .is_err()
+        );
     }
 
     #[test]
@@ -329,7 +381,12 @@ mod tests {
         assert_eq!(get(&env, "KITH_VIA"), "schedule");
         assert_eq!(get(&env, "KITH_PERMISSION_MODE"), "plan");
         assert_eq!(get(&env, "KITH_BACKUP_CHAIN"), "on");
-        for gone in ["KITH_AGENT", "KITH_TURN_CLAIM", "HQ_TURN_CLAIM", "KITH_SCHED_NOW"] {
+        for gone in [
+            "KITH_AGENT",
+            "KITH_TURN_CLAIM",
+            "HQ_TURN_CLAIM",
+            "KITH_SCHED_NOW",
+        ] {
             assert!(!env.contains_key(gone), "{gone}");
         }
     }
@@ -355,7 +412,8 @@ mod tests {
         let mut env = Env::new();
         let spec = json!({"prompt": "p", "settings": null, "person": "sam", "job": job});
         assert_eq!(built(&spec, &mut env).unwrap_err(), REFUSED);
-        let spec = json!({"prompt": "p", "settings": {"person": "sam"}, "person": "owner", "job": job});
+        let spec =
+            json!({"prompt": "p", "settings": {"person": "sam"}, "person": "owner", "job": job});
         assert_eq!(built(&spec, &mut env).unwrap_err(), REFUSED);
         // The owner, said as null, as "owner" or not said at all.
         for spec in [
@@ -365,6 +423,9 @@ mod tests {
         ] {
             assert!(built(&spec, &mut env).is_ok());
         }
-        assert_eq!(built(&json!({"prompt": "", "job": job}), &mut env).unwrap_err(), BAD);
+        assert_eq!(
+            built(&json!({"prompt": "", "job": job}), &mut env).unwrap_err(),
+            BAD
+        );
     }
 }
