@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { CODE_HINT, type JoinStep } from '@shared/invite-join'
+import type { InviteLink } from '@shared/invite'
 import type { RelayState } from '@shared/relay'
 import { Button, Spinner } from '../components/Controls'
 import { Icon } from '../components/Icon'
@@ -15,8 +16,11 @@ import { BotRow } from '../views/BotRow'
 import { GrantedAgentsChat } from '../views/computers/GrantedAgentsChat'
 import { ThreadView } from '../views/thread/ThreadView'
 import type { Unsupported } from './detect'
+import { InvitePreviewCard, useInvitePreview } from './InvitePreview'
+import { pickDoneTarget } from './invite-preview-logic'
 import { emptyAccountText, noticeFor } from './notice'
 import { webSession } from './session'
+import { SharedWithYou } from './SharedWithYou'
 import './web.css'
 
 /**
@@ -77,8 +81,10 @@ function Gate() {
 
 function SignIn() {
   const acct = useAccount()
-  const [invited, setInvited] = useState(false)
-  useEffect(() => void webSession.pendingLink().then((l) => setInvited(!!l)), [])
+  const [pending, setPending] = useState<{ appLink?: string; link?: InviteLink } | null>(null)
+  const [browser, setBrowser] = useState(false)
+  useEffect(() => void webSession.pendingLink().then(setPending), [])
+  const invited = !!pending
   const providers: { id: SignInProvider; label: string }[] = [
     { id: 'google', label: 'Continue with Google' },
     { id: 'github', label: 'Continue with GitHub' },
@@ -86,13 +92,16 @@ function SignIn() {
   return (
     <main className="web-center" data-screen="sign-in">
       <div className="web-card">
-        <h1 className="web-title">{invited ? "You've been invited to Kith" : 'Kith'}</h1>
-        <p className="web-text">
-          {invited
-            ? "Sign in to join. Your invite is kept safe in this browser while you do."
-            : 'Sign in to use the agents on computers that were shared with you. To join one, open the invite link you were sent.'}
-        </p>
-        <div className="web-buttons">
+        {invited ? (
+          <InvitePreviewCard link={pending.link} appLink={pending.appLink} onContinue={browser ? undefined : () => setBrowser(true)} />
+        ) : (
+          <>
+            <h1 className="web-title">Kith</h1>
+            <p className="web-text">Sign in to use the agents on computers that were shared with you. To join one, open the invite link you were sent.</p>
+          </>
+        )}
+        {invited && browser ? <p className="web-text">Sign in to join. Your invite is kept safe in this browser while you do.</p> : null}
+        <div className="web-buttons" hidden={invited && !browser}>
           {providers.map((p) => (
             <Button key={p.id} kind="secondary" className="web-wide" onClick={() => void account.signIn(p.id)} disabled={acct.isBusy}>
               {p.label}
@@ -120,12 +129,23 @@ const progress: Record<JoinStep, string> = {
 }
 
 function JoinPanel() {
+  const app = useApp()
   const join = useModel(inviteJoin)
   const state = join.state
   const busy = state !== null && ['signingIn', 'joining', 'asking', 'connecting', 'proving'].includes(state.step)
+  const preview = useInvitePreview(join.link)
+  const first = preview.kind === 'ready' ? preview.preview.items[0] : undefined
   const close = () => {
     void webSession.discardPending()
     inviteJoin.dismiss()
+  }
+  // "Open <first item>" lands in that chat when the joined computer has a matching bot, else in the chat list.
+  const openFirst = () => {
+    const computerId = state?.computerId ?? join.link?.computerId
+    const store = computerId ? app.store(computerId) : null
+    const botId = preview.kind === 'ready' && computerId ? pickDoneTarget(preview.preview.items, store?.roster ?? []) : null
+    if (computerId && botId) app.select({ computerId, botId })
+    close()
   }
   return (
     <div className="web-center" data-screen="join" data-step={state?.step ?? 'starting'}>
@@ -137,30 +157,44 @@ function JoinPanel() {
         {state?.message ? <p className={state.step === 'failed' ? 'web-error' : 'web-text'} role={state.step === 'failed' ? 'alert' : undefined}>{state.message}</p> : null}
         {state?.step === 'asking' && state.code ? <p className="web-text" data-code={state.code}>Your code: <span className="web-code">{spaced(state.code)}</span>. {CODE_HINT}</p> : null}
         {state?.step === 'waiting' ? <Button kind="secondary" onClick={() => void inviteJoin.run()}>Try again</Button> : null}
-        {state?.step === 'done' || state?.step === 'waiting' || state?.step === 'failed' ? <Button onClick={close}>{state.step === 'done' ? 'Open chats' : 'Close'}</Button> : null}
+        {state?.step === 'done' && preview.kind === 'ready' ? (
+          <ul className="web-preview-items" data-screen="joined-items">
+            {preview.preview.items.map((item) => (
+              <li key={`${item.kind}/${item.id}`}>
+                <Icon name={item.kind === 'agent' ? 'person.crop.circle' : 'person.2'} size={18} color="var(--secondary)" />
+                <span className="web-preview-name">{item.name}</span>
+                <span className="web-fine">{item.suitableFor}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {state?.step === 'done' || state?.step === 'waiting' || state?.step === 'failed' ? (
+          <Button onClick={state.step === 'done' ? openFirst : close}>{state.step === 'done' ? (first ? `Open ${first.name}` : 'Open chats') : 'Close'}</Button>
+        ) : null}
       </div>
     </div>
   )
 }
 
-function ConfirmJoin({ computerId, appLink, onJoin, onDecline }: { computerId: string; appLink?: string; onJoin: () => void; onDecline: () => void }) {
+function ConfirmJoin({ computerId, appLink, link, onJoin, onDecline }: { computerId: string; appLink?: string; link?: InviteLink; onJoin: () => void; onDecline: () => void }) {
+  // One click only: the card is replaced once the join starts, but a fast double-click lands before that render.
+  const clicked = useRef(false)
+  const join = () => {
+    if (clicked.current) return
+    clicked.current = true
+    onJoin()
+  }
   return (
     <div className="web-center" data-screen="confirm-join">
       <div className="web-card">
-        <h1 className="web-title">Join a computer on Kith?</h1>
+        <InvitePreviewCard link={link} appLink={appLink} onContinue={join} />
         <p className="web-text">
-          An invite link asked this browser to join the computer with ID {computerId.slice(0, 8)}. Only continue if you expect this invite
-          from someone you know. Its owner will see that you joined and decides which agents you can use.
+          Only continue if you expect this invite from someone you know (computer {computerId.slice(0, 8)}). Its owner will see that
+          you joined and decides which agents you can use.
         </p>
         <div className="web-buttons">
-          <Button className="web-wide" onClick={onJoin}>Join</Button>
           <Button kind="secondary" className="web-wide" onClick={onDecline}>Not now</Button>
         </div>
-        {appLink ? (
-          <p className="web-fine">
-            Have the Kith app? <a href={appLink} data-action="open-app">Open in the Kith app</a>
-          </p>
-        ) : null}
       </div>
     </div>
   )
@@ -181,7 +215,7 @@ function MemberApp() {
 
   // An invite waiting in IndexedDB (or one that survived a reload mid-join) is offered, never run by itself: a link an
   // agent posted and the person opened while signed in must not join anything without a click.
-  const [offer, setOffer] = useState<{ computerId: string; appLink?: string } | null | undefined>(undefined)
+  const [offer, setOffer] = useState<{ computerId: string; appLink?: string; link?: InviteLink } | null | undefined>(undefined)
   useEffect(() => void webSession.pendingLink().then(setOffer), [])
   useEffect(() => {
     inviteJoin.adopt = (id) => app.relayMacs.adopt(id)
@@ -212,6 +246,7 @@ function MemberApp() {
         <ConfirmJoin
           computerId={offer.computerId}
           appLink={offer.appLink}
+          link={offer.link}
           onJoin={() => {
             setOffer(null)
             void inviteJoin.start()
@@ -287,6 +322,7 @@ function MemberApp() {
                     <span>Asking {c.name} for access…{access.kind === 'code' ? <> Your code: <span className="web-code">{spaced(access.code)}</span>. {CODE_HINT}</> : null}</span>
                   </div>
                 ) : null}
+                {store ? <SharedWithYou computerId={c.computerId} ownerName={c.name} store={store} /> : null}
                 {store ? (
                   store.roster.length === 0 ? (
                     <p className="web-fine web-pad">{store.shownConnection.kind === 'online' ? 'No chats yet. Start one with New chat.' : waitingText(store.shownConnection)}</p>

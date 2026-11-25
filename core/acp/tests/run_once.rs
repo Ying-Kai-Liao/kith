@@ -27,6 +27,7 @@ fn spec(env: &[(&str, &str)]) -> RunSpec {
         task: "say hi".into(),
         timeout: Duration::from_secs(20),
         approve: false,
+        ..RunSpec::default()
     }
 }
 
@@ -260,4 +261,215 @@ async fn a_timeout_kills_the_engine() {
         0,
         "the engine outlived the run"
     );
+}
+
+fn log_of(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("kith-acp-{name}-{}", std::process::id()))
+}
+
+#[tokio::test]
+async fn a_resumed_run_loads_the_session_and_leaves_its_history_out_of_the_answer() {
+    let log = log_of("resume");
+    let mut s = spec(&[
+        ("FAKE_ACP_LOAD", "1"),
+        ("FAKE_ACP_LOG", log.to_str().unwrap()),
+    ]);
+    s.resume = Some("old-session".into());
+    s.task = "note".into();
+    s.fresh_task = Some("instructions and note".into());
+    let out = run_once(s).await.unwrap();
+    let text = std::fs::read_to_string(&log).unwrap();
+    let _ = std::fs::remove_file(&log);
+    assert_eq!(out.text, "echo: note");
+    assert_eq!(out.session_id, "old-session");
+    assert!(
+        text.contains("session/load") && !text.contains("session/new"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn an_agent_that_cannot_load_gets_a_new_session_and_the_fresh_task() {
+    let mut s = spec(&[]);
+    s.resume = Some("old-session".into());
+    s.task = "note".into();
+    s.fresh_task = Some("instructions and note".into());
+    let out = run_once(s).await.unwrap();
+    assert_eq!(out.text, "echo: instructions and note");
+    assert_eq!(out.session_id, "fake-session-1");
+}
+
+#[tokio::test]
+async fn effort_goes_through_a_thought_level_option_when_the_agent_has_one() {
+    let log = log_of("effort");
+    let mut s = spec(&[
+        ("FAKE_ACP_EFFORT", "low,high"),
+        ("FAKE_ACP_LOG", log.to_str().unwrap()),
+    ]);
+    s.effort = Some("high".into());
+    run_once(s).await.unwrap();
+    let text = std::fs::read_to_string(&log).unwrap();
+    let _ = std::fs::remove_file(&log);
+    assert!(
+        text.contains("session/set_config_option") && text.contains(r#""value": "high""#),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn a_stop_ends_the_run_and_the_engine_with_it() {
+    let pidfile = log_of("stop-pid");
+    let s = spec(&[
+        ("FAKE_ACP_MODE", "hang"),
+        ("FAKE_ACP_PIDFILE", pidfile.to_str().unwrap()),
+    ]);
+    let stop = async {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    };
+    let (result, _) = kith_acp::run_once_until(s, stop).await;
+    assert!(result.is_err());
+    let pid: i32 = std::fs::read_to_string(&pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let _ = std::fs::remove_file(&pidfile);
+    // SAFETY: signal 0 only asks whether the process exists.
+    assert_ne!(
+        unsafe { libc::kill(pid, 0) },
+        0,
+        "the engine outlived the run"
+    );
+}
+
+/// Hermes (`hermes acp`) lists these three; Kith asks `accept_edits` for a run and `dont_ask` for an approved one.
+const HERMES_MODES: &str = "default,accept_edits,dont_ask";
+
+#[tokio::test]
+async fn hermes_modes_are_set_without_and_with_approve() {
+    let (out, set, prompted) = mode_run("hermes-ws", HERMES_MODES, &["accept_edits"], false).await;
+    assert_eq!(out.unwrap(), "echo: say hi");
+    assert_eq!(set, ["accept_edits"]);
+    assert!(prompted);
+    let (out, set, prompted) = mode_run("hermes-full", HERMES_MODES, &["dont_ask"], true).await;
+    assert_eq!(out.unwrap(), "echo: say hi");
+    assert_eq!(set, ["dont_ask"]);
+    assert!(prompted);
+}
+
+#[tokio::test]
+async fn a_hermes_that_lists_no_modes_stops_a_run_without_approve_before_the_task() {
+    let (out, set, prompted) = mode_run("hermes-none", "", &["accept_edits"], false).await;
+    assert!(
+        out.as_ref()
+            .is_err_and(|e| e.contains("none of the session modes accept_edits")),
+        "{out:?}"
+    );
+    assert!(set.is_empty() && !prompted);
+}
+
+/// What a run answers an ask with: the agent reports `call` (a `tool_call` update, or none), then asks with `request`.
+/// The run's text is what the agent saw as the answer.
+async fn ask_run(
+    call: serde_json::Value,
+    request: serde_json::Value,
+    servers: &[&str],
+    opted_in: bool,
+    approve: bool,
+) -> String {
+    let ask = json!({"call": call, "request": request}).to_string();
+    let mut s = spec(&[("FAKE_ACP_ASK", &ask)]);
+    s.mcp_servers = json!(
+        servers
+            .iter()
+            .map(|n| json!({"name": n, "command": "x", "args": [], "env": []}))
+            .collect::<Vec<_>>()
+    );
+    s.allow_granted_mcp = opted_in;
+    s.approve = approve;
+    run_once(s).await.unwrap().text
+}
+
+fn mcp_call(id: &str, server: &str) -> serde_json::Value {
+    json!({"toolCallId": id, "rawInput": {"server": server, "tool": "t", "arguments": {}}})
+}
+
+/// An MCP tool approval as codex-acp sends it. `allow_always` comes first, so the pick has to be by kind.
+fn mcp_ask(id: &str) -> serde_json::Value {
+    json!({
+        "_meta": {"is_mcp_tool_approval": true},
+        "toolCall": {"toolCallId": id},
+        "options": [
+            {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
+            {"optionId": "once", "name": "Allow", "kind": "allow_once"},
+            {"optionId": "cancel", "name": "Cancel", "kind": "reject_once"}
+        ]
+    })
+}
+
+const ALLOWED: &str = r#"asked: {"optionId": "once", "outcome": "selected"}"#;
+const REFUSED: &str = r#"asked: {"outcome": "cancelled"}"#;
+
+#[tokio::test]
+async fn an_mcp_tool_of_a_granted_server_is_allowed_once_without_approve() {
+    let t = ask_run(mcp_call("c1", "h3"), mcp_ask("c1"), &["h3"], true, false).await;
+    assert_eq!(t, ALLOWED);
+}
+
+#[tokio::test]
+async fn every_other_ask_stays_refused_without_approve() {
+    // The row is not opted in.
+    assert_eq!(
+        ask_run(mcp_call("c1", "h3"), mcp_ask("c1"), &["h3"], false, false).await,
+        REFUSED
+    );
+    // No `_meta` flag.
+    let mut no_meta = mcp_ask("c1");
+    no_meta.as_object_mut().unwrap().remove("_meta");
+    assert_eq!(
+        ask_run(mcp_call("c1", "h3"), no_meta, &["h3"], true, false).await,
+        REFUSED
+    );
+    // A command ask that carries the flag but whose id names no MCP call.
+    assert_eq!(
+        ask_run(json!(null), mcp_ask("c1"), &["h3"], true, false).await,
+        REFUSED
+    );
+    // An id the run never saw reported.
+    assert_eq!(
+        ask_run(mcp_call("c1", "h3"), mcp_ask("zz"), &["h3"], true, false).await,
+        REFUSED
+    );
+    // A reported call with a server but no tool name.
+    let no_tool = json!({"toolCallId": "c1", "rawInput": {"server": "h3"}});
+    assert_eq!(
+        ask_run(no_tool, mcp_ask("c1"), &["h3"], true, false).await,
+        REFUSED
+    );
+    // A server this session did not get.
+    assert_eq!(
+        ask_run(mcp_call("c1", "other"), mcp_ask("c1"), &["h3"], true, false).await,
+        REFUSED
+    );
+    // No `allow_once` offered: never settle for an "always".
+    let mut only_always = mcp_ask("c1");
+    only_always["options"] =
+        json!([{"optionId": "always", "name": "Always", "kind": "allow_always"}]);
+    assert_eq!(
+        ask_run(mcp_call("c1", "h3"), only_always, &["h3"], true, false).await,
+        REFUSED
+    );
+}
+
+#[tokio::test]
+async fn approve_still_takes_the_first_allow_option() {
+    let t = ask_run(
+        json!(null),
+        json!({"options": [{"optionId": "yes", "kind": "allow_once"}]}),
+        &[],
+        false,
+        true,
+    )
+    .await;
+    assert_eq!(t, r#"asked: {"optionId": "yes", "outcome": "selected"}"#);
 }

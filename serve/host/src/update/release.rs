@@ -22,6 +22,9 @@ pub fn platform() -> Result<String> {
     let os = match std::env::consts::OS {
         "macos" => "macos",
         "linux" => "linux",
+        // The release asset is kith-<version>-windows-x64.zip (scripts/package-windows.sh); the manifest platform
+        // keeps the macOS/Linux spelling, windows-x86_64.
+        "windows" => "windows",
         other => bail!("host updates do not support {other}"),
     };
     let arch = match std::env::consts::ARCH {

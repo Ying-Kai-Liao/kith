@@ -53,7 +53,10 @@ impl Link {
 }
 
 #[cfg(windows)]
-pub async fn serve_helpers(_screen: Arc<Screen>) {}
+pub async fn serve_helpers(_screen: Arc<Screen>) {
+    // screen.sock is a Unix socket: say so instead of leaving screen control quietly empty (windows-owner WI1).
+    tracing::warn!("screen helper socket not started: not on Windows yet (windows-owner)");
+}
 
 /// Accepts screen helpers on `~/.kith/serve/screen.sock`. The newest connection wins.
 #[cfg(unix)]

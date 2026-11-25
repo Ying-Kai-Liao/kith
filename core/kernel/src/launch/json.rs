@@ -7,7 +7,7 @@ use std::io::Write as _;
 
 use serde_json::{Map, Value, json};
 
-use super::assemble::{get, pj_indent1};
+use super::assemble::get;
 use super::plan::Plan;
 use crate::secrets::pyjson;
 
@@ -27,43 +27,27 @@ pub fn emit_json(plan: &Plan) -> String {
         out,
         settings: settings_val,
         mcp_servers,
-        mcp_arg,
-        model: kith_model,
-        effort: kith_effort,
+        mcp_arg: _,
+        model: _,
+        effort: _,
         call_model,
         physical_cwd,
         spec,
+        launch: _,
+        owner_terminal: _,
+        pkg: _,
+        src_pkg: _,
+        person_id: _,
+        nested: _,
+        caller: _,
+        resume: _,
+        out_format: _,
+        permit_mcp: _,
+        granted: _,
     } = plan;
     let (claude, p_owner) = (*claude, *p_owner);
     let claude_args: Value = if claude {
-        let mut v: Vec<String> = vec!["--append-system-prompt".into(), text.clone()];
-        for d in &out.add_dirs {
-            v.extend(["--add-dir".into(), d.clone()]);
-        }
-        v.extend([
-            "--settings".into(),
-            settings_val.as_ref().map(pj_indent1).unwrap_or_default(),
-        ]);
-        v.push("--allowedTools".into());
-        v.extend(out.allowed_tools.iter().cloned());
-        v.extend([
-            "--strict-mcp-config".into(),
-            "--mcp-config".into(),
-            mcp_arg.clone(),
-        ]);
-        if out.disable_slash_commands {
-            v.push("--disable-slash-commands".into());
-        }
-        if !kith_model.is_empty() {
-            v.extend(["--model".into(), kith_model.clone()]);
-        }
-        if !kith_effort.is_empty() {
-            v.extend(["--effort".into(), kith_effort.clone()]);
-        }
-        if !out.mode_arg.is_empty() {
-            v.extend(["--permission-mode".into(), out.mode_arg.clone()]);
-        }
-        json!(v)
+        json!(super::args::claude_args(plan))
     } else {
         Value::Null
     };

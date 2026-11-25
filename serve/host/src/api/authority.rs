@@ -641,8 +641,17 @@ fn auth_path() -> &'static Path {
 fn fingerprint_of(auth: &Path) -> String {
     match std::fs::metadata(auth) {
         Ok(md) => {
-            use std::os::unix::fs::MetadataExt as _;
-            format!("{}:{}:{}:{}", md.ino(), md.len(), md.mtime(), md.mtime_nsec())
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt as _;
+                format!("{}:{}:{}:{}", md.ino(), md.len(), md.mtime(), md.mtime_nsec())
+            }
+            // No inode here: size and modified time, which the replace-over write still moves.
+            #[cfg(not(unix))]
+            {
+                let modified = md.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok());
+                format!("{}:{}", md.len(), modified.map_or(0, |d| d.as_nanos()))
+            }
         }
         Err(_) => "none".into(),
     }
@@ -1162,6 +1171,7 @@ mod gate_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(unix)]
     #[test]
     fn an_auth_json_that_cant_be_read_is_unreadable_and_never_cached() {
         use std::os::unix::fs::PermissionsExt as _;

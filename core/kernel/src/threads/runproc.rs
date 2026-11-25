@@ -279,6 +279,45 @@ pub fn spawn(argv: &[OsString], status: Option<(RawFd, RawFd)>) -> std::io::Resu
     })
 }
 
+/// Runs `cmd` as a child that TERM and HUP reach (and `^C` does not), waits for it, and gives the signals back: the one-shot of
+/// an engine that is not Claude, which `bin/kith` ran as a child with the same traps. The child gets every signal at its default
+/// and nothing blocked, as [`spawn`] gives it.
+pub fn run_passing_signals(cmd: &mut Command) -> std::io::Result<std::process::ExitStatus> {
+    use std::os::unix::process::CommandExt as _;
+    CHILD.store(0, Ordering::SeqCst);
+    PENDING.store(0, Ordering::SeqCst);
+    let saved = install_handlers();
+    // SAFETY: between fork and exec only sigaction and sigprocmask on data made here, both async-signal-safe.
+    unsafe {
+        cmd.pre_exec(|| {
+            for s in 1..65 {
+                if s != libc::SIGKILL && s != libc::SIGSTOP {
+                    libc::signal(s, libc::SIG_DFL);
+                }
+            }
+            let mut none: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&raw mut none);
+            libc::sigprocmask(libc::SIG_SETMASK, &raw const none, std::ptr::null_mut());
+            Ok(())
+        });
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            saved.restore();
+            return Err(e);
+        }
+    };
+    let pid = i32::try_from(child.id()).unwrap_or(0);
+    CHILD.store(pid, Ordering::SeqCst);
+    saved.unblock();
+    drain_pending(pid);
+    let done = child.wait();
+    forget_child();
+    saved.restore();
+    done
+}
+
 /// Reads the status pipe until it ends, but for no more than `limit`: a descendant that kept the write end open must not hold
 /// the wrapper's exit hostage. What was read so far counts as what was said.
 pub fn read_status(fd: RawFd, limit: std::time::Duration) -> Vec<u8> {
