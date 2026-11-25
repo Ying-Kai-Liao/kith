@@ -205,6 +205,7 @@ pub(super) fn writer_live(host: &Host, sid: &str) -> bool {
             .into_iter()
             .flatten()
             .any(|c| c.get("conversation").and_then(Value::as_str) == Some(sid)),
+        // Matched by text: the core's refusal (core/runtime/src/conversations/external.rs) carries no code yet.
         Err(Fail::Refused(why)) if why.contains("not switched to the core") => {
             let dir = host.state.join("live").join("terminal");
             [format!("{sid}.claim"), format!("{sid}.takeover.claim")]

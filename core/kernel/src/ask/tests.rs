@@ -328,5 +328,33 @@ fn a_core_that_cannot_answer_is_a_writer_but_unswitched_claims_read_the_files() 
     assert!(!with_host(&unswitched, &dir, |h| super::fg::writer_live(
         h, "s2"
     )));
+    // a claim file of a process that is gone: no writer
+    #[cfg(unix)]
+    {
+        let mut child = std::process::Command::new("true").spawn().expect("child");
+        let dead = child.id();
+        child.wait().expect("wait");
+        std::fs::write(terminal.join("s3.claim"), format!("{{\"pid\": {dead}}}")).expect("file");
+        assert!(!with_host(&unswitched, &dir, |h| super::fg::writer_live(
+            h, "s3"
+        )));
+    }
+    // a recorded start that is not this process's (the pid was reused): no writer, when the stamps can be compared
+    if let crate::procstart::Probe::Alive(Some(now)) = crate::procstart::probe(std::process::id()) {
+        let other = format!("{now}0");
+        if crate::procstart::comparable(&other, &now) {
+            std::fs::write(
+                terminal.join("s4.claim"),
+                format!(
+                    "{{\"pid\": {}, \"procStart\": \"{other}\"}}",
+                    std::process::id()
+                ),
+            )
+            .expect("file");
+            assert!(!with_host(&unswitched, &dir, |h| super::fg::writer_live(
+                h, "s4"
+            )));
+        }
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
