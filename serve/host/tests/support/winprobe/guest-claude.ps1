@@ -113,6 +113,27 @@ foreach ($k in $g1.Keys) {
   Log ((Get-Content $env:KITH_SH_LOG -ErrorAction SilentlyContinue | ForEach-Object { $_.Substring(0, [Math]::Min(700, $_.Length)) }) -join "`n")
 }
 
+# --- P-G1 retry: Git for Windows OFF the PATH, so the env var is the only way to find a shell --------------------------
+Section 'P-G1b Git off PATH, CLAUDE_CODE_GIT_BASH_PATH -> stand-in named bash.exe'
+New-Item -ItemType Directory -Force "$Root\fakegit\bin" | Out-Null
+Copy-Item $Boxprobe "$Root\fakegit\bin\bash.exe" -Force
+$noGitPath = (($env:PATH -split ';') | Where-Object { $_ -and $_ -notmatch '\\Git\\' }) -join ';'
+Log "PATH without Git: $noGitPath"
+$g1b = [ordered]@{
+  nogit_control = $null
+  nogit_standin = "$Root\fakegit\bin\bash.exe"
+  nogit_real    = $realBash
+}
+foreach ($k in $g1b.Keys) {
+  $env:KITH_SH_LOG = "$Out\sh-$k.log"
+  Remove-Item $env:KITH_SH_LOG -ErrorAction SilentlyContinue
+  $ex = @{ KITH_SH_LOG = $env:KITH_SH_LOG; KITH_REAL_BASH = $realBash; PATH = $noGitPath }
+  if ($g1b[$k]) { $ex['CLAUDE_CODE_GIT_BASH_PATH'] = $g1b[$k] }
+  Try-Do "g1b $k" { Run-Claude "g1b-$k" $hookSettings $ex $bashTurn 'Bash' }
+  Log "--- how the stand-in shell was called ($k): $env:KITH_SH_LOG"
+  Log ((Get-Content $env:KITH_SH_LOG -ErrorAction SilentlyContinue | ForEach-Object { $_.Substring(0, [Math]::Min(700, $_.Length)) }) -join "`n")
+}
+
 # --- P-G9 ------------------------------------------------------------------------------------------------------------
 Section 'P-G9 which permission-rule path forms match the file tools on Windows'
 $forms = [ordered]@{
