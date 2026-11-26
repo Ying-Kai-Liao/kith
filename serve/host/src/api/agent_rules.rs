@@ -32,9 +32,9 @@ fn rules_of(p: &kith_kernel::paths::Paths, kernel: &Path, agent: &str) -> Result
     if agent.is_empty() || agent.starts_with('.') || agent.contains(['/', '\\']) {
         bail!("no agent named \"{agent}\"");
     }
-    let role = prompt::agent_dir(p, kernel, agent).ok_or_else(|| anyhow!("no agent named \"{agent}\""))?;
+    let role_dir = prompt::agent_dir(p, kernel, agent).ok_or_else(|| anyhow!("no agent named \"{agent}\""))?;
     let mut rules = Vec::new();
-    if let Some(doc) = read_json(&role.join("settings.json"), "settings.json")? {
+    if let Some(doc) = read_json(&role_dir.join("settings.json"), "settings.json")? {
         for list in ["allow", "ask", "deny"] {
             for rule in doc["permissions"][list].as_array().into_iter().flatten().filter_map(Value::as_str) {
                 rules.push(json!({"list": list, "rule": rule, "source": "role/settings.json"}));
