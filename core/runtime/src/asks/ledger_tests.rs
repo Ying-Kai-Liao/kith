@@ -1153,6 +1153,21 @@ fn the_attach_records_the_engines_own_session_when_it_is_not_the_turns_conversat
     let claim = r.claim("a1", turn);
     let pid = std::process::id();
     let started = kith_kernel::procstart::start_stamp(pid).unwrap();
+    // The launch holds the writer claim on its session first (the core refuses an attach that names a session without it).
+    let held = r
+        .d
+        .shared()
+        .with_core(|c| {
+            crate::conversations::external::call_at(
+                c,
+                "claim.external",
+                &json!({"conversation": "sess-real", "pid": pid, "started": started, "person": "", "agent": "echo"}),
+                ms(),
+                &crate::gate::System,
+            )
+        })
+        .unwrap();
+    assert!(held["claimId"].is_i64(), "{held}");
     let said =
         r.d.shared()
             .with_core(|c| {

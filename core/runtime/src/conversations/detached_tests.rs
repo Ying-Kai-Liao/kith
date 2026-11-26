@@ -536,7 +536,7 @@ fn a_channel_launch_takes_its_session_first_then_attaches_the_work_key_and_the_w
         &mut core,
         &live,
         "claim.attach",
-        &json!({"claimId": wake, "conversation": wk, "pid": 700, "started": "e7"}),
+        &json!({"claimId": wake, "conversation": wk, "session": "s1", "pid": 700, "started": "e7"}),
     );
     assert_eq!(said, json!({"attached": true}));
     assert_eq!(
@@ -637,4 +637,40 @@ fn a_terminal_on_the_session_refuses_the_writer_claim_so_the_wake_is_never_attac
     crate::conversations::warm::adopt(&mut core, "kith-serve-host/2-b", NOW + 10).unwrap();
     assert_eq!(turn_state(&core, turn), "queued");
     assert_eq!(turn_rows(&core), 1);
+}
+
+#[test]
+fn an_attach_naming_a_session_the_process_holds_no_writer_claim_on_is_refused() {
+    // The core itself refuses an attach that came before the writer claim (the model's `broken-AttachBeforeWriter`): the session
+    // is named, no running external claim of this process is on it, so the wake claim stays `claimed` and its turn too.
+    let (_t, mut core) = world();
+    let live = Sys::default();
+    let (turn, wake) = claimed_on_the_key(&mut core, "tg:7#house");
+    live.alive.borrow_mut().insert(700);
+    let said = owner(
+        &mut core,
+        &live,
+        "claim.attach",
+        &json!({"claimId": wake, "conversation": "tg:7#house", "session": "s1", "pid": 700, "started": "e7"}),
+    );
+    assert_eq!(said["refused"], "gone", "{said}");
+    assert_eq!(claim_state(&core, wake).0, "claimed");
+    assert_eq!(turn_state(&core, turn), "claimed");
+    // Another process's writer claim on the session is no help.
+    live.alive.borrow_mut().insert(701);
+    let other = owner(
+        &mut core,
+        &live,
+        "claim.external",
+        &json!({"conversation": "s1", "pid": 701, "started": "e8", "person": "", "agent": "echo"}),
+    );
+    assert!(other["claimId"].is_i64(), "{other}");
+    let said = owner(
+        &mut core,
+        &live,
+        "claim.attach",
+        &json!({"claimId": wake, "conversation": "tg:7#house", "session": "s1", "pid": 700, "started": "e7"}),
+    );
+    assert_eq!(said["refused"], "gone", "{said}");
+    assert_eq!(claim_state(&core, wake).0, "claimed");
 }

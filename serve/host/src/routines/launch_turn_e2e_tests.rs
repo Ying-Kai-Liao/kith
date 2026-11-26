@@ -207,7 +207,7 @@ impl World {
     /// Starts `program args` as the launch of the claimed turn (the claim and its conversation in the environment), the engine
     /// held; waits for the claim to be attached and checks it names the launch's pid; releases the engine and waits for the end.
     /// Answers the launch's exit status and the one run the engine recorded.
-    fn launch(&self, program: &Path, args: &[&str], claim: i64, conversation: &str) -> Vec<String> {
+    fn launch(&self, program: &Path, args: &[&str], claim: i64, conversation: &str, own_session: bool) -> Vec<String> {
         std::fs::write(self.dir.join("hold"), "").unwrap();
         let mut cmd = self.command(program);
         cmd.args(args)
@@ -239,6 +239,13 @@ impl World {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
+        // A Claude launch holds the writer claim on its own session while the engine runs; another engine has none.
+        let sessions = self.session_claims(conversation);
+        assert_eq!(sessions.len(), usize::from(own_session), "the launch's session claims: {sessions:?}");
+        for c in &sessions {
+            assert_eq!(c["pid"].as_i64(), Some(i64::from(child.id())), "{c}");
+            assert!(["claimed", "running"].contains(&c["state"].as_str().unwrap_or_default()), "{c}");
+        }
         std::fs::remove_file(self.dir.join("hold")).unwrap();
         let status = child.wait().unwrap();
         assert!(status.success(), "the launch failed: {status}\n{}", diag());
@@ -248,6 +255,18 @@ impl World {
             assert!(!runs[0].lines().any(|l| l.starts_with(&format!("{gone}="))), "{gone} reached the engine");
         }
         runs
+    }
+
+    /// The live writer claims on a conversation other than the turn's `conversation`: the sessions launches hold.
+    fn session_claims(&self, conversation: &str) -> Vec<Value> {
+        let listed = self.core("claim.list", &json!({}));
+        listed["live"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["kind"] == "external" && c["conversation"] != conversation)
+            .cloned()
+            .collect()
     }
 
     /// A launch that is refused: its exit status and what it said; no engine ran.
@@ -281,7 +300,7 @@ fn the_rust_launch_of_claude_takes_its_own_session_then_attaches_the_turns_conve
     let (_, conversation, claim) = w.claimed_turn();
     let kernel = repo_kernel().to_string_lossy().into_owned();
     let args = kernel_args(&kernel, &["do the job"]);
-    let runs = w.launch(&built_kith(), &args, claim, &conversation);
+    let runs = w.launch(&built_kith(), &args, claim, &conversation, true);
     assert!(runs[0].contains("do the job"), "{}", runs[0]);
     let shown = w.show(claim);
     assert_eq!(shown["conversation"], conversation.as_str(), "the claim stays the turn's: {shown}");
@@ -293,7 +312,7 @@ fn the_rust_launch_of_another_engine_attaches_naming_the_turns_conversation() {
     let (_, conversation, claim) = w.claimed_turn();
     let kernel = repo_kernel().to_string_lossy().into_owned();
     let args = kernel_args(&kernel, &["-H", "codex", "do the job"]);
-    w.launch(&built_kith(), &args, claim, &conversation);
+    w.launch(&built_kith(), &args, claim, &conversation, false);
     let sent = std::fs::read_to_string(w.dir.join("acp-in")).unwrap();
     assert!(sent.contains("do the job"), "the task reached the engine: {sent}");
 }
@@ -303,7 +322,7 @@ fn the_script_launch_of_claude_takes_its_own_session_then_attaches_the_turns_con
     let w = World::start();
     let (_, conversation, claim) = w.claimed_turn();
     let script = repo_kernel().join("bin/kith");
-    let runs = w.launch(&script, &["house", "do the job"], claim, &conversation);
+    let runs = w.launch(&script, &["house", "do the job"], claim, &conversation, true);
     assert!(runs[0].contains("do the job"), "{}", runs[0]);
 }
 
@@ -332,4 +351,17 @@ fn a_refused_attach_starts_no_engine_and_the_conversation_without_a_claim_is_ref
     );
     assert_eq!(code, Some(10), "{said}");
     assert_eq!(w.show(claim)["state"], "claimed");
+    assert!(w.session_claims(&conversation).is_empty(), "the refused Claude launch gave its session back");
+    // The script's claim step: the variable alone, and a conversation that is not the turn's.
+    let script = repo_kernel().join("bin/kith");
+    let (code, said) = w.refused(&script, &["house", "do the job"], &[("KITH_TURN_CONVERSATION", &conversation)]);
+    assert_eq!(code, Some(10), "{said}");
+    let (code, said) = w.refused(
+        &script,
+        &["house", "do the job"],
+        &[("KITH_TURN_CLAIM", &claim.to_string()), ("KITH_TURN_CONVERSATION", "ask:not-this-one")],
+    );
+    assert_eq!(code, Some(10), "{said}");
+    assert_eq!(w.show(claim)["state"], "claimed");
+    assert!(w.session_claims(&conversation).is_empty(), "the refused script launch gave its session back");
 }
