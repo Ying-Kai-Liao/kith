@@ -24,6 +24,7 @@ pub const METHODS: &[&str] = &[
     "kithMemoryRestore",
     "kithMemoryDelete",
     "kithMemoryForget",
+    "kithMemoryForgetPerson",
     "kithMemoryTidyUps",
     "kithMemoryUndoTidy",
     "kithMemoryPromotions",
@@ -64,7 +65,10 @@ pub fn call(hub: &Hub, method: &str, b: &Value) -> Result<Value> {
     let file = || -> Result<&str> { if name.is_empty() { Err(anyhow!("name required")) } else { Ok(name) } };
     let id = |k: &str| b[k].as_i64();
     Ok(match method {
-        "kithMemoryList" => hqmem::list_files(&layout, &agent)?,
+        "kithMemoryList" => match b["person"].as_str() {
+            Some(person) => hqmem::person::list(&layout, &agent, person)?,
+            None => hqmem::list_files(&layout, &agent)?,
+        },
         "kithMemoryRead" => hqmem::read_file(&layout, &agent, shared, file()?)?,
         "kithMemorySave" => {
             let out = hqmem::save(&hqmem::open(&layout)?, &layout, &agent, shared, file()?, str_arg(b, "text")?)?;
@@ -97,6 +101,18 @@ pub fn call(hub: &Hub, method: &str, b: &Value) -> Result<Value> {
             }
             hqmem::forget(&hqmem::open(&layout)?, text)?;
             json!({"forgotten": true, "text": text})
+        }
+        // What the agent keeps about one person (`memory/people/<person>/`), a file of it (`name`) or all. Owner only.
+        "kithMemoryForgetPerson" => {
+            let out = hqmem::person::forget(
+                &hqmem::open(&layout)?,
+                &layout,
+                &agent,
+                str_arg(b, "person")?,
+                b["name"].as_str(),
+            )?;
+            hub.emit_bot(str_arg(b, "botId")?);
+            out
         }
         "kithMemoryTidyUps" | "kithMemoryDreams" => {
             let runs = tidy::runs(&hqmem::open(&layout)?, &agent, count(b, "limit", RUNS_DEFAULT, RUNS_MAX))?;

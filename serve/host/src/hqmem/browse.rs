@@ -125,7 +125,7 @@ fn cause(v: &Version) -> &'static str {
     }
 }
 
-fn version_json(v: &Version) -> Value {
+pub(super) fn version_json(v: &Version) -> Value {
     let (bytes, lines) = v.content.as_deref().map_or((0, 0), |c| (c.len(), c.lines().count()));
     json!({
         "id": v.id, "at": v.at, "author": author(v), "authorBot": v.author_bot, "cause": cause(v),
