@@ -56,6 +56,45 @@ pub(crate) fn inherited(name: &str) -> bool {
     basic || hq || kith
 }
 
+/// Whether `kernel version` of this program (`{"abi":1,"modules":[...]}`) lists `token`.
+pub(crate) fn lists_module(version: &str, token: &str) -> bool {
+    serde_json::from_str::<Value>(version)
+        .ok()
+        .and_then(|v| v.get("modules").and_then(Value::as_array).map(|m| m.iter().any(|x| x == token)))
+        .unwrap_or(false)
+}
+
+/// The variables a claimed wake's launch gets: the claim, and the work key it attaches under when the program can name it.
+pub(crate) fn wake_env(w: &ChannelWake, names_the_key: bool) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    let mut out: Vec<(std::ffi::OsString, std::ffi::OsString)> =
+        vec![("KITH_TURN_CLAIM".into(), w.claim.to_string().into())];
+    if names_the_key {
+        out.push(("KITH_TURN_CONVERSATION".into(), w.wk.clone().into()));
+    }
+    out
+}
+
+/// What `kernel version` said for each program, once: a program is replaced only by an update that restarts the host's runs.
+static LISTED: std::sync::LazyLock<Mutex<std::collections::HashMap<std::path::PathBuf, String>>> =
+    std::sync::LazyLock::new(Mutex::default);
+
+/// Whether the program at `bin` lists `token` among its modules. A program that cannot be asked, or answers no list, does not.
+async fn program_lists(bin: &Path, token: &str, env: &[(std::ffi::OsString, std::ffi::OsString)]) -> bool {
+    if let Some(said) = LISTED.locked().get(bin) {
+        return lists_module(said, token);
+    }
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.args(["kernel", "version"]).env_clear().envs(env.iter().cloned()).stdin(Stdio::null()).kill_on_drop(true);
+    let out = tokio::time::timeout(Duration::from_secs(10), cmd.output()).await;
+    let Ok(Ok(out)) = out else { return false };
+    if !out.status.success() {
+        return false;
+    }
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    LISTED.locked().insert(bin.to_owned(), said.clone());
+    lists_module(&said, token)
+}
+
 /// Reads a pipe into a buffer that stays readable if the reader is stopped.
 async fn read_into(mut pipe: impl tokio::io::AsyncRead + Unpin, into: Arc<Mutex<Vec<u8>>>) {
     let mut chunk = [0u8; 8192];
@@ -456,9 +495,11 @@ impl Core {
             return Ok(Attempt::NotStarted);
         }
         if let Some(w) = wake {
-            // Read together by the launch and removed from the engine's environment: it attaches the claim naming the work key.
-            env.push(("KITH_TURN_CLAIM".into(), w.claim.to_string().into()));
-            env.push(("KITH_TURN_CONVERSATION".into(), w.wk.clone().into()));
+            // Read together by the launch and removed from the engine's environment: it attaches the claim naming the work key. A
+            // program that does not list `turn-conversation` is not told the key: it attaches with the session's id, the core
+            // refuses that (exit 10), and the wake is requeued, as for any older launch.
+            let named = program_lists(&self.paths.hq_bin, "turn-conversation", &env).await;
+            env.extend(wake_env(w, named));
         }
         let mut cmd = tokio::process::Command::new(&self.paths.hq_bin);
         cmd.args(run_args(agent, account, &format!("{preface}{task}{}", ad.footer())))
@@ -724,7 +765,7 @@ fn run_args(agent: &str, backup: Option<&str>, prompt: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{depleted, inherited, run_args, run_room};
+    use super::{ChannelWake, depleted, inherited, lists_module, run_args, run_room, wake_env};
     use serde_json::json;
 
     #[test]
@@ -814,5 +855,19 @@ mod tests {
         ] {
             assert!(!inherited(name), "{name} must not reach a run");
         }
+    }
+
+    #[test]
+    fn a_program_without_the_turn_conversation_token_is_not_told_the_work_key() {
+        let old = r#"{"abi":1,"modules":["launch","threads-writer","turn-claim","wake"]}"#;
+        let new = r#"{"abi":1,"modules":["launch","turn-claim","turn-conversation","wake"]}"#;
+        assert!(!lists_module(old, "turn-conversation"), "an older program lists turn-claim only");
+        assert!(lists_module(new, "turn-conversation"));
+        assert!(!lists_module("not json", "turn-conversation"), "a program that cannot say does not list it");
+        let w = ChannelWake::for_test("run-1", 7, 41, "tg:7#house");
+        let names: Vec<_> = wake_env(&w, lists_module(old, "turn-conversation")).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(names, ["KITH_TURN_CLAIM"], "the skew case: the claim alone, the launch is refused and the wake requeued");
+        let both: Vec<_> = wake_env(&w, true).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(both, ["KITH_TURN_CLAIM", "KITH_TURN_CONVERSATION"]);
     }
 }
