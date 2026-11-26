@@ -26,7 +26,7 @@ pub(super) fn kill(pid: u32) {
 
 /// Ends the run's process by its pid after a start-stamp check against the stamp taken when the host started it (W12-3,
 /// rule P1). Never by name. A run whose start was not recorded or cannot be matched is not killed, and says so (WI1).
-/// Not reachable yet (a chat run returns NotStarted on Windows before the spawn), and H4 does not hold for it: the tools
+/// Not reachable yet (a chat run returns `NotStarted` on Windows before the spawn), and H4 does not hold for it: the tools
 /// below the run are not in a kill-on-close job.
 // W12-7: the spawn must go in a kill-on-close job, and the stamp must be read from the child's handle, not by pid after
 // the spawn (`winproc::remember` in run.rs does the latter).
