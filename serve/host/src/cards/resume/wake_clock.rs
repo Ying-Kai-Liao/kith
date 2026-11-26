@@ -5,7 +5,7 @@
 //! - **R1 the clock**: each pass of the taker (every 5 s, and 300 ms after a kick, the host's own enqueue of a request) calls
 //!   `wake.tick`, in Writer mode only, like the schedule runner's pull. A tick the core refuses, answers `Busy` or does not
 //!   answer is not made: the next pass is its retry. After a tick the host starts the housekeeping that used to ride on
-//!   `kith-wake drain`: the lifecycle sweep (`kith kernel lifecycle sweep`) and, until asks are rows of the core, the ask
+//!   `kith-wake drain`: the lifecycle sweep (`kernel lifecycle sweep` on `kernel::launch_program()`) and, until asks are rows of the core, the ask
 //!   bridge (`kith-ask --sweep`, whose `enqueue` goes to the core).
 //! - **R3 the pull**: `hostclaim.queued` with the `wake` source lists the turns the tick made. A turn of a bot chat or a channel
 //!   thread still goes to its door as before (`handle`, `WK4c` moves those to the turn id). Every other turn is a run door turn,
@@ -32,7 +32,7 @@ use crate::terminal::core_holders::{Reader, Reading};
 use crate::terminal::core_writer::{CoreWriter, Mode};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -410,16 +410,49 @@ fn detached(busy: &'static AtomicBool, make: fn() -> Option<Command>) {
     });
 }
 
-/// `kith kernel lifecycle --kernel K sweep`: the 54-minute decision of sessions nobody runs (F12 rule 5). Skipped with no kith.
+/// `kernel lifecycle --kernel K sweep`: the 54-minute decision of sessions nobody runs (F12 rule 5). Skipped with no program.
+/// The program is the launch program, not the bash entry: that has no `kernel` verb.
 fn lifecycle_command() -> Option<Command> {
-    let kith = crate::agent::hq::bin()?;
-    let mut cmd = Command::new(kith);
+    lifecycle_command_with(crate::kernel::launch_program(), crate::kernel::current_kernel())
+}
+
+fn lifecycle_command_with(program: Option<PathBuf>, kernel: Option<PathBuf>) -> Option<Command> {
+    let mut cmd = Command::new(program?);
     cmd.args(["kernel", "lifecycle"]);
-    if let Some(kernel) = crate::kernel::current_kernel() {
+    if let Some(kernel) = kernel {
         cmd.arg("--kernel").arg(kernel);
     }
     cmd.arg("sweep");
     Some(cmd)
+}
+
+#[cfg(test)]
+mod lifecycle_command_tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    fn args_of(cmd: &Command) -> Vec<String> {
+        cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect()
+    }
+
+    #[test]
+    fn sweep_starts_the_launch_program_with_the_kernel_verb() {
+        let cmd = lifecycle_command_with(Some(PathBuf::from("/opt/kith/kith-host")), None).unwrap();
+        assert_eq!(cmd.get_program(), OsStr::new("/opt/kith/kith-host"));
+        assert_eq!(args_of(&cmd), ["kernel", "lifecycle", "sweep"]);
+    }
+
+    #[test]
+    fn sweep_passes_the_current_kernel_before_sweep() {
+        let program = Some(PathBuf::from("/opt/kith/kith-host"));
+        let cmd = lifecycle_command_with(program, Some(PathBuf::from("/k"))).unwrap();
+        assert_eq!(args_of(&cmd), ["kernel", "lifecycle", "--kernel", "/k", "sweep"]);
+    }
+
+    #[test]
+    fn no_launch_program_means_no_sweep() {
+        assert!(lifecycle_command_with(None, Some(PathBuf::from("/k"))).is_none());
+    }
 }
 
 // Unix-only until retire-python P1-12: the run door's stand-in `kith` is a shell script (no Windows kernel launcher before it).
