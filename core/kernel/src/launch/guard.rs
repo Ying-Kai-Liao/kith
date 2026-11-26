@@ -57,7 +57,11 @@ const HOME_FILES: [&str; 9] = [
     ".gitconfig",
     ".claude.json",
 ];
+#[cfg(unix)]
 const ABS_TREES: [&str; 2] = ["/opt/homebrew", "/usr/local/bin"];
+// Windows has no such places, and `/opt/homebrew` there would read as a path under the working folder.
+#[cfg(not(unix))]
+const ABS_TREES: [&str; 0] = [];
 pub(super) const HOME_SECRETS: [&str; 8] = [
     ".ssh/id_*",
     ".aws/credentials",
