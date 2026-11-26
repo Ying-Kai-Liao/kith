@@ -243,7 +243,8 @@ impl World {
         let sessions = self.session_claims(conversation);
         assert_eq!(sessions.len(), usize::from(own_session), "the launch's session claims: {sessions:?}");
         for c in &sessions {
-            assert_eq!((c["state"].as_str(), c["pid"].as_i64()), (Some("running"), Some(i64::from(child.id()))), "{c}");
+            assert_eq!(c["pid"].as_i64(), Some(i64::from(child.id())), "{c}");
+            assert!(["claimed", "running"].contains(&c["state"].as_str().unwrap_or_default()), "{c}");
         }
         std::fs::remove_file(self.dir.join("hold")).unwrap();
         let status = child.wait().unwrap();

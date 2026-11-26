@@ -147,7 +147,7 @@ pub(crate) fn attach_in(
                            AND (?5 IS NULL OR t.conversation = ?5)
                            AND (?5 IS NOT NULL OR t.source = 'schedule')
                            AND (?6 IS NULL OR EXISTS (SELECT 1 FROM claims w WHERE w.conversation = ?6 AND w.kind = 'external'
-                                                      AND w.state = 'running' AND w.pid = ?3 AND w.pid_started = ?4))
+                                                      AND w.state IN ('claimed', 'running') AND w.pid = ?3 AND w.pid_started = ?4))
                            AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.turn = t.id AND a.origin_computer IS NOT NULL
                                            AND NOT EXISTS (SELECT 1 FROM ask_peers p WHERE p.computer = a.origin_computer
                                                            AND p.dir = 'in' AND p.epoch = a.origin_epoch AND p.live = 1)))",
