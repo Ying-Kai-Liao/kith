@@ -240,13 +240,32 @@ pub fn pid_signalable(pid: i64) -> bool {
     pid_runs(pid)
 }
 
-/// Ends the process now (`TerminateProcess`); errors (it is gone, not ours) are ignored. `sig` is [`SIGTERM`] or [`SIGKILL`]:
-/// Windows has no gentler end to ask for (docs/plans/windows-owner.md D6).
+/// Ends `pid` now (`TerminateProcess`) but only when it began at the claimed `stamp` (`e<ms>`), through one open handle: a pid given
+/// to a stranger since is left alone, and so is a process whose start cannot be read (H4: never by bare pid). `sig` is [`SIGTERM`]
+/// or [`SIGKILL`]: Windows has no gentler end to ask for (docs/plans/windows-owner.md D6).
 #[cfg(windows)]
-pub fn signal(pid: i64, _sig: i32) {
-    if let Some(p) = u32::try_from(pid).ok().filter(|p| *p > 0) {
-        let _ = kith_winsys::procs::terminate(p, 1);
+pub fn signal_started(pid: i64, stamp: Option<&str>, _sig: i32) {
+    let ms = stamp
+        .and_then(|s| s.strip_prefix('e'))
+        .and_then(|s| s.parse::<i64>().ok());
+    if let (Some(p), Some(ms)) = (u32::try_from(pid).ok().filter(|p| *p > 0), ms) {
+        let _ = kith_winsys::kill::terminate_if_started_at(p, ms);
     }
+}
+
+/// `(pid, ppid)` pairs where the child really is the parent's child: a parent pid is not cleared when the parent ends, and pids
+/// are reused fast, so a row whose parent began after the child (or either start cannot be read) is dropped.
+#[cfg(windows)]
+pub fn child_table() -> Vec<(i64, i64)> {
+    let began = |pid: i64| {
+        u32::try_from(pid)
+            .ok()
+            .and_then(kith_winsys::tree::creation_time)
+    };
+    ps_table()
+        .into_iter()
+        .filter(|(pid, ppid)| matches!((began(*pid), began(*ppid)), (Some(c), Some(p)) if p <= c))
+        .collect()
 }
 
 /// No old `ps -o lstart=` text was ever written on Windows: nothing to compare, so the start cannot be told.

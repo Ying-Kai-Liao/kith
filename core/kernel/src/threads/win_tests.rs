@@ -266,7 +266,10 @@ fn ending_a_holder_ends_its_children_too() {
         std::thread::sleep(Duration::from_millis(50));
     }
     let kid = kid.expect("cmd started ping");
-    let ended = end_holders(vec![i64::from(top.id())], Duration::ZERO);
+    let ended = end_holders(
+        vec![(i64::from(top.id()), os::proc_start(i64::from(top.id())))],
+        Duration::ZERO,
+    );
     assert!(ended.contains(&i64::from(top.id())) && ended.contains(&kid));
     top.wait().unwrap();
     let end = Instant::now() + Duration::from_secs(10);
@@ -274,4 +277,36 @@ fn ending_a_holder_ends_its_children_too() {
         assert!(Instant::now() < end, "the child is still running");
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+fn a_holder_whose_pid_is_alive_with_another_stamp_is_not_ended() {
+    let mut other = Command::new("cmd")
+        .args(["/C", "ping -n 60 127.0.0.1 >NUL"])
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = i64::from(other.id());
+    // A claim from an earlier process that had this pid, an unreadable stamp and no stamp at all.
+    for claimed in [Some("e1000".to_owned()), Some("garbage".to_owned()), None] {
+        assert_eq!(
+            end_holders(vec![(pid, claimed)], Duration::ZERO),
+            Vec::<i64>::new()
+        );
+        assert!(
+            other.try_wait().unwrap().is_none(),
+            "the stranger is still running"
+        );
+    }
+    // The second sweep finds the right one and ends it; a third finds nothing.
+    let mine = os::proc_start(pid);
+    assert_eq!(
+        end_holders(vec![(pid, mine.clone())], Duration::ZERO),
+        vec![pid]
+    );
+    other.wait().unwrap();
+    assert_eq!(
+        end_holders(vec![(pid, mine)], Duration::ZERO),
+        Vec::<i64>::new()
+    );
 }

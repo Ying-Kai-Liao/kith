@@ -709,37 +709,73 @@ pub fn sweep_persons(c: &Ctx, persons: &[String], grace: Duration) -> Vec<i64> {
             && claim.is_claimer()
             && let Some(pid) = claim.pid.filter(|p| *p > 1)
         {
-            holders.push(pid);
+            holders.push((pid, claim.proc_start.clone()));
         }
     }
     end_holders(holders, grace)
 }
 
-/// Ends the processes in `holders` and everything below them: SIGTERM, and SIGKILL after `grace`. Returns the pids it signalled.
-pub(crate) fn end_holders(holders: Vec<i64>, grace: Duration) -> Vec<i64> {
+/// Ends the processes in `holders` (pid and the start stamp the claim recorded) and everything below them: SIGTERM, and SIGKILL
+/// after `grace`. Returns the pids it signalled. On Windows (no signals, parent pids that outlive their parents, pids reused
+/// fast) a process is ended only if it still began when the claim says, through one handle (H4), and a child is only a process
+/// that began no earlier than its parent; the stamps are ignored on Unix, where the callers checked the claimer just before.
+pub(crate) fn end_holders(holders: Vec<(i64, Option<String>)>, grace: Duration) -> Vec<i64> {
+    #[cfg(windows)]
+    let holders: Vec<(i64, Option<String>)> = holders
+        .into_iter()
+        .filter(|(pid, claimed)| {
+            // Unreadable or different: not the claimer, or not known to be (P1: never ended either way).
+            claimed.as_deref().is_some_and(|c| {
+                os::proc_start(*pid).is_some_and(|now| {
+                    crate::procstart::comparable(c, &now) && crate::procstart::same_process(c, &now)
+                })
+            })
+        })
+        .collect();
     if holders.is_empty() {
         return Vec::new();
     }
     let mut kids: std::collections::HashMap<i64, Vec<i64>> = std::collections::HashMap::new();
-    for (pid, ppid) in os::ps_table() {
+    #[cfg(windows)]
+    let table = os::child_table();
+    #[cfg(not(windows))]
+    let table = os::ps_table();
+    for (pid, ppid) in table {
         kids.entry(ppid).or_default().push(pid);
     }
     let me = i64::from(std::process::id());
     let (mut victims, mut todo) = (Vec::new(), holders);
-    while let Some(pid) = todo.pop() {
-        if !victims.contains(&pid) && pid != me {
-            victims.push(pid);
-            todo.extend(kids.get(&pid).cloned().unwrap_or_default());
+    while let Some((pid, claimed)) = todo.pop() {
+        if !victims.iter().any(|(p, _)| *p == pid) && pid != me {
+            // The start a descendant has now is the one it is ended by.
+            let stamp = claimed.or_else(|| {
+                if cfg!(windows) {
+                    os::proc_start(pid)
+                } else {
+                    None
+                }
+            });
+            victims.push((pid, stamp));
+            todo.extend(kids.get(&pid).into_iter().flatten().map(|k| (*k, None)));
         }
     }
     for (sig, wait) in [(os::SIGTERM, grace), (os::SIGKILL, Duration::ZERO)] {
-        for pid in &victims {
-            os::signal(*pid, sig);
+        for (pid, stamp) in &victims {
+            #[cfg(windows)]
+            os::signal_started(*pid, stamp.as_deref(), sig);
+            #[cfg(not(windows))]
+            {
+                let _ = stamp;
+                os::signal(*pid, sig);
+            }
         }
         let end = Instant::now() + wait;
-        while !wait.is_zero() && Instant::now() < end && victims.iter().any(|p| os::pid_runs(*p)) {
+        while !wait.is_zero()
+            && Instant::now() < end
+            && victims.iter().any(|(p, _)| os::pid_runs(*p))
+        {
             std::thread::sleep(Duration::from_millis(100));
         }
     }
-    victims
+    victims.into_iter().map(|(p, _)| p).collect()
 }

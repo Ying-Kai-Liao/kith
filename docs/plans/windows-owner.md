@@ -456,7 +456,6 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     `agent/bot/lifecycle.rs` (liveness via procstart); `core/kernel/src/threads/*` and `lifecycle/*` (LockFileEx, spawn
     instead of fork); D6 graceful stop; the transcript reader accepts a torn last line.
   - The core-fired schedule turn runs here as a normal host turn, once P2-4 lands.
-  - **W12-4 (threads and lifecycle in kith-kernel): built 2026-11-27.** The modules build on Windows with the Unix code unchanged behind `cfg(unix)`. Locks are LockFileEx through `fs2` (no new unsafe), liveness is procstart, `winsys::procs` lists and ends processes, and the compaction's parked child is a spawn of `kith kernel lifecycle parked`. Left for others: the host's `threads_cmd`/`lifecycle_cmd` wiring and its Windows refusals (W12-3/W12-5), `threads run` (W12-5, W12-6), the stub's status pipe so a Windows compaction takes the conversation lock (W12-5).
   - **W12-7 (host turns): built 2026-11-27, switched off.** `hostclaim.turn` (`claim_next`, with the transcripts rows under it) builds on
     Windows. The host's Writer mode builds there: `warm_stub.rs`, `writer*.rs` and `kith_acp::spawn_resident` start the resident
     stub inside a job the host holds (unnamed, kill on close, no breakaway flags, `spawn_in_job`, rule 6), with its stdio on pipes
@@ -478,6 +477,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - **W12-2 (core probe and kernel tools): done.** P1 rows, `end_groups` empty on Windows (P2) and a torn last line (P4) are tests;
     the kernel tools (`runtools.rs`) run in a core-held, unnamed kill-on-close job (`Job::create_kill_on_close`, started with
     `spawn_in_job`) that the core ends through its own handle on a timeout or when the tool is done.
+  - **W12-4 (threads and lifecycle in kith-kernel): built 2026-11-27.** The modules build on Windows with the Unix code unchanged behind `cfg(unix)`. Locks are LockFileEx through `fs2` (no new unsafe), liveness is procstart, `winsys::procs` lists and ends processes, and the compaction's parked child is a spawn of `kith kernel lifecycle parked`. Left for others: the host's `threads_cmd`/`lifecycle_cmd` wiring and its Windows refusals (W12-3/W12-5), `threads run` (W12-5, W12-6), the stub's status pipe so a Windows compaction takes the conversation lock (W12-5).
   - **Rules the model needs** (each one's broken run fails; `model-w12/results.md`). The model is `WinClaims.tla`, which
     extends S4's model with processes and job objects. Workers build these:
     1. **H1: the recorded process makes the run's job itself.** For a CLI or detached run that is the launcher; the job is
