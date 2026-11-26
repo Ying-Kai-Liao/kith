@@ -328,13 +328,14 @@ impl CredentialManager {
     }
 }
 
-/// The folder of the mint lock: the user's local application folder (private to them), else the user's temp folder.
+/// The folder of the mint lock: the `locks` folder under the install root `%LOCALAPPDATA%\\Kith` (private to the user), else the user's temp folder.
 #[cfg(windows)]
 fn mint_lock_dir() -> std::path::PathBuf {
     std::env::var_os("LOCALAPPDATA")
         .filter(|d| !d.is_empty())
         .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
-        .join("kith")
+        .join("Kith")
+        .join("locks")
 }
 
 /// The lock file's name for a Credential Manager target: the target with every character that is not a letter, digit,
