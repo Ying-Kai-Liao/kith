@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '16cc6e9c5a14412e680d8dff24305932f4deece079eb9b5f77a9b4f0ec20d1f7'
+export const CONTRACT_SHA256 = '79fa3372947d821d404a90a8d1ffa84dd77b869498fce8a2cc4fa1de6b8bcc59'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -670,6 +670,65 @@ export interface BotConversations {
   conversations: BotConversation[]
 }
 
+/** Where a Feed post came from: the owner's chat, and the thread and entry it points at when there are some. A reply goes to this chat and thread with send. */
+export interface PostSource {
+  chat: string
+  thread?: string | null
+  entry?: string | null
+}
+
+/** One card of the owner's Feed. kind is merges, failing, number, page, file, video or yourTurn (one an app doesn't know shows as a plain card). attachment is at most one of {type:file,file}, {type:page,file,shot,version}, {type:video,file}, {type:number,value,unit,delta} and {type:link,url}; file and shot are the file meta a chat entry carries. items are the fold's members: a day's merged PRs ({id, title}), or a routine's last ten runs ({id, at, ok}). streak is the failed runs in a row of a routine, ending at its newest run. title is one line of at most 80 characters and line one of at most 200. Owner only: no invited person or bot ever gets a post. */
+export interface Post {
+  id: string
+  rev: number
+  agent: string
+  kind: string
+  title: string
+  line: string
+  attachment?: unknown | null
+  items: unknown[]
+  factAt: number
+  streak: number
+  source: PostSource
+  by: string
+  createdAt: number
+  updatedAt: number
+  liked: boolean
+  hidden: boolean
+}
+
+/** A page of the Feed, newest first. next is the updatedAt to pass as before for the page after it; absent on the last page. */
+export interface Feed {
+  posts: Post[]
+  next?: number | null
+}
+
+/** The post after the change. */
+export interface PostAnswer {
+  post: Post
+}
+
+/** A chat whose agent said something in the last three hours: the ring above the Feed. unread counts what the owner has not read there. */
+export interface Story {
+  chat: string
+  agent?: string | null
+  lastAt: number
+  lastEntryId: string
+  unread: number
+}
+
+/** The owner's chats with an agent entry in the last three hours, newest first. */
+export interface Stories {
+  stories: Story[]
+}
+
+/** The agent the text fits best, why, and up to two others to pick instead. */
+export interface FeedRoute {
+  agent: string
+  why: string
+  others: string[]
+}
+
 /** What `hello` takes. */
 export type HelloParams = Record<string, never>
 
@@ -1007,6 +1066,32 @@ export interface LeaveRoomParams {
   room: string
 }
 
+/** What `feed` takes. */
+export interface FeedParams {
+  before?: number | null
+  limit?: number | null
+}
+
+/** What `likePost` takes. */
+export interface LikePostParams {
+  id: string
+  liked: boolean
+}
+
+/** What `hidePost` takes. */
+export interface HidePostParams {
+  id: string
+  hidden: boolean
+}
+
+/** What `stories` takes. */
+export type StoriesParams = Record<string, never>
+
+/** What `feedRoute` takes. */
+export interface FeedRouteParams {
+  text: string
+}
+
 export interface Types {
   Empty: Empty
   StoreHealth: StoreHealth
@@ -1071,6 +1156,13 @@ export interface Types {
   BotThread: BotThread
   BotConversation: BotConversation
   BotConversations: BotConversations
+  PostSource: PostSource
+  Post: Post
+  Feed: Feed
+  PostAnswer: PostAnswer
+  Story: Story
+  Stories: Stories
+  FeedRoute: FeedRoute
   HelloParams: HelloParams
   KithInfoParams: KithInfoParams
   StartChatParams: StartChatParams
@@ -1126,6 +1218,11 @@ export interface Types {
   RoomPeopleParams: RoomPeopleParams
   MyRoomsParams: MyRoomsParams
   LeaveRoomParams: LeaveRoomParams
+  FeedParams: FeedParams
+  LikePostParams: LikePostParams
+  HidePostParams: HidePostParams
+  StoriesParams: StoriesParams
+  FeedRouteParams: FeedRouteParams
 }
 export type TypeName = keyof Types
 
@@ -1205,6 +1302,11 @@ export const METHODS = {
   roomPeople: { who: ['owner'], params: 'RoomPeopleParams', result: 'RoomPeople' },
   myRooms: { who: ['member'], params: 'MyRoomsParams', result: 'MyRooms' },
   leaveRoom: { who: ['member'], params: 'LeaveRoomParams', result: 'RoomLeft' },
+  feed: { who: ['owner'], params: 'FeedParams', result: 'Feed' },
+  likePost: { who: ['owner'], params: 'LikePostParams', result: 'PostAnswer' },
+  hidePost: { who: ['owner'], params: 'HidePostParams', result: 'PostAnswer' },
+  stories: { who: ['owner'], params: 'StoriesParams', result: 'Stories' },
+  feedRoute: { who: ['owner'], params: 'FeedRouteParams', result: 'FeedRoute' },
 } as const
 export type MethodName = keyof typeof METHODS
 
@@ -1265,6 +1367,11 @@ export interface Params {
   roomPeople: RoomPeopleParams
   myRooms: MyRoomsParams
   leaveRoom: LeaveRoomParams
+  feed: FeedParams
+  likePost: LikePostParams
+  hidePost: HidePostParams
+  stories: StoriesParams
+  feedRoute: FeedRouteParams
 }
 
 /** What each method answers with. */
@@ -1324,10 +1431,15 @@ export interface Results {
   roomPeople: RoomPeople
   myRooms: MyRooms
   leaveRoom: RoomLeft
+  feed: Feed
+  likePost: PostAnswer
+  hidePost: PostAnswer
+  stories: Stories
+  feedRoute: FeedRoute
 }
 
 /** What the owner alone (a method no one else may call; the owner may call every method) may call. */
-export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic', 'createInvite', 'addRoomPerson', 'removeRoomPerson', 'roomPeople'] as const satisfies readonly MethodName[]
+export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic', 'createInvite', 'addRoomPerson', 'removeRoomPerson', 'roomPeople', 'feed', 'likePost', 'hidePost', 'stories', 'feedRoute'] as const satisfies readonly MethodName[]
 
 /** What an invited person may call. */
 export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread', 'history', 'newSession', 'unsend', 'markRead', 'stop', 'upload', 'readUpload', 'react', 'respondPermission', 'editHandoff', 'keepConversation', 'projects', 'threadProjects', 'setThreadProjects', 'linkCode', 'scheduleMessages', 'callAccept', 'callDecline', 'callGreet', 'logCall', 'startCall', 'endCall', 'createBotInvite', 'revokeBotInvite', 'revokeBot', 'myBots', 'setBotLimits', 'resolveCitation', 'myRooms', 'leaveRoom'] as const satisfies readonly MethodName[]
@@ -1441,6 +1553,13 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotThread: { fields: { conversation: 'string', entries: '[BotEntry]', done: 'bool', turn: 'int?', state: 'ConversationState' } },
     BotConversation: { fields: { conversation: 'string', agent: 'string', ref: 'string?', originLabel: 'string', lastAt: 'int', state: 'ConversationState' } },
     BotConversations: { fields: { conversations: '[BotConversation]' } },
+    PostSource: { fields: { chat: 'string', thread: 'string?', entry: 'string?' }, mayOmit: ['thread', 'entry'] },
+    Post: { fields: { id: 'string', rev: 'int', agent: 'string', kind: 'string', title: 'string', line: 'string', attachment: 'json?', items: '[json]', factAt: 'int', streak: 'int', source: 'PostSource', by: 'string', createdAt: 'int', updatedAt: 'int', liked: 'bool', hidden: 'bool' }, mayOmit: ['attachment'] },
+    Feed: { fields: { posts: '[Post]', next: 'int?' }, mayOmit: ['next'] },
+    PostAnswer: { fields: { post: 'Post' } },
+    Story: { fields: { chat: 'string', agent: 'string?', lastAt: 'int', lastEntryId: 'string', unread: 'int' }, mayOmit: ['agent'] },
+    Stories: { fields: { stories: '[Story]' } },
+    FeedRoute: { fields: { agent: 'string', why: 'string', others: '[string]' } },
     HelloParams: { fields: {} },
     KithInfoParams: { fields: { botId: 'string', refresh: 'bool?' } },
     StartChatParams: { fields: { agent: 'string' } },
@@ -1496,6 +1615,11 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     RoomPeopleParams: { fields: { room: 'string' } },
     MyRoomsParams: { fields: {} },
     LeaveRoomParams: { fields: { room: 'string' } },
+    FeedParams: { fields: { before: 'int?', limit: 'int?' } },
+    LikePostParams: { fields: { id: 'string', liked: 'bool' } },
+    HidePostParams: { fields: { id: 'string', hidden: 'bool' } },
+    StoriesParams: { fields: {} },
+    FeedRouteParams: { fields: { text: 'string' } },
   },
 }
 
