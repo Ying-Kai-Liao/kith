@@ -298,7 +298,7 @@ Merged: #1222 A2, #1228 C3L, #1210 (Hermes refusal), #1219 (prer4: `other_engine
 ### Phase 2: replace the copies of "is this Claude?" (S, after #1221 and #1220 merge)
 
 - **Changes.** The two `harness_of_agent` copies and `is_claude` (`core_ask.rs:89,318`, `wake_clock.rs:126,132`) call
-  `engines::of_agent`; S2's copy of `launch_program` moves to the shared `kernel::launch_program` (a #1222/#1220 loose end); `backups.rs:70`, `plan.rs:1079`, `launch_cmd.rs:145` ask `can(...)`. `ENGINE_GAP`
+  `engines::for_run` (the wake and ask doors' differing rules become one, so `wake_clock_tests.rs:132` and `core_ask_tests` change on purpose); S2's copy of `launch_program` moves to the shared `kernel::launch_program` (a #1222/#1220 loose end); `backups.rs:70`, `plan.rs:1079`, `launch_cmd.rs:145` ask `can(...)`. `ENGINE_GAP`
   stays (same answer, now `can(DetachedTurn)`), so no behaviour moves.
 - **Files.** `serve/host/src/routines/core_ask.rs`, `cards/resume/wake_clock.rs`, `routines/sched_launch.rs` (S2),
   `agent/backups.rs`, `core/kernel/src/launch/plan.rs`, `serve/host/src/launch_cmd.rs`.
