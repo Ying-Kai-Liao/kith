@@ -165,7 +165,12 @@ impl World {
         world
     }
 
-    fn command(&self, program: &Path) -> Command {
+    /// The core re-reads the module switch records (a test writes one after the daemon started).
+    pub(super) fn reconciled(&self) {
+        self.daemon.as_ref().expect("the daemon").reconciled();
+    }
+
+    pub(super) fn command(&self, program: &Path) -> Command {
         let mut c = Command::new(program);
         c.env_clear().envs(self.env.iter().map(|(k, v)| (k, v)));
         c
