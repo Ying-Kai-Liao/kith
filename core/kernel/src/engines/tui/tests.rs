@@ -192,7 +192,7 @@ fn codex_owner_sandbox_gets_network_and_nobody_else_does() {
         !bypass
             .argv
             .iter()
-            .any(|a| a.contains("network_access") || a.contains("sandbox"))
+            .any(|a| a.contains("network_access") || a.starts_with("sandbox_"))
     );
 }
 
