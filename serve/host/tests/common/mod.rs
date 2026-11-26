@@ -87,13 +87,19 @@ fn end_holders_of(home: &Path) {
     let script = "Get-CimInstance Win32_Process -Filter \"Name='kith-holder.exe'\" \
         | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($env:KITH_TEST_HOME, 'OrdinalIgnoreCase') -ge 0 } \
         | ForEach-Object { taskkill /F /T /PID $_.ProcessId | Out-Null }";
-    let _ = Command::new(Path::new(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe"))
+    let out = Command::new(Path::new(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe"))
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("KITH_TEST_HOME", home.file_name().unwrap_or_default())
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+        .output();
+    // DIAGNOSTIC (W2b): CI reads this file to see whether this ran and what powershell said.
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(std::env::temp_dir().join("kith-forget.log")) {
+        let _ = match out {
+            Ok(o) => writeln!(f, "{} status={} out={} err={}", home.display(), o.status, String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)),
+            Err(e) => writeln!(f, "{} spawn failed: {e}", home.display()),
+        };
+    }
 }
 
 /// Runs `kith-serve serve` for `home` until it answers: the process and its base URL. A port

@@ -1046,6 +1046,8 @@ jobs:
             $par = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)"
             if ($par) { Write-Host "parent of $($p.ProcessId): $($par.Name) $($par.ProcessId) created $($par.CreationDate): $($par.CommandLine)" } else { Write-Host "parent $($p.ParentProcessId) of $($p.ProcessId) is gone" }
           }
+          Get-ChildItem $env:TEMP -Filter 'kith-*' | ForEach-Object { Write-Host "temp: $($_.Name)" }
+          if (Test-Path "$env:TEMP\kith-forget.log") { Get-Content "$env:TEMP\kith-forget.log" | Write-Host } else { Write-Host "no kith-forget.log" }
           exit 0
       # The two programs the Windows app bundles (apps/desktop/tools/native-host.mjs builds exactly these .exe names).
       - name: Bundled programs build
