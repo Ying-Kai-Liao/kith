@@ -132,7 +132,11 @@ hooks X=1 > "$T/h.out"
 check "terminal launch, program with cost-ledger: the hook is the program's form" "grep -q 'kernel cost --kernel .* tag\$' '$T/h.out'"
 hooks KITH_BIN=$T/nonexistent > "$T/h.out"
 check "terminal launch, no program: refused in one line, no hook written" "[ -z '$(cat "$T/h.out")' ] && grep -q '^kith: ' '$T/hook.out'"
+# The old program is the real one with one module hidden, so it still lists `launch-exec`; no real old program does (it came later than
+# cost-ledger). This row is about the script's own settings, so the line is off for it (the bash body, the rollback proof until R5).
+grep -v '^launch-exec[[:space:]]' "$T/switched.keep" > "$SW"
 hooks KITH_BIN=$T/old/kith > "$T/h.out"
+cp "$T/switched.keep" "$SW"
 check "terminal launch, old program (no cost-ledger): the settings are written, with no cost hook" "[ -s '$STUB_SETTINGS' ] && [ -s '$T/h.out' ] && ! grep -q 'kernel cost\\|/bin/kith-cost' '$T/h.out'"
 
 echo

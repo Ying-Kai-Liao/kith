@@ -66,9 +66,9 @@ fi
 if [ -n "$BIN" ]; then
   # Both from copies of the kernel folder (a checkout's own files are protected in the settings; a copy's are not).
   # The off copy has no `launch-exec` line (the line is on in the shipped file since R4), so it is the script's own body the program is compared with.
-  cp -R "$KERNEL" "$T0/kernel-off"; cp -R "$KERNEL" "$T0/kernel-on"
-  grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T0/kernel-off/lib/core-switched.txt"
-  launch "$T0/kernel-off" "$T0/off" ""
+  mkdir -p "$T0/off-dir"; cp -R "$KERNEL" "$T0/off-dir/kernel"; ln -s "$KERNEL/../serve" "$T0/off-dir/serve"; cp -R "$KERNEL" "$T0/kernel-on"
+  grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T0/off-dir/kernel/lib/core-switched.txt"
+  launch "$T0/off-dir/kernel" "$T0/off" ""
   printf 'launch-exec\tlaunch-exec\n' >> "$T0/kernel-on/lib/core-switched.txt"
   launch "$T0/kernel-on" "$T0/on" "$BIN"
   expect "launch-exec on: the stub claude was launched with its settings" "$(grep -c '^SETTINGS' "$T0/on")" 1

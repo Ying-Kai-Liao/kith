@@ -39,9 +39,10 @@ if [[ -z $BIN ]]; then
 fi
 
 # The first suite is the script's own body: a copy of the kernel folder without the `launch-exec` line (it is on in the shipped file since R4).
-cp -R "$KERNEL" "$T/kernel-off"
-grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/kernel-off/lib/core-switched.txt"
-K=$T/kernel-off P=""
+# (in a folder of its own with the checkout's serve/ beside it: the script looks for the program at kernel/../serve/host/target)
+mkdir -p "$T/off" && cp -R "$KERNEL" "$T/off/kernel" && ln -s "$KERNEL/../serve" "$T/off/serve"
+grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/off/kernel/lib/core-switched.txt"
+K=$T/off/kernel P=""
 run() {   # run VAR=value ... — one `kith echo hi`, prints what claude saw
   : > "$ENV_LOG"
   (cd "$KITH_HOME/agents/echo" && env "$@" "$K/bin/kith" echo hi >/dev/null 2>"$T/err")

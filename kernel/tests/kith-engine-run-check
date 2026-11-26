@@ -107,9 +107,9 @@ term_rows() {   # term_rows LABEL KITH_PROGRAM
 }
 term_rows "launch-exec on: " "$KITH"
 # The rollback proof until R5: a copy of the kernel folder without the `launch-exec` line (it is on in the shipped file since R4).
-cp -R "$KERNEL" "$T/kernel-off"
-grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/kernel-off/lib/core-switched.txt"
-term_rows "launch-exec off: " "$T/kernel-off/bin/kith"
+mkdir -p "$T/off" && cp -R "$KERNEL" "$T/off/kernel" && ln -s "$KERNEL/../serve" "$T/off/serve"
+grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/off/kernel/lib/core-switched.txt"
+term_rows "launch-exec off: " "$T/off/kernel/bin/kith"
 
 # pi has no ACP path: engine-run exits 78 before it starts anything, and that is the final answer (no native run).
 printf -- '---\nname: echo\ndescription: test agent, pi\nharness: pi\n---\nYou echo.\n' > "$A/agent.md"
