@@ -604,6 +604,11 @@ fn other_engine(
     );
     env.insert("KITH_RUN_DIRS".to_owned(), dirs.join("\n"));
     env.insert("KITH_RUN_MCP".to_owned(), mcp);
+    // Only the owner's own run gets network inside the engine's sandbox (`owner` is the plan's, as for the other owner-only rules).
+    env.insert(
+        "KITH_RUN_OWNER".to_owned(),
+        if plan.owner { "1" } else { "0" }.to_owned(),
+    );
     // Global skills load unless the role turned them off.
     env.insert(
         "KITH_RUN_GLOBAL_SKILLS".to_owned(),
