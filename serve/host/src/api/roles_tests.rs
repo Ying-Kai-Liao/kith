@@ -820,6 +820,28 @@ async fn a_thread_row_carries_its_summary_only_to_its_audience() {
     assert!(plain.unwrap().data["thread"].is_null());
 }
 
+/// Who prompted an entry (`data.prompter`) is the owner's to see: an invitee's history and a bot guest's entry have none.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
+#[tokio::test]
+async fn who_prompted_an_entry_is_not_shown_to_an_invitee_or_a_bot_guest() {
+    let r = Rig::new().await;
+    let (sam, _) = joined(&r, json!({"house": "member"})).await;
+    let theirs = chat_of(&r, &sam).await;
+    let data = json!({"text": "hi", "status": "sent", "prompter": {"kind": "app"}});
+    let e = r.hub.store.insert_entry(&crate::store::Lane::main(&theirs), crate::store::EntryKind::User, 1, &data);
+    let id = e.unwrap().id;
+    let find = |v: &Value| v["entries"].as_array().unwrap().iter().find(|e| e["id"] == id).unwrap().clone();
+    let theirs_seen = find(&call(&r, &sam, "history", json!({"botId": theirs})).await.unwrap());
+    assert_eq!(theirs_seen["data"]["text"], "hi");
+    assert!(theirs_seen["data"]["prompter"].is_null(), "{theirs_seen}");
+    let owner_seen = find(&call(&r, &Caller::Local, "history", json!({"botId": theirs})).await.unwrap());
+    assert_eq!(owner_seen["data"]["prompter"], json!({"kind": "app"}));
+    // A bot guest's view is a whitelist.
+    let entry = json!({"id": "e", "rev": 1, "turn": 1, "createdAt": 1, "kind": "user", "data": data});
+    let seen = roles::bot_entry(&entry, "c", "the owner").unwrap();
+    assert!(!seen.to_string().contains("prompter"), "{seen}");
+}
+
 #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn showing_the_summary_as_the_row_is_an_owner_setting_off_by_default() {
