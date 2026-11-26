@@ -29,12 +29,14 @@ impl Core {
         let home = PathBuf::from("/tmp").join(format!("kwa-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
         std::fs::create_dir_all(home.join(".kith")).expect("home");
         let folders = crate::kernel::folders(&home);
+        // The claims are the core's (a callee attaches its claim through `claim.attach`, which serves only then): the real step,
+        // before the daemon holds the core.
+        let said = kith_core::cutover(&folders, &home.join("kith/kernel"), &["step".to_owned(), "claims".to_owned()])
+            .map_err(|e| e.to_string())
+            .expect("the claims step");
+        assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
         let daemon = serve_for_test(&folders);
         daemon.reconciled();
-        // The claims are the core's (a callee attaches its claim through `claim.attach`, which serves only then).
-        let cutover = folders.machine.join("core/cutover");
-        std::fs::create_dir_all(&cutover).expect("cutover dir");
-        std::fs::write(cutover.join("claims.switch"), "state=switched\nat=1\n").expect("switch record");
         let writer = Arc::new(CoreWriter::with_instance(folders.clone(), "test-host".to_owned()));
         Self { home, folders, daemon: Some(daemon), writer }
     }
@@ -42,7 +44,7 @@ impl Core {
     fn call(&self, method: &str, params: &Value) -> Value {
         match call_owner(&self.folders, method, params, false) {
             Answer::Done(v) => v,
-            _ => panic!("{method}: the core did not answer"),
+            Answer::Refused(why) | Answer::Down { why, .. } => panic!("{method}: {why}"),
         }
     }
 
@@ -61,7 +63,7 @@ impl Core {
     fn call_host_row(&self, method: &str, params: &Value) -> Value {
         match call_host(&self.folders, method, params) {
             Answer::Done(v) => v,
-            _ => panic!("{method}: the core did not answer"),
+            Answer::Refused(why) | Answer::Down { why, .. } => panic!("{method}: {why}"),
         }
     }
 
