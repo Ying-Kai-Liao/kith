@@ -96,7 +96,7 @@ impl World {
         let kernel = repo_kernel();
         let bin = dir.join("bin");
         let rec = dir.join("rec");
-        for d in [&home, &machine, &bin, &rec, &home.join("agents/house/role")] {
+        for d in [&home, &machine, &bin, &rec, &home.join("agents/house/role"), &machine.join("live/terminal")] {
             std::fs::create_dir_all(d).unwrap();
         }
         std::fs::write(
