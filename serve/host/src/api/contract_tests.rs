@@ -121,6 +121,7 @@ async fn member_answers(r: &Rig, sam: &Caller) -> BTreeMap<&'static str, Value> 
 
 /// A bot guest of the owner's (`Rex`, with `house`), joined the way the cloud lists it, then proven, asking, read back,
 /// stopped and leaving. Each answer is filed by its fixture's name; the bot's `hello` is `hello-as-bot`.
+#[cfg(unix)] // its room-secret step uses the Unix-only Keychain stand-in (cards::room_secret_tests)
 async fn bot_answers(r: &Rig) -> BTreeMap<&'static str, (&'static str, Value)> {
     let mut got = BTreeMap::new();
     let made =
@@ -207,6 +208,7 @@ fn answers_are_their_fixtures(who: &str, answers: &BTreeMap<&str, (&str, Value)>
     }
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_member_methods_answer_as_the_contract_and_its_fixtures_say() {
     let r = Rig::new().await;
@@ -216,6 +218,7 @@ async fn the_member_methods_answer_as_the_contract_and_its_fixtures_say() {
     answers_are_their_fixtures("member", &answers);
 }
 
+#[cfg(unix)] // needs bot_answers, which is Unix-only
 #[tokio::test]
 async fn the_bot_methods_answer_as_the_contract_and_its_fixtures_say() {
     let r = Rig::new().await;
@@ -226,6 +229,7 @@ async fn the_bot_methods_answer_as_the_contract_and_its_fixtures_say() {
     answers_are_their_fixtures("bot", &answers);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_peer_methods_answer_as_the_contract_and_its_fixtures_say() {
     let r = Rig::new().await;

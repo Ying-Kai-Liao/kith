@@ -862,7 +862,7 @@ pub async fn chat_request(hub: &Arc<Hub>, bot: &str, actor: &str, args: &Value) 
     Ok(request(hub, &origin, service, args["purpose"].as_str().unwrap_or_default()).await)
 }
 
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 mod tests;

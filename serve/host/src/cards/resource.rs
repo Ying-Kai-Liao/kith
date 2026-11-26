@@ -444,6 +444,10 @@ mod tests {
         std::fs::canonicalize(dir).unwrap().join(rel).to_string_lossy().into_owned()
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "fixtures spell POSIX absolute paths (/Users/x); Windows path spelling for cards is W10 (WI7)"
+    )]
     #[test]
     fn secrets_and_logins_are_never_carded() {
         let r = roots();
@@ -483,6 +487,10 @@ mod tests {
         assert!(matches!(classify("Bash", &json!({"command": "ls /tmp"}), &r), Classified::Card { .. }));
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "fixtures spell POSIX absolute paths (/Users/x); Windows path spelling for cards is W10 (WI7)"
+    )]
     #[test]
     fn bash_names_through_home_spellings_and_case_are_still_secrets() {
         let home = dirs::home_dir().unwrap();
@@ -531,6 +539,10 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "fixtures spell POSIX absolute paths (/Users/x); Windows path spelling for cards is W10 (WI7)"
+    )]
     #[test]
     fn a_folder_that_holds_a_secret_is_never_carded_either() {
         let r = roots();
@@ -574,6 +586,10 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "fixtures spell POSIX absolute paths (/Users/x); Windows path spelling for cards is W10 (WI7)"
+    )]
     #[test]
     fn a_card_is_bound_to_everything_it_was_asked_with() {
         let none = Roots::default();

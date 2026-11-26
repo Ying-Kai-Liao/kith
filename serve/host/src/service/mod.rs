@@ -725,10 +725,10 @@ mod tests {
     fn statusline_repoints_a_moved_host() {
         let host = fake_bin("kith");
         let old = fake_bin("kith-serve"); // an older Kith build, still on disk
-        let f = temp_settings(&format!(
-            r#"{{"statusLine":{{"type":"command","command":"'{}' statusline -- sh ~/mine.sh"}}}}"#,
-            old.display()
-        ));
+        let f = temp_settings(
+            &json!({"statusLine": {"type": "command", "command": format!("'{}' statusline -- sh ~/mine.sh", old.display())}})
+                .to_string(),
+        );
         assert!(ensure_statusline(&f, Some(&host)).unwrap());
         assert_eq!(command(&f), format!("'{}' statusline -- sh ~/mine.sh", host.display()));
     }
@@ -756,7 +756,7 @@ mod tests {
         assert_eq!(command(&f), "sh ~/mine.sh");
         let live = fake_bin("kith-serve");
         let wrapped = format!("'{}' statusline -- sh ~/mine.sh", live.display());
-        let f = temp_settings(&format!(r#"{{"statusLine":{{"type":"command","command":"{wrapped}"}}}}"#));
+        let f = temp_settings(&json!({"statusLine": {"type": "command", "command": wrapped}}).to_string());
         assert!(!ensure_statusline(&f, None).unwrap(), "a live wrapper is left as is");
         assert_eq!(command(&f), wrapped);
     }

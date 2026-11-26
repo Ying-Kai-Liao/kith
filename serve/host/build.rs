@@ -22,6 +22,8 @@ fn main() {
     if target_os != "windows" || target_env != "msvc" {
         return;
     }
+    // Windows gives a main thread 1 MiB, Unix 8: the host's start-up (its router tables and store) overflows the smaller one.
+    println!("cargo:rustc-link-arg-bins=/STACK:8388608");
     let Some(out) = std::env::var_os("OUT_DIR") else { return };
     let path = PathBuf::from(out).join("kith.manifest");
     if std::fs::write(&path, MANIFEST).is_err() {

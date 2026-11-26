@@ -35,6 +35,10 @@ async fn status(host: &Host, bot: &str) -> String {
     roster.iter().find(|b| b["id"] == bot).map(|b| b["status"].as_str().unwrap_or_default().to_owned()).unwrap()
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn stop_ends_a_turn_that_is_still_starting_and_the_next_message_starts_afresh() {
     if python_missing() {
@@ -87,6 +91,10 @@ async fn share_during_a_slow_start(abandon: bool) -> bool {
     history(&host, &bot).await.iter().any(|e| e["data"]["files"].is_array())
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn a_file_share_the_agent_gave_up_on_is_not_posted_later() {
     if python_missing() {
@@ -95,6 +103,10 @@ async fn a_file_share_the_agent_gave_up_on_is_not_posted_later() {
     assert!(!share_during_a_slow_start(true).await, "the share the agent gave up on was posted");
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 /// The control: the same share, not abandoned, is posted, so the test above can fail.
 #[tokio::test]
 async fn the_same_file_share_not_given_up_on_is_posted() {

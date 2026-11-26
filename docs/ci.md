@@ -47,7 +47,7 @@ A PR gets one group per ref, so a re-push cancels its older run. Pushes to main 
 
 ## Windows clippy on a Mac
 
-The `windows` job used to clippy one crate per step, so the first failing crate hid the rest and each fix cost a CI round (about 40 minutes). `scripts/ci/windows-clippy.sh` now holds the whole Windows clippy list (the all-targets crates in one `cargo clippy -p ... --all-targets` call, `kith-serve --bins` in a second, both `--locked -D warnings`), runs both even when the first fails, and names every failed group. The job runs it as its first cargo step; the later steps only test and build. The script is the source of truth for the list: a new crate that CI builds on Windows is added there.
+The `windows` job used to clippy one crate per step, so the first failing crate hid the rest and each fix cost a CI round (about 40 minutes). `scripts/ci/windows-clippy.sh` now holds the whole Windows clippy list (the all-targets crates in one `cargo clippy -p ... --all-targets` call, `kith-serve --all-targets` in a second, both `--locked -D warnings`), runs both even when the first fails, and names every failed group. The job runs it as its first cargo step; the later steps only test and build. The script is the source of truth for the list: a new crate that CI builds on Windows is added there.
 
 **When:** any change to a Windows-built crate (kith-holder, kith-winsys, kith-core, kith-api, kith-kernel, kith-stub, kith-attach, kith-serve) or to a `cfg(windows)` / `cfg(not(unix))` path. Run it once before pushing; it replaces a CI round.
 
