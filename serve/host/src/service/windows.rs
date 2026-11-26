@@ -24,8 +24,8 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 /// dies with it, and the service must outlive the app that installed it).
 const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
 
-/// Stops the running service. Its configuration stays for a later start; a
-/// manually started `kith-serve serve` is left alone.
+/// Stops the running service. Its configuration stays for a later start. The stop event is named for the data folder, so
+/// it also ends a `kith-serve serve` started by hand on the same data folder; one on another folder is left alone.
 pub fn stop() -> Result<()> {
     stop_gracefully();
     // Under the holder (opt-in, see `holder_wanted`) the supervising holder goes first, or it would start the host again.

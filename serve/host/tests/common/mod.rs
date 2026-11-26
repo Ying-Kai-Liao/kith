@@ -387,9 +387,11 @@ static HOSTS: std::sync::Mutex<Vec<(u32, std::path::PathBuf)>> = std::sync::Mute
 /// SIGTERM. A host this file did not start, or one that never made the event, is left to the hard kill after the wait.
 #[cfg(windows)]
 fn signal_stop_event(pid: u32) {
-    let hosts = HOSTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some((_, home)) = hosts.iter().find(|(p, _)| *p == pid) else { return };
-    let name = kith_winsys::event::stop_event_name(home);
+    // Removed here: the host is going, and a reused pid must not pick this home.
+    let mut hosts = HOSTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(at) = hosts.iter().position(|(p, _)| *p == pid) else { return };
+    let (_, home) = hosts.remove(at);
+    let name = kith_winsys::event::stop_event_name(&home);
     if let Ok(Some(event)) = kith_winsys::event::StopEvent::open(&name) {
         let _ = event.signal();
     }
