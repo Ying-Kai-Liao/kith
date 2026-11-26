@@ -334,7 +334,7 @@ async fn a_claimed_wake_is_a_batch_of_its_own_that_is_never_saved_and_no_message
         reloaded.inbox
     );
     // A message sent while the wake batch waits starts a batch of its own.
-    r.send(&Rig::in_thread(Rig::msg("2", "and the lights?"), "fake/x:room:1")).await;
+    r.send(&Rig::in_thread(Rig::msg("1", "and the lights?"), "fake/x:room:1")).await;
     let end = Instant::now() + Duration::from_secs(20);
     while r.fake.posts().len() < 3 {
         let (posts, inbox) = (r.fake.posts(), r.core.with(|i| i.st.inbox.clone()));
