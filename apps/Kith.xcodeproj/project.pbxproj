@@ -28,7 +28,8 @@
 		A11CE00000000000000000B1 /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE00000000000000000A1 /* PeopleView.swift */; };
 		A11CE0000000000000000D12 /* SharingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D11 /* SharingView.swift */; };
 		A11CE0000000000000000D22 /* ShareFlowSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D21 /* ShareFlowSheet.swift */; };
-		A11CE0000000000000000D32 /* SharingPersonSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D31 /* SharingPersonSheet.swift */; };
+		A11CE0000000000000000D32 /* PersonPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D31 /* PersonPageView.swift */; };
+		A11CE0000000000000000F72 /* PersonPageExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000F71 /* PersonPageExtras.swift */; };
 		A11CE0000000000000000F2 /* ShareAgentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000F1 /* ShareAgentSheet.swift */; };
 		A11CE0000000000000000F4 /* KeysView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000F3 /* KeysView.swift */; };
 		501377099B6CF42761B230CB /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D57A7C09154869DD84BACE19 /* WelcomeView.swift */; };
@@ -166,7 +167,8 @@
 		A11CE00000000000000000A1 /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000D11 /* SharingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharingView.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000D21 /* ShareFlowSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareFlowSheet.swift; sourceTree = "<group>"; };
-		A11CE0000000000000000D31 /* SharingPersonSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharingPersonSheet.swift; sourceTree = "<group>"; };
+		A11CE0000000000000000D31 /* PersonPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonPageView.swift; sourceTree = "<group>"; };
+		A11CE0000000000000000F71 /* PersonPageExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonPageExtras.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000F1 /* ShareAgentSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareAgentSheet.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000F3 /* KeysView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeysView.swift; sourceTree = "<group>"; };
 		CE63C84233B14A2D63640EAA /* Capture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Capture.swift; sourceTree = "<group>"; };
@@ -310,7 +312,8 @@
 				A11CE00000000000000000A1 /* PeopleView.swift */,
 				A11CE0000000000000000D11 /* SharingView.swift */,
 				A11CE0000000000000000D21 /* ShareFlowSheet.swift */,
-				A11CE0000000000000000D31 /* SharingPersonSheet.swift */,
+				A11CE0000000000000000D31 /* PersonPageView.swift */,
+				A11CE0000000000000000F71 /* PersonPageExtras.swift */,
 				A11CE0000000000000000F1 /* ShareAgentSheet.swift */,
 				A11CE0000000000000000F3 /* KeysView.swift */,
 				B3B62ACA7CC342EEB0829556 /* MacProblemCard.swift */,
@@ -704,7 +707,8 @@
 				A11CE00000000000000000B1 /* PeopleView.swift in Sources */,
 				A11CE0000000000000000D12 /* SharingView.swift in Sources */,
 				A11CE0000000000000000D22 /* ShareFlowSheet.swift in Sources */,
-				A11CE0000000000000000D32 /* SharingPersonSheet.swift in Sources */,
+				A11CE0000000000000000D32 /* PersonPageView.swift in Sources */,
+				A11CE0000000000000000F72 /* PersonPageExtras.swift in Sources */,
 				A11CE0000000000000000F2 /* ShareAgentSheet.swift in Sources */,
 				A11CE0000000000000000F4 /* KeysView.swift in Sources */,
 				7E5F670CFFA0E4373F44DB41 /* AccountSession.swift in Sources */,

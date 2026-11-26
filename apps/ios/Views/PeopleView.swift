@@ -84,7 +84,7 @@ struct PeopleView: View {
         .task { await people.load(); await guests.refresh() }
         .botSheets($botSheet, viewer: .owner)
         .kithSheet(isPresented: $inviting) { InviteSheet(people: people, store: store) }
-        .kithSheet(item: $editing) { person in EditPersonSheet(person: person, people: people, store: store) }
+        .kithSheet(item: $editing) { person in PersonPageView(personId: person.personId, people: people, store: store) }
         .kithSheet(isPresented: $showActivity) { ActivitySheet(people: people) }
     }
 }
@@ -471,117 +471,6 @@ private enum QRCode {
     }
 }
 
-// MARK: - edit
-
-/// Change a person's agents, roles and shared projects, or remove them.
-private struct EditPersonSheet: View {
-    let person: HostPerson
-    let people: PeopleStore
-    let store: BotStore
-    @Environment(\.dismissModal) private var dismiss
-    @State private var roles: [String: InviteRole]
-    @State private var projects: Set<String>
-    @State private var confirmRemove = false
-    /// What the always-allow switch was just set to, until the people list says so.
-    @State private var autoBots: Bool?
-
-    init(person: HostPerson, people: PeopleStore, store: BotStore) {
-        self.person = person
-        self.people = people
-        self.store = store
-        _roles = State(initialValue: person.agents)
-        _projects = State(initialValue: Set(person.projects))
-    }
-
-    private var agents: [String] { agentsOffered(on: store, plus: person.agents.keys) }
-    private var changed: Bool { roles != person.agents || projects != Set(person.projects) }
-    /// Rooms that would close for this person if the switches stay as they are.
-    private var closing: [String] {
-        RoomPeopleLogic.closingLines(person: person.name, closing: RoomPeopleLogic.closingRooms(person: person, newRoles: roles, inRooms: store.rooms(of: person.personId)))
-    }
-
-    var body: some View {
-        CardForm {
-            CardSection("Agents") {
-                ForEach(agents, id: \.self) { agent in
-                    AgentRoleRow(agent: agent, role: Binding(get: { roles[agent] }, set: { roles[agent] = $0 }))
-                }
-                ForEach(closing, id: \.self) { line in Text(line).font(.footnote).foregroundStyle(Palette.text) }
-            }
-            if !people.projects.isEmpty || !projects.isEmpty {
-                CardSection("Shared rooms", footer: "Only the rooms you tick are shared with \(person.name).") {
-                    ForEach(projectChoices, id: \.id) { project in
-                        Toggle(project.id, isOn: Binding(get: { projects.contains(project.id) },
-                                                           set: { if $0 { projects.insert(project.id) } else { projects.remove(project.id) } }))
-                            .toggleStyle(.kith)
-                    }
-                }
-            }
-            if !store.botGuests.unsupported {
-                let theirs = store.botGuests.bots(of: person.personId)
-                CardSection("\(person.name)'s bots", footer: "New bots \(person.name) invites start without waiting for you. Turning this on also allows any waiting now. Removing \(person.name) removes these too.") {
-                    Toggle("Always allow \(person.name)'s bots", isOn: Binding(
-                        get: { autoBots ?? person.autoBots },
-                        set: { on in
-                            autoBots = on
-                            Task {
-                                let done = await store.botGuests.setAutoAllow(personId: person.personId, on: on)
-                                await people.load()
-                                if !done { autoBots = nil }
-                            }
-                        }))
-                        .toggleStyle(.kith)
-                        .disabled(store.botGuests.busy)
-                    ForEach(BotGuestStore.live(theirs)) { bot in
-                        BotGuestRow(bot: bot, viewer: .owner, store: store, indent: 0, open: { _ in }, newLink: { _ in })
-                    }
-                    if BotGuestStore.live(theirs).isEmpty {
-                        Text("No bots yet").font(.subheadline).foregroundStyle(Palette.secondary)
-                    }
-                }
-            }
-            if let error = people.error {
-                Text(error).font(.footnote).foregroundStyle(Palette.danger)
-            }
-            Button {
-                Task {
-                    if await people.setAccess(person.personId, agents: roles, projects: projects.sorted()) { dismiss() }
-                }
-            } label: {
-                Text("Save").frame(maxWidth: .infinity, minHeight: 28)
-            }
-            .buttonStyle(.primary)
-            .disabled(!changed || people.busy)
-
-            CardSection {
-                Button { confirmRemove = true } label: {
-                    Label("Remove \(person.name)", systemImage: "person.badge.minus")
-                        .foregroundStyle(Palette.danger)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(people.busy)
-            }
-        }
-        .background(Palette.background)
-        .safeAreaInset(edge: .top, spacing: 0) { ModalHeader(person.name) }
-        .task { await people.loadProjects(); await store.refreshAllRoomPeople() }
-        .kithDialog("Remove \(person.name)?", isPresented: $confirmRemove,
-                    message: ["They lose access to this computer. Their memory stays on the Mac.", RoomPeopleLogic.revokeLine(person: person.name, rooms: store.rooms(of: person.personId).map(\.name))].compactMap { $0 }.joined(separator: " ")) {
-            [DialogAction("Remove", destructive: true) {
-                Task { if await people.remove(person.personId) { dismiss() } }
-            }]
-        }
-    }
-
-    /// Projects the host listed, plus any already shared that it no longer lists.
-    private var projectChoices: [HQProject] {
-        let known = Set(people.projects.map(\.id))
-        return people.projects + projects.subtracting(known).sorted().map { HQProject(id: $0) }
-    }
-}
-
 // MARK: - activity
 
 struct ActivitySheet: View {
@@ -656,7 +545,7 @@ struct DemoBotScreen: View {
         let people = PeopleStore.demo()
         switch screen {
         case "bots-people": PeopleView(people: people, store: store).task { await people.load() }
-        case "bots-edit": EditPersonSheet(person: sam, people: people, store: store)
+        case "bots-edit": PersonPageView(personId: sam.personId, people: people, store: store)
         case "bots-invite": InviteBotSheet(store: store)
         case "bots-result": InviteBotSheet(store: store, result: InviteBotSheet.Result(
             invite: CreatedBotInvite(botId: "bg", inviteId: "bi", expiresAt: Int64((Date.now.timeIntervalSince1970 + 3_600) * 1000),
