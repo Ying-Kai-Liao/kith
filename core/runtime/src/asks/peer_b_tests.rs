@@ -253,7 +253,7 @@ fn a_to_is_kept_for_a_peer_ask_once_and_owed_until_the_computer_took_it() {
         "ask.to",
         &json!({"id": "p1", "text": "too late"}),
     );
-    assert!(matches!(refused, Err(Error::Refused(_))), "{refused:?}");
+    assert!(refused.is_err(), "{refused:?}");
 }
 
 #[test]

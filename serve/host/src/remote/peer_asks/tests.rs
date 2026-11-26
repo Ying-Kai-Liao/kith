@@ -93,6 +93,11 @@ impl Side {
         let claim = claimed["claimId"].as_i64().unwrap_or_else(|| panic!("{claimed}"));
         let pid = std::process::id();
         let started = kith_kernel::procstart::start_stamp(pid).expect("a start stamp");
+        // The launch takes the writer claim on the engine's session first; the attach that names the session needs it.
+        self.owner(
+            "claim.external",
+            &json!({"conversation": session, "pid": pid, "started": started, "person": "", "agent": "echo"}),
+        );
         let said = self.host(
             "claim.attach",
             &json!({"claimId": claim, "pid": pid, "started": started, "conversation": conversation, "session": session}),
