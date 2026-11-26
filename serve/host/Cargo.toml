@@ -63,6 +63,7 @@ semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 sha2 = "0.11.0"
+tower = { version = "0.5", default-features = false, features = ["util"] }
 hmac = "0.13.0"
 shlex = "2.0.1"
 tar = "0.4.46"

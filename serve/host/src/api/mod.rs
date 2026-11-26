@@ -47,6 +47,7 @@ mod invite_rooms_tests;
 mod kith_info;
 mod kith_new;
 pub(crate) mod kith_tools;
+pub mod local;
 mod marketplace;
 pub(crate) mod native_export;
 // Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
