@@ -53,6 +53,7 @@ async fn deny_open(r: &Rig) {
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn this_session_lets_a_repeat_of_that_action_run_with_no_card_and_nothing_else() {
     let r = Rig::new().await;
@@ -81,6 +82,7 @@ async fn this_session_lets_a_repeat_of_that_action_run_with_no_card_and_nothing_
     assert!(!agent_file(&r, "allowed.json").exists());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_new_task_ends_the_grant_and_the_card_says_so() {
     let r = Rig::new().await;
@@ -101,6 +103,7 @@ async fn a_new_task_ends_the_grant_and_the_card_says_so() {
     assert!(!back.await.unwrap().allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn after_24_hours_the_grant_ends_and_the_next_block_asks() {
     let r = Rig::new().await;
@@ -121,6 +124,7 @@ async fn after_24_hours_the_grant_ends_and_the_next_block_asks() {
     assert!(!next.await.unwrap().allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_change_to_the_agents_permission_settings_ends_the_grant() {
     let r = Rig::new().await;
@@ -134,6 +138,7 @@ async fn a_change_to_the_agents_permission_settings_ends_the_grant() {
     assert_eq!(data(&r, &card)["sessionGrant"]["endReason"], "settings");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_owner_removes_a_grant_from_the_card_or_a_row_and_a_second_remove_is_not_found() {
     let r = Rig::new().await;
@@ -174,6 +179,7 @@ async fn the_owner_removes_a_grant_from_the_card_or_a_row_and_a_second_remove_is
     assert!(!next.await.unwrap().allow, "removed: the next one asks again");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_must_ask_action_is_offered_neither_this_session_nor_always() {
     let r = Rig::new().await;
@@ -192,6 +198,7 @@ async fn a_must_ask_action_is_offered_neither_this_session_nor_always() {
     assert_eq!(r.hub.store.session_grants_live("house", &who.session), Vec::new());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn key_shaped_text_is_redacted_before_the_card_is_shown_or_stored() {
     let r = Rig::new().await;
@@ -215,6 +222,7 @@ async fn key_shaped_text_is_redacted_before_the_card_is_shown_or_stored() {
 
 // ---- kith cards history
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn card_history_answers_an_agent_with_cards_read_and_refuses_one_without() {
     let r = Rig::new().await;
@@ -236,6 +244,7 @@ async fn card_history_answers_an_agent_with_cards_read_and_refuses_one_without()
     assert!(!ok.to_string().contains("ls /tmp"), "no command in the history: {ok}");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn another_thread_of_the_agent_gets_no_this_session_tag_on_the_same_command() {
     let r = Rig::new().await;
@@ -248,6 +257,7 @@ async fn another_thread_of_the_agent_gets_no_this_session_tag_on_the_same_comman
     assert!(session::tag_tool(&r.hub, "house", "run:o:chat-7", &ls(), &mut row).is_some());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_hook_without_a_claude_session_is_not_offered_this_session_and_cannot_grant_it() {
     let r = Rig::new().await;
@@ -262,6 +272,7 @@ async fn a_hook_without_a_claude_session_is_not_offered_this_session_and_cannot_
     assert_eq!(r.hub.store.session_grants_live("house", "run:o:chat-11").len(), 0);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_card_history_lists_the_owners_cards_only() {
     let r = Rig::new().await;

@@ -80,8 +80,8 @@ run() {
 # One invocation for every crate CI clippies with --all-targets, so all their errors come out together.
 # shellcheck disable=SC2086
 run "all-targets crates" $all_targets --all-targets
-# kith-serve is bins only (its tests are not Windows-ready).
-run "kith-serve --bins" -p kith-serve --bins
+# kith-serve with its test targets: they run on Windows now (W2b), so they are clippied here too.
+run "kith-serve --all-targets" -p kith-serve --all-targets
 
 if [ -n "$failed" ]; then
   echo "windows clippy FAILED in:$failed" >&2

@@ -94,6 +94,10 @@ async fn ready(host: &Host, bot: &str, expected_files: usize) -> Vec<Value> {
     waited.unwrap()
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn publishes_all_types_with_final_text_and_survives_restart_workspace_changes_and_threads() {
     use base64::Engine as _;
@@ -189,6 +193,10 @@ async fn publishes_all_types_with_final_text_and_survives_restart_workspace_chan
     assert!(!response.status().is_success());
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn rejects_invalid_sources_without_a_file_entry() {
     let host = Host::start().await;
@@ -204,6 +212,10 @@ async fn rejects_invalid_sources_without_a_file_entry() {
     assert!(results.as_array().unwrap().iter().all(|r| r["isError"] == true));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn several_paths_publish_one_entry_in_order_and_a_bad_path_publishes_nothing() {
     let host = Host::start().await;
@@ -249,6 +261,10 @@ async fn rejected(path: &std::path::Path) {
     waited.unwrap();
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn groups_routines_and_delegated_turns_cannot_publish_files() {
     let host = Host::start().await;
@@ -276,6 +292,10 @@ async fn groups_routines_and_delegated_turns_cannot_publish_files() {
     assert!(history["entries"].as_array().unwrap().iter().all(|entry| entry["data"]["files"].is_null()));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn files_only_turns_finish_without_duplicate_text_and_input_uploads_still_work() {
     use base64::Engine as _;

@@ -87,6 +87,10 @@ fn files(entries: &[Value]) -> usize {
     entries.iter().filter(|e| e["data"]["files"].is_array()).count()
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn a_woken_agent_posts_and_sends_in_the_chat_and_the_turn_ends_after_a_quiet_spell() {
     let host = Host::start().await;
@@ -116,6 +120,10 @@ async fn a_woken_agent_posts_and_sends_in_the_chat_and_the_turn_ends_after_a_qui
     until("idle again", || async { host.idle(&bot).await }).await;
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn an_off_turn_send_that_fails_leaves_a_notice() {
     let host = Host::start().await;
@@ -131,6 +139,10 @@ async fn an_off_turn_send_that_fails_leaves_a_notice() {
     assert_eq!(files(&host.entries(&bot).await), 0);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn a_routine_is_not_adopted() {
     let host = Host::start().await;

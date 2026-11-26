@@ -24,6 +24,7 @@ fn paired(r: &Rig, key: &str) -> Caller {
     Caller::Device { key: key.into(), scopes: vec![Scope::Control] }
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_paired_computer_is_a_peer_never_the_owner() {
     let r = Rig::new().await;
@@ -40,6 +41,7 @@ async fn a_paired_computer_is_a_peer_never_the_owner() {
     assert_eq!(principal(&r.hub.store, &peer), Principal::Nobody, "unpaired: nobody");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn every_router_method_but_the_peer_ones_is_denied_to_a_peer() {
     let r = Rig::new().await;
@@ -64,6 +66,7 @@ async fn every_router_method_but_the_peer_ones_is_denied_to_a_peer() {
     assert!(!rows.is_empty() && rows.iter().all(|row| !row.allowed && row.device_key == "mac-b"));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_peer_sees_the_owners_agents_only() {
     let r = Rig::new().await;
