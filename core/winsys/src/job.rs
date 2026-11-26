@@ -1,4 +1,5 @@
-//! A named job object per run, and a process created inside it in one call (docs/plans/windows-owner.md, W12's model rule 2).
+//! A run's job object, held by the process the claim records, and a process created inside it in one call
+//! (docs/plans/windows-owner.md, W12 rules H1 and H2).
 //!
 //! The launcher is made with `PROC_THREAD_ATTRIBUTE_JOB_LIST`: the kernel puts the new process in the job as part of creating
 //! it, so there is no moment at which it runs outside the job and none at which it sits suspended waiting to be assigned (a host
@@ -6,8 +7,11 @@
 //! the process, creating it fails and there is no process: nothing is ever started and then assigned, and there is no fallback
 //! to a plain spawn.
 //!
-//! The job is made with no limits: not kill-on-close (a run outlives the host that started it) and no breakaway flags, so
-//! nothing the run starts can leave the job. Its handle is not inheritable, so a child never keeps the job open.
+//! The job is unnamed (a name only lets a squatter fail a start) and kills on close: the process that made it keeps the only
+//! handle, so when that process ends, however it ends, everything the run started goes with it, as a process group does on the
+//! Mac. There are no breakaway flags, so nothing the run starts can leave the job. The handle is not inheritable and is never
+//! duplicated into another process, so a child never keeps the job open. The holder of the job must therefore stay until the
+//! job is empty (`wait_idle`).
 
 use std::ffi::OsStr;
 use std::io;
@@ -21,9 +25,10 @@ use windows_sys::Win32::Foundation::{
     WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::System::JobObjects::{
-    CreateJobObjectW, IsProcessInJob, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
-    JobObjectBasicAccountingInformation, OpenJobObjectW, QueryInformationJobObject,
-    TerminateJobObject,
+    CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
+    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
@@ -38,71 +43,39 @@ use crate::{Handle, last_err, wide};
 const PROC_THREAD_ATTRIBUTE_JOB_LIST: usize = 0x0002_000D;
 /// `ProcThreadAttributeHandleList` (2) with the input flag: the only handles the new process inherits.
 const PROC_THREAD_ATTRIBUTE_HANDLE_LIST: usize = 0x0002_0002;
-/// Job access rights (winnt.h): assign a process, query, terminate.
-const JOB_OBJECT_ASSIGN_PROCESS: u32 = 0x1;
-const JOB_OBJECT_QUERY: u32 = 0x4;
-const JOB_OBJECT_TERMINATE: u32 = 0x8;
 /// `STILL_ACTIVE`, what `GetExitCodeProcess` answers for a process that has not ended.
 const STILL_ACTIVE: u32 = 259;
 
-fn full_name(name: &str) -> String {
-    if name.contains('\\') {
-        name.to_owned()
-    } else {
-        format!("Local\\{name}")
-    }
-}
-
-/// An open named job object.
+/// An open job object: the only handle to it, held by the process that made it.
 pub struct Job(Handle);
 
 impl Job {
-    /// Makes the job `name` (in the session's namespace). It has no limits set. A name that is taken is refused
-    /// (`AlreadyExists`): `CreateJobObjectW` would hand back the other run's job, and the no-limits and no-breakaway
-    /// guarantees would then be whoever made it first's, with two runs in one job.
-    pub fn create(name: &str) -> io::Result<Self> {
-        const ERROR_ALREADY_EXISTS: i32 = 183;
-        let n = wide(OsStr::new(&full_name(name)));
-        // SAFETY: `n` is NUL-ended; null attributes mean the default security and a handle that is not inheritable.
-        let h = unsafe { CreateJobObjectW(null(), n.as_ptr()) };
+    /// Makes an unnamed job that ends every process in it when its handle closes (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), with
+    /// no breakaway flags. Null security attributes make the handle non-inheritable.
+    pub fn create() -> io::Result<Self> {
+        // SAFETY: null attributes mean the default security and a handle that is not inheritable; a null name makes it unnamed.
+        let h = unsafe { CreateJobObjectW(null(), null()) };
         if h.is_null() {
             return Err(last_err());
         }
-        // Read before anything else can change the thread's last error; the handle closes on drop.
-        let taken = last_err().raw_os_error() == Some(ERROR_ALREADY_EXISTS);
+        // The handle closes on drop, so a job that cannot be limited is never used.
         let job = Self(Handle(h));
-        if taken {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("the job {name} exists already"),
-            ));
+        // SAFETY: a zeroed structure is the documented starting point; only the limit flag is set.
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `info` is the structure this information class takes, and its size is passed.
+        let ok = unsafe {
+            SetInformationJobObject(
+                job.0.0,
+                JobObjectExtendedLimitInformation,
+                (&raw const info).cast(),
+                u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).unwrap_or(0),
+            )
+        };
+        if ok == 0 {
+            return Err(last_err());
         }
         Ok(job)
-    }
-
-    /// Opens the job somebody made, by name, while some process holds a handle to it (a name lasts only as long as one open
-    /// handle: when the last closes the job is gone from the namespace, even with processes still running in it). `Ok(None)`
-    /// is therefore NOT "the run is over": it also means nobody holds the job any more (docs/plans/windows-owner.md W12).
-    pub fn open(name: &str) -> io::Result<Option<Self>> {
-        Self::open_with(
-            name,
-            JOB_OBJECT_QUERY | JOB_OBJECT_ASSIGN_PROCESS | JOB_OBJECT_TERMINATE,
-        )
-    }
-
-    fn open_with(name: &str, access: u32) -> io::Result<Option<Self>> {
-        let n = wide(OsStr::new(&full_name(name)));
-        // SAFETY: `n` is NUL-ended.
-        let h = unsafe { OpenJobObjectW(access, 0, n.as_ptr()) };
-        if h.is_null() {
-            let e = last_err();
-            return if e.kind() == io::ErrorKind::NotFound {
-                Ok(None)
-            } else {
-                Err(e)
-            };
-        }
-        Ok(Some(Self(Handle(h))))
     }
 
     /// How many processes of the job are running now.
@@ -131,6 +104,15 @@ impl Job {
             return Err(last_err());
         }
         Ok(info.ActiveProcesses)
+    }
+
+    /// Waits until the job has no running process. The holder of a kill-on-close job must not end before this (W12 H5): closing
+    /// the handle with a process still in the job kills it. A job answers no wait of its own for "empty", so this polls.
+    pub fn wait_idle(&self) -> io::Result<()> {
+        while self.active_processes()? > 0 {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Ok(())
     }
 
     /// Ends every process of the job at once (the stop of a run).
@@ -259,11 +241,14 @@ fn create(job: &Job, l: &Launch<'_>, suspended: bool) -> io::Result<(Child, Hand
     let mut command_line = wide(OsStr::new(&line.join(" ")));
     let mut block = env_block(l.env);
     let cwd = l.cwd.map(|c| wide(c.as_os_str()));
-    let handles: Vec<HANDLE> = l
+    let mut handles: Vec<HANDLE> = l
         .stdio
         .as_ref()
         .map(|s| s.iter().map(AsRawHandle::as_raw_handle).collect())
         .unwrap_or_default();
+    // A handle list with one handle twice (stdout and stderr on one handle) is refused as invalid.
+    handles.sort_by_key(|h| *h as usize);
+    handles.dedup();
     // A handle list takes inheritable handles only; the three the caller named are made so (they stay so).
     for h in &handles {
         // SAFETY: the handle is one the caller holds open (a borrowed handle).
@@ -416,16 +401,12 @@ fn env_block(env: &[(String, String)]) -> Vec<u16> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::os::windows::io::AsHandle;
+    use windows_sys::Win32::Foundation::{DuplicateHandle, GetHandleInformation};
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
-    fn unique(tag: &str) -> String {
-        static N: AtomicU32 = AtomicU32::new(0);
-        format!(
-            "kith-winsys-job-{tag}-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        )
-    }
+    /// The query right of a job (winnt.h).
+    const JOB_OBJECT_QUERY: u32 = 0x4;
 
     fn system_root() -> String {
         std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_owned())
@@ -447,7 +428,7 @@ mod tests {
 
     #[test]
     fn the_child_is_in_the_job_before_it_runs_a_single_instruction() {
-        let job = Job::create(&unique("first")).unwrap();
+        let job = Job::create().unwrap();
         let (program, args, env) = sleeper(&[]);
         let launch = Launch {
             program: &program,
@@ -466,10 +447,23 @@ mod tests {
 
     #[test]
     fn a_job_that_cannot_take_the_process_fails_the_launch_and_leaves_no_process() {
-        let name = unique("noassign");
-        let job = Job::create(&name).unwrap();
-        // The same job opened for queries only: the kernel may not put a process in it.
-        let query_only = Job::open_with(&name, JOB_OBJECT_QUERY).unwrap().unwrap();
+        let job = Job::create().unwrap();
+        // A copy of the handle with the right to query only: the kernel may not put a process in it.
+        let mut copy: HANDLE = null_mut();
+        // SAFETY: both handles are this process's own; `copy` is where the new handle goes.
+        let ok = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                job.0.0,
+                GetCurrentProcess(),
+                &raw mut copy,
+                JOB_OBJECT_QUERY,
+                0,
+                0,
+            )
+        };
+        assert_ne!(ok, 0);
+        let query_only = Job(Handle(copy));
         let (program, args, env) = sleeper(&[]);
         let launch = Launch {
             program: &program,
@@ -484,7 +478,7 @@ mod tests {
 
     #[test]
     fn a_batch_file_is_refused_by_name() {
-        let job = Job::create(&unique("batch")).unwrap();
+        let job = Job::create().unwrap();
         let program = Path::new("C:\\x\\tool.cmd");
         let launch = Launch {
             program,
@@ -498,43 +492,51 @@ mod tests {
     }
 
     #[test]
-    fn the_job_is_found_by_name_and_its_run_outlives_the_handle_that_made_it() {
-        let name = unique("named");
-        let job = Job::create(&name).unwrap();
-        let (program, args, env) = sleeper(&[]);
-        let launch = Launch {
-            program: &program,
-            args: &args,
-            env: &env,
-            cwd: None,
-            stdio: None,
-        };
-        let child = spawn_in_job(&job, &launch).unwrap();
-        // Not kill-on-close: the host that made the job can go away and the run goes on. A job with no open handle is
-        // gone, and a name finds nothing then (W12: something must keep a handle for `recorded_gone` to ask by name).
-        let _keeper = Job::open(&name).unwrap().unwrap();
-        drop(job);
-        assert!(
-            child
-                .wait_for(Duration::from_millis(300))
-                .unwrap()
-                .is_none()
-        );
-        let again = Job::open(&name).unwrap().unwrap();
-        // cmd and the ping it started: what the run starts stays in the job.
-        assert!(again.active_processes().unwrap() >= 1);
-        again.terminate(7).unwrap();
-        assert_eq!(child.wait().unwrap(), 7);
-        assert_eq!(again.active_processes().unwrap(), 0);
+    fn the_job_handle_is_not_inheritable() {
+        let job = Job::create().unwrap();
+        let mut flags = 0;
+        // SAFETY: the handle is open; `flags` is where the answer goes.
+        assert_ne!(unsafe { GetHandleInformation(job.0.0, &raw mut flags) }, 0);
+        assert_eq!(flags & HANDLE_FLAG_INHERIT, 0);
     }
 
     #[test]
-    fn a_name_that_is_taken_is_refused_not_shared() {
-        let name = unique("taken");
-        let first = Job::create(&name).unwrap();
-        let e = Job::create(&name).err().unwrap();
-        assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
-        // The first job is untouched: it still takes a run and counts it.
+    fn closing_the_handle_ends_the_child_and_its_child_even_when_the_child_inherited_handles() {
+        let job = Job::create().unwrap();
+        let (program, args, env) = sleeper(&[]);
+        // The child is given inheritable handles (the three std ones), as a run's launcher gives its engine: the job handle
+        // must not be among what it inherits, or it would keep the job, and so itself, alive.
+        let nul = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("NUL")
+            .unwrap();
+        let launch = Launch {
+            program: &program,
+            args: &args,
+            env: &env,
+            cwd: None,
+            stdio: Some([nul.as_handle(), nul.as_handle(), nul.as_handle()]),
+        };
+        let child = spawn_in_job(&job, &launch).unwrap();
+        // cmd and the ping it starts.
+        for _ in 0..100 {
+            if job.active_processes().unwrap() >= 2 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(job.active_processes().unwrap() >= 2);
+        drop(job);
+        assert!(
+            child.wait_for(Duration::from_secs(10)).unwrap().is_some(),
+            "the child outlived the closed job: it kept a handle to it"
+        );
+    }
+
+    #[test]
+    fn two_jobs_are_independent() {
+        let (a, b) = (Job::create().unwrap(), Job::create().unwrap());
         let (program, args, env) = sleeper(&[]);
         let launch = Launch {
             program: &program,
@@ -543,15 +545,29 @@ mod tests {
             cwd: None,
             stdio: None,
         };
-        let child = spawn_in_job(&first, &launch).unwrap();
-        assert!(first.holds(&child).unwrap());
-        first.terminate(3).unwrap();
+        let child = spawn_in_job(&a, &launch).unwrap();
+        assert!(a.holds(&child).unwrap());
+        assert!(!b.holds(&child).unwrap());
+        a.terminate(3).unwrap();
         assert_eq!(child.wait().unwrap(), 3);
     }
 
     #[test]
-    fn a_name_nobody_made_is_not_found() {
-        assert!(Job::open(&unique("none")).unwrap().is_none());
+    fn wait_idle_returns_once_the_last_process_has_ended() {
+        let job = Job::create().unwrap();
+        let cmd = Path::new(&system_root()).join("System32").join("cmd.exe");
+        let args = ["/d", "/c", "exit 0"].map(str::to_owned).to_vec();
+        let env = [("SystemRoot".to_owned(), system_root())];
+        let launch = Launch {
+            program: &cmd,
+            args: &args,
+            env: &env,
+            cwd: None,
+            stdio: None,
+        };
+        spawn_in_job(&job, &launch).unwrap();
+        job.wait_idle().unwrap();
+        assert_eq!(job.active_processes().unwrap(), 0);
     }
 
     #[test]

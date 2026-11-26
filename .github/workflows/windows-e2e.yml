@@ -40,12 +40,23 @@ on:
   pull_request:
     paths:
       - .github/workflows/windows-e2e.yml
-      - core/winsys/**
+      # Every crate the zip builds (scripts/windows-exes.txt) and their path dependencies; scripts/ci/windows-filter-check.sh
+      # fails when one is missing here.
+      - core/acp/**
+      - core/api/**
+      - core/attach/**
+      - core/holder/**
       - core/kernel/**
+      - core/procstart/**
+      - core/runtime/**
+      - core/stub/**
+      - core/winsys/**
       - serve/host/**
+      - serve/rust-toolchain.toml
       - scripts/stage-kernel.sh
       - scripts/package-windows.sh
       - scripts/windows-exes.txt
+      - scripts/ci/windows-filter-check.sh
 
 permissions:
   contents: read

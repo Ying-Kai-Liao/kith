@@ -804,3 +804,24 @@ fn the_main_login_follows_claude_config_dir_unless_it_is_an_accounts_own_folder(
     // A run on the work account has its folder in the variable; that is not the main login.
     assert_eq!(config_dir(&make(work), "claude"), Some(w.main()));
 }
+
+/// A run cut off mid-write leaves a last line that is not JSON and has no newline: the marker in it still counts (W12 rule
+/// P4), because the reader looks for the bytes and never parses the line.
+#[test]
+fn answered_counts_a_torn_last_line() {
+    let w = World::new();
+    let ctx = w.ctx();
+    let (_t, m) = machine();
+    let core = open_all(&Layout::new(&m));
+    let p = w.session(&w.main(), "p", SID);
+    write(
+        &p.jsonl(),
+        "{\"a\":1}\n{\"text\":\"[kith wake run-5] go and the line stops mid-wr",
+    );
+    let r = FsReader {
+        conn: core.conn(),
+        ctx: &ctx,
+    };
+    assert!(r.answered(SID, "run-5"));
+    assert!(!r.answered(SID, "run-6"));
+}
