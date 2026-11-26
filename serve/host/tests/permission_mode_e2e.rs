@@ -41,16 +41,24 @@ async fn house(host: &Host) -> String {
     panic!("house never appeared");
 }
 
-/// The ACP agent's requests so far, once it has answered a prompt (so the session exists and its mode is settled).
-async fn requests_after_a_turn(home: &Path) -> Vec<Value> {
-    let deadline = Instant::now() + Duration::from_secs(30);
+/// Sends `go` once and returns the ACP agent's requests once it has answered a prompt (so the session exists and its
+/// mode is settled). The send is not repeated: the host answers a clientNonce it already saved with the saved entry
+/// and starts nothing (api/bots.rs, `find_by_nonce`), so a repeat could not start a turn and would only hide a lost
+/// one. The deadline is generous for a loaded CI box; a turn that never reaches the agent fails the test, with the
+/// requests and the chat's entries (the host's own notice, if any) in the message.
+async fn requests_after_a_turn(host: &Host, bot: &str, home: &Path) -> Vec<Value> {
+    let deadline = Instant::now() + Duration::from_secs(90);
+    host.call("send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
     loop {
         let text = std::fs::read_to_string(home.join("requests.jsonl")).unwrap_or_default();
         let all: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         if all.iter().any(|r| r["method"] == "session/prompt") {
             return all;
         }
-        assert!(Instant::now() < deadline, "the agent never got a prompt");
+        if Instant::now() >= deadline {
+            let history = host.call("history", json!({"botId": bot})).await;
+            panic!("the agent never got a prompt; requests {all:?}; chat {history}");
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -67,8 +75,7 @@ fn set_modes(requests: &[Value]) -> Vec<String> {
 async fn an_owners_run_starts_in_the_mode_launch_json_reports() {
     let (host, home) = start("acceptEdits").await;
     let bot = house(&host).await;
-    host.call("send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
-    let requests = requests_after_a_turn(&home).await;
+    let requests = requests_after_a_turn(&host, &bot, &home).await;
     assert_eq!(set_modes(&requests), ["acceptEdits"], "{requests:?}");
     // The mode is asked for before the first prompt, not after.
     let order: Vec<&str> = requests.iter().map(|r| r["method"].as_str().unwrap()).collect();
@@ -92,8 +99,15 @@ async fn an_invitees_run_never_starts_in_bypass() {
         chat = db.query_row("SELECT id FROM bots", [], |r| r.get(0)).unwrap();
     })
     .await;
-    host.call("send", json!({"botId": chat, "text": "go", "clientNonce": "n1"})).await;
-    let requests = requests_after_a_turn(&home).await;
+    // The restarted host has the bot as sam's before anything is sent.
+    for _ in 0..200 {
+        if host.roster().await.iter().any(|b| b["id"] == chat.as_str()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let requests = requests_after_a_turn(&host, &chat, &home).await;
+    assert!(requests.iter().any(|r| r["method"] == "session/new" || r["method"] == "session/load"), "{requests:?}");
     assert!(set_modes(&requests).is_empty(), "{requests:?}");
     let _ = std::fs::remove_dir_all(&home);
 }
