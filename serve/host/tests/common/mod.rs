@@ -229,6 +229,8 @@ pub async fn serve_with(home: &Path, extra: &[&str], env: &[(&str, &str)]) -> (C
                 }
                 assert_quick_start(&log_path, env);
                 let child = child.0.take().unwrap();
+                #[cfg(windows)]
+                HOSTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((child.id(), home.to_owned()));
                 return (child, base);
             }
             assert!(Instant::now() < deadline, "host didn't start{}", log_tail(&log_path));
@@ -360,6 +362,9 @@ pub fn stop(child: &mut Child) {
 }
 
 fn stop_process(child: &mut Child) {
+    #[cfg(windows)]
+    signal_stop_event(child.id());
+    #[cfg(not(windows))]
     let _ = Command::new("kill").arg(child.id().to_string()).status();
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -370,6 +375,23 @@ fn stop_process(child: &mut Child) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// Windows: the homes of the hosts `serve_with` started, by pid. `stop` has only the child, and the stop event is named
+/// for the host's data folder.
+#[cfg(windows)]
+static HOSTS: std::sync::Mutex<Vec<(u32, std::path::PathBuf)>> = std::sync::Mutex::new(Vec::new());
+
+/// Windows: the stand-in for SIGTERM. Signals the named stop event of the host `pid`, which then leaves the way it does on
+/// SIGTERM. A host this file did not start, or one that never made the event, is left to the hard kill after the wait.
+#[cfg(windows)]
+fn signal_stop_event(pid: u32) {
+    let hosts = HOSTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some((_, home)) = hosts.iter().find(|(p, _)| *p == pid) else { return };
+    let name = kith_winsys::event::stop_event_name(home);
+    if let Ok(Some(event)) = kith_winsys::event::StopEvent::open(&name) {
+        let _ = event.signal();
+    }
 }
 
 /// Python as the test machine names it.
