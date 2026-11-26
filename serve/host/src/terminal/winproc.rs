@@ -42,10 +42,7 @@ pub(crate) use windows::{Ended, alive, end, is_descendant, remember, started};
 mod windows {
     use super::{Probe, Seen, judge};
     use std::collections::HashMap;
-    use std::os::windows::process::CommandExt as _;
     use std::sync::{LazyLock, Mutex};
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     /// Whether `pid` may still be running: everything but `Gone` (a process we may not read is still there).
     pub(crate) fn alive(pid: u32) -> bool {
@@ -57,17 +54,16 @@ mod windows {
         pid != std::process::id() && kith_winsys::tree::descends(pid, std::process::id())
     }
 
-    /// Ends `pid` alone, by pid (never by image name). A job with kill on close does the rest. The caller has checked the
-    /// start stamp just before.
-    fn terminate_pid(pid: u32) -> bool {
-        std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+    /// Ends `pid` alone, by pid (never by image name), on one handle that also re-reads its start, so a pid handed to a
+    /// stranger since the stamp check is not hit. A job with kill on close does the rest. `Some(true)` killed, `Some(false)`
+    /// it is another process now, `None` not known.
+    fn terminate_pid(pid: u32, stamp: &str) -> Option<bool> {
+        let ms: i64 = stamp.trim().strip_prefix('e')?.parse().ok()?;
+        match kith_winsys::kill::terminate_if_started_at(pid, ms) {
+            kith_winsys::kill::Killed::Yes => Some(true),
+            kith_winsys::kill::Killed::NotThatProcess => Some(false),
+            kith_winsys::kill::Killed::Unsure => None,
+        }
     }
 
     /// What [`end`] did.
@@ -85,8 +81,12 @@ mod windows {
     /// Ends the process recorded as `pid` + `recorded` after a start-stamp check.
     pub(crate) fn end(pid: u32, recorded: Option<&str>) -> Ended {
         match judge(recorded, &kith_kernel::procstart::probe(pid)) {
-            Seen::Same if terminate_pid(pid) => Ended::Killed,
-            Seen::Same | Seen::Unsure => Ended::NotSure,
+            Seen::Same => match recorded.and_then(|r| terminate_pid(pid, r)) {
+                Some(true) => Ended::Killed,
+                Some(false) => Ended::Nobody,
+                None => Ended::NotSure,
+            },
+            Seen::Unsure => Ended::NotSure,
             Seen::Gone | Seen::Other => Ended::Nobody,
         }
     }
