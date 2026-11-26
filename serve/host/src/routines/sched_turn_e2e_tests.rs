@@ -308,7 +308,7 @@ fn an_owners_job_walks_to_the_second_account_when_the_first_is_out_of_usage() {
     assert_eq!(value_of(run, "KITH_BACKUP_CHAIN").as_deref(), Some("on"));
     assert_eq!(value_of(run, "KITH_PERSON"), None, "the owner is no person");
     assert_eq!(value_of(run, "KITH_RUN_OUTBOX"), None, "the owner has no app chat with house here: no outbox");
-    let argv = value_of(run, "argv").unwrap();
+    let argv = run.as_str(); // the whole record: the prompt has lines of its own
     assert!(argv.contains("Scheduled job \"walk\" of house, cron `0 8 * * *`, core turn"), "{argv}");
     assert_eq!(w.show(&json!({"claimId": claim}))["pid"], World::launch_pid(), "turn {turn}");
     assert!(ancestors(run).contains(&World::launch_pid()), "the engine descends from the launch: {:?}", ancestors(run));
@@ -357,7 +357,7 @@ fn a_host_restarted_mid_run_leaves_the_run_writing_its_log_and_the_core_ends_the
     std::fs::write(w.dir.join("hold"), "").unwrap();
     let fired = w.core("schedule.runNow", &json!({"agent": "house", "id": "slow", "key": "e2e-slow"}));
     assert_eq!(fired["outcome"], "fired", "{fired}");
-    let host1 = CoreWriter::with_instance(w.folders.clone(), "host-1".to_owned());
+    let host1 = CoreWriter::with_instance(w.folders.clone(), "kith-serve-host/1-a".to_owned());
     let turns = host1.queued().expect("the core's queue");
     let t = turns.iter().find(|t| t["job"] == "slow").expect("the turn");
     let (turn, conversation, person) = (
@@ -380,7 +380,7 @@ fn a_host_restarted_mid_run_leaves_the_run_writing_its_log_and_the_core_ends_the
     });
 
     // The host restarts: another instance adopts. A claim with a live process stays the writer.
-    let host2 = CoreWriter::with_instance(w.folders.clone(), "host-2".to_owned());
+    let host2 = CoreWriter::with_instance(w.folders.clone(), "kith-serve-host/2-b".to_owned());
     host2.adopt().expect("adopt");
     let state = |w: &World| w.show(&json!({"claimId": claim}))["state"].as_str().unwrap_or_default().to_owned();
     assert!(["claimed", "running", "ending"].contains(&state(&w).as_str()), "the run goes on: {}", state(&w));
