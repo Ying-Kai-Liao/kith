@@ -67,3 +67,18 @@ struct PersonBotsSection: View {
         }
     }
 }
+
+#if DEBUG
+/// The `-kithDemoScreens person` and `person-paused` shots: Sam's page over a fixed People list, no host.
+struct DemoPersonPage: View {
+    let store: BotStore
+    @State private var people: PeopleStore
+
+    init(store: BotStore, paused: Bool) {
+        self.store = store
+        _people = State(initialValue: PeopleStore.demo(paused: paused))
+    }
+
+    var body: some View { PersonPageView(personId: "sam", people: people, store: store) }
+}
+#endif

@@ -95,6 +95,8 @@ private struct DebugHooks: ViewModifier {
     @State private var shareScreen: String?
     /// The bot guest demo shots (`bots-people`, `bots-edit`, `bots-invite`, `bots-result`, `bots-detail`, `bots-remove`).
     @State private var botScreen: String?
+    /// The person page demo shots (`person`, `person-paused`).
+    @State private var personScreen: String?
     /// The group room demo shots over the open room (`room-add`, `room-info`).
     @State private var roomScreen: String?
 
@@ -113,6 +115,11 @@ private struct DebugHooks: ViewModifier {
             if let screen = shareScreen, let computer = app.accounts.computers.first, let store = app.accounts.store(for: computer.id) {
                 ShareAgentSheet(store: store, agent: "ada", name: "Ada", people: PeopleStore.demo(),
                                 created: screen == "share-link" ? DemoScreens.demoInvite : nil)
+            }
+        }
+        .kithSheet(isPresented: Binding(get: { personScreen != nil }, set: { if !$0 { personScreen = nil } })) {
+            if let screen = personScreen, let computer = app.accounts.computers.first, let store = app.accounts.store(for: computer.id) {
+                DemoPersonPage(store: store, paused: screen == "person-paused")
             }
         }
         .kithSheet(isPresented: Binding(get: { botScreen != nil }, set: { if !$0 { botScreen = nil } })) {
@@ -197,6 +204,7 @@ private struct DebugHooks: ViewModifier {
                         app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: "ada")
                     }
                 case "share-sheet", "share-link": shareScreen = screen
+                case "person", "person-paused": personScreen = screen
                 case "bots-share": shareScreen = "share-sheet"
                 case "bots-settings": app.showSettings = true
                 case "bots-people", "bots-edit", "bots-invite", "bots-result", "bots-detail", "bots-remove": botScreen = screen
