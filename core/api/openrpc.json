@@ -11331,6 +11331,14 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "session",
+          "summary": "Optional: the engine's own session when it is not that conversation; a `--bg` ask's record keeps it for `-c`.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
         }
       ],
       "result": {
@@ -11359,6 +11367,9 @@
             "kind": "caller"
           },
           "conversation": {
+            "kind": "caller"
+          },
+          "session": {
             "kind": "caller"
           }
         },

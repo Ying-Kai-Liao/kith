@@ -128,6 +128,8 @@ impl World {
         assert!(out.status.success(), "kith-auth person: {}", String::from_utf8_lossy(&out.stderr));
         let said = crate::core_front::step_authority_for_test(&world.folders, &kernel).expect("the authority step");
         assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
+        // The step writes the writer lock's tombstone there.
+        std::fs::create_dir_all(world.folders.machine.join("live/terminal")).unwrap();
         let said = crate::core_front::step_claims_for_test(&world.folders, &kernel).expect("the claims step");
         assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
         let daemon = crate::core_front::serve_for_test(&world.folders);
