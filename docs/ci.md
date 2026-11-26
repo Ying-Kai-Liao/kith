@@ -66,6 +66,8 @@ It cross-checks through `cargo xwin clippy` (C build scripts such as kith-core's
 
 The `windows` path filter in `ci.yml` (second `filters: |` block) must cover every path that builds into those crates: each crate's source, its path dependencies (transitively), build scripts, `include_str!` targets outside the crate, the toolchain pin, the script and the workflow. `scripts/ci/windows-filter-check.sh` (a step in kernel shard 1) derives that set from `windows-clippy.sh --list-crates` and each `Cargo.toml`'s path dependencies, and fails naming any path the filter misses. When you add a Windows crate to the script or a path dependency to one, the check tells you which line to add to the filter.
 
+The same check also covers `windows-e2e.yml`: its `on.pull_request.paths` must include every crate `scripts/package-windows.sh` builds (the packages in `scripts/windows-exes.txt`; a pending one with no crate yet is skipped) and their path dependencies (transitively), plus the staging and packaging scripts and the toolchain pin. Otherwise a `core/runtime` PR would skip the e2e.
+
 Output goes to its own target dir, `serve/host/target-xwin` (override with `WINCLIPPY_TARGET_DIR`), so it never invalidates the Mac build cache. A second run reuses it.
 
 **Cost** (measured on the flow Mac, `nice taskpolicy -b`, at origin/main c65afbf05; clean, every Windows-clippied crate checks):
