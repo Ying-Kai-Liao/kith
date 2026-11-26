@@ -20,6 +20,7 @@ use crate::routines::switch_tests::hub;
 use crate::terminal::core_writer::CoreWriter;
 use kith_kernel::paths::Paths;
 use serde_json::{Value, json};
+use std::fmt::Write as _;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -63,7 +64,7 @@ fn written() -> String {
                 walk(&path, out);
             } else {
                 let text = std::fs::read_to_string(&path).unwrap_or_default();
-                out.push_str(&format!("--- {}\n{text}\n", path.display()));
+                let _ = writeln!(out, "--- {}\n{text}", path.display());
             }
         }
     }
