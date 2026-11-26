@@ -930,6 +930,12 @@ async fn run_door(hub: &Arc<Hub>, turn: &Turn, live: &[Card], person: Option<&st
         end_claimed(hub, live);
         return give_up(hub, &turn.run);
     }
+    // The resume is the kernel's one-shot, which takes the session's claim in process: Windows has not got that yet (W12: claims,
+    // held terminals and host turns). The resume stays owed, and it is said why, rather than started without the claim.
+    if cfg!(windows) {
+        tracing::warn!(run = %turn.run, "a card's resume waits: runs on Windows wait the claims package (W12)");
+        return unstarted(hub, &turn.run, true, true);
+    }
     // A live writer on the session keeps the resume owed (the kernel's one-shot would wait and then refuse).
     let state = hub.terminal.env().state;
     let sid = session.to_owned();

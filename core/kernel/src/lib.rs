@@ -13,9 +13,9 @@ pub mod cost;
 pub mod delegation;
 pub mod engines;
 pub mod helpers;
-// Unix only: these write modes with mode(2), sync directories, send signals and read `ps`. The Windows build of this crate
-// (the `windows` CI job) is the modules in the Windows list of `MODULES`; the core runtime needs paths.
-#[cfg(unix)]
+// On Windows the launch is the plan and its settings (`launch::assemble`, what the host launches in process); the one-shot run
+// (`launch::exec`, `launch::start`) stands on claims and `kith-permit` and stays Unix only until W12. A guest's launch is
+// refused there (guests are not offered on Windows).
 pub mod launch;
 // Unix only: it forks the compaction (a parked child) and takes flocks, like `threads`, whose claims it takes.
 #[cfg(unix)]
