@@ -336,10 +336,16 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
             }
         }
     }
+    // A holder `end` is not sure of (no stamp, access denied) still runs and keeps its claim: releasing it would let a second
+    // writer in beside it.
     #[cfg(windows)]
-    for (_, claim) in &holders {
-        super::winproc::end(claim.pid, claim.proc_start.as_deref());
-    }
+    let unsure: Vec<u32> = {
+        use super::winproc::{Ended, end};
+        let sure = |claim: &Claim| end(claim.pid, claim.proc_start.as_deref()) != Ended::NotSure;
+        holders.iter().filter(|(_, claim)| !sure(claim)).map(|(_, claim)| claim.pid).collect()
+    };
+    #[cfg(not(windows))]
+    let unsure: Vec<u32> = Vec::new();
     signal(&victims, SIGTERM);
     let deadline = std::time::Instant::now() + grace;
     while std::time::Instant::now() < deadline && victims.iter().any(|p| pid_runs(*p)) {
@@ -349,7 +355,7 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
     signal(&left, SIGKILL);
     let mut ended = Vec::new();
     for (path, claim) in holders {
-        if claim.pid == me {
+        if claim.pid == me || unsure.contains(&claim.pid) {
             continue;
         }
         // The holder got SIGKILL: its claim is stale (a zombie not yet reaped still counts as running). Given back under the
@@ -605,12 +611,18 @@ pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Dura
     // holds the conversation's lock, and the lock must not be free while claude still runs.
     let mut victims = children_of(claim.pid, 4);
     victims.push(claim.pid);
-    // Recorded before the signal lands (F12 rule 8): a session gone with no intent reads as a crash.
-    super::intent::write(state, sid, "stopped from the app", claim.pid);
+    // Windows ends the claimer in `end`, which may not be sure of it: nothing was stopped then, so no intent is left behind
+    // (it is written right after the kill there). Unix writes it first, as it signals below.
     #[cfg(windows)]
-    if super::winproc::end(claim.pid, claim.proc_start.as_deref()) == super::winproc::Ended::NotSure {
-        return Stopped::CantStop(claim);
+    {
+        if super::winproc::end(claim.pid, claim.proc_start.as_deref()) == super::winproc::Ended::NotSure {
+            return Stopped::CantStop(claim);
+        }
+        super::intent::write(state, sid, "stopped from the app", claim.pid);
     }
+    // Recorded before the signal lands (F12 rule 8): a session gone with no intent reads as a crash.
+    #[cfg(not(windows))]
+    super::intent::write(state, sid, "stopped from the app", claim.pid);
     signal(&victims, SIGTERM);
     let deadline = std::time::Instant::now() + grace;
     while std::time::Instant::now() < deadline && victims.iter().any(|p| pid_runs(*p)) {
