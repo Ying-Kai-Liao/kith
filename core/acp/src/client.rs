@@ -10,8 +10,8 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
@@ -23,9 +23,9 @@ const STDERR_DRAIN: Duration = Duration::from_secs(1);
 const EXIT_GRACE: Duration = Duration::from_secs(10);
 
 /// The host's run-token variables (`runauth::TOKEN_ENV`, `SOCKET_ENV`; a host test pins them): never passed on to an agent.
-const RUN_TOKEN_ENV: &str = "KITH_RUN_TOKEN";
-const RUN_SOCKET_ENV: &str = "KITH_RUN_SOCKET";
-const CORE_RUN_SOCKET_ENV: &str = "KITH_CORE_RUN_SOCKET";
+pub(crate) const RUN_TOKEN_ENV: &str = "KITH_RUN_TOKEN";
+pub(crate) const RUN_SOCKET_ENV: &str = "KITH_RUN_SOCKET";
+pub(crate) const CORE_RUN_SOCKET_ENV: &str = "KITH_CORE_RUN_SOCKET";
 
 type ShellFn = fn(&str) -> Command;
 static SHELL: std::sync::OnceLock<ShellFn> = std::sync::OnceLock::new();
@@ -36,7 +36,7 @@ pub fn set_shell(f: ShellFn) {
 }
 
 /// `command` as one shell line that replaces the shell with the program, so signals and exit codes reach it.
-fn shell_command(command: &str) -> Command {
+pub(crate) fn shell_command(command: &str) -> Command {
     if let Some(f) = SHELL.get() {
         return f(command);
     }
@@ -231,15 +231,29 @@ impl Answer {
     }
 }
 
+/// What the agent's stdin is: a child's pipe, or on Windows the host's end of a pipe made for a process started in a job.
+type Stdin = Box<dyn AsyncWrite + Send + Unpin>;
+
+/// The agent's process, however it was started.
+pub(crate) enum Proc {
+    Child(Box<Child>),
+    /// A resident stub started in a host-held kill-on-close job (`resident::spawn_resident`, Windows).
+    #[cfg(windows)]
+    Held(crate::held::Held),
+}
+
 pub struct Acp {
     /// `None` once stopped: the closed pipe tells the agent to exit.
-    stdin: tokio::sync::Mutex<Option<ChildStdin>>,
+    stdin: tokio::sync::Mutex<Option<Stdin>>,
     next_id: AtomicI64,
     pending: Pending,
     /// `None` once stopped (handed to [`reap`]).
-    child: tokio::sync::Mutex<Option<Child>>,
+    child: tokio::sync::Mutex<Option<Proc>>,
     /// The process (and, on Unix, process group) leader.
     pid: Option<u32>,
+    /// The job the process was started in, when it was (Windows): [`Acp::end_now`] ends all of it at once.
+    #[cfg(windows)]
+    job: Option<Arc<kith_winsys::job::Job>>,
 }
 
 impl Acp {
@@ -295,6 +309,27 @@ impl Acp {
         let stdin = child.stdin.take().expect("stdin is piped");
         let stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");
+        let pid = child.id();
+        Ok(Self::attach(
+            Box::new(stdin),
+            stdout,
+            stderr,
+            Proc::Child(Box::new(child)),
+            pid,
+            #[cfg(windows)]
+            None,
+        ))
+    }
+
+    /// Wires an agent's three pipes to a new connection: the reader tasks, the pending table and the process to stop later.
+    pub(crate) fn attach(
+        stdin: Stdin,
+        stdout: impl AsyncRead + Send + Unpin + 'static,
+        stderr: impl AsyncRead + Send + Unpin + 'static,
+        proc: Proc,
+        pid: Option<u32>,
+        #[cfg(windows)] job: Option<Arc<kith_winsys::job::Job>>,
+    ) -> (Arc<Self>, mpsc::UnboundedReceiver<Incoming>) {
         // Deliberately unbounded: `session/load` replays a whole history as notifications
         // *before* its response, while the bot is still awaiting that response. A bounded
         // queue would stall this reader, and with it the response — a deadlock.
@@ -369,15 +404,16 @@ impl Acp {
             });
         }
 
-        let pid = child.id();
         let acp = Arc::new(Self {
             stdin: tokio::sync::Mutex::new(Some(stdin)),
             next_id: AtomicI64::new(1),
             pending,
-            child: tokio::sync::Mutex::new(Some(child)),
+            child: tokio::sync::Mutex::new(Some(proc)),
             pid,
+            #[cfg(windows)]
+            job,
         });
-        Ok((acp, rx))
+        (acp, rx)
     }
 
     pub fn pid(&self) -> Option<u32> {
@@ -437,6 +473,15 @@ impl Acp {
             stopping.push(tokio::spawn(reap(child)));
         }
     }
+
+    /// Ends everything the agent started at once, with no grace (Windows: its kill-on-close job). The resident stub's group kill:
+    /// a stub that holds a lock must be gone before the next one asks for it. Does nothing for a process not started in a job.
+    #[cfg(windows)]
+    pub fn end_now(&self) {
+        if let Some(job) = &self.job {
+            let _ = job.terminate(1);
+        }
+    }
 }
 
 /// Waits until every agent being stopped has exited or been killed (at most [`EXIT_GRACE`]).
@@ -449,7 +494,16 @@ pub async fn stopped() {
 
 /// Gives the agent [`EXIT_GRACE`] to exit with everything it started (ACP adapters spawn
 /// CLIs, MCP servers and tools), then kills its process group (Windows: process tree).
-async fn reap(mut child: Child) {
+async fn reap(proc: Proc) {
+    #[cfg(unix)]
+    let Proc::Child(child) = proc;
+    #[cfg(unix)]
+    let mut child = *child;
+    #[cfg(windows)]
+    let mut child = match proc {
+        Proc::Child(c) => *c,
+        Proc::Held(held) => return held.reap(EXIT_GRACE).await,
+    };
     let Some(pid) = child.id() else { return };
     let deadline = Instant::now() + EXIT_GRACE;
     let exited = tokio::time::timeout_at(deadline, child.wait())

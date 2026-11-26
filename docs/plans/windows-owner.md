@@ -457,6 +457,24 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     instead of fork); D6 graceful stop; the transcript reader accepts a torn last line.
   - The core-fired schedule turn runs here as a normal host turn, once P2-4 lands.
   - **W12-4 (threads and lifecycle in kith-kernel): built 2026-11-27.** The modules build on Windows with the Unix code unchanged behind `cfg(unix)`. Locks are LockFileEx through `fs2` (no new unsafe), liveness is procstart, `winsys::procs` lists and ends processes, and the compaction's parked child is a spawn of `kith kernel lifecycle parked`. Left for others: the host's `threads_cmd`/`lifecycle_cmd` wiring and its Windows refusals (W12-3/W12-5), `threads run` (W12-5, W12-6), the stub's status pipe so a Windows compaction takes the conversation lock (W12-5).
+  - **W12-7 (host turns): built 2026-11-27, switched off.** `hostclaim.turn` (`claim_next`, with the transcripts rows under it) builds on
+    Windows. The host's Writer mode builds there: `warm_stub.rs`, `writer*.rs` and `kith_acp::spawn_resident` start the resident
+    stub inside a job the host holds (unnamed, kill on close, no breakaway flags, `spawn_in_job`, rule 6), with its stdio on pipes
+    the host made and the control channel on an owner-only named pipe (`--ctl-pipe`, `winsys::pipe`); the stub holds its engine's own
+    job (W12-1). `kill_group` ends the host's job at once, and a host that exits does the same. The claim names the stub's pid and
+    start stamp at `redeem`, before the prompt (H3); a restarted host's `adopt` marks the old claim `ending` (`host_changed`) and
+    `settle` ends it only after procstart says the stub is gone (P1). **C1 (decided 2026-11-27, standing answer "conservative",
+    option c): `can(Chat, Windows) = Partial("a host restart ends the turn")`.** The stub does not outlive the host there; the
+    chat says so (`RESTART_ENDED_TURN`) and resumes the conversation in a new process. TODO (engine-layer, PR #1240, section 3):
+    show it as that `Partial` in `engines/caps.rs` when the file exists; until then the cfg gates are the switch, and no caps flip
+    is made. Adopting the old stub after a restart is a later package. **The switch is off:** `claims` is `false` in
+    `switched::MODULES`, the core answers `cutover.mayServe {claims}` `ok: false` on Windows (it answered nothing before), so the
+    host stays in files mode until the claims writer is whole on Windows (W12-5 and the module's flip). **Channel runs stay
+    disabled** (`channels/run.rs` answers NotStarted before the spawn): a channel run is `kith run`, the kernel's one-shot, which is
+    Unix only until W12-5; the notes there say what turning them on needs (a kill-on-close job and the stamp from the child's own
+    handle). The core-fired schedule turn waits on retire-python P2-4. **windows-e2e scenario (b), an app-API chat turn, is not added:**
+    it needs the Writer mode on (the module flip), an ACP engine and a signed-in bot on the Windows runner; the unit tests run the
+    real stub over the named pipe instead (`terminal/warm_stub_win_tests.rs`, `hostclaim_tests.rs`).
   - **W12-2 (core probe and kernel tools): done.** P1 rows, `end_groups` empty on Windows (P2) and a torn last line (P4) are tests;
     the kernel tools (`runtools.rs`) run in a core-held, unnamed kill-on-close job (`Job::create_kill_on_close`, started with
     `spawn_in_job`) that the core ends through its own handle on a timeout or when the tool is done.

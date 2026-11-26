@@ -24,7 +24,6 @@
 
 use super::{Actor, Conn};
 use crate::terminal::core_writer::{Begin, CoreWriter, Mode, Running, Turn, WarmStub, new_turn_key};
-#[cfg(unix)]
 use crate::terminal::warm_stub::{Launch, ResidentStub};
 use crate::terminal::{pid_runs, proc_start};
 use anyhow::{Result, anyhow, bail};
@@ -35,42 +34,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-/// The warm process under a resident stub. Windows has none until the named-pipe spawn lands (S2 refuses there).
-#[cfg(unix)]
+/// The warm process under a resident stub.
 pub(crate) type Stub = ResidentStub;
-#[cfg(not(unix))]
-pub(crate) enum Stub {}
-
-#[cfg(not(unix))]
-impl WarmStub for Stub {
-    fn pid(&self) -> u32 {
-        match *self {}
-    }
-    fn account(&self) -> Option<String> {
-        match *self {}
-    }
-    fn take(&self, _: &str, _: i64) -> std::io::Result<kith_acp::Take> {
-        match *self {}
-    }
-    fn release(&self, _: &str, _: i64) -> std::io::Result<kith_acp::Release> {
-        match *self {}
-    }
-    fn restart(&mut self, _: Option<&str>) -> std::io::Result<()> {
-        match *self {}
-    }
-    fn kill_group(&self) {
-        match *self {}
-    }
-}
 
 /// The stub's control channel, for the `loaded` / `forgot` marks.
-#[cfg(unix)]
 fn ctl_of(stub: &Stub) -> Arc<kith_acp::Ctl> {
     stub.ctl()
-}
-#[cfg(not(unix))]
-fn ctl_of(stub: &Stub) -> Arc<kith_acp::Ctl> {
-    match *stub {}
 }
 
 /// The rows whose `loaded` marker goes with them: dropped (in `rows`, not in `want`) AND closed by the engine since its last load.
@@ -149,9 +118,6 @@ static CORES: OnceLock<Mutex<HashMap<PathBuf, Arc<CoreWriter>>>> = OnceLock::new
 /// The writer for this host's core, one per state folder (a host instance is the process's). `None` where Writer mode cannot be:
 /// no core folders for the state, or a platform with no resident stub.
 pub(crate) fn core(hub: &crate::hub::Hub) -> Option<Arc<CoreWriter>> {
-    if !cfg!(unix) {
-        return None;
-    }
     let state = hub.terminal.env().state;
     let mut cores = CORES.get_or_init(Mutex::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(c) = cores.get(&state) {
@@ -503,12 +469,6 @@ impl Actor {
         budget: Duration,
         account: &str,
     ) -> Result<Conn> {
-        #[cfg(not(unix))]
-        {
-            let _ = (command, cwd, env, budget, account);
-            bail!("Writer mode needs Unix until the resident stub has a named-pipe spawn");
-        }
-        #[cfg(unix)]
         {
             let Some(core) = core(&self.hub) else { bail!("no core to claim through") };
             let (stub_bin, locks) = stub_paths(&core)?;

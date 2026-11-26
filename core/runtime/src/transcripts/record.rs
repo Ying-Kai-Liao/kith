@@ -322,6 +322,7 @@ pub(crate) fn place(core: &Core) -> Option<(PathBuf, Ctx<'static>)> {
 
 /// Whether the transcripts are the core's on this Mac: the `transcripts` module is switched (its switch file and the marker
 /// in core.db), read through the same `may_serve` as every module. `Err(why)` otherwise.
+#[cfg(unix)]
 pub(crate) fn serving(core: &Core) -> std::result::Result<(), String> {
     let Some(folders) = core.folders() else {
         return Err("this core was opened without its folders".into());
@@ -342,6 +343,16 @@ pub(crate) fn serving(core: &Core) -> std::result::Result<(), String> {
         Err(s.warning.unwrap_or_else(|| {
             "the transcripts are not switched to the core on this Mac (kith migrate step transcripts)".into()
         }))
+    }
+}
+
+/// A Windows core has no cutover framework: it is born switched (WI13), and `transcripts` is not on yet.
+#[cfg(not(unix))]
+pub(crate) fn serving(_core: &Core) -> std::result::Result<(), String> {
+    if crate::switched::on_windows("transcripts") {
+        Ok(())
+    } else {
+        Err("the transcripts are not the core's on Windows yet".into())
     }
 }
 

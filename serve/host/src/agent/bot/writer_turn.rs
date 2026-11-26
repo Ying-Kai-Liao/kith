@@ -433,12 +433,6 @@ impl Actor {
     /// A stub that was restarted under a begin has a new process: its connection (and what it had loaded) is the old one's. A new
     /// connection on the new process, registered as the first one was.
     async fn rebuild_after_restart(&mut self, core: &Arc<CoreWriter>) -> Result<()> {
-        #[cfg(not(unix))]
-        {
-            let _ = core;
-            bail!("Writer mode needs Unix");
-        }
-        #[cfg(unix)]
         {
             let Some(old) = self.conn.as_mut() else { bail!("the agent process is gone") };
             let run_grant = old.run_grant.take();

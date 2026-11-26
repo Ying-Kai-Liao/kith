@@ -587,6 +587,9 @@ impl Actor {
     /// the agent is told, in the same session, to finish without redoing steps.
     pub(super) async fn resume_interrupted(&mut self, lane: Lane, done_tx: &mpsc::UnboundedSender<Done>) {
         self.set_inflight(false);
+        // Said before anything else, so a resume that cannot go on still tells the person why the turn stopped.
+        #[cfg(windows)]
+        self.notice(super::RESTART_ENDED_TURN, NoticeStyle::Info);
         if self.session_for(lane.thread.as_deref()).is_none() {
             self.finish_routine(
                 crate::routines::Status::Interrupted,

@@ -48,6 +48,16 @@ impl Core {
             m if crate::accounts::call::serves(m) => self.account_call(m, params),
             #[cfg(unix)]
             "cutover.mayServe" => crate::cutover::call_may_serve(self, params),
+            // The cutover framework is Unix only; a Windows core is born switched (WI13). The one gate a Windows host asks is
+            // `claims` (its Writer mode, W12-7), answered from the table (`switched::MODULES`): off until the package that makes
+            // the claims writer whole turns it on, so the host's Writer mode is built and waits behind this answer. Any other
+            // module is not served, as before (the authority gate stays closed there).
+            #[cfg(not(unix))]
+            "cutover.mayServe"
+                if params.get("module").and_then(Value::as_str) == Some("claims") =>
+            {
+                Ok(json!({"ok": crate::switched::on_windows("claims"), "warning": Value::Null}))
+            }
             _ => Err(Error::NotServed(format!(
                 "kith-core: {method} is not answered in the core yet"
             ))),

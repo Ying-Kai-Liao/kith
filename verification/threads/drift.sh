@@ -53,6 +53,8 @@ FILES=(
   serve/host/src/cards/resume/wake_clock.rs # WK4b: the wake clock and the run door by turn id: wake.tick, hostclaim.queued, may_use_checked at the door, the wakeRun claim before any process, redeemedBefore cancels
   serve/host/src/routines/run_door.rs # WK4b: claim_run_as, then the spawn; a claim refused as held is Later, nothing starts beside the writer
   serve/host/src/terminal/warm_stub.rs    # the host's resident stub: take / release / kill_group
+  core/acp/src/resident.rs            # W12-7, Windows: the stub starts in a host-held kill-on-close job, the control channel is a named pipe; the Unix socketpair is the same lines
+  core/runtime/src/hostclaim.rs       # W12-7: hostclaim.turn (claim_next) builds on Windows; the rows are the same steps
   serve/host/src/agent/bot/writer.rs      # the actor's use of CoreWriter: orphaned begins, the mode
   serve/host/src/agent/bot/writer_turn.rs # End choice (Done / Died / Killed / OutOfUsage / Left), abandon + settle_gone, failover
   core/stub/src/resident.rs           # the stub's lock: take / release, nothing released on close; loaded / forgot markers

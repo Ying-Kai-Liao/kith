@@ -2123,6 +2123,7 @@ name = "kith-acp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "kith-winsys",
  "libc",
  "serde_json",
  "tokio",

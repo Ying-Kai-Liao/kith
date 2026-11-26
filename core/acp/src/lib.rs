@@ -2,6 +2,8 @@
 //! program and the host both link it, so an engine behaves the same whichever starts it. No web server, no host types.
 
 mod client;
+#[cfg(windows)]
+mod held;
 mod resident;
 mod run_once;
 

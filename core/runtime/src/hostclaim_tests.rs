@@ -214,7 +214,6 @@ fn park_unpark_and_cancel_a_queued_turn() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_turn_claim_goes_through_claim_next() {
     let (_t, mut core, m) = world();
@@ -248,7 +247,6 @@ fn a_turn_claim_goes_through_claim_next() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn an_unswitched_turn_claim_without_the_hosts_account_is_an_error_not_a_pick() {
     let (_t, mut core, m) = world();
@@ -685,4 +683,139 @@ fn queued_lists_the_schedule_turns_no_host_began_and_says_which_ran_before() {
     assert_eq!(turns[1]["turn"], ran);
     assert_eq!(turns[1]["redeemedBefore"], true, "{listed}");
     assert!(turns[1]["job"].is_null(), "no fire row names it");
+}
+
+/// A process that runs until it is killed: what a claim names as the one that holds its writer (the resident stub's place).
+fn sleeper() -> std::process::Child {
+    #[cfg(windows)]
+    let mut c = {
+        let mut c = std::process::Command::new("cmd.exe");
+        c.args(["/d", "/c", "ping -n 60 127.0.0.1 >nul"]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut c = {
+        let mut c = std::process::Command::new("sleep");
+        c.arg("60");
+        c
+    };
+    c.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("a process to name")
+}
+
+/// A turn claimed through `hostclaim.turn` (`claim_next`) as the host instance `holder`: its claim id and turn.
+fn host_turn(core: &mut Core, m: &std::path::Path, sid: &str, holder: &str) -> (i64, i64) {
+    let q = row(
+        core,
+        "hostclaim.enqueue",
+        &json!({"conversation": sid, "agent": "echo", "engine": "claude", "source": "app", "person": "",
+                "prompt": "hi", "revokeSeen": 0}),
+    );
+    let turn = q["turn"].as_i64().unwrap();
+    let got = row(
+        core,
+        "hostclaim.turn",
+        &json!({"conversation": sid, "turn": turn, "person": "", "revokeSeen": 0, "cwd": "/work", "account": "claude",
+                "sessionId": sid, "home": m.join("home"), "kernel": m.join("kernel"), "holderInstance": holder,
+                "env": {"KITH_MACHINE": m, "KITH_AGENTS": m.join("agents")}}),
+    );
+    assert_eq!(got["status"], "claimed", "{got}");
+    (got["claimId"].as_i64().unwrap(), turn)
+}
+
+fn claim_row(core: &Core, id: i64) -> (String, Option<String>) {
+    core.conn()
+        .query_row(
+            "SELECT state, end_reason FROM claims WHERE claim_id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+}
+
+/// W12-7 H3: a host turn's claim has no process until the host redeems it on the recorded one (the host's resident stub, whose job
+/// holds the engine), with the pid and the start stamp together, and that happens before the prompt goes. Windows reads the stamp
+/// through procstart, so this runs there on the stamp the stub's pid really has.
+#[test]
+fn a_host_turn_claim_records_its_process_with_the_stamp_before_anything_runs() {
+    let (_t, mut core, m) = world();
+    let (id, turn) = host_turn(&mut core, &m, "s1", "kith-serve-host/1-a");
+    let shown = row(&mut core, "hostclaim.show", &json!({"claimId": id}));
+    assert_eq!(shown["claim"]["state"], "claimed", "{shown}");
+    assert!(
+        shown["claim"]["pid"].is_null() && shown["claim"]["started"].is_null(),
+        "{shown}"
+    );
+    assert_eq!(
+        turn_state(&core, turn),
+        "claimed",
+        "the turn does not run before its writer is named"
+    );
+    let mut stub = sleeper();
+    let stamp = kith_kernel::procstart::start_stamp(stub.id()).expect("the stub's start stamp");
+    assert!(kith_kernel::procstart::is_stamp(&stamp), "{stamp}");
+    let red = row(
+        &mut core,
+        "hostclaim.redeem",
+        &json!({"claimId": id, "pid": i64::from(stub.id()), "started": stamp, "holderInstance": "kith-serve-host/1-a"}),
+    );
+    assert_eq!(red["running"], true, "{red}");
+    let shown = row(&mut core, "hostclaim.show", &json!({"claimId": id}));
+    assert_eq!(shown["claim"]["state"], "running", "{shown}");
+    assert_eq!(shown["claim"]["pid"], i64::from(stub.id()), "{shown}");
+    assert_eq!(shown["claim"]["started"], stamp, "{shown}");
+    assert_eq!(turn_state(&core, turn), "running");
+    let _ = stub.kill();
+    let _ = stub.wait();
+}
+
+/// W12-7 C1 (`Partial: a host restart ends the turn`): the next host's `adopt` gives the old host's turn a named outcome, ends it
+/// as `host_changed` and puts the turn back, and the claim stays the conversation's writer (`ending`) until the process it names is
+/// confirmed gone, so no second writer starts beside a stub that is still ending.
+#[test]
+fn a_turn_cut_by_a_host_restart_ends_as_host_changed_once_its_process_is_gone() {
+    let (_t, mut core, m) = world();
+    let (id, turn) = host_turn(&mut core, &m, "s1", "kith-serve-host/1-a");
+    let mut stub = sleeper();
+    let stamp = kith_kernel::procstart::start_stamp(stub.id()).expect("the stub's start stamp");
+    row(
+        &mut core,
+        "hostclaim.redeem",
+        &json!({"claimId": id, "pid": i64::from(stub.id()), "started": stamp, "holderInstance": "kith-serve-host/1-a"}),
+    );
+    // The host restarts: the new instance adopts. The process is still there, so the claim waits `ending`.
+    let adopted = row(
+        &mut core,
+        "hostclaim.adopt",
+        &json!({"instance": "kith-serve-host/2-b"}),
+    );
+    assert_eq!(adopted["kill"][0]["pid"], i64::from(stub.id()), "{adopted}");
+    assert_eq!(
+        claim_row(&core, id),
+        ("ending".into(), Some("host_changed".into()))
+    );
+    assert_eq!(
+        turn_state(&core, turn),
+        "queued",
+        "the cut turn goes back to the queue"
+    );
+    let held = row(&mut core, "hostclaim.settle", &json!({}));
+    assert_eq!(
+        held["ended"],
+        json!([]),
+        "a process that is still there is still the writer: {held}"
+    );
+    assert_eq!(claim_row(&core, id).0, "ending");
+    // Once it is gone (on Windows its job ended with the host's), the claim is released with the named reason.
+    let _ = stub.kill();
+    let _ = stub.wait();
+    let done = row(&mut core, "hostclaim.settle", &json!({}));
+    assert_eq!(done["ended"], json!([id]), "{done}");
+    assert_eq!(
+        claim_row(&core, id),
+        ("ended".into(), Some("host_changed".into()))
+    );
 }

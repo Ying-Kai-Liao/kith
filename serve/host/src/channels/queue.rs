@@ -28,8 +28,10 @@ pub(super) fn kill(pid: u32) {
 /// rule P1). Never by name. A run whose start was not recorded or cannot be matched is not killed, and says so (WI1).
 /// Not reachable yet (a chat run returns `NotStarted` on Windows before the spawn), and H4 does not hold for it: the tools
 /// below the run are not in a kill-on-close job.
-// W12-7: the spawn must go in a kill-on-close job, and the stamp must be read from the child's handle, not by pid after
-// the spawn (`winproc::remember` in run.rs does the latter).
+// W12-7 left channel runs off on Windows: the run is `kith run` (the kernel's one-shot, `launch exec`), which stays Unix only until
+// W12-5. Whoever turns them on: the spawn goes in a host-held kill-on-close job (`winsys::job::spawn_in_job`, as the resident
+// stub's in `kith_acp::spawn_resident`), and the stamp is read from the child's own handle, not by pid after the spawn
+// (`winproc::remember` in run.rs does the latter).
 #[cfg(windows)]
 pub(super) fn kill(pid: u32) {
     use crate::terminal::winproc::{Ended, end, started};
