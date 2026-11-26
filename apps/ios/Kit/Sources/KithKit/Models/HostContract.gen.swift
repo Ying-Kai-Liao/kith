@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "16cc6e9c5a14412e680d8dff24305932f4deece079eb9b5f77a9b4f0ec20d1f7"
+    public static let sha256 = "e4278b6043237bc7a995eeb4cb0a74499d851f03d81ed1dc02010052812129d0"
 }
 
 extension HostContract {
@@ -1058,6 +1058,34 @@ extension HostContract {
         }
     }
 
+    /// One permission rule of an agent, raw (placeholders such as {{HOME_REAL}} unexpanded). list is allow, ask or deny; source is role/settings.json or allowed.json; id and kind come only from allowed.json entries.
+    public struct AgentRule: Codable, Hashable, Sendable {
+        public var list: String
+        public var rule: String
+        public var source: String
+        public var id: String?
+        public var kind: String?
+
+        public init(list: String, rule: String, source: String, id: String? = nil, kind: String? = nil) {
+            self.list = list
+            self.rule = rule
+            self.source = source
+            self.id = id
+            self.kind = kind
+        }
+    }
+
+    /// An agent's permission rules, as the launcher merges them at launch: role/settings.json allow, ask and deny, then allowed.json (as allow).
+    public struct AgentRules: Codable, Hashable, Sendable {
+        public var agent: String
+        public var rules: [AgentRule]
+
+        public init(agent: String, rules: [AgentRule]) {
+            self.agent = agent
+            self.rules = rules
+        }
+    }
+
     /// What making an invite answers: its id and links, when it lapses, and the person it is for.
     public struct CreatedInvite: Codable, Hashable, Sendable {
         public var inviteId: String
@@ -1960,6 +1988,15 @@ extension HostContract {
         }
     }
 
+    /// What `agentRules` takes.
+    public struct AgentRulesParams: Codable, Hashable, Sendable {
+        public var agent: String
+
+        public init(agent: String) {
+            self.agent = agent
+        }
+    }
+
     /// What `myRooms` takes.
     public struct MyRoomsParams: Codable, Hashable, Sendable {
         public init() {
@@ -2030,12 +2067,13 @@ extension HostContract {
         case addRoomPerson
         case removeRoomPerson
         case roomPeople
+        case agentRules
         case myRooms
         case leaveRoom
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople]
+    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople, .agentRules]
 
     /// What an invited person may call.
     public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation, .myRooms, .leaveRoom]
@@ -2102,6 +2140,8 @@ extension HostContract {
         case "HandleRevokes": _ = try d.decode(HandleRevokes.self, from: data)
         case "RoomPerson": _ = try d.decode(RoomPerson.self, from: data)
         case "RoomPeople": _ = try d.decode(RoomPeople.self, from: data)
+        case "AgentRule": _ = try d.decode(AgentRule.self, from: data)
+        case "AgentRules": _ = try d.decode(AgentRules.self, from: data)
         case "CreatedInvite": _ = try d.decode(CreatedInvite.self, from: data)
         case "RoomPersonChange": _ = try d.decode(RoomPersonChange.self, from: data)
         case "MyRoomAgent": _ = try d.decode(MyRoomAgent.self, from: data)
@@ -2172,6 +2212,7 @@ extension HostContract {
         case "AddRoomPersonParams": _ = try d.decode(AddRoomPersonParams.self, from: data)
         case "RemoveRoomPersonParams": _ = try d.decode(RemoveRoomPersonParams.self, from: data)
         case "RoomPeopleParams": _ = try d.decode(RoomPeopleParams.self, from: data)
+        case "AgentRulesParams": _ = try d.decode(AgentRulesParams.self, from: data)
         case "MyRoomsParams": _ = try d.decode(MyRoomsParams.self, from: data)
         case "LeaveRoomParams": _ = try d.decode(LeaveRoomParams.self, from: data)
         default: return false
