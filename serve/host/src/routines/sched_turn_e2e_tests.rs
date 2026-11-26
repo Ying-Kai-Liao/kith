@@ -49,7 +49,29 @@ fn until(what: &str, secs: u64, mut f: impl FnMut() -> bool) {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    panic!("gave up waiting for {what}");
+    panic!("gave up waiting for {what}; what the runs wrote:\n{}", written());
+}
+
+/// The folder whose files a failing wait shows: the logs of the world that is running.
+static DIAG: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn written() -> String {
+    fn walk(dir: &Path, out: &mut String) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                out.push_str(&format!("--- {}\n{text}\n", path.display()));
+            }
+        }
+    }
+    let mut out = String::new();
+    if let Some(dir) = DIAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
+        walk(&dir, &mut out);
+    }
+    out
 }
 
 struct World {
@@ -137,6 +159,7 @@ exit 0
             ("TZ".to_owned(), "UTC".to_owned()),
         ]);
         SPAWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+        *DIAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(folders.logs.clone());
         let world = Self { dir, folders, rec, env, daemon: None, _held: held };
         world.python(&kernel, &["person", "kai", "owner"]);
         world.python(&kernel, &["person", "sam", "name=Sam"]);
