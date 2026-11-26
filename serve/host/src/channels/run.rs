@@ -13,6 +13,7 @@ use crate::LockExt;
 use crate::agent::acp::{self, Depleted};
 use crate::agent::backups::{Backups, ChainEntry, MAX_MOVES, Pick, RATE_LIMIT};
 use crate::agent::gate::Permit;
+use crate::cards::resume::{ChannelWake, Seen};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -190,6 +191,7 @@ impl Core {
     /// An agent with a backup chain (see `agent::backups`) starts on the first account that is not out of usage. A run
     /// that ends on a usage limit marks its account out and, when it has done nothing yet that can't be done twice
     /// (nothing was posted to the thread), starts again on the next one, at most once per entry.
+    #[allow(clippy::too_many_arguments)] // one turn: its inputs
     pub(super) async fn run(
         &self,
         ad: &Arc<dyn Adapter>,
@@ -197,12 +199,18 @@ impl Core {
         agent: &str,
         wk: &str,
         task: &str,
+        wake: Option<Arc<ChannelWake>>,
         _permit: Permit,
     ) -> Result<Ended> {
         let conv = self.with(|i| i.st.threads.get(key).and_then(|t| t.get("conv").cloned()).unwrap_or(Value::Null));
         let outbox = self.paths.data.join("outbox").join(short(&format!("{wk}{}", super::core::now())));
         std::fs::create_dir_all(&outbox).with_context(|| format!("creating {}", outbox.display()))?;
-        let ended = self.turn(ad, key, agent, wk, task, &conv, &outbox).await;
+        let ended = self.turn(ad, key, agent, wk, task, &conv, &outbox, wake.as_ref()).await;
+        // No attempt attached the wake's claim (the launch stopped first, the spawn failed, a Stop): it is requeued, withdrawn or freed.
+        if let (Some(w), Some(hub)) = (&wake, crate::runauth::hub()) {
+            let stopped = matches!(ended, Ok(Ended::Stopped));
+            crate::cards::resume::channel_unattached(&hub, w, stopped).await;
+        }
         // A wake this turn didn't settle never ran (the spawn failed, every account was out, an error).
         self.wake_not_run(task, true);
         let _ = std::fs::remove_dir(&outbox);
@@ -219,6 +227,7 @@ impl Core {
         task: &str,
         conv: &Value,
         outbox: &Path,
+        wake: Option<&Arc<ChannelWake>>,
     ) -> Result<Ended> {
         let person = self.with(|i| {
             i.st.threads.get(key).and_then(|t| t.get("person")).and_then(Value::as_str).unwrap_or("").to_owned()
@@ -308,8 +317,13 @@ impl Core {
             if let Some(session) = &session {
                 set(&mut run_env, "RESUME", session); // any harness: bin/hq starts a new session when this one is another harness's
             }
+            // The claim rides with the attempts until one attaches it; later ones (a backup account) run without it.
+            let carry = wake.filter(|w| !w.settled());
+            if let Some(w) = carry {
+                w.set_sid(session.as_deref());
+            }
             let attempt = match self
-                .attempt(ad, agent, wk, task, conv, outbox, &still, run_env, account.as_deref(), fresh_backup)
+                .attempt(ad, agent, wk, task, conv, outbox, &still, run_env, account.as_deref(), fresh_backup, carry)
                 .await?
             {
                 Attempt::Stopped(ended) => return Ok(ended),
@@ -326,6 +340,11 @@ impl Core {
                 continue;
             }
             let res = serde_json::from_slice::<Value>(&attempt.out).ok();
+            // A claimed wake the launch never attached (a writer holds the session, an older launch): the claim is given back
+            // and the turn runs again later, so the thread hears nothing; the card shows the holder.
+            if res.is_none() && carry.is_some_and(|w| !w.settled()) {
+                return Ok(Ended::Done);
+            }
             // A card's wake rides in this task: no result means the turn never ran (held session, failed spawn).
             if res.is_some() {
                 self.settle_wake(task, true);
@@ -367,8 +386,34 @@ impl Core {
 
     /// One process of the agent, on `backup` or its own account, until it ends. Posts what its `kith-send` calls leave
     /// in the outbox while it runs.
-    #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // the process and everything it is watched with
+    #[allow(clippy::too_many_arguments)] // the process and everything it is watched with
     async fn attempt(
+        &self,
+        ad: &Arc<dyn Adapter>,
+        agent: &str,
+        wk: &str,
+        task: &str,
+        conv: &Value,
+        outbox: &Path,
+        still: &Recheck,
+        env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+        account: Option<&str>,
+        fresh_backup: bool,
+        wake: Option<&Arc<ChannelWake>>,
+    ) -> Result<Attempt> {
+        let mut seen = Seen::default();
+        let ran = self
+            .attempt_run(ad, agent, wk, task, conv, outbox, still, env, account, fresh_backup, wake, &mut seen)
+            .await;
+        // Whatever the attempt came to (a refusal before the spawn included), the claim is read for what the launch did with it.
+        if let (Some(w), Some(hub)) = (wake, crate::runauth::hub()) {
+            crate::cards::resume::channel_attempt_over(&hub, w, &seen).await;
+        }
+        ran
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // the process and everything it is watched with
+    async fn attempt_run(
         &self,
         ad: &Arc<dyn Adapter>,
         agent: &str,
@@ -380,6 +425,8 @@ impl Core {
         mut env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
         account: Option<&str>,
         fresh_backup: bool,
+        wake: Option<&Arc<ChannelWake>>,
+        seen: &mut Seen,
     ) -> Result<Attempt> {
         // A person's run (the env names one) gets a token of its own, revoked when this attempt ends.
         let grant = crate::runauth::grant_for_env_async(&mut env, agent, wk, None).await;
@@ -408,6 +455,13 @@ impl Core {
             self.say(ad, conv, agent, &text, None).await;
             return Ok(Attempt::NotStarted);
         }
+        if let Some(w) = wake {
+            // Read together by the launch and removed from the engine's environment: it attaches the claim naming the work key. The
+            // program checks its own `turn-conversation` token (`bin/kith`), and an older one ignores the variable: it attaches with
+            // the session's id, the core refuses that (exit 10), and the wake is requeued.
+            env.push(("KITH_TURN_CLAIM".into(), w.claim.to_string().into()));
+            env.push(("KITH_TURN_CONVERSATION".into(), w.wk.clone().into()));
+        }
         let mut cmd = tokio::process::Command::new(&self.paths.hq_bin);
         cmd.args(run_args(agent, account, &format!("{preface}{task}{}", ad.footer())))
             .env_clear()
@@ -430,6 +484,10 @@ impl Core {
         };
         self.wake_started(task);
         let pid = child.id();
+        seen.pid = pid;
+        if let (Some(w), Some(hub)) = (wake, crate::runauth::hub()) {
+            crate::cards::resume::channel_wake_started(&hub, w);
+        }
         if let (Some(grant), Some(pid)) = (&grant, pid) {
             grant.bind_pid(pid).await;
         }
@@ -490,6 +548,7 @@ impl Core {
             self.with(|i| i.busy.get_mut(wk).map(|b| b.exited = true));
         }
         let code = outcome.ok().and_then(|(_, code)| code);
+        seen.code = code;
         stop_pump.notify_one();
         let mut posted = pump.await.unwrap_or(0); // a post in flight finishes before the last flush
         posted += flush(ad, conv, outbox, still).await;
@@ -746,6 +805,8 @@ mod tests {
             "KITH_DISCORD_BOT_TOKEN",
             "KITH_AGENT",
             "KITH_PERSON",
+            "KITH_TURN_CLAIM",
+            "KITH_TURN_CONVERSATION",
             "KITH_BRIDGE_OUTBOX",
             "HQ_AGENT",
             "HQ_PERSON",
