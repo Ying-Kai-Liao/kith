@@ -215,7 +215,7 @@ Each row gives the gap, its evidence, and the package (W) or retire-python item 
 | Host turns: `hostclaim.turn` NotServed; `warm_stub` Unix-only | `core/runtime/src/hostclaim.rs:462-537`; `one-bot-model.md:525` | W12 |
 | Old-instance group kill does nothing: correct for holder spawns (kill-on-close jobs, `holder/src/platform/windows.rs:632-634`); detached runs the host starts outside the holder have no group stand-in for `recorded_gone` (`conversations/claims.rs:997-1006`) | `holder_link.rs:1085-1094` | W12 (named job per detached run; the probe asks the job) |
 | Kernel tools' group kill | `core/runtime/src/runtools.rs:212-216,271-277` | W12 |
-| `ps`, `pgrep` and `lstart` liveness in the host | `serve/host/src/terminal/claim.rs:472,607-632`, `terminal/registry.rs:214`, `agent/bot/lifecycle.rs:225-260,357` | W12 (procstart's GetProcessTimes, `core/procstart/src/lib.rs:422-497`) |
+| `ps`, `pgrep` and `lstart` liveness in the host | `serve/host/src/terminal/claim.rs:472,607-632`, `terminal/registry.rs:214`, `agent/bot/lifecycle.rs:225-260,357` | W12-3 done: procstart stamps plus a start-checked kill by handle (`core/winsys/src/kill.rs`, `terminal/winproc.rs`); channel Stop and run stamps in `channels/{queue,run}.rs` |
 | Graceful stop | `holder/src/platform/windows.rs:663-664` (hard only) | W12 (D6) |
 | Console client | `core/attach` is tested on Windows CI (`ci.yml:809-812`) | ready |
 

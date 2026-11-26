@@ -209,7 +209,7 @@ mod tests {
         fn a_remembered_start_is_read_back() {
             let mut child = sleeper();
             remember(child.id());
-            assert_eq!(started(child.id()), kith_kernel::procstart::start_stamp(child.id()));
+            assert_eq!(started(child.id()), start_stamp(child.id()));
             assert!(started(0).is_none());
             child.kill().unwrap();
             child.wait().unwrap();
