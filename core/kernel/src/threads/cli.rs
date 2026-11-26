@@ -34,7 +34,7 @@ use serde_json::Value;
 
 use super::core::Core;
 use super::resolve::{Host, resolve_taking};
-use super::writer::{ProcErr, TURN_CLAIM_EXIT, TURN_CLAIM_REFUSED, Taker};
+use super::writer::{ProcErr, Taker, claim_exit};
 use super::{Claim, Ctx, claim_path, claim_wait, pick, release_claims, spool};
 use crate::secrets::pyjson;
 
@@ -59,11 +59,7 @@ impl Out {
     fn refusal(said: &str, msg: &str) -> Self {
         Self {
             stderr: format!("{said}kith: {msg}\n"),
-            code: if msg.starts_with(TURN_CLAIM_REFUSED) {
-                TURN_CLAIM_EXIT
-            } else {
-                1
-            },
+            code: claim_exit(msg),
             ..Self::default()
         }
     }

@@ -302,6 +302,62 @@ fn os_store_is_unsupported_here() {
     let _: fn(&dyn KeyStore, bool) = exercise;
 }
 
+#[test]
+fn the_mint_lock_is_named_for_the_target_not_the_layout() {
+    let s = super::keystore::CredentialManager::new("dev.kith.core.secrets", "master-key");
+    assert_eq!(
+        super::keystore::mint_lock_name(s.target()),
+        "dev.kith.core.secrets_master-key.mint.lock"
+    );
+    // One plain file name whatever the target holds.
+    assert_eq!(
+        super::keystore::mint_lock_name("a/b\\c:d e"),
+        "a_b_c_d_e.mint.lock"
+    );
+}
+
+/// WI15: two cores minting their first key at once (here two threads, each its own store handle, as two layouts of one
+/// user are) end with one key: the first writer's, not the last's. Against the real Credential Manager, under a throwaway
+/// target that is deleted after.
+#[test]
+#[cfg(windows)]
+fn os_store_windows_two_mints_end_with_one_key() {
+    let target = format!(
+        "dev.kith.test.mint.{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    );
+    let cleanup = super::keystore::CredentialManager::new(&target, "master-key");
+    cleanup.remove();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let minters: Vec<_> = (0u8..2)
+        .map(|n| {
+            let barrier = barrier.clone();
+            let target = target.clone();
+            std::thread::spawn(move || {
+                let store = super::keystore::CredentialManager::new(&target, "master-key");
+                let mine = [n + 1; 32];
+                barrier.wait();
+                store.add(&mine).expect("add");
+                let held = store.get().expect("get").expect("a key is there");
+                (mine.to_vec(), held.to_vec())
+            })
+        })
+        .collect();
+    let seen: Vec<_> = minters
+        .into_iter()
+        .map(|t| t.join().expect("minter"))
+        .collect();
+    cleanup.remove();
+    assert_eq!(seen[0].1, seen[1].1, "both cores adopt one key");
+    assert!(
+        seen.iter().any(|(mine, held)| mine == held),
+        "the key is one of the two minted, not a third"
+    );
+}
+
 fn slot(store: &MemoryKeyStore) -> std::sync::Mutex<Option<Envelope>> {
     std::sync::Mutex::new(Some(envelope(store)))
 }

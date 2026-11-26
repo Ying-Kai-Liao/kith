@@ -17,7 +17,6 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
-use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -25,7 +24,7 @@ use crate::error::Error;
 use crate::layout::Layout;
 use crate::runs::{RunIdentity, RunTokens};
 use crate::runsock::{RunHandler, Server, endpoint};
-use crate::tests::{machine, paths};
+use crate::tests::{DAEMON_UP, machine, paths};
 
 /// Waits for a go-file, connects, sends the request from the environment, prints the answer line.
 const CLIENT: &str = "import os,socket,sys,time\n\
@@ -470,7 +469,7 @@ fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
             ..Config::default()
         },
     );
-    d.ready(Duration::from_secs(10)).expect("serving");
+    d.ready(DAEMON_UP).expect("serving");
     let layout = Layout::new(&m);
     let sock = endpoint(&layout);
     let owner = |method: &str, params: &Value| match crate::reach(&p, method, params, false) {
@@ -597,7 +596,7 @@ fn revoke_through_the_daemon_ends_the_tokens_and_a_revoked_person_cannot_mint() 
             ..Config::default()
         },
     );
-    d.ready(Duration::from_secs(10)).expect("serving");
+    d.ready(DAEMON_UP).expect("serving");
     let sock = endpoint(&Layout::new(&m));
     let owner = |method: &str, params: &Value| match crate::reach(&p, method, params, false) {
         crate::Reached::Answered(v) => v,

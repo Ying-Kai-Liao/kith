@@ -25,6 +25,10 @@ const MIGRATIONS: &[Migration] = &[ALL_STEPS[0]];
 const BOTH: &[Migration] = &[MIGRATIONS[0], V2];
 /// Schema 1 alone: the head these two-step tests stand for, whatever the real list grows to.
 const ONLY_V1: &[Migration] = &[MIGRATIONS[0]];
+/// How long a test waits for a daemon on a new machine to serve. It runs every migration first, and on a busy CI
+/// runner (Windows, beside the property tests) that once took past 10 s for three tests at once. A daemon that never
+/// serves still fails the test, only later.
+pub(crate) const DAEMON_UP: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub(crate) fn machine() -> (TempDir, PathBuf) {
     let t = tempfile::tempdir().expect("tempdir");

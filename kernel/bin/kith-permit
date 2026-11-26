@@ -682,27 +682,20 @@ def endpoint():
 
 
 def host_call(method, body, timeout=8):
-    """The host's local API over loopback with the serve token (as kith-recall does). None when it can't be reached."""
-    import urllib.request
-    from pathlib import Path
-    try:
-        data, port = endpoint()
-        token = (Path(data) / 'token').read_text().strip()
-        req = urllib.request.Request('http://127.0.0.1:%s/api/%s' % (port, method), json.dumps(body).encode(),
-                                     {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.load(r)
-    except Exception:  # noqa: BLE001
-        return None
+    """The host's local API over its local endpoint with the serve token (as kith-recall does). None when it can't be reached."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+    import kith_hostlocal
+    answer, _ = kith_hostlocal.call(method, body, timeout)
+    return answer
+
 
 
 def host_up():
-    """The host's port takes a connection (a host that answers no to a request is up)."""
-    try:
-        with socket.create_connection(('127.0.0.1', int(endpoint()[1])), timeout=2):
-            return True
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return False
+    """The host's local endpoint takes a connection (a host that answers no to a request is up)."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+    import kith_hostlocal
+    return kith_hostlocal.up()
+
 
 
 def restart_host():

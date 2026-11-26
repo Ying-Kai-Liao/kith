@@ -891,7 +891,7 @@ pub(crate) fn agent_access(
             "{host} is no longer kept for everyone {agent} is shared with"
         )]);
     }
-    if !kith_kernel::launch::guard::valid_domain(host) {
+    if !secrets::valid_domain(host) {
         return usage(format!(
             "'{host}' is not a plain host name (no wildcard, address or port)"
         ));

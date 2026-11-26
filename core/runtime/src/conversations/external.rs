@@ -79,7 +79,7 @@ pub(crate) fn switched(core: &Core) -> bool {
 
 #[cfg(not(unix))]
 pub(crate) fn switched(_core: &Core) -> bool {
-    false
+    crate::switched::on_windows("claims")
 }
 
 fn now_ms() -> i64 {

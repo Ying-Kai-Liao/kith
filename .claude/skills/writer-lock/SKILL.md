@@ -302,3 +302,12 @@ requeues it, an attached one is ended by `end_gone` once the pid and its group a
 (the detached-run rule above). No new way to start an engine without a claim, and nothing takes the lock. The host test
 `routines/sched_turn_e2e_tests.rs` checks claim pid = the pid the host started, and that a run outlives a host restart and is ended
 by `hostclaim.settle`. Drift read; SYNC not moved.
+
+## A warm stub killed alone, the host up (2026-11-25) - prose only, no model row
+`Claims4`'s `StubDies` makes an orphan only with the holder down (`~hUp`): a live holder sweeps the group before it records the
+stub's exit, so a report never ends a claim under a live engine. The host plays the holder for its warm stubs and did not: a stub
+SIGKILLed alone on macOS (no parent-death signal) left its engine in the group and the host reported `exit` with the stub's pid,
+so `apply` ended the claim. `core_writer.rs` `retry_end` (every end report goes through it) now calls `reap_orphan` first: while
+`procstart::orphan_group` names the group, SIGTERM, a grace, SIGKILL; a group that outlives both makes the report name no pid,
+which `apply` turns into `ending` for `end_gone`. That is the sweep the model assumes, so no action changed. The stub's L-clear
+(`clear.rs`) also kills the `orphan_group` of a gone marked stub before it removes the marker. Drift read for both; SYNC not moved.

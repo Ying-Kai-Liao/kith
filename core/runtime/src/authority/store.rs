@@ -69,7 +69,22 @@ pub(super) fn read<T>(core: &mut Core, f: impl FnOnce(&Value) -> T) -> Result<T>
 pub(super) fn digest(core: &mut Core) -> Result<String> {
     let tx = core.claim_tx()?;
     let tables = read_tables(&tx, &mut || {})?;
-    Ok(crate::cutover::authority::tables_digest(&tables))
+    Ok(tables_digest(&tables))
+}
+
+/// The digest of authority tables already read as one value: the first 16 hex of the SHA-256 of their text. The cutover
+/// marker and the gate's fingerprint hold it too (`cutover::authority::tables_digest` is this), and `people.revision`
+/// gives it to the host's cards. It lives here so a build with no cutover framework (Windows) has the same one.
+pub(crate) fn tables_digest(tables: &Value) -> String {
+    use sha2::{Digest as _, Sha256};
+    use std::fmt::Write as _;
+    Sha256::digest(tables.to_string().as_bytes())
+        .iter()
+        .take(8)
+        .fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
 }
 
 /// A refusal of the rules, as the readers give theirs: `Refused`, or `BadParams` for the ones `kith-auth` gives exit

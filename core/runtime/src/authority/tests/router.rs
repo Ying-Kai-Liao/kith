@@ -156,6 +156,8 @@ fn granted_gives_the_profiles_as_a_list() {
     );
 }
 
+// Compares against the Python kith-auth, which is Unix only (`import fcntl`) until retire-python P1.
+#[cfg(unix)]
 #[test]
 fn secrets_view_is_the_tables_in_auth_shape_without_values_handles_or_invite_codes() {
     let mut rig = Rig::new(&json!({

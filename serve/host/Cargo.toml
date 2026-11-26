@@ -63,6 +63,7 @@ semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 sha2 = "0.11.0"
+tower = { version = "0.5", default-features = false, features = ["util"] }
 hmac = "0.13.0"
 shlex = "2.0.1"
 tar = "0.4.46"
@@ -117,6 +118,14 @@ undocumented_unsafe_blocks = "warn"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Lean debug info: file and line tables (enough for backtraces and panics) for this workspace's crates, none for the
+# dependencies. A host rebuild takes about 30 s instead of 31-58 s and the debug binary is about 7% smaller.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
 
 # Every host start hashes its own executable (`service::capture_binary_identity`, the `binaryHash` the desktop app and the
 # updater check). A debug kith-serve is about 530 MB on Linux, and an unoptimized SHA-256 took many seconds of CPU per start

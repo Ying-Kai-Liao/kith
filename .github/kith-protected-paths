@@ -137,6 +137,8 @@ core/runtime/src/revoke_order.rs
 core/runtime/src/runs_props.rs
 core/runtime/src/runs.rs
 core/runtime/src/schedules/fire.rs
+core/runtime/src/secrets/keystore.rs
+core/runtime/src/switched.rs
 core/runtime/src/terminal.rs
 core/runtime/src/transcripts/record.rs
 core/runtime/src/wake/queue.rs
@@ -152,3 +154,13 @@ kernel/lib/kith_door_core.py
 kernel/tests/kith-door-core-check
 kernel/tests/kith-project-id-guest-check
 core/kernel/src/secrets/authority.rs
+core/kernel/src/access.rs
+core/kernel/src/launch/exec.rs
+core/kernel/src/launch/plan.rs
+core/kernel/src/secrets.rs
+core/kernel/src/threads/resolve.rs
+core/kernel/src/threads/writer.rs
+kernel/lib/kith_people_access.py
+kernel/lib/kith-core.sh
+serve/host/src/core_front.rs
+serve/host/src/launch_cmd.rs

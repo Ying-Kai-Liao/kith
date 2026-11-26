@@ -405,8 +405,20 @@ async fn limits_and_ownership_hold() {
     // A busy conversation queues; with noQueue it refuses; at five waiting it is busy.
     let busy = call(&r, &other.caller, "botAsk", ask("a", "q1")).await.unwrap();
     let conv = busy["conversation"].as_str().unwrap().to_owned();
-    // The rig has no agent process, so nothing keeps the first turn running; a message waiting in the thread is what
-    // makes the conversation busy, whatever the timing.
+    // The rig has no agent process, so the first turn ends by itself, but on the actor's own time: until it has, "a"
+    // still counts (waiting, or running), and the four waiting below would make five. So wait for it to end; then a
+    // message waiting in the thread is what makes the conversation busy, whatever the timing.
+    let thread = json!({"conversation": conv});
+    let mut ended = false;
+    for _ in 0..200 {
+        let t = call(&r, &other.caller, "botThread", thread.clone()).await.unwrap();
+        if matches!(t["state"].as_str(), Some("idle" | "stopped")) {
+            ended = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(ended, "the first turn of the busy conversation never ended");
     let cv = r.hub.store.bot_conversation_by_id(&conv).unwrap();
     let lane = Lane::in_thread(&cv.chat_bot_id, &cv.thread_root);
     let wait = |n: usize| {

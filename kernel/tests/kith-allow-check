@@ -176,8 +176,8 @@ json.dump(s, sys.stdout)'
 }
 S=$(settings KITH_PERMISSION_MODE=auto)
 has "an owner run in auto mode loads the saved rule" "$(js "d['permissions']['allow']" <<< "$S")" "Bash(git status)"
-is "...and the saved sentence, after the defaults and the kernel's own-code sentence" \
-  "$(js "d['autoMode']['allow'][0] == '\$defaults' and d['autoMode']['allow'][1].startswith('Running a script') and d['autoMode']['allow'][2].startswith('The owner approved the agent \"echo\"')" <<< "$S")" "True"
+is "...and the saved sentence, after the defaults and the kernel's own-code and public-web sentences" \
+  "$(js "d['autoMode']['allow'][0] == '\$defaults' and d['autoMode']['allow'][1].startswith('Running a script') and d['autoMode']['allow'][2].startswith('Reading a public web page') and d['autoMode']['allow'][3].startswith('The owner approved the agent \"echo\"')" <<< "$S")" "True"
 hasnt "...but not a rule of another agent" "$(js "d['permissions']['allow']" <<< "$S")" "Bash(ls)"
 is "it has a PermissionDenied hook" "$(js "'permit' in d['hooks']['PermissionDenied'][0]['hooks'][0]['command'] and d['hooks']['PermissionDenied'][0]['hooks'][0]['command'].split()[-2]" <<< "$S")" "--dir"
 is "...that waits as long as a card may" "$(js "d['hooks']['PermissionDenied'][0]['hooks'][0]['timeout']" <<< "$S")" "660"
@@ -209,13 +209,14 @@ for who in guest bot-3f9a1c2e; do
   is "$who: no hooks" "$(js "'PermissionDenied' in d['hooks']" <<< "$S")" "False"
   hasnt "$who: no saved rule" "$S" "git status"
   hasnt "$who: no saved sentence" "$S" "The owner approved"
+  hasnt "$who: no public-web sentence" "$S" "Reading a public web page"
   has "$who: the allow list is closed to the file tools" "$(js "d['permissions']['deny']" <<< "$S")" "agents/*/allowed.json)"
 done
 
 # no file, and a malformed one
 rm -f "$FILE"
 S=$(settings KITH_PERMISSION_MODE=auto)
-is "no allowed.json loads nothing past the defaults and the kernel's own-code sentence" "$(js "len(d['autoMode']['allow'])" <<< "$S")" "2"
+is "no allowed.json loads nothing past the defaults and the kernel's two sentences" "$(js "len(d['autoMode']['allow'])" <<< "$S")" "3"
 is "...and the hooks are there all the same" "$(js "'PermissionDenied' in d['hooks']" <<< "$S")" "True"
 printf '{ not json' > "$FILE"
 S=$(settings KITH_PERMISSION_MODE=auto)
@@ -347,11 +348,12 @@ class H(http.server.BaseHTTPRequestHandler):
         out = json.dumps({'env': {'KITH_ASK_TOKEN': 'term-tok', 'KITH_ASK_SOCKET': '/tmp/x.sock'}}).encode()
         self.send_response(200); self.send_header('Content-Length', str(len(out))); self.end_headers(); self.wfile.write(out)
     def log_message(self, *a): pass
-http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+import fakehost
+fakehost.UnixHTTPServer(fakehost.sock_path(sys.argv[1]), H).serve_forever()
 PY
-PORT=$((20000 + $$ % 20000))
-python3 "$T/fakehost.py" "$PORT" "$T/issued" & PIDS+=($!)
-for _ in $(seq 50); do python3 -c "import socket; socket.create_connection(('127.0.0.1', $PORT), 1)" 2>/dev/null && break; sleep 0.1; done
+PORT=1
+PYTHONPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)${PYTHONPATH:+:$PYTHONPATH}" python3 "$T/fakehost.py" "$T/serve" "$T/issued" & PIDS+=($!)
+for _ in $(seq 50); do [[ -S $T/serve/owner/host.sock ]] && break; sleep 0.1; done
 cat > "$T/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 [[ $1 == --version ]] && { echo "2.1.309 (Claude Code)"; exit 0; }
@@ -385,6 +387,6 @@ term KITH_PERMISSION_MODE=default
 is "terminal, another mode: no token asked for" "$(grep -c issueAskToken "$T/issued")" "0"
 term KITH_PERMISSION_MODE=auto KITH_AGENT=parent
 is "nested (started by another run): no token" "$(grep -c issueAskToken "$T/issued")" "0"
-term KITH_PERMISSION_MODE=auto KITH_SERVE_PORT=1
+term KITH_PERMISSION_MODE=auto KITH_SERVE_PORT=1 KITH_SERVE_DIR="$T/nohost"
 has "no host: the run still starts" "$(cat "$STUB_OUT")" "TOKEN="
 exit $((fails > 0))

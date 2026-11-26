@@ -285,7 +285,7 @@ pub async fn run(a: Args) -> Result<i32> {
     // Before anything starts: an engine that can't hold the run to its folders must not get the task.
     if let Some(why) = runonce::cannot_hold(engine, approve) {
         show(&Done::of(&a.engine, Err(anyhow!(why)), None), &a.engine, a.json);
-        return Ok(1);
+        return Ok(runonce::CANNOT_HOLD);
     }
     let Some(command) = runonce::acp_command(engine, None).await? else {
         return Ok(runonce::NOT_AVAILABLE);

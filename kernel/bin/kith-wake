@@ -70,6 +70,7 @@ import kith_wake_core  # noqa: E402  the helpers' and verbs' way to the core onc
 KEEP_DAYS = 7
 MAX_TRIES = 5                     # a run-door turn that fails this often without reaching the session ends as failed
 FIRST_RETRY, MAX_RETRY = 5, 600   # seconds, doubling
+CANNOT_HOLD = 79                  # the exit of a run the engine layer refused for good (a Hermes agent without bypass): never retried
 HELD_PAUSE = 10                   # seconds a held session waits before it is offered again (not a failed try)
 WAIT_TIMEOUT = '6h'               # a waiter always has one (v2 design §7)
 CI_POLL = 50                      # seconds between two looks at a PR's checks (the tick is a minute)
@@ -375,23 +376,24 @@ def commit(run, how='answered'):
         return True
 
 
-def give_back(run, held=False, why=''):
+def give_back(run, held=False, why='', final=False):
     """The turn did not reach the session: its requests are owed again. A held writer is not a failed try; a failed try
-    waits a doubling pause, and after MAX_TRIES the requests end as failed (logged) instead of looping."""
+    waits a doubling pause, and after MAX_TRIES the requests end as failed (logged) instead of looping. A final failure
+    (the run was refused for good) ends them as failed at once."""
     with locked():
         path, it = find_run(run)
         if not it:
             return False
-        return release(path, it, held, why)
+        return release(path, it, held, why, final)
 
 
-def release(path, it, held, why):
+def release(path, it, held, why, final=False):
     run = it['turn']['run']
     carried = [r for r in it['requests'] if r['run'] == run]
     it['turn'] = None
     if not held:
         it['tries'] = it.get('tries', 0) + 1
-        if it['tries'] >= MAX_TRIES:
+        if final or it['tries'] >= MAX_TRIES:
             ids = [r['id'] for r in carried]
             mark_answered(ids, 'failed', run)
             it['requests'] = [r for r in it['requests'] if r not in carried]
@@ -536,7 +538,7 @@ def deliver(session):
         commit(turn['run'], 'answered' if rc == 0 else f'answered, exit {rc}')
     else:
         last = said.strip().splitlines()[-1] if said.strip() else ''
-        give_back(turn['run'], held=bool(HELD.search(said)), why=f'exit {rc}: {last}')
+        give_back(turn['run'], held=bool(HELD.search(said)), why=f'exit {rc}: {last}', final=rc == CANNOT_HOLD)
     return rc
 
 

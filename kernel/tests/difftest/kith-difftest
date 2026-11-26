@@ -109,8 +109,10 @@ class Normalizer:
         for path, ph in self.roots:
             s = s.replace(path, ph)
         # A checkout path with a space is shlex-quoted in a command line ('...<KERNEL>/bin/x' becomes ''"'"'<KERNEL>/bin/x'"'"'
-        # inside a quote); strip those quotes so the record does not depend on the path having a space.
+        # inside a quote, and a bare shlex.quote(root) + '/lib/x' becomes '<KERNEL>'/lib/x); strip those quotes so the record
+        # does not depend on the path having a space. Only text shlex leaves unquoted on a plain path is unquoted here.
         s = re.sub(r"'\"'\"'(<KERNEL>[^']*?)'\"'\"'", r"\1", s)
+        s = re.sub(r"'(<KERNEL>[\w@%+=:,./-]*)'", r"\1", s, flags=re.ASCII)
         for rx, repl in self.rules:
             s = rx.sub(repl, s)
         return s
