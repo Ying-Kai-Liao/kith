@@ -20,7 +20,7 @@ use super::core_runs::Ops;
 use super::run_door::{Launch, Run, Started, detach, start};
 use super::sched_launch;
 use crate::hub::Hub;
-use crate::terminal::core_writer::CoreWriter;
+use crate::terminal::core_writer::{CoreWriter, Mode};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -55,7 +55,9 @@ impl Ops for Live {
         let spec = json!({"prompt": t["prompt"], "settings": t["settings"], "person": spec_person});
         // A program that lists `sched-turn` runs the turn as the launch; one that does not (an older one, a Mac whose program
         // list lacks it) keeps `kith-sched run-turn` (design 2026-11-24-sched-turn S-R3).
-        let program = sched_launch::program();
+        // And only on a Mac whose claims are the core's: the launch attaches the host's claim through `claim.attach`, which the core
+        // refuses until `kith migrate step claims`. The runner pulls in Writer mode only; this keeps the line true whoever calls.
+        let program = sched_launch::program().filter(|_| self.0.mode() == Mode::Writer);
         let run = Run {
             turn,
             conversation,

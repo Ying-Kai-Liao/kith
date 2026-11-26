@@ -165,6 +165,9 @@ exit 0
         world.python(&kernel, &["person", "kai", "owner"]);
         world.python(&kernel, &["person", "sam", "name=Sam"]);
         world.python(&kernel, &["member", "house", "sam", "mode=default"]);
+        // The claims are the core's (`claim.attach` is refused until this step, and the host runs turns this way in Writer mode
+        // only), then the authority, as the cutover's own order has it.
+        world.kith(&["kernel", "cutover", "step", "claims"]);
         let said = crate::core_front::step_authority_for_test(&world.folders, &kernel).expect("the authority step");
         assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
         let mut world = world;

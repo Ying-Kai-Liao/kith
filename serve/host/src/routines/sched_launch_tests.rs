@@ -29,6 +29,8 @@ struct Lab {
     folders: Paths,
     /// Every call the scripted core took: (method, params).
     log: Arc<Mutex<Vec<(String, Value)>>>,
+    /// Whether the core says the claims module is switched (the gate `cutover.mayServe` answers).
+    switched: Arc<std::sync::atomic::AtomicBool>,
     _held: std::sync::MutexGuard<'static, ()>,
 }
 
@@ -52,9 +54,12 @@ impl Lab {
         };
         let log = Arc::new(Mutex::new(Vec::new()));
         let seen = log.clone();
+        let switched = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let gate = switched.clone();
         let fake: Fake = Arc::new(move |method: &str, p: &Value| {
             seen.lock().unwrap().push((method.to_owned(), p.clone()));
             Answer::Done(match method {
+                "cutover.mayServe" => json!({"ok": gate.load(std::sync::atomic::Ordering::SeqCst)}),
                 "hostclaim.epoch" => json!({"epoch": 1}),
                 "hostclaim.claim" => json!({"claimId": 9}),
                 _ => json!({}),
@@ -63,7 +68,7 @@ impl Lab {
         register(&state, fake);
         std::fs::create_dir_all(dir.join("k/bin")).unwrap();
         *TEST_KERNEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(dir.join("k"));
-        Self { dir, folders, log, _held: held }
+        Self { dir, folders, log, switched, _held: held }
     }
 
     fn script(&self, name: &str, body: &str) -> PathBuf {
@@ -253,4 +258,16 @@ fn a_launch_that_fails_to_start_leaves_no_outbox_behind() {
         .filter(|n| n.starts_with("sched-house-daily-"))
         .collect();
     assert!(left.is_empty(), "the outbox of a run that never started is removed: {left:?}");
+}
+
+#[test]
+fn a_mac_whose_claims_are_not_switched_keeps_run_turn_though_the_program_lists_the_token() {
+    let lab = Lab::new();
+    lab.program("\"sched-turn\"", "echo the-launch-must-not-run > /dev/null; exit 1");
+    lab.script("k/bin/kith-sched", &format!("echo \"$@\" > {}/argv", lab.dir.display()));
+    lab.switched.store(false, std::sync::atomic::Ordering::SeqCst);
+    let hub = hub();
+    assert_eq!(Live(lab.writer()).cron(&hub, &fired("kai", true), "daily"), Started::Ran);
+    lab.until("the report", || !lab.calls("hostclaim.report").is_empty());
+    assert_eq!(lab.read("argv").trim(), "run-turn house daily --turn 7 --claim 9");
 }
