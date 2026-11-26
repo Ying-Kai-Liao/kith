@@ -160,9 +160,11 @@ impl Routines {
         if turns.is_empty() {
             return;
         }
+        let launch = crate::kernel::launch_program();
         let world = super::core_ask::World {
             bin: crate::agent::hq::bin(),
-            launch: crate::kernel::launch_program(),
+            launch: launch.clone(),
+            names_conversation: crate::kernel::program_lists(launch.as_deref(), "turn-conversation"),
             kernel: crate::kernel::current_kernel(),
             harness: &super::core_ask::harness_of_agent,
             runtime: tokio::runtime::Handle::try_current().ok(),

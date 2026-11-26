@@ -40,6 +40,9 @@ pub(super) struct World<'a> {
     pub launch: Option<PathBuf>,
     /// The kernel folder.
     pub kernel: Option<PathBuf>,
+    /// Whether the program lists `turn-conversation` (`kernel version`): the launch then attaches the claim naming the ask's
+    /// conversation. Without it `KITH_TURN_CONVERSATION` would be ignored or refused, so the turn is cancelled up front instead.
+    pub names_conversation: bool,
     /// The `harness:` an agent's snapshot names, `claude` when it names none, `None` when it cannot be read.
     pub harness: &'a dyn Fn(&str) -> Option<String>,
     /// The host's runtime, to bind a run token to the callee's process.
@@ -164,6 +167,9 @@ impl Plan {
     fn of(t: &Value, engine: &str, task: &str, claim: i64, world: &World<'_>) -> Result<Self, String> {
         let opt = |k: &str| t["opts"][k].as_str().filter(|v| !v.is_empty()).map(str::to_owned);
         let claude = is_claude(engine);
+        if !world.names_conversation {
+            return Err("the kith program here does not attach a turn naming its conversation (turn-conversation), so no callee was started".to_owned());
+        }
         let program = if claude { &world.bin } else { &world.launch };
         let bin = program.clone().ok_or_else(|| "no kith program here to run the callee".to_owned())?;
         if !claude && world.kernel.is_none() {

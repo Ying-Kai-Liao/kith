@@ -43,6 +43,7 @@ fn door(w: &World, host: &str, bin: std::path::PathBuf, launch: Option<std::path
     let world = Door {
         bin: Some(bin),
         launch,
+        names_conversation: true,
         kernel: Some(repo_kernel()),
         harness: &move |_| Some(harness.to_owned()),
         runtime: None,
