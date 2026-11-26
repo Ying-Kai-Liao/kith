@@ -477,9 +477,22 @@ fn end_in_asks(
     Ok(())
 }
 
-/// `ask.endPeer`: [`end_epoch_in`] in one transaction.
-pub(crate) fn end(core: &mut Core, computer: &str, dir: &str, now: i64) -> Result<EndedPeer> {
+/// `ask.endPeer`: [`end_epoch_in`] in one transaction. With an `epoch`, only that pairing ends: a caller that read an epoch and
+/// acts on what it read (the pass's cut-off, the reconcile) never ends a newer one that was linked since (nothing happens when
+/// the live epoch is another).
+pub(crate) fn end(
+    core: &mut Core,
+    computer: &str,
+    dir: &str,
+    epoch: Option<&str>,
+    now: i64,
+) -> Result<EndedPeer> {
     wake::write_tx(core, secs(now), |tx, st| {
+        if let Some(e) = epoch
+            && !live_in(tx, computer, dir, e)?
+        {
+            return Ok(EndedPeer::default());
+        }
         end_epoch_in(tx, st, computer, dir, now)
     })
 }
@@ -555,6 +568,17 @@ pub(crate) struct Apply<'a> {
     pub cost: Option<f64>,
     /// The `--to` messages (`ask.to`'s `k`) the computer took.
     pub to_sent: Vec<String>,
+    /// The host's try did not reach the computer (D4): the ask shows "waiting on computer" from now, and nothing else is written.
+    pub away: bool,
+}
+
+/// When the host's first failed try of this ask's computer was (the `away` mark in the ask's own fields); it stays until a call
+/// that carried the computer's answer clears it.
+pub(super) fn away_since(a: &Ask) -> Option<i64> {
+    a.extra
+        .as_ref()
+        .and_then(|e| e.get("away"))
+        .and_then(Value::as_i64)
 }
 
 /// `ask.peerApply` (D3 following): copies what the computer's row of this ask says, in one transaction.
@@ -586,6 +610,17 @@ pub(crate) fn apply(core: &mut Core, machine: &Path, f: &Apply<'_>, now: i64) ->
             return Ok(json!({"id": f.id, "applied": false, "stale": true}));
         }
         let live = is_live(&a);
+        if f.away {
+            // One failed try is enough to say so; nothing is settled, no row is written (D4). An ask that is over waits on nothing.
+            if live && away_since(&a).is_none() {
+                let mut a = a;
+                a.extra
+                    .get_or_insert_with(Default::default)
+                    .insert("away".to_owned(), json!(now));
+                a.put(tx)?;
+            }
+            return Ok(json!({"id": f.id, "applied": false, "away": live}));
+        }
         // The computer's cost joins the chain once, whatever became of the ask here.
         // A live ask takes its final state here, so a cost that tips the chain's cap makes it `capped` and stays so.
         if let (Some(_), Some(cost)) = (end, f.cost)
@@ -599,6 +634,10 @@ pub(crate) fn apply(core: &mut Core, machine: &Path, f: &Apply<'_>, now: i64) ->
         };
         a.sent = true;
         a.peer_seen_ms = Some(now);
+        // It answered: it is not away any more.
+        if let Some(extra) = a.extra.as_mut() {
+            extra.remove("away");
+        }
         let mut copied = Vec::new();
         if live {
             let mut sorted: Vec<&InRow> = f.rows.iter().collect();
@@ -675,6 +714,18 @@ pub(crate) fn owed(core: &Core) -> Result<Value> {
             .collect::<std::result::Result<_, _>>()?
     };
     let (mut send, mut follow, mut stop, mut to) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    // The places left on each computer's side (`peer_b::MAX_QUEUED`): its callee refuses an ask past ten waiting, and a refusal is a
+    // final `refused` for the user, who only asked while it was busy. So the sends stop at ten asks open there, and the rest stay
+    // owed (listed as soon as one of the ten ends); the callee's refusal stays as the backstop.
+    let mut open_there: BTreeMap<&str, i64> = BTreeMap::new();
+    for a in asks
+        .iter()
+        .filter(|a| a.mode.as_deref() == Some("peer") && is_live(a) && a.sent)
+    {
+        if let Some(c) = a.peer.as_deref() {
+            *open_there.entry(c).or_insert(0) += 1;
+        }
+    }
     for a in asks.iter().filter(|a| a.mode.as_deref() == Some("peer")) {
         let (Some(computer), Some(epoch)) = (&a.peer, &a.peer_epoch) else {
             continue;
@@ -684,24 +735,25 @@ pub(crate) fn owed(core: &Core) -> Result<Value> {
         }
         let kept = |k: &str| a.extra.as_ref().and_then(|e| e.get(k)).cloned();
         if is_live(a) && !a.sent {
-            send.push(json!({
-                "id": a.id, "key": a.id, "computer": computer, "epoch": epoch,
-                "agent": a.asked, "task": a.task,
-                "cont": kept("cont"), "opts": kept("opts"),
-                "lineage": {"chain": a.chain, "hop": a.hop, "cross": a.cross_hops, "from": a.id,
-                            "cost": costs.get(&a.chain).copied().unwrap_or(0.0)},
-            }));
+            let held = open_there.entry(computer.as_str()).or_insert(0);
+            if *held < super::peer_b::MAX_QUEUED {
+                *held += 1;
+                send.push(json!({
+                    "id": a.id, "key": a.id, "computer": computer, "epoch": epoch,
+                    "agent": a.asked, "task": a.task,
+                    "cont": kept("cont"), "opts": kept("opts"),
+                    "lineage": {"chain": a.chain, "hop": a.hop, "cross": a.cross_hops, "from": a.id,
+                                "cost": costs.get(&a.chain).copied().unwrap_or(0.0)},
+                }));
+            }
         } else if is_live(a) {
             follow.push(json!({"id": a.id, "key": a.id, "computer": computer, "epoch": epoch, "after": a.fetched}));
         }
         if a.stop_owed {
             stop.push(json!({"id": a.id, "key": a.id, "computer": computer, "epoch": epoch}));
         }
-        // A message for an ask that was sent (and not stopped or ended) goes after it.
-        if a.sent
-            && a.ended_ms.is_none()
-            && matches!(a.state.as_str(), "open" | "answered" | "capped")
-        {
+        // A message for an ask that was sent and is still open goes after it (an answered one takes none: `to_owed` refuses it).
+        if a.sent && is_live(a) {
             for (k, text) in super::peer_b::owed_to(a) {
                 to.push(json!({"id": a.id, "key": a.id, "computer": computer, "epoch": epoch, "k": k, "text": text}));
             }

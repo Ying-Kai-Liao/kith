@@ -129,6 +129,8 @@ struct Direct {
     /// The epoch B's host still holds for A (`peers_in`); `None` once B unlinked.
     b_epoch: Mutex<Option<String>>,
     off: AtomicBool,
+    /// A key B's host refuses the calls of (an item it would not take), while it answers every other.
+    bad_key: Mutex<Option<String>>,
     calls: Mutex<Vec<String>>,
 }
 
@@ -138,6 +140,7 @@ impl Direct {
             b: b.folders.clone(),
             b_epoch: Mutex::new(Some("e1".to_owned())),
             off: AtomicBool::new(false),
+            bad_key: Mutex::default(),
             calls: Mutex::default(),
         }
     }
@@ -154,11 +157,14 @@ impl Wire for Direct {
                 return Err(Reach::Away("off".to_owned()));
             }
             self.calls.lock().unwrap().push(method.to_owned());
+            if self.bad_key.lock().unwrap().as_deref().is_some_and(|k| params["key"] == json!(k)) {
+                return Err(Reach::Refused("a parameter is not one B takes".to_owned()));
+            }
             if self.b_epoch.lock().unwrap().as_deref() != Some(epoch) {
                 return Ok(unpaired(method));
             }
             let caller = Caller { computer: "macA", name: "A", epoch };
-            callee::handle(&self.b, &caller, method, &params, &|a| a == "echo", 1_000).await.map_err(Reach::Away)
+            callee::handle(&self.b, &caller, method, &params, &|a| a == "echo", 1_000).await.map_err(Reach::Refused)
         })
     }
 }
@@ -401,7 +407,10 @@ async fn a_pairing_a_core_ended_and_a_host_row_that_remains_is_finished_by_the_r
         let (_a2, b2, _w) = pair();
         b2.host("ask.peerList", &json!({}))
     };
-    assert_eq!(fence::plan(&listed, &[], &[]), [Step::End { computer: "macA".to_owned(), dir: "in" },]);
+    assert_eq!(
+        fence::plan(&listed, &[], &[]),
+        [Step::End { computer: "macA".to_owned(), dir: "in", epoch: "e1".to_owned() },]
+    );
     // A host row the core never heard of (a pairing from before the link carried asks) is made known to it.
     let none = json!({"in": [], "out": [], "ended": []});
     assert_eq!(
@@ -433,4 +442,81 @@ async fn a_stop_that_comes_before_the_ask_leaves_nothing_to_start() {
     let said = callee::handle(&b.folders, &caller, "peerAsk", &params, &|_| true, 1).await.unwrap();
     assert_eq!(said["state"], json!("stopped"), "{said}");
     assert_eq!(b.queued(), Vec::<Value>::new());
+}
+
+fn waiting_of(a: &Side, id: &str) -> Value {
+    a.owner("ask.delegations", &json!({}))["delegations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == json!(id))
+        .unwrap()["waiting"]
+        .clone()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_failed_pass_shows_waiting_on_the_computer_and_a_good_one_clears_it_with_nothing_settled() {
+    let (a, b, wire) = pair();
+    let pass = Pass::default();
+    a.ask("p1", &json!({}));
+    a.ask("p2", &json!({}));
+    assert_eq!(waiting_of(&a, "p1"), Value::Null);
+    wire.off.store(true, Ordering::SeqCst);
+    pass.run(&a.folders, &wire).await;
+    // Both asks say so (the second was skipped behind the first failed call, and is shown all the same); no row, nothing settled.
+    for id in ["p1", "p2"] {
+        let w = waiting_of(&a, id);
+        assert_eq!((&w["on"], &w["computer"]), (&json!("computer"), &json!("macB")), "{id}: {w}");
+        assert_eq!(a.state(id), "open");
+        assert!(a.rows(id).is_empty());
+    }
+    assert_eq!(b.queued(), Vec::<Value>::new());
+    // The computer is back: the next pass that reaches it clears the mark.
+    wire.off.store(false, Ordering::SeqCst);
+    let fresh = Pass::default();
+    fresh.run(&a.folders, &wire).await;
+    for id in ["p1", "p2"] {
+        assert_eq!(waiting_of(&a, id), Value::Null, "{id}");
+        assert_eq!(a.state(id), "open");
+    }
+    assert_eq!(b.queued().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_item_the_computer_would_not_take_does_not_hold_up_the_rest() {
+    let (a, b, wire) = pair();
+    let pass = Pass::default();
+    a.ask("p1", &json!({}));
+    a.ask("p2", &json!({}));
+    *wire.bad_key.lock().unwrap() = Some("p1".to_owned());
+    pass.run(&a.folders, &wire).await;
+    // p2 went over in the same pass; p1 stays owed, and is not shown as waiting on a computer that answered.
+    assert_eq!(b.queued().len(), 1);
+    assert_eq!(b.queued()[0]["ask"], json!(on_b("p2")));
+    let owed = a.owner("ask.peerOwed", &json!({}));
+    assert_eq!(owed["send"].as_array().unwrap().len(), 1, "{owed}");
+    assert_eq!(owed["send"][0]["id"], json!("p1"));
+    assert_eq!(waiting_of(&a, "p1"), Value::Null);
+    // The computer was not marked away: the next pass tries p1 again at once, and goes through once B takes it.
+    *wire.bad_key.lock().unwrap() = None;
+    pass.run(&a.folders, &wire).await;
+    assert_eq!(b.queued().len(), 2);
+    assert_eq!(a.owner("ask.peerOwed", &json!({}))["send"], json!([]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_not_paired_answer_never_ends_a_newer_pairing() {
+    let (a, _b, _wire) = pair();
+    a.ask("p1", &json!({}));
+    // The pass read its items at e1; the owner linked again (e2) before the answer came back as "not paired".
+    a.host("ask.peerLink", &json!({"computer": "macB", "dir": "out", "epoch": "e2", "name": "mini"}));
+    assert_eq!(a.state("p1"), "cut_off", "the old epoch's ask went with it");
+    a.ask("p2", &json!({}));
+    Pass::default().cut_off(&a.folders, "macB", "e1").await;
+    assert_eq!(a.state("p2"), "open", "the e2 pairing and its ask are left alone");
+    let listed = a.host("ask.peerList", &json!({}));
+    assert_eq!(listed["out"][0]["epoch"], json!("e2"), "{listed}");
+    // The epoch that is live ends it.
+    Pass::default().cut_off(&a.folders, "macB", "e2").await;
+    assert_eq!(a.state("p2"), "cut_off");
 }

@@ -441,6 +441,34 @@ fn a_new_epoch_replaces_the_old_and_ends_what_came_under_it_in_that_direction_on
 }
 
 #[test]
+fn end_peer_with_an_epoch_ends_only_that_pairing_never_a_newer_one() {
+    let r = Rig::new();
+    link_out(&r, 1);
+    peer(&r, "p", MAC);
+    // The owner re-linked since the caller read epoch 1: its end of epoch 1 changes nothing of epoch 2's.
+    let said = link_out(&r, 2);
+    assert_eq!(said["ended"], json!(["p"]), "{said}");
+    peer(&r, "q", MAC);
+    let stale = r.host(
+        "ask.endPeer",
+        &json!({"computer": MAC, "dir": "out", "epoch": ep(1)}),
+    );
+    assert_eq!(stale["ended"], json!([]), "{stale}");
+    assert_eq!(r.ask_state("q"), "open");
+    assert_eq!(
+        r.sql::<i64>("SELECT live FROM ask_peers WHERE epoch = ?1", &ep(2)),
+        1
+    );
+    // The live epoch named ends it.
+    let live = r.host(
+        "ask.endPeer",
+        &json!({"computer": MAC, "dir": "out", "epoch": ep(2)}),
+    );
+    assert_eq!(live["ended"], json!(["q"]), "{live}");
+    assert_eq!(r.ask_state("q"), "cut_off");
+}
+
+#[test]
 fn two_computers_paired_both_ways_end_one_direction_and_the_other_goes_on() {
     let r = Rig::new();
     link_in(&r, 1);
@@ -533,6 +561,93 @@ fn peer_owed_lists_the_send_then_the_follow_and_the_stop() {
         owed,
         json!({"send": [], "follow": [], "stop": [], "to": []})
     );
+}
+
+#[test]
+fn an_eleventh_ask_is_held_back_here_and_goes_when_one_of_the_ten_ends() {
+    let r = Rig::new();
+    link_out(&r, 1);
+    for n in 0..11 {
+        peer(&r, &format!("q{n:02}"), MAC);
+    }
+    let listed = |r: &Rig| -> Vec<String> {
+        r.host("ask.peerOwed", &json!({}))["send"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let first = listed(&r);
+    assert_eq!(first.len(), 10, "{first:?}");
+    let held_back = (0..11)
+        .map(|n| format!("q{n:02}"))
+        .find(|id| !first.contains(id))
+        .unwrap();
+    // Ten of them open there: still ten, the same ones are owed.
+    apply(&r, &first[0], 1, &json!([]), Some("open"), None);
+    let second = listed(&r);
+    assert_eq!(second.len(), 9, "{second:?}");
+    assert!(!second.contains(&held_back), "{second:?}");
+    // One ends: the held-back ask is owed now.
+    apply(&r, &first[0], 1, &json!([]), Some("answered"), None);
+    let third = listed(&r);
+    assert!(third.contains(&held_back), "{third:?}");
+    assert_eq!(
+        r.ask_state(&held_back),
+        "open",
+        "never refused or cut off for waiting"
+    );
+}
+
+#[test]
+fn a_failed_try_shows_waiting_on_the_computer_and_a_call_it_answered_clears_it() {
+    let r = Rig::new();
+    link_out(&r, 1);
+    peer(&r, "p1", MAC);
+    let waiting = |r: &Rig| -> Value {
+        r.owner("ask.delegations", &json!({}))["delegations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["id"] == json!("p1"))
+            .unwrap()["waiting"]
+            .clone()
+    };
+    assert_eq!(waiting(&r), Value::Null);
+    let wakes_before = wakes(&r);
+    let mut p = r.env(&[]);
+    p["id"] = json!("p1");
+    p["epoch"] = json!(ep(1));
+    p["away"] = json!(true);
+    let said = r.host("ask.peerApply", &p);
+    assert_eq!(said["applied"], json!(false), "{said}");
+    let w = waiting(&r);
+    assert_eq!(
+        (&w["on"], &w["computer"]),
+        (&json!("computer"), &json!(MAC)),
+        "{w}"
+    );
+    let since = w["since"].clone();
+    assert!(since.is_i64(), "{w}");
+    // Nothing was settled and nothing was written: the ask is open, still owed its send, with no row and no wake.
+    assert_eq!(r.ask_state("p1"), "open");
+    assert!(r.rows("p1").is_empty());
+    assert_eq!(wakes(&r), wakes_before);
+    assert_eq!(
+        r.host("ask.peerOwed", &json!({}))["send"][0]["id"],
+        json!("p1")
+    );
+    // A second failed try keeps the first one's time.
+    r.host("ask.peerApply", &p);
+    assert_eq!(waiting(&r)["since"], since);
+    // The computer answered: the mark is gone.
+    apply(&r, "p1", 1, &json!([]), Some("open"), None);
+    assert_eq!(waiting(&r), Value::Null);
+    // An ask that is over waits on nothing, and a failed try does not mark it.
+    apply(&r, "p1", 1, &json!([]), Some("stopped"), None);
+    r.host("ask.peerApply", &p);
+    assert_eq!(waiting(&r), Value::Null);
 }
 
 #[test]

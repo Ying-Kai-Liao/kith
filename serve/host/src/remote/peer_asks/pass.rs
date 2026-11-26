@@ -2,9 +2,14 @@
 //! came back told to the core. One pass is sends, then stops, then `--to` messages, then follows, each repeatable.
 //!
 //! - **A computer that cannot be reached** is skipped for [`AWAY_FOR`] after the first failure, so a computer that is off costs
-//!   one failed call, not one per ask per pass. Nothing is settled: the core cuts the ask off past its wait (seven days).
+//!   one failed call, not one per ask per pass. Nothing is settled: the core cuts the ask off past its wait (seven days). The
+//!   first failed try marks each ask it held up as waiting on the computer (`ask.peerApply {away}`, D4: no row, no wake), and the
+//!   next call the computer answers clears it.
+//! - **A computer that answers with a refusal of one call** (a bad parameter, "still settling") is not away: that item stays
+//!   owed and goes again next pass, and the other items for the computer go on.
 //! - **A computer that says it is not paired** (or this host has no pairing at the epoch of the row) cuts its asks off at once:
-//!   `ask.endPeer {dir: out}`, which gives each ask one notice row, and drops what was owed to it.
+//!   `ask.endPeer {dir: out, epoch}` under the pairing lock (the epoch the item was read at, so a pairing made since is never
+//!   ended by a stale answer), which gives each ask one notice row, and drops what was owed to it.
 //! - **Two passes at once** do no harm (every call is repeatable) but waste calls, so a pass that finds one running does nothing.
 
 use std::collections::HashMap;
@@ -29,6 +34,8 @@ const AWAY_FOR: Duration = Duration::from_secs(30);
 pub(crate) struct Pass {
     running: AtomicBool,
     away: Mutex<HashMap<String, Instant>>,
+    /// The asks marked "waiting on computer" in this process, with their computer: a mark is told to the core once.
+    marked: Mutex<HashMap<String, String>>,
 }
 
 impl Pass {
@@ -44,6 +51,22 @@ impl Pass {
 
     fn found(&self, computer: &str) {
         self.away.locked().remove(computer);
+        // The core clears the mark itself with the answer it takes (`ask.peerApply`); this only lets a later failure mark again.
+        self.marked.locked().retain(|_, c| c != computer);
+    }
+
+    /// The ask of an item that could not be tried is shown as waiting on its computer (once per away spell).
+    async fn mark_away(&self, folders: &Paths, item: &Value) {
+        let (Some(id), Some(computer)) = (item["id"].as_str(), item["computer"].as_str()) else { return };
+        if self.marked.locked().insert(id.to_owned(), computer.to_owned()).is_some() {
+            return;
+        }
+        let params = json!({"id": id, "epoch": item["epoch"], "away": true});
+        if let Err(Said::Down(why)) = core(folders, "ask.peerApply", params).await {
+            // Not told: tried again with the next pass.
+            self.marked.locked().remove(id);
+            tracing::debug!(why, "peer asks: the core did not take the away mark");
+        }
     }
 
     /// One pass over what the core says the link owes. A pass that is already running makes this one a no-op.
@@ -87,11 +110,12 @@ impl Pass {
     ) -> Option<Value> {
         let (computer, epoch) = (item["computer"].as_str()?, item["epoch"].as_str()?);
         if self.skip(computer) {
+            self.mark_away(folders, item).await;
             return None;
         }
         match wire.call(computer, epoch, method, params).await {
             Ok(v) if v["paired"].as_bool() == Some(false) => {
-                self.cut_off(folders, computer).await;
+                self.cut_off(folders, computer, epoch).await;
                 None
             }
             Ok(v) => {
@@ -99,20 +123,32 @@ impl Pass {
                 Some(v)
             }
             Err(Reach::NotPaired) => {
-                self.cut_off(folders, computer).await;
+                self.cut_off(folders, computer, epoch).await;
+                None
+            }
+            Err(Reach::Refused(why)) => {
+                // The computer is there; this one call it would not take. It stays owed, and the next item goes.
+                tracing::debug!(computer, why, "peer asks: the computer refused one call; it is tried again");
+                self.found(computer);
                 None
             }
             Err(Reach::Away(why)) => {
                 tracing::debug!(computer, why, "peer asks: the computer did not answer");
                 self.lost(computer);
+                self.mark_away(folders, item).await;
                 None
             }
         }
     }
 
-    async fn cut_off(&self, folders: &Paths, computer: &str) {
+    /// The computer is not paired at `epoch`, the epoch the item was read at: the asks of that epoch are cut off. Under the
+    /// pairing lock, and naming the epoch, so an answer that is stale (the owner linked again since the item was read) ends nothing
+    /// of the newer pairing.
+    pub(super) async fn cut_off(&self, folders: &Paths, computer: &str, epoch: &str) {
         tracing::info!(computer, "peer asks: the computer is not paired at the epoch of its asks; cutting them off");
-        if let Err(e) = core(folders, "ask.endPeer", json!({"computer": computer, "dir": "out"})).await {
+        let _one = fence::lock().await;
+        let params = json!({"computer": computer, "dir": "out", "epoch": epoch});
+        if let Err(e) = core(folders, "ask.endPeer", params).await {
             tracing::debug!(why = %e, "peer asks: the core did not take the cut-off");
         }
     }

@@ -38,6 +38,9 @@ pub(crate) enum Reach {
     Away(String),
     /// This computer has no live pairing with it at that epoch, or it says it has none: the ask is cut off.
     NotPaired,
+    /// It answered, and would not take this one call (a bad parameter, "still settling"): the item stays owed and goes again
+    /// next pass, and the other items for that computer go on. The computer is not away.
+    Refused(String),
 }
 
 /// A boxed future, as `Wire::call` answers it.
@@ -65,6 +68,7 @@ impl Wire for HubWire {
             }
             super::peers::call_peer_typed(&self.0, &p, method, params).await.map_err(|e| match e {
                 super::peers::PeerFail::Refused(_) => Reach::NotPaired,
+                super::peers::PeerFail::Host(why) => Reach::Refused(why),
                 super::peers::PeerFail::Away(why) => Reach::Away(why),
             })
         })

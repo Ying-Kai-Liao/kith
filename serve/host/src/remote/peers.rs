@@ -500,7 +500,7 @@ async fn first_call(hub: &Arc<Hub>, p: &PeerOut) -> Result<Value, String> {
 /// link). An error is a message to show; B being off is one.
 pub async fn call_peer(hub: &Arc<Hub>, p: &PeerOut, method: &str, params: Value) -> Result<Value, String> {
     call_peer_typed(hub, p, method, params).await.map_err(|e| match e {
-        PeerFail::Refused(why) | PeerFail::Away(why) => why,
+        PeerFail::Refused(why) | PeerFail::Away(why) | PeerFail::Host(why) => why,
     })
 }
 
@@ -509,6 +509,9 @@ pub async fn call_peer(hub: &Arc<Hub>, p: &PeerOut, method: &str, params: Value)
 pub enum PeerFail {
     /// The cloud refused the channel: this computer's key is not (or no longer) in the other's ACL. The pairing is over.
     Refused(String),
+    /// The computer answered, with an error: it is there, and it would not take this call (a bad parameter, an agent it does not
+    /// have, "still settling"). The call is about one item; the computer is not away.
+    Host(String),
     /// Anything else: off, asleep, the relay or the cloud out of reach, the key not readable. Nothing is settled.
     Away(String),
 }
@@ -524,9 +527,17 @@ pub async fn call_peer_typed(hub: &Arc<Hub>, p: &PeerOut, method: &str, params: 
     let host_sign_key = crypto::unb64_n::<32>(&p.sign_key).map_err(|e| away(e.to_string()))?;
     let target = kith_guest::relay::Target { cloud: base, computer_id: p.computer_id.clone(), host_sign_key };
     let fail = |f: kith_guest::relay::Fail| {
-        let refused = matches!(f, kith_guest::relay::Fail::Refused);
+        let kind = match &f {
+            kith_guest::relay::Fail::Refused => 0,
+            kith_guest::relay::Fail::Host(_) => 1,
+            _ => 2,
+        };
         let message = f.into_cli().message;
-        if refused { PeerFail::Refused(message) } else { PeerFail::Away(message) }
+        match kind {
+            0 => PeerFail::Refused(message),
+            1 => PeerFail::Host(message),
+            _ => PeerFail::Away(message),
+        }
     };
     let mut channel =
         kith_guest::relay::connect(&target, &SigningKey::from_bytes(&seed), FIRST_CALL).await.map_err(fail)?;

@@ -14231,7 +14231,7 @@
     },
     {
       "name": "ask.endPeer",
-      "summary": "One pairing with a computer ends (the host calls it before it removes the pairing, and again from its level-triggered reconcile). In one transaction the fence of that direction is down, so nothing of that epoch opens, is claimed or attaches, and: for `in`, the asks that computer sent here are ended (running ones stopped, with the claims to kill, queued and claimed ones refused, each with a row it can read); for `out`, the asks sent there are cut off, each with one notice row and wake, and every stop owed to it is dropped. The other direction is left alone. Safe to repeat. Answers `{computer, dir, ended, sessions, kill}`.",
+      "summary": "One pairing with a computer ends (the host calls it before it removes the pairing, and again from its level-triggered reconcile). In one transaction the fence of that direction is down, so nothing of that epoch opens, is claimed or attaches, and: for `in`, the asks that computer sent here are ended (running ones stopped, with the claims to kill, queued and claimed ones refused, each with a row it can read); for `out`, the asks sent there are cut off, each with one notice row and wake, and every stop owed to it is dropped. The other direction is left alone. With `epoch`, it ends that pairing only and does nothing when the live one is another. Safe to repeat. Answers `{computer, dir, ended, sessions, kill}`.",
       "params": [
         {
           "name": "computer",
@@ -14245,6 +14245,14 @@
           "name": "dir",
           "summary": "`in` ends the asks that computer sent here; `out` cuts off the asks sent there.",
           "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "epoch",
+          "summary": "End only this pairing epoch: when the live one is another (a newer pairing), nothing happens.",
+          "required": false,
           "schema": {
             "type": "string"
           }
@@ -14276,6 +14284,12 @@
           },
           "dir": {
             "kind": "positional"
+          },
+          "epoch": {
+            "kind": "flag",
+            "spellings": [
+              "--epoch"
+            ]
           }
         }
       }
@@ -14329,6 +14343,14 @@
             "items": {
               "type": "string"
             }
+          }
+        },
+        {
+          "name": "away",
+          "summary": "The computer did not answer the host's try: the ask shows \"waiting on computer\" until a call that carries its answer (any call without `away`) clears it. Nothing is settled and no row is written.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         },
         {
@@ -14408,6 +14430,12 @@
             "kind": "flag",
             "spellings": [
               "--to-sent"
+            ]
+          },
+          "away": {
+            "kind": "flag",
+            "spellings": [
+              "--away"
             ]
           },
           "kernel": {
@@ -16294,7 +16322,7 @@
     },
     {
       "name": "hostclaim.queued",
-      "summary": "The turns the core queued that no host began (a schedule's fire, a wake's take or a `--bg` ask: `enq_key` NULL, source `schedule`, `wake` or `ask`) and that wait (queued or parked): `{turns: [{turn, source, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. An `ask` turn also carries `ask` (the ask's id) `out` (the file its run gives the callee as stdout), `opts` (`{model, effort, folder, project}` the caller gave, or null), `askedBy` (the asking agent) and `askSession` (the callee's session once it has one). A `wake` turn also carries `door` (`run` or `host`), `requestIds` (the requests it carries, in order) and `note`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed. `sources` (default `[\"schedule\"]`) picks which detached sources are listed: a host that runs only cron jobs never sees a wake's turn.",
+      "summary": "The turns the core queued that no host began (a schedule's fire, a wake's take or a `--bg` ask: `enq_key` NULL, source `schedule`, `wake` or `ask`) and that wait (queued or parked): `{turns: [{turn, source, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. An `ask` turn also carries `ask` (the ask's id) `out` (the file its run gives the callee as stdout), `opts` (`{model, effort, folder, project}` the caller gave, or null), `askedBy` (the asking agent) and `askSession` (the callee's session once it has one) and `originComputer` (the paired computer that sent it, else null). A `wake` turn also carries `door` (`run` or `host`), `requestIds` (the requests it carries, in order) and `note`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed. `sources` (default `[\"schedule\"]`) picks which detached sources are listed: a host that runs only cron jobs never sees a wake's turn.",
       "params": [
         {
           "name": "sources",

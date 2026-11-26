@@ -39,7 +39,19 @@ fn owe() {
     SETTLED.store(false, Ordering::Release);
 }
 
+/// Whether the reconcile has agreed the pairings since the host last failed to tell the core of one ([`settled`] without the
+/// reconcile). The run door reads it before it claims an ask that came from a computer: a `Busy` core that did not hear an unlink
+/// is alive, and still holds the epoch, so nothing of that computer starts until a clean reconcile ended it (M1).
+pub(crate) fn is_settled() -> bool {
+    SETTLED.load(Ordering::Acquire)
+}
+
 /// The callee's gate: true when the pairings agree (the reconcile runs first when they have not been shown to).
+///
+/// Only a Writer host starts asks (the run door pulls them in Writer mode alone), and the pass's reconcile runs there every few
+/// seconds, which is what confirms the pairings again after the core restarts (`ask.peerLink`: the core starts nothing of a
+/// pairing it was not told of in its own run). A host that is not the Writer answers what it is asked (the rows are read and
+/// written through the core all the same) but claims nothing, so nothing starts from a confirmation it never refreshed.
 pub(crate) async fn settled(hub: &Hub) -> bool {
     if SETTLED.load(Ordering::Acquire) {
         return true;
@@ -72,8 +84,18 @@ pub(crate) async fn link(hub: &Hub, computer: &str, dir: &str, epoch: &str, name
 /// `ask.endPeer`: the pairing in `dir` with `computer` ends in the core (its asks stopped, refused or cut off) before the host
 /// removes its row. Safe to repeat.
 pub(crate) async fn end(hub: &Hub, computer: &str, dir: &str) -> Result<()> {
+    end_at(hub, computer, dir, None).await
+}
+
+/// [`end`] for the epoch the caller read: a newer pairing of that direction is left alone (the reconcile reads the core's list,
+/// and a pairing may have been made since).
+pub(crate) async fn end_at(hub: &Hub, computer: &str, dir: &str, epoch: Option<&str>) -> Result<()> {
     let Some(folders) = folders_of(hub) else { return Ok(()) };
-    match core(&folders, "ask.endPeer", json!({"computer": computer, "dir": dir})).await {
+    let mut params = json!({"computer": computer, "dir": dir});
+    if let Some(e) = epoch {
+        params["epoch"] = json!(e);
+    }
+    match core(&folders, "ask.endPeer", params).await {
         Ok(_) => Ok(()),
         Err(Said::Down(why)) => {
             tracing::warn!(computer, dir, why, "the core did not hear a pairing end; the reconcile ends it");
@@ -91,7 +113,7 @@ pub(crate) type Held = (String, String);
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Step {
     /// The core holds a live pairing the host has no row for: `ask.endPeer`.
-    End { computer: String, dir: &'static str },
+    End { computer: String, dir: &'static str, epoch: String },
     /// The core ended the epoch the host's row still names (a crash between the two writes): the host removes its row.
     Remove { computer: String, dir: &'static str },
     /// The host holds a pairing the core never heard of (from before the link carried asks): `ask.peerLink`.
@@ -117,7 +139,7 @@ pub(crate) fn plan(listed: &Value, host_in: &[(Held, String)], host_out: &[(Held
             .collect();
         for held in &live {
             if !host.iter().any(|(h, _)| h == held) {
-                steps.push(Step::End { computer: held.0.clone(), dir });
+                steps.push(Step::End { computer: held.0.clone(), dir, epoch: held.1.clone() });
             }
         }
         for (held, name) in host {
@@ -166,9 +188,9 @@ pub(crate) async fn reconcile(hub: &Hub) {
     }
     for step in plan(&listed, &host_in, &host_out) {
         match step {
-            Step::End { computer, dir } => {
+            Step::End { computer, dir, epoch } => {
                 tracing::info!(computer, dir, "the core holds a pairing this host no longer has; ending it");
-                if let Err(e) = end(hub, &computer, dir).await {
+                if let Err(e) = end_at(hub, &computer, dir, Some(&epoch)).await {
                     tracing::warn!(error = format!("{e:#}"), "couldn't end a pairing the host dropped");
                     clean = false;
                 }

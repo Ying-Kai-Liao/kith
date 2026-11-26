@@ -307,7 +307,13 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
         }
         "ask.endPeer" => {
             let (computer, dir) = (need(params, "computer")?, need_dir(params)?);
-            let ended = peer::end(core, computer, dir, now)?;
+            let ended = peer::end(
+                core,
+                computer,
+                dir,
+                word(params, "epoch").filter(|e| !e.is_empty()),
+                now,
+            )?;
             Ok(json!({
                 "computer": computer,
                 "dir": dir,
@@ -351,6 +357,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                     state: word(params, "state"),
                     cost: params.get("cost").and_then(Value::as_f64),
                     to_sent: strings(params, "toSent"),
+                    away: flag(params, "away"),
                 },
                 now,
             )

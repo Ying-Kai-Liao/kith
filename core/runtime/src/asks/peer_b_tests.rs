@@ -174,6 +174,26 @@ fn a_pairing_not_confirmed_since_the_core_started_starts_nothing_until_the_host_
     assert!(!was_refused(&again), "{again:?}");
 }
 
+#[test]
+fn the_run_door_lists_which_computer_sent_an_ask() {
+    let r = Rig::new();
+    link_in(&r, 1);
+    origin(&r, "o1", "k1", 1);
+    r.open_bg("local");
+    let listed = r.host("hostclaim.queued", &json!({"sources": ["ask"]}));
+    let of = |id: &str| {
+        listed["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["ask"] == json!(id))
+            .unwrap()["originComputer"]
+            .clone()
+    };
+    assert_eq!(of("o1"), json!(MAC));
+    assert_eq!(of("local"), Value::Null);
+}
+
 // ---- the day ----
 
 #[test]
@@ -217,6 +237,33 @@ fn an_ask_nobody_started_in_a_day_expires_lost_and_never_starts() {
     assert_eq!(r.rows("old").len(), 1);
 }
 
+#[test]
+fn an_ask_that_already_ran_and_was_put_back_does_not_expire() {
+    let r = Rig::new();
+    link_in(&r, 1);
+    let turn = turn_of(&origin(&r, "ran", "kr", 1));
+    let claim = r.start("ran", turn);
+    // The run crashed and its turn went back in the queue (`requeue_turn`), long after the ask came.
+    exec(
+        &r,
+        "UPDATE asks SET at_ms = ?1 WHERE id = 'ran'",
+        ms() - 2 * DAY,
+    );
+    r.d.shared()
+        .with_core(|c| {
+            c.conn().execute(
+                "UPDATE turns SET state = 'queued', claim_id = NULL, requeues = requeues + 1, started_at = NULL WHERE id = ?1",
+                [turn],
+            )?;
+            c.conn().execute("UPDATE claims SET state = 'ended' WHERE id = ?1", [claim])?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(r.tick()["asks"], json!([]));
+    assert_eq!(r.ask_state("ran"), "open");
+    assert_eq!(r.turn_state(turn), "queued");
+}
+
 // ---- the caller's --to ----
 
 #[test]
@@ -254,6 +301,34 @@ fn a_to_is_kept_for_a_peer_ask_once_and_owed_until_the_computer_took_it() {
         &json!({"id": "p1", "text": "too late"}),
     );
     assert!(refused.is_err(), "{refused:?}");
+}
+
+#[test]
+fn a_to_after_the_peer_ask_was_answered_is_refused_and_nothing_is_owed() {
+    let r = Rig::new();
+    link_out(&r, 1);
+    peer(&r, "p1", MAC);
+    r.owner("ask.to", &json!({"id": "p1", "text": "before"}));
+    super::peer_tests::apply(&r, "p1", 1, &json!([]), Some("open"), None);
+    assert_eq!(
+        r.host("ask.peerOwed", &json!({}))["to"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    super::peer_tests::apply(&r, "p1", 1, &json!([]), Some("answered"), None);
+    // What was owed before the answer is not owed after it, and a new one is refused with words.
+    assert_eq!(r.host("ask.peerOwed", &json!({}))["to"], json!([]));
+    let late = r.call(
+        Principal::Owner,
+        "ask.to",
+        &json!({"id": "p1", "text": "after"}),
+    );
+    assert!(
+        matches!(late, Err(Error::Refused(ref w)) if w.contains("already answered")),
+        "{late:?}"
+    );
 }
 
 #[test]

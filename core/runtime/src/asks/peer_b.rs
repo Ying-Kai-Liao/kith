@@ -8,7 +8,8 @@
 //!   row, so the ask of that key, when it arrives, finds it and never runs (`MacLink2` C1).
 //! - **Limits** (mac-link, "Limits"): a computer has at most [`MAX_QUEUED`] asks waiting here (a refused row says so) and at most
 //!   [`MAX_RUNNING`] running at once (the claim of one more is refused as `held`: the turn stays queued and starts when a run ends).
-//! - **Expiry**: an origin ask whose turn nobody claimed in [`EXPIRE_MS`] expires `lost`, by this computer's clock.
+//! - **Expiry**: an origin ask whose turn nobody claimed in [`EXPIRE_MS`] expires `lost`, by this computer's clock. A turn that was
+//!   ever claimed (a crashed run put back in the queue, a parked one woken) already ran, and never expires this way.
 //! - **`--to`** (caller): `ask.to` with `text` keeps the message on the peer ask; `ask.peerOwed` lists it until `ask.peerApply`
 //!   says it was sent (`toSent`).
 
@@ -121,7 +122,10 @@ pub(crate) fn expire_unstarted_in(
         let mut stmt = tx.prepare(
             "SELECT a.id, a.turn FROM asks a JOIN turns t ON t.id = a.turn
              WHERE a.origin_computer IS NOT NULL AND a.state = 'open' AND a.ended_ms IS NULL
-               AND t.state = 'queued' AND COALESCE(a.at_ms, 0) < ?1 ORDER BY a.id",
+               AND t.state = 'queued' AND COALESCE(a.at_ms, 0) < ?1
+               AND t.requeues = 0
+               AND NOT EXISTS (SELECT 1 FROM claims k WHERE k.turn = t.id)
+             ORDER BY a.id",
         )?;
         stmt.query_map([now - EXPIRE_MS], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<std::result::Result<_, _>>()?
@@ -275,6 +279,13 @@ pub(crate) fn to_owed(core: &mut Core, id: &str, text: &str) -> Result<Value> {
     };
     if a.mode.as_deref() != Some("peer") {
         return Ok(json!({"id": id, "ok": true}));
+    }
+    // An answered peer ask is over on its computer too: a message after it would never reach the run (the rows copied are
+    // final), so it is refused here, not kept to be owed for nothing.
+    if !is_live(&a) {
+        return Err(Error::Refused(format!(
+            "kith-core: asks: ask {id} was already answered; ask anew"
+        )));
     }
     let k = sha12(text);
     let mut extra = a.extra.take().unwrap_or_default();

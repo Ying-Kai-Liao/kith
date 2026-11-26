@@ -368,10 +368,16 @@ pub(super) const ROWS: &[Method] = &[
     .principals(OWNER_HOST),
     ask(
         "ask.endPeer",
-        "One pairing with a computer ends (the host calls it before it removes the pairing, and again from its level-triggered reconcile). In one transaction the fence of that direction is down, so nothing of that epoch opens, is claimed or attaches, and: for `in`, the asks that computer sent here are ended (running ones stopped, with the claims to kill, queued and claimed ones refused, each with a row it can read); for `out`, the asks sent there are cut off, each with one notice row and wake, and every stop owed to it is dropped. The other direction is left alone. Safe to repeat. Answers `{computer, dir, ended, sessions, kill}`.",
+        "One pairing with a computer ends (the host calls it before it removes the pairing, and again from its level-triggered reconcile). In one transaction the fence of that direction is down, so nothing of that epoch opens, is claimed or attaches, and: for `in`, the asks that computer sent here are ended (running ones stopped, with the claims to kill, queued and claimed ones refused, each with a row it can read); for `out`, the asks sent there are cut off, each with one notice row and wake, and every stop owed to it is dropped. The other direction is left alone. With `epoch`, it ends that pairing only and does nothing when the live one is another. Safe to repeat. Answers `{computer, dir, ended, sessions, kill}`.",
         &[
             pos("computer", "string", true, "The other computer."),
             pos("dir", "string", true, "`in` ends the asks that computer sent here; `out` cuts off the asks sent there."),
+            flag(
+                "epoch",
+                "string",
+                &["--epoch"],
+                "End only this pairing epoch: when the live one is another (a newer pairing), nothing happens.",
+            ),
         ],
         &["asks", "end-peer"],
     )
@@ -400,6 +406,12 @@ pub(super) const ROWS: &[Method] = &[
                 "[string]",
                 &["--to-sent"],
                 "The `--to` messages (`k` of `ask.peerOwed`'s `to`) the computer took: they are not owed any more.",
+            ),
+            flag(
+                "away",
+                "bool",
+                &["--away"],
+                "The computer did not answer the host's try: the ask shows \"waiting on computer\" until a call that carries its answer (any call without `away`) clears it. Nothing is settled and no row is written.",
             ),
             KERNEL,
             HOME,
