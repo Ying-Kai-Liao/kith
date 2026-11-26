@@ -183,7 +183,8 @@ class H(BaseHTTPRequestHandler):
         a = ANSWERS.get(body["thread"], {"error": "unknown thread"}) if ok else {"error": "no"}
         self.send_response(200 if ok and "error" not in a else 400); self.end_headers(); self.wfile.write(json.dumps(a).encode())
     def log_message(self, *a): pass
-HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+import fakehost
+fakehost.UnixHTTPServer(fakehost.sock_path(sys.argv[1]), H).serve_forever()
 PY
 mkdir -p "$T/work/b"
 cat > "$T/answers.json" <<JSON
@@ -194,9 +195,9 @@ cat > "$T/answers.json" <<JSON
  "th-noclaims": {"botId":"b","threadId":"th-noclaims","agent":"designer","sessionId":"nc-sid","cwd":"$T/work/b","hostBusy":false},
  "th-other": {"botId":"b","threadId":"th-other","agent":"coder","sessionId":"o-sid","cwd":"$T/work/b","hostBusy":false,"claims":1}}
 JSON
-PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+PORT=1
 echo tok > "$T/serve/token"
-python3 "$T/host.py" "$PORT" "$T/answers.json" & HOSTPID=$!
+PYTHONPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)${PYTHONPATH:+:$PYTHONPATH}" python3 "$T/host.py" "$T/serve" "$T/answers.json" & HOSTPID=$!
 sleep 0.5
 export KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=$PORT
 
@@ -338,17 +339,18 @@ err=$(cd "$T/work/a" && "$KERNEL/bin/kith" designer --resume cs-2 2>&1 >/dev/nul
 kill $C2 2>/dev/null; wait $C2 2>/dev/null
 rm -f $REG/cs-*.claim
 # a session an old host cannot vouch for: a host from before continue-anywhere answers 404 to resolveThread
-python3 "$T/host.py" "$((PORT + 1))" "$T/answers.json" old & OLDPID=$!
+mkdir -p "$T/serve-old"; echo tok > "$T/serve-old/token"
+PYTHONPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)${PYTHONPATH:+:$PYTHONPATH}" python3 "$T/host.py" "$T/serve-old" "$T/answers.json" old & OLDPID=$!
 sleep 0.5
-err=$(cd "$T/work/a" && KITH_SERVE_PORT=$((PORT + 1)) "$KERNEL/bin/kith" designer --resume th-1 2>&1 >/dev/null); rc=$?
+err=$(cd "$T/work/a" && KITH_SERVE_DIR=$T/serve-old "$KERNEL/bin/kith" designer --resume th-1 2>&1 >/dev/null); rc=$?
 [[ $rc != 0 && $err == *"update kith serve"* ]] && ok "old host: a thread/app session is refused with the reason" || bad "old host refusal" "$rc $err"
 [[ $(ls $REG | grep -c '\.claim$') == 0 ]] && ok "old host refusal: no claim left" || bad "old host claim left"
-err=$(cd "$T/work/b" && KITH_SERVE_PORT=$((PORT + 1)) "$KERNEL/bin/kith" designer -c 2>&1 >/dev/null); rc=$?
+err=$(cd "$T/work/b" && KITH_SERVE_DIR=$T/serve-old "$KERNEL/bin/kith" designer -c 2>&1 >/dev/null); rc=$?
 [[ $rc != 0 && $err == *"update kith serve"* ]] && ok "old host: -c on an app session is refused" || bad "old host -c" "$rc $err"
 cat > "$REG/term-sid.json" <<JSON
 {"v":1,"sessionId":"term-sid","agent":"designer","cwd":"$T/work/b","transcriptPath":"$CLAUDE_CONFIG_DIR/projects/p/term-sid.jsonl","pid":$$,"startedAt":"2026-01-01T00:00:00Z"}
 JSON
-(cd "$T/work/a" && KITH_SERVE_PORT=$((PORT + 1)) STUB_SID=term-sid tty "$KERNEL/bin/kith" designer --resume term-sid); rc=$?
+(cd "$T/work/a" && KITH_SERVE_DIR=$T/serve-old STUB_SID=term-sid tty "$KERNEL/bin/kith" designer --resume term-sid); rc=$?
 is "old host: a session a terminal started (in the registry) resumes" "$rc" 0
 is "old host: runs in the registry's cwd" "$(sed -n 1p $T/stub.out)" "$T/work/b"
 kill $OLDPID 2>/dev/null; wait $OLDPID 2>/dev/null
@@ -389,7 +391,7 @@ err=$(cd "$T/work/a" && "$KERNEL/bin/kith" designer --resume th-1 2>&1 >/dev/nul
 
 # --- the take-over note --------------------------------------------------------------------------------------------------
 note() { sed 's/\r//' "$T/tty.out" | grep -c "continued in Kith"; }
-host_up() { python3 "$T/host.py" "$PORT" "$T/answers.json" & HOSTPID=$!; sleep 0.5; }
+host_up() { PYTHONPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)${PYTHONPATH:+:$PYTHONPATH}" python3 "$T/host.py" "$T/serve" "$T/answers.json" & HOSTPID=$!; sleep 0.5; }
 host_up
 # the host takes the session over while claude runs: it writes <sid>.taken, then claude ends
 rm -f "$T/go" "$REG/app-sid.json"
@@ -421,19 +423,22 @@ sleep 1; : > "$REG/fb-sid.taken"; : > "$T/go"; wait $BG
 grep -q "kith designer --resume fb-sid" "$T/tty.out" && ok "taken: host down, note falls back to the session id" || bad "taken fallback" "$(cat $T/tty.out)"
 
 # host location follows kith-serve: 19224/serve, even from a bundle with a stale env file; KITH_SERVE_* still override
-PK=$T/pk; mkdir -p "$PK/a/b/bin" "$PK/home/.kith/serve"
-cp "$KERNEL/bin/kith-serve" "$KERNEL/bin/kith-sessions" "$PK/a/b/bin/"; echo main > "$PK/a/env"; echo maintok > "$PK/home/.kith/serve/token"
-probe() {   # probe [VAR=value ...] — the url and token host_call would use, with urlopen stubbed
-  env -u KITH_SERVE_DIR -u KITH_SERVE_PORT HOME=$PK/home "$@" python3 - "$PK/a/b/bin/kith-sessions" <<'PY'
-import importlib.machinery, importlib.util, sys, urllib.request
+PK=$T/pk; mkdir -p "$PK/a/b/bin" "$PK/a/b/lib" "$PK/home/.kith/serve" "$PK/other"
+cp "$KERNEL/bin/kith-serve" "$KERNEL/bin/kith-sessions" "$PK/a/b/bin/"; cp "$KERNEL/lib/kith_hostlocal.py" "$PK/a/b/lib/"
+echo main > "$PK/a/env"; echo maintok > "$PK/home/.kith/serve/token"; echo othertok > "$PK/other/token"
+probe() {   # probe [VAR=value ...] — the serve folder and token host_call would use, with the connection stubbed
+  env -u KITH_SERVE_DIR -u KITH_SERVE_PORT HOME=$PK/home "$@" python3 - "$PK/a/b/bin/kith-sessions" "$PK/a/b/lib" <<'PY'
+import importlib.machinery, importlib.util, sys
 l = importlib.machinery.SourceFileLoader('ks', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(m)
-def fake(req, timeout=0): print(req.full_url, req.get_header('Authorization')); raise OSError
-urllib.request.urlopen = fake
+sys.path.insert(0, sys.argv[2])
+import kith_hostlocal
+def fake(data, timeout): print(data, (data / 'token').read_text().strip()); raise OSError
+kith_hostlocal._connect = fake
 m.host_call('resolveThread', {})
 PY
 }
-is "stale env file: port 19224 and serve token" "$(probe)" "http://127.0.0.1:19224/api/resolveThread Bearer maintok"
-is "stale env file: KITH_SERVE_PORT overrides the port" "$(probe KITH_SERVE_PORT=4242)" "http://127.0.0.1:4242/api/resolveThread Bearer maintok"
+is "stale env file: the serve folder and token" "$(probe)" "$PK/home/.kith/serve maintok"
+is "stale env file: KITH_SERVE_DIR overrides the folder" "$(probe KITH_SERVE_DIR=$PK/other KITH_SERVE_PORT=4242)" "$PK/other othertok"
 
 # release_claims gives back only the releasing pid's claims, and takes the claim lock to do it.
 RC=$T/rc; mkdir -p "$RC"
@@ -500,7 +505,7 @@ is "interactive KITH_RESUME: claimed before claude started" "$(sed -n 5p "$T/fre
 [[ "$(sed -n 2p "$T/fresh-r.out")" != *--session-id* ]] && ok "interactive KITH_RESUME: no new --session-id" || bad "resume got a --session-id"
 # a -r/--resume run (the claim resolve took) is the same: held as claude starts
 printf '{"cwd":"%s","type":"user"}\n' "$T/work/a" > "$CLAUDE_CONFIG_DIR/projects/p/ir1.jsonl"
-(cd "$T/work/a" && KITH_SERVE_PORT=$((PORT + 1)) STUB_OUT=$T/fresh-rr.out tty "$KERNEL/bin/kith" designer --resume ir1)
+(cd "$T/work/a" && KITH_SERVE_DIR=$T/serve-old STUB_OUT=$T/fresh-rr.out tty "$KERNEL/bin/kith" designer --resume ir1)
 is "--resume: claimed before claude started" "$(sed -n 5p "$T/fresh-rr.out")" terminal:parent
 # a fresh one-shot of the owner's (kith ask / schedule / helper): claimed (oneshot, claude's own pid) before it starts
 (cd "$T/work/a" && STUB_OUT=$T/fresh-o.out "$KERNEL/bin/kith" designer "fresh task" >/dev/null 2>&1)

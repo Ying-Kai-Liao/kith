@@ -104,25 +104,11 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
             }),
         ),
     };
-    let res = crate::http()
-        .post(format!("http://127.0.0.1:{port}/api/{method}"))
-        .bearer_auth(token)
-        .json(&body)
-        .timeout(timeout)
-        .send()
-        .await;
+    let res = crate::api::local::call(crate::service::data_dir(), port, token.to_owned(), method, &body, timeout).await;
     let error = match res {
-        Ok(r) => {
-            let ok = r.status().is_success();
-            match r.json::<Value>().await {
-                Ok(v) if ok => {
-                    return json!({"content": [{"type": "text", "text": v.to_string()}]});
-                }
-                Ok(v) => v["error"].as_str().unwrap_or("the Kith host refused the call").to_owned(),
-                Err(e) => format!("bad response from the Kith host: {e}"),
-            }
-        }
-        Err(e) => format!("can't reach the Kith host: {e}"),
+        Ok((true, v)) => return json!({"content": [{"type": "text", "text": v.to_string()}]}),
+        Ok((false, v)) => v["error"].as_str().unwrap_or("the Kith host refused the call").to_owned(),
+        Err(e) => e,
     };
     json!({"content": [{"type": "text", "text": error}], "isError": true})
 }
@@ -205,16 +191,16 @@ struct Remote {
 impl Remote {
     /// The connector's URL and headers, with a fresh sign-in token (`stale` forces a refresh).
     async fn target(&self, stale: bool) -> Result<(String, reqwest::header::HeaderMap)> {
-        let res = crate::http()
-            .post(format!("http://127.0.0.1:{}/api/connectorTarget", self.port))
-            .bearer_auth(&self.token)
-            .json(&json!({"id": self.connector, "stale": stale}))
-            .timeout(Duration::from_secs(30))
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("can't reach the Kith host: {e}"))?;
-        let ok = res.status().is_success();
-        let target: Value = res.json().await?;
+        let (ok, target) = crate::api::local::call(
+            crate::service::data_dir(),
+            self.port,
+            self.token.clone(),
+            "connectorTarget",
+            &json!({"id": self.connector, "stale": stale}),
+            Duration::from_secs(30),
+        )
+        .await
+        .map_err(anyhow::Error::msg)?;
         if !ok {
             anyhow::bail!("{}", target["error"].as_str().unwrap_or("the Kith host refused"));
         }
@@ -412,17 +398,19 @@ fn sse_data(event: &str) -> Option<Value> {
 pub async fn serve_local(connector: String, port: u16) -> Result<()> {
     use std::process::Stdio;
     let token = tokio::fs::read_to_string(crate::service::data_dir().join("token")).await.map_err(|_| host_down())?;
-    let res = crate::http()
-        .post(format!("http://127.0.0.1:{port}/api/connectorRuntime"))
-        .bearer_auth(token.trim())
-        .json(&json!({"id":connector}))
-        .send()
-        .await
-        .map_err(|_| host_down())?;
-    if !res.status().is_success() {
+    let (ok, v) = crate::api::local::call(
+        crate::service::data_dir(),
+        port,
+        token.trim().to_owned(),
+        "connectorRuntime",
+        &json!({"id":connector}),
+        Duration::from_secs(60),
+    )
+    .await
+    .map_err(|_| host_down())?;
+    if !ok {
         anyhow::bail!("{connector}: connector credentials unavailable; check that it is still installed in Kith");
     }
-    let v: Value = res.json().await?;
     let command = v["command"].as_str().ok_or_else(|| anyhow::anyhow!("Not a local connector"))?;
     let mut child = tokio::process::Command::new(crate::shell::program(command));
     child.args(v["args"].as_array().into_iter().flatten().filter_map(Value::as_str));

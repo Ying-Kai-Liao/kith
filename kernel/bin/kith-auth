@@ -505,24 +505,10 @@ def bridge_held(auth, person):
 
 
 def host_call(method, body):
-    """The host's local API (owner token over loopback). (answer, None), or (None, why it couldn't be reached)."""
-    import urllib.error
-    import urllib.request
-    try:
-        data, port = host_endpoint()
-        token = (data / 'token').read_text().strip()
-        req = urllib.request.Request(f'http://127.0.0.1:{port}/api/{method}', json.dumps(body).encode(),
-                                     {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.load(r), None
-    except urllib.error.HTTPError as e:
-        try:
-            why = json.load(e).get('error')
-            return None, why if isinstance(why, str) and why else f'kith serve answered {e.code}'
-        except (ValueError, AttributeError):
-            return None, f'kith serve answered {e.code}'
-    except Exception as e:  # noqa: BLE001
-        return None, f'kith serve is not reachable ({e.__class__.__name__})'
+    """The host's local API (owner token, over its local endpoint). (answer, None), or (None, why it couldn't be reached)."""
+    import kith_hostlocal  # lib is on sys.path (above)
+    return kith_hostlocal.call(method, body, 30)
+
 
 
 def bots_of(auth, person):

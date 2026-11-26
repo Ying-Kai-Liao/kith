@@ -13,6 +13,7 @@ pub mod cost;
 pub mod delegation;
 pub mod engines;
 pub mod helpers;
+pub mod hostlocal;
 // On Windows the launch is the plan and its settings (`launch::assemble`, what the host launches in process); the one-shot run
 // (`launch::exec`, `launch::start`) stands on claims and `kith-permit` and stays Unix only until W12. A guest's launch is
 // refused there (guests are not offered on Windows).

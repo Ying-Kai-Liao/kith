@@ -24,27 +24,14 @@ USAGE = 'usage: kith recall <query> [--project p] [--room r] [--thread t] [--tie
 
 
 def host_call(method, body, timeout=240):
-    """The host's local API over loopback with the owner token (as kith-sessions does). None when it can't be reached."""
-    import subprocess, urllib.error, urllib.request
-    from pathlib import Path
+    """The host's local API over its local endpoint with the owner token (as kith-sessions does). None when it can't be reached."""
+    import kith_hostlocal
     try:
-        data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
-        if not (data and port):
-            d, p = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-serve'), 'endpoint'],
-                                  capture_output=True, text=True, timeout=4, check=True).stdout.split()
-            data, port = data or d, port or p
-        token = (Path(data) / 'token').read_text().strip()
-        req = urllib.request.Request('http://127.0.0.1:%s/api/%s' % (port, method), json.dumps(body).encode(),
-                                     {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        try:
-            return json.load(e)
-        except ValueError:
-            return None
-    except Exception:  # noqa: BLE001
+        _, payload = kith_hostlocal.request(f'/api/{method}', body, timeout)
+        return json.loads(payload)
+    except (kith_hostlocal.HostUnreachable, ValueError):
         return None
+
 
 
 def thread_command(cmd, argv):
