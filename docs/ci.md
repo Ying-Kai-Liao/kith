@@ -22,10 +22,10 @@ No paid, larger or self-hosted runners. Rust caches come from Swatinem/rust-cach
 ## Tiers
 
 - Cheap tier, every pull request: fmt, clippy, host unit tests, kernel, cloud and relay (typecheck, vitest), licenses, thread-writers, desktop typecheck and tests. All path-filtered.
-- Heavy tier: the macOS builds (`ios`, `desktop`), every e2e (`host-e2e`, `desktop-relay-e2e`, cloud's bot guests e2e step) and `guest-linux`. They run on the reviewer's batch (a workflow_dispatch run), push to main and any other workflow_dispatch, never skipped there.
+- Heavy tier: the macOS builds (`ios`, `desktop`), every e2e (`host-e2e`, `desktop-relay-e2e`, cloud's bot guests e2e step) and `guest-linux`. They run on the reviewer's batch PR (head ref `flow/batch-<sha>`, heavy on its own `ci` run), push to main and any other workflow_dispatch, never skipped there.
 - A pull request gets the heavy tier too when it carries the `ci:full` label (add it with `gh pr edit <n> --add-label ci:full`). A draft pull request gets the cheap tier only, even with the label: `ci-label.yml` doesn't dispatch the heavy run for a draft. Mark it ready to run the heavy tier.
 
-Jobs skipped by the tier count as passed in `ci`, so a green PR means "cheap tier green"; the reviewer's batch runs the rest before anything lands on main.
+Jobs skipped by the tier count as passed in `ci`, so a green PR means "cheap tier green"; the reviewer's batch PR runs the rest before anything lands on main.
 
 ## Path filters
 
@@ -35,7 +35,7 @@ The filters apply on pull requests, on pushes to main and on dispatch.
 
 ## Merging
 
-This repo uses merge commits. The maintainers' flow reviewer merges PRs in batches: it merges the batch locally on top of the latest main, pushes it to a `flow/batch-<sha>` branch and dispatches the heavy `ci.yml` there; only when that is green does it push to main. There are no intermediate or integration branches. To run the heavy tier on a single PR, add `ci:full`.
+This repo uses merge commits. The maintainers' flow reviewer merges PRs in batches: it merges the batch locally on top of the latest main, pushes it to a `flow/batch-<sha>` branch and opens a batch PR there, whose own `ci` run is heavy (a `flow/batch-` head ref turns the heavy tier on, no label or dispatch needed); only when that is green does it push to main. There are no intermediate or integration branches. To run the heavy tier on a single PR, add `ci:full`.
 
 Never `gh pr merge` directly: that skips the heavy tier.
 
@@ -43,4 +43,4 @@ Never rebase or merge main into a branch just to be up to date. Do that only to 
 
 ## Concurrency
 
-A PR gets one group per ref, so a re-push cancels its older run. Pushes to main are keyed by sha and run id and are never cancelled. Batch runs are dispatches keyed by sha and run id, so they never cancel each other. Label events never start `ci.yml`, so a label creates no run and no skipped `ci` check. Adding `ci:full` runs the small `ci-label.yml`, which dispatches `ci.yml` on the PR branch (a dispatch run is heavy, ignores draft state, and its `ci` lands on the head sha); a cancelled run skips `ci` instead of reporting a failure.
+A PR gets one group per ref, so a re-push cancels its older run. Pushes to main are keyed by sha and run id and are never cancelled. A batch PR is a PR like any other, so a batch branch force-pushed to a new sha cancels the older batch run. Label events never start `ci.yml`, so a label creates no run and no skipped `ci` check. Adding `ci:full` runs the small `ci-label.yml`, which dispatches `ci.yml` on the PR branch (a dispatch run is heavy, ignores draft state, and its `ci` lands on the head sha); a cancelled run skips `ci` instead of reporting a failure.
