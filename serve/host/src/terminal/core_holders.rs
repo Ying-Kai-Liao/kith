@@ -543,7 +543,7 @@ pub async fn owed_loop(hub: std::sync::Arc<Hub>) {
     }
 }
 
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 #[path = "core_holders_tests.rs"]

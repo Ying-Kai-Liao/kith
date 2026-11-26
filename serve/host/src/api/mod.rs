@@ -2,7 +2,7 @@
 //! apps and helpers (loopback + `Authorization: Bearer <token>`), and `GET /channel`, the
 //! direct end-to-end encrypted channel phones use (see `channel`).
 
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 mod access_core_tests;
@@ -11,12 +11,12 @@ pub mod authority;
 #[cfg(test)]
 pub(crate) mod authority_props;
 mod backups;
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 mod bot_guests_tests;
 pub mod botguests;
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 mod botguests_props;
@@ -25,7 +25,9 @@ mod calls;
 mod cards;
 #[cfg(test)]
 mod contract_tests;
+// Unix-only until W22b: built on the Unix-only Keychain stand-in (kith_kernel::secrets, split in W22a).
 #[cfg(test)]
+#[cfg(unix)]
 mod core_revokes_tests;
 mod delegations;
 pub mod devices;
@@ -34,7 +36,7 @@ mod error_tests;
 mod events;
 mod files;
 mod folders;
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 mod guard_props;
@@ -47,7 +49,7 @@ mod kith_new;
 pub(crate) mod kith_tools;
 mod marketplace;
 pub(crate) mod native_export;
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 mod native_guard_tests;
@@ -60,14 +62,14 @@ mod people_tests;
 #[cfg(test)]
 mod proof_tests;
 mod remote;
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 mod revoke_tests;
 #[cfg(test)]
 pub(crate) mod rig;
 pub mod roles;
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 mod roles_props;
@@ -81,18 +83,24 @@ mod room_people;
 mod room_people_tests;
 #[cfg(test)]
 mod room_pointer_tests;
+// Unix-only until W22b: built on the Unix-only Keychain stand-in (kith_kernel::secrets, split in W22a).
 #[cfg(test)]
+#[cfg(unix)]
 mod room_points_props;
+// Unix-only until W22b: built on the Unix-only Keychain stand-in (kith_kernel::secrets, split in W22a).
 #[cfg(test)]
+#[cfg(unix)]
 mod room_rename_tests;
+// Unix-only until W22b: built on the Unix-only Keychain stand-in (kith_kernel::secrets, split in W22a).
 #[cfg(test)]
+#[cfg(unix)]
 mod room_secrets_props;
 #[cfg(test)]
 mod room_turn_tests;
 #[cfg(test)]
 mod room_withdraw_tests;
 mod scratch;
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 mod stepped_e2e_tests;

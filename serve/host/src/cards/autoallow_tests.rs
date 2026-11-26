@@ -60,6 +60,7 @@ async fn until(what: impl Fn() -> bool) {
 
 use std::path::PathBuf;
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_blocked_call_gets_an_owner_card_with_the_reason_and_three_options() {
     let r = Rig::new().await;
@@ -88,6 +89,7 @@ async fn a_blocked_call_gets_an_owner_card_with_the_reason_and_three_options() {
     assert!(!call.await.unwrap().allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn allow_once_lets_that_call_retry_and_remembers_nothing() {
     let r = Rig::new().await;
@@ -107,6 +109,7 @@ async fn allow_once_lets_that_call_retry_and_remembers_nothing() {
     assert!(!again.await.unwrap().allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn always_allow_saves_one_narrow_rule_once_and_a_deny_saves_nothing() {
     let r = Rig::new().await;
@@ -132,6 +135,7 @@ async fn always_allow_saves_one_narrow_rule_once_and_a_deny_saves_nothing() {
     assert_eq!(rules[0]["reason"], REASON);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_late_always_still_saves_and_a_late_once_does_nothing() {
     let r = Rig::new().await;
@@ -159,6 +163,7 @@ async fn a_late_always_still_saves_and_a_late_once_does_nothing() {
     assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 0);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn what_cannot_be_remembered_gets_no_always_option() {
     let r = Rig::new().await;
@@ -180,6 +185,7 @@ async fn what_cannot_be_remembered_gets_no_always_option() {
     }
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_rule_a_permission_rule_cannot_hold_is_kept_as_a_sentence_naming_the_agent() {
     let r = Rig::new().await;
@@ -204,6 +210,7 @@ async fn a_rule_a_permission_rule_cannot_hold_is_kept_as_a_sentence_naming_the_a
     assert!(text.contains("\"house\"") && text.contains("git push origin feature"), "{text}");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_auto_card_never_joins_or_uses_an_ordinary_approval_of_the_same_call() {
     let r = Rig::new().await;
@@ -231,6 +238,7 @@ async fn an_auto_card_never_joins_or_uses_an_ordinary_approval_of_the_same_call(
     assert!(!ordinary.await.unwrap().allow && !auto.await.unwrap().allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_sentence_is_not_offered_when_the_block_is_a_hard_deny() {
     let r = Rig::new().await;
@@ -248,6 +256,7 @@ async fn a_sentence_is_not_offered_when_the_block_is_a_hard_deny() {
     assert!(!call.await.unwrap().allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_save_that_is_not_what_the_card_offered_writes_nothing() {
     let r = Rig::new().await;
@@ -273,6 +282,7 @@ async fn remember_ls(r: &Rig) {
     until(|| !saved(r).is_empty()).await;
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_owner_lists_and_removes_a_remembered_rule_and_a_second_remove_is_not_found() {
     use crate::api::{devices::Caller, dispatch};
@@ -294,6 +304,7 @@ async fn the_owner_lists_and_removes_a_remembered_rule_and_a_second_remove_is_no
     assert!(format!("{:#}", again.unwrap_err()).contains("Not found"));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_bad_agent_or_id_is_refused_and_a_member_never_reaches_the_methods() {
     use crate::api::{devices::Caller, dispatch};

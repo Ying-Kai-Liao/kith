@@ -56,6 +56,7 @@ fn people(r: &Rig, room: &str) -> Vec<String> {
     r.hub.store.room_open_people(room)
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn naming_a_room_needs_the_setting_a_room_that_takes_people_and_every_agent_in_it() {
     let r = Rig::new().await;
@@ -85,6 +86,7 @@ async fn naming_a_room_needs_the_setting_a_room_that_takes_people_and_every_agen
     );
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_plain_invite_has_no_room_part_and_the_old_rows_have_none() {
     let r = Rig::new().await;
@@ -97,6 +99,7 @@ async fn a_plain_invite_has_no_room_part_and_the_old_rows_have_none() {
     assert_eq!(r.hub.store.invite_rooms_todo(), vec![]);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_invite_for_someone_already_here_cannot_name_a_room() {
     let r = Rig::new().await;
@@ -109,6 +112,7 @@ async fn an_invite_for_someone_already_here_cannot_name_a_room() {
     assert!(format!("{e:#}").contains("add them to the room directly"), "{e:#}");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_proof_joins_the_person_once_and_marks_the_part_done() {
     let r = Rig::new().await;
@@ -128,6 +132,7 @@ async fn the_proof_joins_the_person_once_and_marks_the_part_done() {
 }
 
 /// invite-nomarker: Sam proves on the phone and joins, Kai takes him out, the Mac proves later.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_removed_persons_second_device_never_re_joins() {
     let r = Rig::new().await;
@@ -145,6 +150,7 @@ async fn a_removed_persons_second_device_never_re_joins() {
 
 /// invite-edge: the host went down between the proof and the join. The proof is on the device row; nothing else
 /// remembers it, so only a pass that looks at the rows can join him.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_restart_between_the_proof_and_the_join_still_joins() {
     let r = Rig::new().await;
@@ -177,6 +183,7 @@ fn sam_device(key: &str) -> crate::store::Device {
 
 /// A cancelled invite (revoked before anyone accepted it) has no membership, so no device can prove it, and a pass that
 /// looks at the rows finds nobody who did.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_cancelled_invite_never_joins() {
     let r = Rig::new().await;
@@ -201,6 +208,7 @@ async fn a_cancelled_invite_never_joins() {
     assert!(!r.hub.store.invite_room_done(invite, &room));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_revoked_person_does_not_join_and_an_undo_lets_the_waiting_part_go_on() {
     let r = Rig::new().await;
@@ -218,6 +226,7 @@ async fn a_revoked_person_does_not_join_and_an_undo_lets_the_waiting_part_go_on(
     assert_eq!(people(&r, &room), vec!["sam".to_owned()], "the part was not done, so it goes on");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_room_deleted_before_the_join_is_marked_done_with_no_join() {
     let r = Rig::new().await;
@@ -230,6 +239,7 @@ async fn a_room_deleted_before_the_join_is_marked_done_with_no_join() {
     assert!(r.hub.store.invite_room_done(&invite, &room));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_agent_added_to_the_room_after_the_invite_holds_the_join_until_the_person_has_it() {
     let r = Rig::new().await;
@@ -249,6 +259,7 @@ async fn an_agent_added_to_the_room_after_the_invite_holds_the_join_until_the_pe
     assert_eq!(people(&r, &room), vec!["sam".to_owned()]);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_setting_off_at_the_join_leaves_the_part_waiting() {
     let r = Rig::new().await;
@@ -265,6 +276,7 @@ async fn the_setting_off_at_the_join_leaves_the_part_waiting() {
 
 /// Kai adds the person by hand before they accept, then takes them out: the invite's waiting part is done by the
 /// removal, so the proof later joins no one (the architect's `InviteJoin2` trace).
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_removal_before_the_proof_marks_the_waiting_part_done() {
     let r = Rig::new().await;
@@ -280,6 +292,7 @@ async fn a_removal_before_the_proof_marks_the_waiting_part_done() {
 
 /// Two invites for the same person, only the first accepted: the second, naming a room, is made before the first is accepted. Proving the first joins
 /// no one into the second's room, and the list says the second isn't accepted.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_unaccepted_invite_beside_an_accepted_one_waits_and_says_why() {
     let r = Rig::new().await;
@@ -315,6 +328,7 @@ async fn waiting_of(r: &Rig, invite: &str) -> String {
 }
 
 /// A revoked person's accepted invite said "isn't accepted" (their membership is set aside); it says the access was revoked.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_revoked_persons_accepted_invite_says_the_access_was_revoked() {
     let r = Rig::new().await;
@@ -328,6 +342,7 @@ async fn a_revoked_persons_accepted_invite_says_the_access_was_revoked() {
 
 /// A room that took Kith agents when the invite was made and now holds a plain bot takes no people: that is the reason,
 /// not "the person isn't granted every agent".
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_room_that_no_longer_takes_people_says_so_not_that_the_grant_is_short() {
     let r = Rig::new().await;

@@ -28,6 +28,7 @@ async fn joined(r: &Rig, roles: Value) -> Caller {
     r.device("sam-phone", Some("sam"))
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_unproven_device_can_only_prove_and_only_a_few_times() {
     let r = Rig::new().await;
@@ -65,6 +66,7 @@ async fn an_unproven_device_can_only_prove_and_only_a_few_times() {
     assert!(format!("{again:#}").contains("already shown its invite"), "once is enough: {again:#}");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn permission_prompts_go_to_the_owner_for_a_guest_and_to_a_member_for_their_own_run() {
     let r = Rig::new().await;
@@ -141,6 +143,7 @@ async fn permission_prompts_go_to_the_owner_for_a_guest_and_to_a_member_for_thei
     call(&r, &sam, "stop", json!({"botId": chat})).await.unwrap();
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn answers_leave_out_this_computers_folders() {
     let r = Rig::new().await;
@@ -154,6 +157,7 @@ async fn answers_leave_out_this_computers_folders() {
     );
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn person_ids_are_checked_and_only_our_own_grants_are_taken_back() {
     let r = Rig::new().await;
@@ -182,6 +186,7 @@ async fn person_ids_are_checked_and_only_our_own_grants_are_taken_back() {
     assert!(r.allowed("kim", "money"));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_deleted_template_makes_no_chat_and_a_second_account_keeps_the_handle() {
     let r = Rig::new().await;

@@ -333,28 +333,30 @@ mod tests {
     fn the_stub_and_holder_are_found_beside_the_host_in_the_app_bundle_and_through_the_kith_link() {
         let t = std::env::temp_dir().join(format!("kith-stub-find-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&t);
+        let (stub, holder) =
+            if cfg!(windows) { ("kith-stub.exe", "kith-holder.exe") } else { ("kith-stub", "kith-holder") };
         // The app: Resources/kith-serve (the service runs it), Resources/kith/bin/{kith,kith-stub}.
         let res = t.join("Kith.app/Contents/Resources");
         std::fs::create_dir_all(&res).unwrap();
         std::fs::write(res.join("kith-serve"), "").unwrap();
-        stub_at(&res.join("kith/bin/kith-stub"));
+        stub_at(&res.join(format!("kith/bin/{stub}")));
         assert_eq!(
             find_stub(Some(&res.join("kith-serve")), None),
-            Some(res.join("kith/bin/kith-stub").canonicalize().unwrap())
+            Some(res.join(format!("kith/bin/{stub}")).canonicalize().unwrap())
         );
         assert_eq!(find_holder(&res.join("kith-serve")), None, "no holder in this bundle yet");
-        stub_at(&res.join("kith/bin/kith-holder"));
+        stub_at(&res.join(format!("kith/bin/{holder}")));
         assert_eq!(
             find_holder(&res.join("kith-serve")),
-            Some(res.join("kith/bin/kith-holder").canonicalize().unwrap())
+            Some(res.join(format!("kith/bin/{holder}")).canonicalize().unwrap())
         );
         // A service copy with the stub beside it wins over the bundle layout.
         let svc = t.join("serve/bin");
         std::fs::create_dir_all(&svc).unwrap();
         std::fs::write(svc.join("kith-serve"), "").unwrap();
         assert_eq!(find_stub(Some(&svc.join("kith-serve")), None), None, "nothing beside it, nothing on PATH");
-        stub_at(&svc.join("kith-stub"));
-        assert_eq!(find_stub(Some(&svc.join("kith-serve")), None), Some(svc.join("kith-stub").canonicalize().unwrap()));
+        stub_at(&svc.join(stub));
+        assert_eq!(find_stub(Some(&svc.join("kith-serve")), None), Some(svc.join(stub).canonicalize().unwrap()));
         // install.sh links only `kith` into ~/.local/bin; the stub is beside the link's target.
         #[cfg(unix)]
         {

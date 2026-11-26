@@ -31,6 +31,7 @@ fn lose_agent_folder(r: &Rig, agent: &str) {
     std::fs::remove_dir_all(r.dir.join("home").join("agents").join(agent)).unwrap();
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn revoking_a_person_whose_agent_folder_is_gone_still_removes_their_devices_and_invites() {
     let r = Rig::new().await;
@@ -48,6 +49,7 @@ async fn revoking_a_person_whose_agent_folder_is_gone_still_removes_their_device
     assert_eq!(call(&r, "revokePerson", json!({"personId": "sam"})).await.unwrap()["revoked"], true);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn changing_access_survives_a_lost_agent_folder() {
     let r = Rig::new().await;

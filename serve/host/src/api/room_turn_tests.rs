@@ -56,6 +56,7 @@ fn texts(lines: &[Entry]) -> Vec<String> {
 
 /// Rule 1 and R1: a turn's lines take the gen the turn STARTED in, whenever they land. Broken variant: stamped at landing
 /// (the known break; model doors-stampland, notag-owner) shows the new person what was written before they came.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_lines_stamp_is_its_turns_start_gen_and_a_person_who_joined_meanwhile_is_not_shown_it() {
     let (r, room) = rig().await;
@@ -75,6 +76,7 @@ async fn a_lines_stamp_is_its_turns_start_gen_and_a_person_who_joined_meanwhile_
 /// late they land (after a join, after the turn ended, after a restart: the stamp is the turn's basis, never taken at
 /// landing). The tool line itself is no person's to see; the reply that tells what the door made is, and a person who joined
 /// after the turn started is not shown it. Stamped when it lands (model doors-stampland) it would be sent to Ben.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_doors_result_carries_its_turns_start_gen_and_is_hidden_from_a_later_joiner() {
     let (r, room) = rig().await;
@@ -102,6 +104,7 @@ async fn a_doors_result_carries_its_turns_start_gen_and_is_hidden_from_a_later_j
 }
 
 /// A writer that names no gen is hidden from every person (NULL = unstamped), the owner still reads it.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_unstamped_line_is_hidden_from_people_and_a_turn_at_room_level() {
     let (r, room) = rig().await;
@@ -114,6 +117,7 @@ async fn an_unstamped_line_is_hidden_from_people_and_a_turn_at_room_level() {
 }
 
 /// Rule 1: the owner's own post in a group is stamped with the room's gen in the same step as the append.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_owners_post_in_a_room_is_stamped_with_the_rooms_gen() {
     let (r, room) = rig().await;
@@ -127,6 +131,7 @@ async fn the_owners_post_in_a_room_is_stamped_with_the_rooms_gen() {
 
 /// Rule 3 / model design-flow: a message left unanswered across a join is not answered by a room turn, and its author is
 /// told with a line no later joiner is shown. Broken variant (the trigger not checked): the turn answers Kai's pre-join post.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_post_from_before_a_join_is_not_answered_in_the_room_and_its_author_is_told() {
     let (r, room) = rig().await;
@@ -155,6 +160,7 @@ async fn a_post_from_before_a_join_is_not_answered_in_the_room_and_its_author_is
 
 /// Rule 3 / model design-r2: an owner-level turn after the last leave reads nothing that was written while the person
 /// was in. Broken variant (the input not cut): the owner turn answers the person's unanswered post.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_owner_turn_after_the_last_leave_reads_nothing_written_while_a_person_was_in() {
     let (r, room) = rig().await;
@@ -173,6 +179,7 @@ async fn an_owner_turn_after_the_last_leave_reads_nothing_written_while_a_person
 
 /// Rule 3: a room turn reads only what every current person can see. Ann joined first, ben later: a line of ann's stay
 /// from before ben came is not in the prompt of a turn for both.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_room_turn_reads_only_what_every_current_person_sees() {
     let (r, room) = rig().await;
@@ -190,6 +197,7 @@ async fn a_room_turn_reads_only_what_every_current_person_sees() {
 }
 
 /// Rule 6 and the architect's MUST 10: a room with people never falls back to "everyone answers".
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn nobody_answers_a_post_that_mentions_nobody_when_people_are_in_the_room() {
     let (r, room) = rig().await;
@@ -221,6 +229,7 @@ async fn nobody_answers_a_post_that_mentions_nobody_when_people_are_in_the_room(
 }
 
 /// Rule 7: only the owner answers a room person's cards, whoever wrote.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn only_the_owner_answers_a_room_persons_cards() {
     let (r, _room) = rig().await;
@@ -238,6 +247,7 @@ async fn only_the_owner_answers_a_room_persons_cards() {
 }
 
 /// Rule 12 / model jobs-revokekeepsturn: a revoke of p ends the room turn whose basis holds p, and only that one.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_revoke_ends_the_room_turns_whose_basis_holds_the_person() {
     let (r, room) = rig().await;
@@ -261,6 +271,7 @@ async fn a_revoke_ends_the_room_turns_whose_basis_holds_the_person() {
 }
 
 /// R3: a revoke writes no room row, so its undo gives the room back exactly.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_revoke_writes_no_room_row() {
     let (r, room) = rig().await;
@@ -287,6 +298,7 @@ fn a_room_actors_key_and_session_are_its_own() {
 }
 
 /// PR B SHOULD 1: a nonce used in an earlier stay is not answered with that stay's line.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_reused_nonce_in_a_new_stay_is_not_answered_with_the_old_stays_line() {
     let (r, room) = rig().await;
@@ -303,6 +315,7 @@ async fn a_reused_nonce_in_a_new_stay_is_not_answered_with_the_old_stays_line() 
 }
 
 /// PR B SHOULD 2: Kai's send is not answered with a person's line that has the same nonce.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_owners_nonce_lookup_never_returns_a_persons_line() {
     let (r, room) = rig().await;
@@ -315,6 +328,7 @@ async fn the_owners_nonce_lookup_never_returns_a_persons_line() {
 }
 
 /// PR B SHOULD 3: the reaction is written in the same transaction as the stay and revoke check.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_reaction_is_refused_once_a_revoke_is_recorded_even_after_the_check() {
     let (r, room) = rig().await;

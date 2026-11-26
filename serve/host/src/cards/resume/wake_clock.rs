@@ -402,7 +402,7 @@ fn lifecycle_command() -> Option<Command> {
     Some(cmd)
 }
 
-// Unix-only until windows-owner W2b: the run door's stand-in `kith` is a shell script.
+// Unix-only until retire-python P1-12: the run door's stand-in `kith` is a shell script (no Windows kernel launcher before it).
 #[cfg(all(test, unix))]
 #[path = "wake_clock_tests.rs"]
 mod tests;

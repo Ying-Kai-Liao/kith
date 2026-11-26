@@ -47,6 +47,7 @@ async fn events(r: &Rig, caller: &Caller) -> Vec<Value> {
     Box::pin(s).take_until(tokio::time::sleep(Duration::from_millis(300))).collect().await
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_caller_is_the_owner_or_a_person() {
     let r = Rig::new().await;
@@ -71,6 +72,7 @@ async fn a_caller_is_the_owner_or_a_person() {
     assert!(call(&r, &ghost, "hello", json!({})).await.is_err());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn schedule_messages_are_on_until_the_person_turns_their_own_off() {
     let r = Rig::new().await;
@@ -144,6 +146,7 @@ pub(super) fn router_methods() -> BTreeSet<String> {
     out
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_member_cannot_make_rename_or_unfold_a_topic() {
     let r = Rig::new().await;
@@ -155,6 +158,7 @@ async fn a_member_cannot_make_rename_or_unfold_a_topic() {
     }
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn every_router_method_is_denied_to_members_unless_listed() {
     let r = Rig::new().await;
@@ -209,6 +213,7 @@ async fn every_router_method_is_denied_to_members_unless_listed() {
     assert!(rows.len() >= refused && rows.iter().all(|row| !row.allowed || roles::member_may(&row.method)));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_invitee_sees_and_touches_only_their_own_chats() {
     let r = Rig::new().await;
@@ -295,6 +300,7 @@ async fn an_invitee_sees_and_touches_only_their_own_chats() {
     assert!(rows.iter().all(|a| a["deviceKey"] == "sam-phone"));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn create_invite_makes_the_person_the_grants_and_the_cloud_record() {
     let r = Rig::new().await;
@@ -363,6 +369,7 @@ async fn create_invite_makes_the_person_the_grants_and_the_cloud_record() {
 /// `people` reads kith-auth: a person and a member row made there show with the agent and role; the host's own
 /// facts join in by id; revoked shows; the owner never; a store-only person is left out; kith-auth unreadable is an
 /// error, not an empty list.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn people_come_from_kith_auth() {
     let r = Rig::new().await;
@@ -400,6 +407,7 @@ async fn people_come_from_kith_auth() {
     assert!(broken.is_err(), "unreadable kith-auth is an error, not nobody");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn create_invite_refuses_and_leaves_nothing_half_made() {
     let r = Rig::new().await;
@@ -435,6 +443,7 @@ async fn create_invite_refuses_and_leaves_nothing_half_made() {
     assert!(format!("{e:#}").contains("owner"), "{e:#}");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_removed_persons_id_never_goes_to_a_new_invite_and_their_old_link_binds_nobody() {
     let r = Rig::new().await;
@@ -457,6 +466,7 @@ async fn a_removed_persons_id_never_goes_to_a_new_invite_and_their_old_link_bind
     assert_eq!(r.hub.store.memberships().unwrap(), []);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn memberships_bind_only_to_our_open_invites_and_leave_with_the_cloud() {
     let r = Rig::new().await;
@@ -514,6 +524,7 @@ async fn memberships_bind_only_to_our_open_invites_and_leave_with_the_cloud() {
     members::apply(&r.hub, bin, &[], Some("user_owner")).await.unwrap();
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_pull_binds_the_member_and_their_device_waits_for_the_owner_to_compare_its_code() {
     let r = Rig::new().await;
@@ -589,6 +600,7 @@ async fn a_pull_binds_the_member_and_their_device_waits_for_the_owner_to_compare
     let _ = owner_phone;
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn changing_and_revoking_a_persons_access() {
     let r = Rig::new().await;
@@ -645,6 +657,7 @@ async fn changing_and_revoking_a_persons_access() {
     let _ = Arc::strong_count(&r.hub);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_invitee_never_reaches_a_terminal_thread() {
     let r = Rig::new().await;
@@ -707,6 +720,7 @@ async fn an_invitee_never_reaches_a_terminal_thread() {
     assert!(serde_json::to_string(&owner_view).unwrap().contains("terminal secret"));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_thread_project_is_corrected_only_in_own_chats_and_to_shared_projects() {
     let r = Rig::new().await;
@@ -767,6 +781,7 @@ async fn chat_of(r: &Rig, caller: &Caller) -> String {
     started["bot"]["id"].as_str().unwrap().to_owned()
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_thread_row_carries_its_summary_only_to_its_audience() {
     let r = Rig::new().await;
@@ -805,6 +820,7 @@ async fn a_thread_row_carries_its_summary_only_to_its_audience() {
     assert!(plain.unwrap().data["thread"].is_null());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn showing_the_summary_as_the_row_is_an_owner_setting_off_by_default() {
     let r = Rig::new().await;
@@ -827,6 +843,7 @@ async fn set_labels(r: &Rig, room: &str, labels: Value) -> anyhow::Result<Value>
     call(r, &Caller::Local, "updateBot", json!({"id": room, "labels": labels})).await
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_rooms_labels_are_the_owners_normalized_and_capped() {
     let r = Rig::new().await;
@@ -852,6 +869,7 @@ async fn a_rooms_labels_are_the_owners_normalized_and_capped() {
     assert!(denied(&e), "{e:#}");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_citation_opens_for_its_audience_and_is_not_shared_for_anyone_else() {
     let r = Rig::new().await;
@@ -884,6 +902,7 @@ async fn a_citation_opens_for_its_audience_and_is_not_shared_for_anyone_else() {
     assert_eq!(call(&r, &sam, "resolveCitation", link(&mine.id)).await.unwrap(), stranger);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn resolving_a_main_chat_citation_hides_other_threads_summaries_from_a_member() {
     let r = Rig::new().await;
@@ -907,6 +926,7 @@ async fn resolving_a_main_chat_citation_hides_other_threads_summaries_from_a_mem
     assert_eq!(all, 3);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn forgetting_a_thread_takes_the_summary_off_its_row() {
     let r = Rig::new().await;
@@ -936,6 +956,7 @@ async fn forgetting_a_thread_takes_the_summary_off_its_row() {
     }
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_bots_row_summary_follows_the_same_audience_rule_as_its_thread_rows() {
     let r = Rig::new().await;
@@ -956,6 +977,7 @@ async fn a_bots_row_summary_follows_the_same_audience_rule_as_its_thread_rows() 
 
 /// A membership changed with `kith-auth member` (not through the app) is what the host's access reads follow: the
 /// own-chat events of a member, `startChat`, and what `setPersonAccess` takes away.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn memberships_changed_in_kith_auth_are_followed() {
     let r = Rig::new().await;
@@ -1011,6 +1033,7 @@ async fn memberships_changed_in_kith_auth_are_followed() {
 
 /// An agent given to everyone (the `*` row) is one `startChat` lets a member into, so their own chat's events must
 /// arrive too (F8): the copy `event_for` reads follows the `*` row. Taking the row away stops them.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_row_for_everyone_lets_the_members_chat_events_through() {
     let r = Rig::new().await;
@@ -1031,6 +1054,7 @@ async fn a_row_for_everyone_lets_the_members_chat_events_through() {
 
 /// The 10 s mirror reads kith-auth and writes the copy under the lock `setPersonAccess` holds (F8): while an owner's
 /// change holds it, the mirror waits, so its older read can't land over the change.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_mirror_waits_for_the_lock_of_an_access_change() {
     let r = Rig::new().await;

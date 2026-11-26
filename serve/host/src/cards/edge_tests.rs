@@ -40,6 +40,7 @@ async fn until(what: impl Fn() -> bool) {
     }
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_host_in_an_unticked_job_offers_always_and_the_job_and_each_keeps_only_what_it_says() {
     let r = Rig::new().await;
@@ -86,6 +87,7 @@ async fn a_host_in_an_unticked_job_offers_always_and_the_job_and_each_keeps_only
     assert!(call.await.unwrap().allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn always_for_everyone_keeps_one_host_on_the_agent_for_every_guest_and_nothing_else() {
     let r = Rig::new().await;
@@ -121,6 +123,7 @@ async fn always_for_everyone_keeps_one_host_on_the_agent_for_every_guest_and_not
     assert!(!call.await.unwrap().allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_package_update_that_widens_a_ticked_job_asks_once_and_a_no_declines_that_update() {
     let r = Rig::new().await;
@@ -150,6 +153,7 @@ async fn a_package_update_that_widens_a_ticked_job_asks_once_and_a_no_declines_t
     assert!(!call.await.unwrap().allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_helpers_yes_is_written_before_the_run_hears_it() {
     let r = Rig::new().await;
@@ -190,6 +194,7 @@ fn door_caps(r: &Rig, text: &str) {
     caps(r, text);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_door_card_offers_only_its_job_and_the_job_is_on_before_the_run_hears_yes() {
     let r = Rig::new().await;
@@ -224,6 +229,7 @@ async fn a_door_card_offers_only_its_job_and_the_job_is_on_before_the_run_hears_
     assert!(entry()["outcome"].as_str().unwrap().starts_with("Not turned on ("), "{}", entry());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_door_no_job_holds_can_only_be_refused() {
     let r = Rig::new().await;
@@ -273,6 +279,7 @@ async fn app_card(r: &Rig, chat: &str, host: &str) -> (Card, Value) {
     (r.hub.store.card(&card.id).unwrap(), data)
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_members_app_chat_ask_keeps_what_the_owner_picked_and_its_agent_hears_its_own_allow_once() {
     let r = Rig::new().await;
