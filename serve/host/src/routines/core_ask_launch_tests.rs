@@ -107,10 +107,11 @@ fn a_claude_callee_attaches_naming_ask_conversation_keeps_its_session_and_surviv
     assert!(runs[0].contains("do the ask task"), "the task reached the engine: {}", runs[0]);
     gone_vars(&runs[0]);
     // Its record keeps the engine's real session (the one the launch gave Claude), so `-c` resumes it.
+    // The stand-in prints its arguments with `$*`, and the system prompt among them spans lines: the whole record is searched.
     let session = runs[0]
-        .lines()
-        .find_map(|l| l.strip_prefix("argv="))
-        .and_then(|a| a.split_whitespace().skip_while(|x| *x != "--session-id").nth(1))
+        .split_whitespace()
+        .skip_while(|x| *x != "--session-id")
+        .nth(1)
         .unwrap_or_else(|| panic!("no --session-id in the engine's arguments: {}", runs[0]))
         .to_owned();
     let record = w.core("ask.record", &json!({"id": "r1"}));
