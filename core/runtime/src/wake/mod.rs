@@ -23,6 +23,8 @@ mod outside;
 #[cfg(all(test, unix))]
 mod parity_tests;
 mod queue;
+#[cfg(unix)]
+pub(crate) mod rollback;
 mod settle;
 mod store;
 #[cfg(test)]
@@ -33,18 +35,24 @@ mod tick_tests;
 mod turns;
 mod waiters;
 
-pub(crate) use call::{call, serves};
+pub(crate) use call::{call, call_open, serves};
+#[cfg(unix)]
+pub(crate) use tick::settle_only;
 pub(crate) use tick::{CoreLock, World, system, tick};
 // The import (Unix only, like the rest of `import`) is the one outside user of the model and the counts.
 pub(crate) use model::State;
 #[cfg(unix)]
 pub(crate) use model::{Answered, Item, Waiter};
 #[cfg(unix)]
+pub(crate) use model::{file_key, number};
+#[cfg(unix)]
 pub(crate) use store::counts;
 pub(crate) use store::{load, save};
 // What the ask ledger needs of the queue (P2-3): it owes a wake in its own transaction and takes one back, on the state the
 // caller loaded (`write_tx`, or the tick's).
 pub(crate) use outside::Outside;
+#[cfg(unix)]
+pub(crate) use outside::System;
 #[cfg(all(test, unix))]
 pub(crate) use outside::{Check, Civil, PrView, Transcripts};
 pub(crate) use queue::{New, enqueue};
@@ -52,6 +60,29 @@ pub(crate) use turns::withdraw_in;
 
 use crate::db::Core;
 use crate::error::{Error, Result};
+
+/// Whether the wake queue is the core's on this Mac: the `wake` cutover record says `switched` and core.db holds the marker
+/// the step wrote (the same `may_serve` as every module). `stepping`, `rolling-back`, no record, a record with no marker, and
+/// a core opened without its folders all say no, so the core refuses the writes of a queue that is not its to write.
+#[cfg(unix)]
+pub(crate) fn switched(core: &Core) -> bool {
+    let Some(folders) = core.folders() else {
+        return false;
+    };
+    crate::cutover::same_answer::may_serve(
+        &crate::cutover::modules::wake::Wake::new(),
+        &crate::cutover::Env::with_paths(folders),
+        core.conn(),
+        false,
+    )
+    .ok
+}
+
+/// A Windows core is born switched, and `wake` is not on yet (`switched.rs`): its rows refuse by name.
+#[cfg(not(unix))]
+pub(crate) fn switched(_core: &Core) -> bool {
+    crate::switched::on_windows("wake")
+}
 
 /// Runs `f` over the state in one write transaction. Answered ids older than a week are forgotten on the way.
 pub(crate) fn write<T>(

@@ -23,7 +23,7 @@ impl Core {
         let row = check(who, method, params)?;
         match row.name {
             "paths" => self.paths(params),
-            "kernel.version" => parse(&kith_kernel::version_json()),
+            "kernel.version" => parse(&kith_kernel::version_json_with(crate::version_extras())),
             "secrets.open"
             | "secrets.has"
             | "secrets.get"

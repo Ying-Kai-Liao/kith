@@ -13,6 +13,9 @@
 //!
 //! M4-5a: [`schedules`], the host's routines and `kith-sched`'s state. It does have secrets (the webhook keys), which it
 //! writes into the envelope itself and puts back into serve.db at a rollback; see its doc.
+//!
+//! WK6: [`wake`], the wake queue (`kith-wake`'s files); stepped with the host stopped, after which the queue is the core's and
+//! the host's clock ticks it.
 
 pub(crate) mod accounts;
 pub(crate) mod claims;
@@ -42,3 +45,10 @@ mod transcripts_back_tests;
 mod transcripts_preflight;
 #[cfg(test)]
 mod transcripts_tests;
+pub(crate) mod wake;
+mod wake_back;
+#[cfg(test)]
+mod wake_back_tests;
+mod wake_preflight;
+#[cfg(test)]
+mod wake_tests;

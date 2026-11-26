@@ -49,9 +49,14 @@ pub(super) struct HostHold(#[allow(dead_code, reason = "held for its drop")] Fil
 
 /// Takes `host.lock` for good (no wait: a running host does not let go). `running` is the verb's "the host is running".
 pub(super) fn hold_host(env: &Env, running: &str) -> Result<HostHold> {
+    hold_host_for("schedules", env, running)
+}
+
+/// [`hold_host`] for another module's step or rollback (the host half of `hold_both`, which `wake` also takes): `module` names it in the errors.
+pub(super) fn hold_host_for(module: &str, env: &Env, running: &str) -> Result<HostHold> {
     let dir = super::schedules::host_dir_of(env);
     std::fs::create_dir_all(&dir)
-        .map_err(|e| Error::Io(format!("cutover: schedules: {}: {e}", dir.display())))?;
+        .map_err(|e| Error::Io(format!("cutover: {module}: {}: {e}", dir.display())))?;
     let path = dir.join("host.lock");
     // Never truncated: the host writes nothing into it, and a stale pid would only mislead.
     let f = OpenOptions::new()
@@ -60,17 +65,17 @@ pub(super) fn hold_host(env: &Env, running: &str) -> Result<HostHold> {
         .open(&path)
         .map_err(|e| {
             Error::Refused(format!(
-                "cutover: schedules: host.lock cannot be checked: {}: {e}",
+                "cutover: {module}: host.lock cannot be checked: {}: {e}",
                 path.display()
             ))
         })?;
     match f.try_lock_exclusive() {
         Ok(()) => Ok(HostHold(f)),
         Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
-            Err(Error::Refused(format!("cutover: schedules: {running}")))
+            Err(Error::Refused(format!("cutover: {module}: {running}")))
         }
         Err(e) => Err(Error::Refused(format!(
-            "cutover: schedules: host.lock cannot be checked: {e}"
+            "cutover: {module}: host.lock cannot be checked: {e}"
         ))),
     }
 }

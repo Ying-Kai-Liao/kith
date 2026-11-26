@@ -76,6 +76,21 @@ pub(crate) fn claim_run(
         revoke_seen,
     };
     let claimed = (|| {
+        // A wake's turn starts only while the wake queue is the core's: nothing new may start on a queue that is going back
+        // (a rollback's record, or a host that starts after a crash in it, must not pull a queued wake turn).
+        let wakes: Option<String> = core
+            .conn()
+            .query_row(
+                "SELECT source FROM turns WHERE id = ?1 AND conversation = ?2 AND source = 'wake'",
+                params![turn, conversation],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if wakes.is_some() && !crate::wake::switched(core) {
+            return Err(Error::Refused(format!(
+                "kith-core: turn {turn} is a wake's, and the wake queue is not switched to the core on this Mac (kith migrate step wake)"
+            )));
+        }
         let generation = core.generation();
         let tx = core.claim_tx()?;
         let source: Option<String> = tx

@@ -39,6 +39,8 @@ fn kith(f: &Paths, line: &str, env: &[(&str, &str)]) -> (i32, String, String) {
 #[test]
 fn every_verb_goes_through_the_real_dispatch_and_a_missing_core_refuses_and_writes_nothing() {
     let f = folders("verbs");
+    // The core answers the wake rows of a switched queue only.
+    kith_core::mark_wake_switched_for_test(&f).expect("the wake switch");
     let daemon = serve_for_test(&f);
     let said = |line: &str| {
         let (code, out, err) = kith(&f, line, &[]);

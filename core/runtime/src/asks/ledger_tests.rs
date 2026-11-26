@@ -129,6 +129,12 @@ impl Rig {
         d.shared()
             .with_core(|c| claims::reconcile(c, &[], &[], i64::MAX, 1).map(|_| ()))
             .unwrap();
+        // The wake rows answer a switched queue only (`wake::call`).
+        d.shared()
+            .with_core(|c| {
+                crate::cutover::modules::wake::write_switched(&crate::layout::Layout::new(&m), c, 1)
+            })
+            .unwrap();
         let f = Arc::new(Fake {
             procs: Mutex::new(BTreeMap::new()),
             under_lock: AtomicUsize::new(0),

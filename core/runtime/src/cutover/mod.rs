@@ -239,6 +239,7 @@ pub(crate) fn registry() -> Vec<Box<dyn Module>> {
         Box::new(modules::transcripts::Transcripts),
         Box::new(modules::claims::Claims),
         Box::new(modules::schedules::Schedules::new()),
+        Box::new(modules::wake::Wake::new()),
         Box::new(authority::AuthorityModule::real()),
     ]
 }

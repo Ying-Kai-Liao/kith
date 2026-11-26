@@ -183,6 +183,11 @@ struct Rig {
 }
 
 fn rig_with(lock_wait: Duration) -> Rig {
+    rig_on(lock_wait, true)
+}
+
+/// `switched`: the `wake` record and marker a step leaves (the owner's `wake.*` writes and `wake.tick` answer only then).
+fn rig_on(lock_wait: Duration, switched: bool) -> Rig {
     let (t, m) = machine();
     let d = Daemon::spawn_with(
         &paths(&m),
@@ -200,6 +205,13 @@ fn rig_with(lock_wait: Duration) -> Rig {
     d.shared()
         .with_core(|c| claims::reconcile(c, &[], &[], i64::MAX, 1).map(|_| ()))
         .unwrap();
+    if switched {
+        d.shared()
+            .with_core(|c| {
+                crate::cutover::modules::wake::write_switched(&crate::layout::Layout::new(&m), c, 1)
+            })
+            .unwrap();
+    }
     let f = Fake::new();
     d.shared().set_wake_world(f.world());
     Rig { _t: t, d, f }
@@ -1159,4 +1171,96 @@ fn the_core_lock_trait_is_what_the_daemon_gives_the_tick() {
         2,
         "one lock for each phase"
     );
+}
+
+// ---- U5: the core refuses the owner's wake writes unless `wake` is switched (WK6 brief section 3) ----
+
+/// The `wake` record in the state a test needs, in this rig's machine folder.
+fn record(r: &Rig, phase: crate::cutover::state::Phase) {
+    crate::cutover::state::write(
+        &crate::layout::Layout::new(&r._t.path().join("machine")),
+        "wake",
+        &crate::cutover::state::Switch {
+            phase,
+            snapshot: None,
+            at: 1,
+        },
+    )
+    .unwrap();
+}
+
+/// Every refused row with params its table row accepts, and who may call it.
+fn writes() -> Vec<(Principal, &'static str, Value)> {
+    vec![
+        (
+            Principal::Owner,
+            "wake.enqueue",
+            json!({"session": "s", "id": "i", "agent": "echo", "text": ["hi"]}),
+        ),
+        (Principal::Owner, "wake.withdraw", json!({"session": "s"})),
+        (
+            Principal::Owner,
+            "wake.withdrawPerson",
+            json!({"persons": ["ann"]}),
+        ),
+        (Principal::Owner, "wake.take", json!({"holder": 1})),
+        (Principal::Owner, "wake.done", json!({"run": "r"})),
+        (Principal::Owner, "wake.back", json!({"run": "r"})),
+        (
+            Principal::Owner,
+            "wake.wait",
+            json!({"on": "at:+1h", "session": "s", "agent": "echo"}),
+        ),
+        (Principal::Owner, "wake.released", json!({"session": "s"})),
+        (Principal::Host, "wake.tick", json!({})),
+    ]
+}
+
+#[test]
+fn every_wake_write_is_refused_while_the_queue_is_not_switched_and_the_reads_are_served() {
+    use crate::cutover::state::Phase;
+    type Setup = fn(&Rig);
+    let cases: [(&str, bool, Setup); 4] = [
+        ("no record", false, |_| {}),
+        ("stepping", false, |r| record(r, Phase::Stepping)),
+        ("rolling back", true, |r| record(r, Phase::RollingBack)),
+        // A record with no marker in core.db (forged, or core.db restored from before the step).
+        ("a record without its marker", false, |r| {
+            record(r, Phase::Switched);
+        }),
+    ];
+    for (name, marker, setup) in cases {
+        let r = rig_on(Duration::from_secs(10), marker);
+        setup(&r);
+        for (who, method, params) in writes() {
+            let said = r.call(who, method, &params);
+            assert!(
+                matches!(&said, Err(Error::Refused(m)) if m.contains(method) && m.contains("not switched to the core")),
+                "{name}: {method}: {said:?}"
+            );
+        }
+        // Nothing was written by the refused calls, and the two reads still answer.
+        assert_eq!(
+            r.owner("wake.queueList", &json!({}))["items"],
+            json!([]),
+            "{name}"
+        );
+        assert_eq!(
+            r.owner("wake.queueStatus", &json!({"id": "i"}))["state"],
+            "unknown",
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_switched_queue_answers_the_writes() {
+    let r = rig();
+    for (who, method, params) in writes() {
+        // `done` and `back` answer `done: false` for a run nobody took, and `wait` has rules of its own (tested above).
+        if matches!(method, "wake.done" | "wake.back" | "wake.wait") {
+            continue;
+        }
+        assert!(r.call(who, method, &params).is_ok(), "{method}");
+    }
 }

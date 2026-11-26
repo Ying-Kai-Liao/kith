@@ -18,13 +18,12 @@ impl Core {
         let home = PathBuf::from("/tmp").join(format!("kwc-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
         std::fs::create_dir_all(home.join(".kith")).expect("home");
         let folders = crate::kernel::folders(&home);
+        if switched {
+            // The record and its marker in core.db, before the daemon holds the core.
+            kith_core::mark_wake_switched_for_test(&folders).expect("the wake switch");
+        }
         let daemon = serve_for_test(&folders);
         crate::terminal::core_claims::enable(&folders.state, folders.clone());
-        if switched {
-            let dir = folders.machine.join("core/cutover");
-            std::fs::create_dir_all(&dir).expect("cutover dir");
-            std::fs::write(dir.join("wake.switch"), "state=switched\nat=1\n").expect("switch record");
-        }
         Self { home, folders, daemon: Some(daemon) }
     }
 
@@ -185,14 +184,17 @@ fn a_switch_still_stepping_is_the_files_and_a_damaged_one_is_the_cores() {
     assert_eq!(enqueue(st, &ask("acp:c1:t", "card:1", None)).unwrap(), Queued::New);
     assert_eq!(spawns(st), 1, "Python is still the writer while stepping");
     assert!(matches!(via_core::ls(&core.folders), Some(items) if items.is_empty()));
-    // As the core reads it: no trimming (a padded line is no state line: damaged), the last state wins.
+    // As the core reads it: no trimming (a padded line is no state line: damaged), the last state wins. Each of these is Core
+    // mode, so no Python starts; and a core with no marker behind the record refuses the write (WK6), so the caller fails
+    // closed and keeps the request.
     for (n, text) in
         ["state=rolling-back\n", "{}", " state=stepping\n", "state=stepping\nstate=switched\n"].into_iter().enumerate()
     {
         std::fs::write(&record, text).unwrap();
         let before = spawns(st);
         let (session, id) = (format!("acp:d{n}:t"), format!("card:d{n}"));
-        assert_eq!(enqueue(st, &ask(&session, &id, None)).unwrap(), Queued::New);
+        let said = enqueue(st, &ask(&session, &id, None));
+        assert!(said.is_err_and(|e| e.to_string().contains("not switched")), "{text:?}: the core refuses");
         assert_eq!(spawns(st), before, "{text:?} is the core's");
     }
 }

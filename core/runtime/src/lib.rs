@@ -239,6 +239,37 @@ pub fn cutover(
     cutover::run(paths, kernel, args)
 }
 
+/// The `kith kernel version` tokens that depend on this build and not on the kernel's own table: `wake-runner` when the
+/// wake step is allowed on this build (`RUNS_WAKE_TURNS`), which doctor reads.
+#[must_use]
+pub fn version_extras() -> &'static [&'static str] {
+    #[cfg(unix)]
+    {
+        if cutover::modules::wake::RUNS_WAKE_TURNS {
+            return &["wake-runner"];
+        }
+    }
+    &[]
+}
+
+/// Puts the `wake` module's switch in place without the step's gates, for the host's own tests that start a core with the
+/// wake queue switched (the record `kith migrate step wake` writes, and the marker in core.db). Not while a daemon holds the
+/// core; never called outside tests.
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn mark_wake_switched_for_test(paths: &Paths) -> Result<(), Error> {
+    let layout = Layout::new(&paths.machine);
+    let mut core = start_with(&layout, MIGRATIONS)?;
+    cutover::modules::wake::write_switched(&layout, &mut core, 1)
+}
+
+/// A Windows core has no cutover record (`switched.rs`); the host's tests that name this compile there and never run.
+#[cfg(not(unix))]
+#[doc(hidden)]
+pub fn mark_wake_switched_for_test(_paths: &Paths) -> Result<(), Error> {
+    Ok(())
+}
+
 /// [`cutover`] for the CLI, with the exit code: `(code, stdout lines, stderr lines)`. The `status MODULE | --json | --require`
 /// questions answer by exit code, and `--json` goes to stdout whatever the code.
 #[cfg(unix)]

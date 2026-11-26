@@ -141,7 +141,16 @@ pub const MODULES: &[&str] = if cfg!(unix) {
 
 /// What `kith kernel version` prints.
 pub fn version_json() -> String {
-    let modules: Vec<String> = MODULES.iter().map(|m| format!("\"{m}\"")).collect();
+    version_json_with(&[])
+}
+
+/// [`version_json`] with the tokens only the caller's build knows (`kith_core::version_extras`: `wake-runner`), after the table's.
+pub fn version_json_with(extra: &[&str]) -> String {
+    let modules: Vec<String> = MODULES
+        .iter()
+        .chain(extra)
+        .map(|m| format!("\"{m}\""))
+        .collect();
     format!("{{\"abi\":{ABI},\"modules\":[{}]}}", modules.join(","))
 }
 
