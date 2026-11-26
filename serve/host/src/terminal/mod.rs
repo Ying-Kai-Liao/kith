@@ -23,6 +23,7 @@ mod jsonl;
 mod registry;
 pub(crate) use registry::{pid_runs, proc_start};
 mod sync;
+pub(crate) mod winproc;
 #[cfg(test)]
 mod tests;
 #[cfg(unix)]
