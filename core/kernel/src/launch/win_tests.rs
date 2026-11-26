@@ -92,6 +92,9 @@ impl Tree {
             threads_bin: None,
             plugins_json: "[]",
             owner_terminal: false,
+            // A test launch is not the owner typing a bypass at a terminal (#1211's Mac-only keep of bypass).
+            owner_via_terminal: false,
+            typed_bypass: false,
             api_helper: "",
             once_id: "0123456789abcdef0123456789abcdef",
             developer_dir: "",
