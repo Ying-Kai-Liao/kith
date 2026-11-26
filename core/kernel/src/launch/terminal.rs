@@ -318,13 +318,14 @@ mod tests {
     #[test]
     fn another_engines_terminal_starts_the_way_it_is_told() {
         let env = Env::new();
-        assert_eq!(
-            adapter_run("/usr/bin/true", "codex", vec![], &env, Engine::Spawn),
-            0
-        );
+        // `false` first: were the code to replace the test process, `true` would exit 0 and pass unnoticed.
         assert_eq!(
             adapter_run("/usr/bin/false", "codex", vec![], &env, Engine::Spawn),
             1
+        );
+        assert_eq!(
+            adapter_run("/usr/bin/true", "codex", vec![], &env, Engine::Spawn),
+            0
         );
     }
 }
