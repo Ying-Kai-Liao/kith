@@ -82,6 +82,7 @@ pub fn forget_home(home: &Path) {
 /// command line and `runneradmin` in `temp_dir()` (CI run 45760700610 left four holders this way).
 #[cfg(windows)]
 fn end_holders_of(home: &Path) {
+    use std::io::Write as _;
     use std::os::windows::process::CommandExt as _;
     let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
     let script = "Get-CimInstance Win32_Process -Filter \"Name='kith-holder.exe'\" \
@@ -93,10 +94,18 @@ fn end_holders_of(home: &Path) {
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
         .output();
     // DIAGNOSTIC (W2b): CI reads this file to see whether this ran and what powershell said.
-    use std::io::Write as _;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(std::env::temp_dir().join("kith-forget.log")) {
+    if let Ok(mut f) =
+        std::fs::OpenOptions::new().create(true).append(true).open(std::env::temp_dir().join("kith-forget.log"))
+    {
         let _ = match out {
-            Ok(o) => writeln!(f, "{} status={} out={} err={}", home.display(), o.status, String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)),
+            Ok(o) => writeln!(
+                f,
+                "{} status={} out={} err={}",
+                home.display(),
+                o.status,
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            ),
             Err(e) => writeln!(f, "{} spawn failed: {e}", home.display()),
         };
     }
