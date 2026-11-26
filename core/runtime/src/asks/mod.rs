@@ -300,6 +300,10 @@ impl Ask {
         if let Some(p) = self.pid {
             put("pid", json!(p));
         }
+        // The session the callee's run attached with (a `--bg` ask's `-c` continues it).
+        if let Some(s) = &self.session {
+            put("session", json!(s));
+        }
         for (k, on) in [
             ("done", self.done),
             ("delivered", self.delivered),

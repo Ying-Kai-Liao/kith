@@ -42,6 +42,8 @@ pub(super) struct World<'a> {
     pub harness: &'a dyn Fn(&str) -> Option<String>,
     /// The host's runtime, to bind a run token to the callee's process.
     pub runtime: Option<tokio::runtime::Handle>,
+    /// Variables the run gets beyond the host's own (a test's world: its home, its engines on `PATH`). The host passes none.
+    pub env: Vec<(String, String)>,
 }
 
 /// The ask turns one pull listed: begins each. A turn the host cannot start right now stays queued and is pulled again.
@@ -153,6 +155,7 @@ struct Plan {
     person: Option<String>,
     bin: PathBuf,
     kernel: Option<PathBuf>,
+    extra_env: Vec<(String, String)>,
 }
 
 impl Plan {
@@ -185,6 +188,7 @@ impl Plan {
             person: person.map(str::to_owned),
             bin,
             kernel: world.kernel.clone(),
+            extra_env: world.env.clone(),
         })
     }
 
@@ -263,6 +267,9 @@ impl Plan {
             {
                 set(&k, &v);
             }
+        }
+        for (k, v) in &self.extra_env {
+            set(k, v);
         }
         env
     }

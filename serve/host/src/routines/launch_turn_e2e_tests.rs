@@ -25,12 +25,12 @@ use std::time::{Duration, Instant};
 /// One world at a time (the stub program is a process-wide variable).
 static SERIAL: Mutex<()> = Mutex::new(());
 
-fn repo_kernel() -> PathBuf {
+pub(super) fn repo_kernel() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel").canonicalize().unwrap()
 }
 
 /// The built `kith`, beside the folder the test binary runs from (`target/debug/deps/..`).
-fn built_kith() -> PathBuf {
+pub(super) fn built_kith() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     let kith = exe.parent().unwrap().parent().unwrap().join("kith");
     assert!(kith.is_file(), "the built kith is not at {}: build the package's binaries first", kith.display());
@@ -52,17 +52,17 @@ while [ -e "$HOLD" ]; do sleep 0.1; done
 exit 0
 "#;
 
-struct World {
-    dir: PathBuf,
-    folders: Paths,
-    env: Vec<(String, String)>,
+pub(super) struct World {
+    pub(super) dir: PathBuf,
+    pub(super) folders: Paths,
+    pub(super) env: Vec<(String, String)>,
     daemon: Option<crate::core_front::TestDaemon>,
     _held: std::sync::MutexGuard<'static, ()>,
 }
 
 impl World {
     /// A home with agent `house` (a job `j`) and the owner `kai`, and a core serving it with the claims stepped.
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         let held = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // Short, for the core's socket.
         let dir = PathBuf::from("/tmp").join(format!("klt-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
@@ -169,12 +169,18 @@ impl World {
         c
     }
 
-    fn core(&self, method: &str, params: &Value) -> Value {
+    pub(super) fn core(&self, method: &str, params: &Value) -> Value {
         crate::core_front::ask(&self.folders, method, params)
             .unwrap_or_else(|| panic!("{method}: the core did not answer"))
     }
 
-    fn show(&self, claim: i64) -> Value {
+    /// A row only the host may call.
+    pub(super) fn core_host(&self, method: &str, params: &Value) -> Value {
+        crate::core_front::call_as_host(&self.folders, method, params)
+            .unwrap_or_else(|| panic!("{method}: the core did not answer"))
+    }
+
+    pub(super) fn show(&self, claim: i64) -> Value {
         crate::core_front::call_as_host(&self.folders, "hostclaim.show", &json!({"claimId": claim}))
             .map_or(Value::Null, |v| v["claim"].clone())
     }
@@ -197,7 +203,7 @@ impl World {
     }
 
     /// The runs the engines recorded.
-    fn runs(&self) -> Vec<String> {
+    pub(super) fn runs(&self) -> Vec<String> {
         std::fs::read_dir(self.dir.join("rec"))
             .unwrap()
             .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())

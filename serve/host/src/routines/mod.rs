@@ -4,6 +4,8 @@ pub use editor::preview as schedule_preview;
 pub mod hooks;
 use hooks::Refused;
 mod core_ask;
+#[cfg(all(test, unix))]
+mod core_ask_launch_tests;
 pub(crate) mod core_cron;
 mod core_runs;
 #[cfg(test)]

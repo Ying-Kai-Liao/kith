@@ -150,6 +150,7 @@ fn pull_as(writer: &Arc<CoreWriter>, core: &Core, dir: &Path, harness: &'static 
         kernel: Some(dir.join("kernel")),
         harness: &move |_| Some(harness.to_owned()),
         runtime: None,
+        env: Vec::new(),
     };
     take(writer, &core.queued(), &world);
 }

@@ -165,6 +165,7 @@ impl Routines {
             kernel: crate::kernel::current_kernel(),
             harness: &super::core_ask::harness_of_agent,
             runtime: tokio::runtime::Handle::try_current().ok(),
+            env: Vec::new(),
         };
         super::core_ask::take(core, &turns, &world);
     }
