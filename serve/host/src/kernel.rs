@@ -260,20 +260,6 @@ pub fn launch_program() -> Option<PathBuf> {
     launch_program_of(std::env::var_os("KITH_BIN"), std::env::current_exe().ok())
 }
 
-/// Whether `program` lists `token` in `kernel version` (`{"abi":1,"modules":[...]}`): a door hands a variable only to a program that
-/// takes it. A program that does not answer lists nothing.
-pub fn program_lists(program: Option<&Path>, token: &str) -> bool {
-    let Some(program) = program else { return false };
-    std::process::Command::new(program)
-        .args(["kernel", "version"])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains(&format!("\"{token}\"")))
-}
-
 /// [`launch_program`] over its two inputs, so a test makes the choice production makes, with the built `kith` as `KITH_BIN`.
 pub fn launch_program_of(kith_bin: Option<OsString>, current: Option<PathBuf>) -> Option<PathBuf> {
     kith_bin.map(PathBuf::from).filter(|p| p.is_file()).or(current)

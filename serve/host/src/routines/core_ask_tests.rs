@@ -148,7 +148,6 @@ fn pull_as(writer: &Arc<CoreWriter>, core: &Core, dir: &Path, harness: &'static 
     let world = World {
         bin: Some(dir.join("kith")),
         launch: Some(dir.join("kith")),
-        names_conversation: true,
         kernel: Some(dir.join("kernel")),
         harness: &move |_| Some(harness.to_owned()),
         runtime: None,
@@ -257,29 +256,6 @@ fn a_turn_that_cannot_start_is_cancelled_and_never_runs_unattached() {
     // The tick settles the ask: its turn ended with no answer.
     assert!(matches!(call_host(&core.folders, "wake.tick", &json!({})), Answer::Done(_)));
     assert_eq!(core.state("a4"), "lost");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn a_program_without_the_turn_conversation_token_starts_nothing() {
-    let core = Core::start();
-    let dir = scratch();
-    stub(&dir);
-    core.open("a7", "go", &json!({}));
-    let world = World {
-        bin: Some(dir.join("kith")),
-        launch: Some(dir.join("kith")),
-        names_conversation: false,
-        kernel: Some(dir.join("kernel")),
-        harness: &|_| Some("claude".to_owned()),
-        runtime: None,
-        env: Vec::new(),
-    };
-    take(&core.writer, &core.queued(), &world);
-    until("the turn is gone from the queue", || core.queued().is_empty());
-    assert!(lines(&dir).is_empty(), "an older program is never started on a turn it cannot attach");
-    assert!(matches!(call_host(&core.folders, "wake.tick", &json!({})), Answer::Done(_)));
-    assert_eq!(core.state("a7"), "lost");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
