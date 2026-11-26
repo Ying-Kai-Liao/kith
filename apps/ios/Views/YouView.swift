@@ -83,10 +83,10 @@ struct YouView: View {
         .navigationDestination(isPresented: $showAccount) { AccountSwitcherView(pushed: true) }
         .navigationDestination(isPresented: $showComputers) { AccountSwitcherView(pushed: true) }
         .navigationDestination(isPresented: $showUsage) {
-            ComputerPage("Usage") { UsageView().environment($0).id($0.computer.id) }
+            YouComputerPage("Usage") { UsageView().environment($0).id($0.computer.id) }
         }
         .navigationDestination(isPresented: $showRoutines) {
-            ComputerPage("Routines") { RoutinesByAgentView(store: $0).environment($0).id($0.computer.id) }
+            YouComputerPage("Routines") { RoutinesByAgentView(store: $0).environment($0).id($0.computer.id) }
         }
         .navigationDestination(isPresented: $showVoice) {
             if let store = app.currentStore { VoiceChatSettingsView(pushed: true).environment(store) }
@@ -117,7 +117,7 @@ struct YouView: View {
 /// A pushed page that shows one computer's data: the last active one, or the one picked here (which also becomes the
 /// computer the Usage widget shows). With several computers a badge in the header switches; the figures are always one
 /// computer's, never summed.
-private struct ComputerPage<Content: View>: View {
+private struct YouComputerPage<Content: View>: View {
     let title: String
     @ViewBuilder let content: (BotStore) -> Content
     @Environment(AppStore.self) private var app
