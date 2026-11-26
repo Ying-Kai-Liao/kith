@@ -26,12 +26,15 @@ sub=clippy
 extra=""
 if [ -n "$target" ]; then
   # A cross check from another OS (CI passes no target and runs natively).
-  # rustup toolchains without ~/.cargo/bin on PATH (the flow Macs): use the pinned one directly.
-  if ! command -v cargo >/dev/null 2>&1; then
-    tc="$(ls -d "$HOME"/.rustup/toolchains/1.99.0-* 2>/dev/null | head -1)"
-    [ -n "$tc" ] && export PATH="$tc/bin:$PATH"
+  # Without a rustup proxy on PATH (the flow Macs) rust-toolchain.toml is ignored and an older stable would
+  # run, showing lints CI never sees. Put the pinned toolchain's own bin first, read from the toolchain file.
+  channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$root/serve/rust-toolchain.toml")"
+  tc="$(ls -d "$HOME/.rustup/toolchains/$channel"-* 2>/dev/null | head -1)"
+  if [ -z "$tc" ]; then
+    echo "pinned toolchain $channel missing from ~/.rustup/toolchains. Install: rustup toolchain install $channel --target $target" >&2
+    exit 2
   fi
-  export PATH="$HOME/.cargo/bin:$PATH"
+  export PATH="$tc/bin:$HOME/.cargo/bin:$PATH"
   command -v cargo >/dev/null 2>&1 || { echo "no cargo on PATH (install rustup)" >&2; exit 2; }
   # Host build scripts need a real C compiler; ~/.local/bin/cc can be something else on this Mac.
   [ -x /usr/bin/cc ] && export CC=/usr/bin/cc
@@ -47,7 +50,7 @@ if [ -n "$target" ]; then
   fi
   if ! (cd "$root/serve" && rustc --print target-libdir --target "$target" >/dev/null 2>&1 \
         && [ -d "$(rustc --print target-libdir --target "$target")" ]); then
-    echo "rust-std for $target missing. Install: (cd $root/serve && rustup target add $target)" >&2
+    echo "rust-std for $target missing. Install: rustup target add $target --toolchain $channel" >&2
     exit 2
   fi
   # Accepts the Microsoft CRT/SDK license (an approved decision); downloaded once into the xwin cache.

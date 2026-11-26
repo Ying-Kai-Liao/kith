@@ -76,3 +76,11 @@ Output goes to its own target dir, `serve/host/target-xwin` (override with `WINC
 Delete `serve/host/target-xwin` to reclaim the space; nothing else depends on it.
 
 Fallback when you cannot run it: the `rust-check` workflow_dispatch run (mode=check, os=windows) is a CI round on a runner.
+
+### Local clippy uses the pinned toolchain
+
+A Mac without a rustup proxy on PATH ignores `serve/rust-toolchain.toml` and runs whatever `cargo` it finds (stable 1.93), which shows lints CI never sees. `windows-clippy.sh --target ...` reads the channel from the toolchain file and puts that toolchain first on PATH, and fails clearly if the toolchain or its windows-msvc rust-std is missing. For the ordinary (Linux/Mac) clippy, do the same by hand:
+
+```sh
+export PATH="$HOME/.rustup/toolchains/1.99.0-aarch64-apple-darwin/bin:$PATH"   # the channel in serve/rust-toolchain.toml
+```
