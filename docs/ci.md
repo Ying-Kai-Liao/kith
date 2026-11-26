@@ -64,6 +64,8 @@ It cross-checks through `cargo xwin clippy` (C build scripts such as kith-core's
 - `rustup target add x86_64-pc-windows-msvc` in `serve/` (the toolchain pinned by `serve/rust-toolchain.toml`)
 - the script sets `XWIN_ACCEPT_LICENSE=1` (accepts the Microsoft CRT/SDK license; approved) and `CC=/usr/bin/cc` for host build scripts.
 
+The `windows` path filter in `ci.yml` (second `filters: |` block) must cover every path that builds into those crates: each crate's source, its path dependencies (transitively), build scripts, `include_str!` targets outside the crate, the toolchain pin, the script and the workflow. `scripts/ci/windows-filter-check.sh` (a step in kernel shard 1) derives that set from `windows-clippy.sh --list-crates` and each `Cargo.toml`'s path dependencies, and fails naming any path the filter misses. When you add a Windows crate to the script or a path dependency to one, the check tells you which line to add to the filter.
+
 Output goes to its own target dir, `serve/host/target-xwin` (override with `WINCLIPPY_TARGET_DIR`), so it never invalidates the Mac build cache. A second run reuses it.
 
 **Cost** (measured on the flow Mac, `nice taskpolicy -b`, at origin/main c65afbf05; clean, every Windows-clippied crate checks):
