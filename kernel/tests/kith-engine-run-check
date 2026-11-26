@@ -134,9 +134,9 @@ network_rows() {   # network_rows LABEL KITH_PROGRAM LAUNCHER
   caps 'reads_others: true  # reads other people'"'"'s posts'
   check "${P}owner, explicit reads_others true with a comment: network 0" "[ \"\$(net_seen '$K' env KITH_RUN_NETWORK=1)\" = '0 $L none' ]"
   macmode bypassPermissions
-  check "${P}capped: a reader agent chosen as bypass on this Mac, launched nested, runs as auto with network 0" "[ \"\$(net_seen '$K' env KITH_AGENT=boss)\" = '0 $L auto' ]"
+  check "${P}capped: a reader agent chosen as bypass on this Mac, launched nested, runs as auto with network 0" "[ \"\$(net_seen '$K' env KITH_CHAIN_CHILD=1 KITH_AGENT=boss)\" = '0 $L auto' ]"
   caps 'reads_others: false'
-  check "${P}control: the same nested run of a reads_others false agent keeps bypass, network 1" "[ \"\$(net_seen '$K' env KITH_AGENT=boss)\" = '1 $L bypassPermissions' ]"
+  check "${P}control: the same nested run of a reads_others false agent keeps bypass, network 1" "[ \"\$(net_seen '$K' env KITH_CHAIN_CHILD=1 KITH_AGENT=boss)\" = '1 $L bypassPermissions' ]"
   rm -f "$A/capabilities.yaml" "$KITH_HOME/settings.json"
 }
 network_rows "" "$KITH" bash
