@@ -11,3 +11,4 @@ threads-slow	thread-writers-slow	verification/threads
 schedule-fire	schedule-fire	verification/schedule-fire
 lease	holder-lease	verification/lease
 secrets	secret-cards	verification/secrets verification/threads/run.sh
+holder-idle	holder-idle	verification/holder-idle

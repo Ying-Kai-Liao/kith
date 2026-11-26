@@ -409,6 +409,27 @@ fn a_redeem_after_a_release_on_a_new_holder_instance_fails() {
     );
 }
 
+/// A holder that idled out holding an unacked exit leaves its claim running in the core. The same core generation
+/// reconciling again ends nothing (step 5 runs once per generation); the next hello, from a new instance, ends it through
+/// step 7 (verification/holder-idle, `gen-exit-live`).
+#[test]
+fn a_claim_whose_holder_idled_out_with_an_unacked_exit_is_ended_by_the_next_instance() {
+    let (_t, mut c) = open();
+    let (id, t) = running(&mut c, "c1", 10);
+    // The core's first hello of this generation: the holder lists the exit record, the claim stays.
+    unreconcile(&c);
+    reconcile(&mut c, &[id], &[], i64::MAX, 50).expect("first hello");
+    // A plain reconnect to the same instance reconciles nothing, even if the holder had dropped the record.
+    assert!(reconcile(&mut c, &[], &[], i64::MAX, 55).is_err());
+    assert_eq!(state(&c, id), "running");
+    // The holder left with its record; the next hello is a new instance that lists nothing. The running claim goes
+    // to `ending` (it stays the writer until its process is gone), and the turn is given back.
+    let out = different_holder(&mut c, "h2", &[], &[], i64::MAX, 60).expect("new instance");
+    assert_eq!(state(&c, id), "ending");
+    assert_eq!(out.kill.len(), 1);
+    assert_eq!(turn_state(&c, t), "queued", "the turn is given back");
+}
+
 #[test]
 fn a_claim_the_new_instance_lists_is_left_alone() {
     let (_t, mut c) = open();
