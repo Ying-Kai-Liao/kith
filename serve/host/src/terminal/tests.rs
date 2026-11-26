@@ -1706,8 +1706,8 @@ async fn a_fork_the_scan_adopted_between_the_claim_and_step_7_is_still_a_fork() 
 /// A holder `winproc::end` is not sure of (a claim with no start stamp) is left running with its claim: releasing it would
 /// let a second writer take the session.
 #[cfg(windows)]
-#[test]
-fn the_sweep_keeps_the_claim_of_a_holder_it_could_not_end() {
+#[tokio::test]
+async fn the_sweep_keeps_the_claim_of_a_holder_it_could_not_end() {
     let r = Rig::new();
     let mut child = std::process::Command::new("ping").args(["-n", "300", "127.0.0.1"]).spawn().unwrap();
     let pid = child.id();
