@@ -31,9 +31,15 @@ impl Core {
         let folders = crate::kernel::folders(&home);
         // The claims are the core's (a callee attaches its claim through `claim.attach`, which serves only then): the real step,
         // before the daemon holds the core.
-        let said = kith_core::cutover(&folders, &home.join("kith/kernel"), &["step".to_owned(), "claims".to_owned()])
-            .map_err(|e| e.to_string())
-            .expect("the claims step");
+        // The step wants a stub program to exist (it is the writer lock's; nothing here runs it).
+        let stub = home.join("kith-stub");
+        std::fs::write(&stub, "#!/bin/sh\n").expect("stub");
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).expect("stub mode");
+        // SAFETY: set before this test starts a thread of its own; every test sets the same name (nextest runs each in a process of
+        // its own).
+        unsafe { std::env::set_var("KITH_STUB_BIN", &stub) };
+        let said =
+            crate::core_front::step_claims_for_test(&folders, &home.join("kith/kernel")).expect("the claims step");
         assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
         let daemon = serve_for_test(&folders);
         daemon.reconciled();
