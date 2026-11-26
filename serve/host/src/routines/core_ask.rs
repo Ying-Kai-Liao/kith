@@ -135,6 +135,8 @@ struct Plan {
     agent: String,
     task: String,
     claim: i64,
+    /// The conversation the turn is on: the launch names it when it attaches the claim.
+    conversation: String,
     claude: bool,
     /// `-H`, for an engine other than the agent's own.
     harness: Option<String>,
@@ -168,12 +170,15 @@ impl Plan {
             agent: t["agent"].as_str().unwrap_or_default().to_owned(),
             task: task.to_owned(),
             claim,
+            conversation: t["conversation"].as_str().unwrap_or_default().to_owned(),
             claude,
             harness: (!claude).then(|| engine.to_owned()),
             model: opt("model"),
             effort: opt("effort"),
             project: opt("project"),
-            folder: opt("folder").map(PathBuf::from),
+            // A person's callee works where the host starts it: the host is not sandboxed, and a folder the person named is
+            // not one the host has judged for them (the owner's `-C` is the owner's own).
+            folder: opt("folder").map(PathBuf::from).filter(|_| person.is_none()),
             ask: t["ask"].as_str().unwrap_or_default().to_owned(),
             asked_by: t["askedBy"].as_str().unwrap_or_default().to_owned(),
             resume: real(t["askSession"].as_str()).or_else(|| real(t["conversation"].as_str())),
@@ -244,6 +249,7 @@ impl Plan {
         // No host picks the account: the launch walks the candidates (`kith account pick`).
         set("KITH_BACKUP_CHAIN", "on");
         set("KITH_TURN_CLAIM", &self.claim.to_string());
+        set("KITH_TURN_CONVERSATION", &self.conversation);
         if let Ok(mode) = std::env::var("KITH_ASK_PERMISSION_MODE") {
             set("KITH_PERMISSION_MODE", &mode);
         }

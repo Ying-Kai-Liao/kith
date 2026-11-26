@@ -223,12 +223,15 @@ fn an_end_mid_run_stops_the_child_and_nothing_reaches_the_asker() {
     let core = Core::start();
     let dir = scratch();
     stub(&dir);
+    hold(&dir);
     core.open("a3", "SLEEP", &json!({}));
     pull(&core, &dir, "claude");
-    until("the callee is running", || {
-        std::fs::read_to_string(dir.join("pid")).is_ok_and(|p| p.trim().parse::<i32>().is_ok())
-    });
-    let pid: i32 = std::fs::read_to_string(dir.join("pid")).unwrap().trim().parse().unwrap();
+    until("the callee started", || pids(&dir).len() == 1);
+    let pid = pids(&dir)[0];
+    // It attaches its claim for real, so `ask.end` finds a running claim and puts it in `ending`, as it does in production.
+    assert_eq!(attach(&core, &dir, claims_given(&dir)[0], "ask:a3", pid)["attached"], true);
+    release(&dir);
+    until("the engine started", || engines(&dir) == 1);
     assert!(alive(pid));
     core.call("ask.end", &json!({"roots": ["a3"]}));
     until("the waiter stopped the child", || !alive(pid));
