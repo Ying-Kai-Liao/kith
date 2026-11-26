@@ -232,6 +232,7 @@ fn interactive(engine: &str, bypass: bool) -> Result<i32> {
         model: std::env::var("KITH_MODEL").unwrap_or_default(),
         effort: std::env::var("KITH_EFFORT").unwrap_or_default(),
         bypass,
+        owner: std::env::var("KITH_RUN_OWNER").is_ok_and(|v| v == "1"),
         global_skills: std::env::var("KITH_RUN_GLOBAL_SKILLS").is_ok_and(|v| v == "1"),
     };
     let Some(tui) = engines::tui_argv(engine, &inputs) else {

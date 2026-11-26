@@ -89,6 +89,19 @@ KITH_OUTPUT=json run -- hi
 check "the engine's environment has no KITH_RUN_*" "[ -s '$T/engine-env' ] && ! grep -q '^KITH_RUN_' '$T/engine-env'"
 printf '#!/bin/sh\nexec python3 "%s/fakes/fake-acp-agent"\n' "$T" > "$T/bin/opencode"
 
+# KITH_RUN_OWNER (network inside codex's sandbox) follows who runs, never what the caller's environment carried: a spy in front
+# of the program writes what `kernel engine-run` was given, then runs the real one.
+printf '#!/bin/sh\n[ "$1 $2" = "kernel engine-run" ] && printf %%s "${KITH_RUN_OWNER-unset}" > "%s/owner-seen"\nexec "%s" "$@"\n' "$T" "$BIN" > "$T/bin/kith-spy"
+chmod +x "$T/bin/kith-spy"
+"$KERNEL/bin/kith-auth" person guest name=Guest >/dev/null 2>&1
+"$KERNEL/bin/kith-auth" member echo guest mode=default >/dev/null 2>&1
+owner_seen() { rm -f "$T/owner-seen"; KITH_BIN=$T/bin/kith-spy KITH_OUTPUT=json "$@" >"$T/out" 2>"$T/err"; cat "$T/owner-seen" 2>/dev/null; }
+check "owner launch: the engine-run gets KITH_RUN_OWNER=1" "[ \"\$(owner_seen env -u KITH_RUN_OWNER '$KITH' echo -- hi)\" = 1 ]"
+check "owner launch: an inherited KITH_RUN_OWNER=0 is replaced by 1" "[ \"\$(owner_seen env KITH_RUN_OWNER=0 '$KITH' echo -- hi)\" = 1 ]"
+# A guest never reaches engine-run through this script (non-Claude engines are refused for anyone but the owner), so an inherited
+# KITH_RUN_OWNER=1 cannot get to a guest's engine here: the spy must not run at all.
+check "guest launch: refused before engine-run, so an inherited KITH_RUN_OWNER=1 reaches no engine" "[ -z \"\$(owner_seen env KITH_PERSON=guest KITH_RUN_OWNER=1 '$KITH' echo -- hi)\" ] && grep -q 'need Claude Code' '$T/err'"
+
 # A TERM to the run stops the engine (positive control: without it the hung engine is still there). Twice: through the script's
 # trap, and with `launch-exec` switched on in a copy of the kernel folder, where the program passes the TERM on itself.
 term_rows() {   # term_rows LABEL KITH_PROGRAM
