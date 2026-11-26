@@ -4,7 +4,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::{ENGINE_GAP, begin, door, engine_gap, old_door, run_of};
+use super::{begin, door, old_door, run_of};
 use crate::api::rig::Rig;
 use crate::core_front::Answer;
 use crate::terminal::core_claims::tests::register;
@@ -120,20 +120,6 @@ fn a_wake_turns_run_is_named_by_its_note_and_a_bot_or_channel_session_keeps_its_
     assert!(!old_door("3f2a9c1e-claude-session"), "a Claude session is the run door's");
 }
 
-#[test]
-fn only_a_claude_engine_runs_detached_until_sched_turn_lands() {
-    assert_eq!(engine_gap(&listed("claude"), None), None);
-    assert_eq!(engine_gap(&listed("codex"), None), Some(ENGINE_GAP));
-    assert_eq!(
-        engine_gap(&json!({"turn": 1}), None),
-        Some(ENGINE_GAP),
-        "an engine the core did not name is not assumed"
-    );
-    assert_eq!(engine_gap(&listed("claude"), Some("codex")), Some(ENGINE_GAP), "the agent's harness decides");
-    assert_eq!(engine_gap(&listed("codex"), Some("claude")), None);
-    assert_eq!(ENGINE_GAP, "this agent's engine cannot run detached turns yet");
-}
-
 #[tokio::test]
 async fn an_owed_wake_is_claimed_once_and_runs_kith_resume_with_its_claim_and_is_reported_done() {
     let r = rig().await;
@@ -186,24 +172,6 @@ async fn a_person_whose_access_ended_at_the_door_is_withdrawn_and_nothing_is_sta
         calls(&log, "hostclaim.claim").is_empty(),
         "no claim for a person who has no access: {:?}",
         log.lock().unwrap()
-    );
-    assert!(!out.exists(), "nothing was spawned");
-}
-
-#[tokio::test]
-async fn a_non_claude_agents_turn_is_cancelled_with_the_reason_and_never_claimed_or_started() {
-    let r = rig().await;
-    let out = std::env::temp_dir().join(format!("kith-wake-out-{}", uuid::Uuid::new_v4()));
-    *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap() = Some(stub_kith(&out));
-    let (core, log) = scripted(|_, _| None);
-    door(&r.hub, &core, &listed("codex"), 7, &carried(None)).await;
-    until("the cancel", || !calls(&log, "hostclaim.cancel").is_empty()).await;
-    *crate::agent::hq::TEST_KERNEL_BIN.lock().unwrap() = None;
-    let cancels = calls(&log, "hostclaim.cancel");
-    assert_eq!((cancels[0]["turn"].as_i64(), cancels[0]["reason"].as_str()), (Some(7), Some(ENGINE_GAP)));
-    assert!(
-        calls(&log, "hostclaim.claim").is_empty(),
-        "never started without its claim: a restart would send the prompt twice"
     );
     assert!(!out.exists(), "nothing was spawned");
 }
