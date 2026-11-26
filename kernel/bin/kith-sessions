@@ -244,37 +244,25 @@ def record_in_core(reg, state, rec):
         print(f'kith-sessions record: kept for the core ({why})', file=sys.stderr)
 
 
-def host_endpoint():
-    """(data dir, port) of this install's host. kith-serve owns the rule (~/.kith/serve on 19224); the env overrides win."""
-    data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
-    if not (data and port):
-        try:
-            d, p = subprocess.run([str(Path(__file__).resolve().parent / 'kith-serve'), 'endpoint'], capture_output=True, text=True,
-                                  timeout=4, check=True).stdout.split()
-        except Exception:  # noqa: BLE001 — fall back to the defaults
-            d, p = str(Path.home() / '.kith' / 'serve'), '19224'
-        data, port = data or d, port or p
-    return Path(data), port
-
-
 def host_call(method, body):
-    """The host's local API (owner token over loopback), as the host's own CLI reaches it. None when it can't be reached."""
+    """The host's local API over its local endpoint with the serve token, as the host's own CLI reaches it. None when it can't be
+    reached."""
+    lib = str(Path(__file__).resolve().parent.parent / 'lib')
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import kith_hostlocal
     try:
-        data, port = host_endpoint()
-        token = (data / 'token').read_text().strip()
-        req = urllib.request.Request(f'http://127.0.0.1:{port}/api/{method}',
-                                     json.dumps(body).encode(), {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=4) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:   # a refusal with a body is an answer ("unknown thread"); a 404 is an older host
-        if e.code == 404:
-            return {'error': 'unknown method', 'unknownMethod': True}
-        try:
-            return json.load(e)
-        except ValueError:
-            return None
-    except Exception:  # noqa: BLE001
+        status, payload = kith_hostlocal.request(f'/api/{method}', body, 4)
+    except kith_hostlocal.HostUnreachable as e:
+        # Down: the host is not running. Anything else (an older host, one we can't vouch for) may be running a turn.
+        return None if e.down else {'error': str(e), 'unreachable': True}
+    if status == 404:
+        return {'error': 'unknown method', 'unknownMethod': True}
+    try:
+        return json.loads(payload)
+    except ValueError:
         return None
+
 
 
 def procstart():
@@ -854,6 +842,8 @@ def resolve(agent, thread, claimer=None, wait=0):
             return {}
 
     r = host_call('resolveThread', {'thread': thread})
+    if r and r.get('unreachable'):
+        die(f"{r['error']} (a running host's turns cannot be checked, so nothing was resumed)")
     if r and not r.get('error') and r.get('sessionId') and r.get('claims') != 1:
         r = {'error': 'no claims', 'unknownMethod': True}   # a host from before the claims cannot vouch for its threads either
     if r and not r.get('error') and r.get('sessionId'):

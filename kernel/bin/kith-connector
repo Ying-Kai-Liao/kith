@@ -25,42 +25,27 @@ def die(msg, code=1):
     sys.exit(code)
 
 
-def host_endpoint():
-    """(data dir, port) of this install's kith serve; the env overrides win. Same as kith-group."""
-    data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
-    if not (data and port):
-        try:
-            d, p = subprocess.run([str(Path(__file__).resolve().parent / 'kith-serve'), 'endpoint'], capture_output=True,
-                                  text=True, timeout=4, check=True).stdout.split()
-        except Exception:  # noqa: BLE001 — fall back to the defaults
-            d, p = str(Path.home() / '.kith' / 'serve'), '19224'
-        data, port = data or d, port or p
-    return Path(data), port
-
-
 def host_call(method, body):
-    """The host's local API (owner token over loopback). The answer, or exit 1 with why not."""
-    import urllib.error
-    import urllib.request
-    down = "the Kith host isn't running here; start it with `kith serve start`"
+    """The host's local API (owner token, over its local endpoint). The answer, or exit 1 with why not."""
+    lib = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib')
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import kith_hostlocal
     try:
-        data, port = host_endpoint()
-        token = (data / 'token').read_text().strip()
-    except OSError:
-        die(down)
-    req = urllib.request.Request(f'http://127.0.0.1:{port}/api/{method}', json.dumps(body).encode(),
-                                 {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
+        status, payload = kith_hostlocal.request(f'/api/{method}', body, 60)
+    except kith_hostlocal.HostUnreachable as e:
+        die("the Kith host isn't running here; start it with `kith serve start`" if e.down or e.name == 'URLError' else e.name)
+    if 200 <= status < 300:
         try:
-            why = json.load(e).get('error')
-        except (ValueError, AttributeError):
-            why = None
-        die(why if isinstance(why, str) and why else f'the host answered {e.code}')
-    except (urllib.error.URLError, OSError):
-        die(down)
+            return json.loads(payload)
+        except ValueError:
+            die('the host answered something that is not JSON')
+    try:
+        why = json.loads(payload).get('error')
+    except (ValueError, AttributeError):
+        why = None
+    die(why if isinstance(why, str) and why else f'the host answered {status}')
+
 
 
 def show(args, data, lines):

@@ -45,14 +45,11 @@ def read_bots():
     catch-up (GET /events?since=0: hello, then each bot, then entries, then the stream stays open with no end marker).
     So read until it goes quiet for IDLE_S (the catch-up is sent at once), at most CAP_S. The latest event per id wins; a
     deleted bot is gone."""
-    import urllib.error
-    import urllib.request
+    import kith_hostlocal  # the host's local endpoint, never loopback TCP
     try:
-        data, port = host_endpoint()
-        token = (data / 'token').read_text().strip()
-        req = urllib.request.Request(f'http://127.0.0.1:{port}/events?since=0', headers={'Authorization': f'Bearer {token}'})
         bots, end = {}, time.monotonic() + CAP_S
-        with urllib.request.urlopen(req, timeout=IDLE_S) as r:
+        r = kith_hostlocal.stream('/events?since=0', IDLE_S)
+        try:
             while time.monotonic() < end:
                 try:
                     line = r.readline()
@@ -72,9 +69,11 @@ def read_bots():
                         bots.pop(b['id'], None)
                     else:
                         bots[b['id']] = b
+        finally:
+            r.close()
         return bots, None
-    except urllib.error.HTTPError as e:
-        return None, f'kith serve answered {e.code}'
+    except kith_hostlocal.HostUnreachable as e:
+        return None, f'kith serve is not reachable ({e.name})'
     except Exception as e:  # noqa: BLE001
         return None, f'kith serve is not reachable ({e.__class__.__name__})'
 

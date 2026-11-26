@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use super::assemble::Env;
 use super::session::lockable;
 use crate::threads::run::say;
-use crate::threads::writer::Taker;
+use crate::threads::writer::{Taker, claim_exit};
 
 /// What a call of the core came to (`kith kernel core-call`'s ends).
 pub enum Call {
@@ -319,7 +319,7 @@ pub fn launch(h: &Held<'_>) -> Outcome {
         eprint!("{}", h.taker.said());
         if let Err(m) = claimed {
             say(&format!("kith: {m}"));
-            return Outcome::Exit(1);
+            return Outcome::Exit(claim_exit(&m));
         }
         alone = h.taker.alone();
     }

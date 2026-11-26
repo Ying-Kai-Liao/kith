@@ -130,6 +130,22 @@ fn the_engine_does_not_get_the_runs_own_variables() {
 }
 
 #[tokio::test]
+async fn a_hermes_run_without_bypass_exits_cannot_hold() {
+    if !engines::HERMES_REFUSES_WITHOUT_BYPASS {
+        return;
+    }
+    let args = Args {
+        engine: "hermes".into(),
+        json: false,
+        resume: None,
+        permission_mode: None,
+        interactive: false,
+        task: vec!["hi".into()],
+    };
+    assert_eq!(run(args).await.unwrap(), runonce::CANNOT_HOLD);
+}
+
+#[tokio::test]
 async fn an_agent_stored_on_the_dropped_dsh_engine_gets_a_clear_refusal() {
     let args = Args {
         engine: "dsh".into(),
