@@ -13036,6 +13036,12 @@
           }
         },
         {
+          "name": "lineage",
+          "summary": "`bg`, on the callee's computer: the chain the asking computer sent, `{chain, hop, cross, from, cost}` (what `ask.peerOwed` listed). The caps are checked from it as for any ask that crossed.",
+          "required": false,
+          "schema": {}
+        },
+        {
           "name": "model",
           "summary": "`bg`: the model (`-m`) the host's run of the callee gets. Kept on the row; a row without it runs on the agent's own.",
           "required": false,
@@ -13221,6 +13227,12 @@
             "kind": "flag",
             "spellings": [
               "--origin-epoch"
+            ]
+          },
+          "lineage": {
+            "kind": "flag",
+            "spellings": [
+              "--lineage"
             ]
           },
           "model": {
@@ -13928,12 +13940,20 @@
     },
     {
       "name": "ask.to",
-      "summary": "`kith ask --to ID`, the check before anything is queued: whether the ask still takes a follow-up. An ask that was stopped or ended refuses with `was stopped; ask anew` (the stopped fence never lifts; the Python `--to` queued the message and the wake fence dropped it). Answers `{id, ok}`; refuses an id that is no ask.",
+      "summary": "`kith ask --to ID`, the check before anything is queued: whether the ask still takes a follow-up. An ask that was stopped or ended refuses with `was stopped; ask anew` (the stopped fence never lifts; the Python `--to` queued the message and the wake fence dropped it). Answers `{id, ok}`; refuses an id that is no ask. With `text`, an ask that waits on another computer (a peer ask) also keeps the message to be sent there (`ask.peerOwed`'s `to`; the same words again are one message) and answers `{id, ok, peer, k}`.",
       "params": [
         {
           "name": "id",
           "summary": "The ask.",
           "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "text",
+          "summary": "The follow-up message, for the ask to keep when it is on another computer.",
+          "required": false,
           "schema": {
             "type": "string"
           }
@@ -13961,6 +13981,12 @@
         "args": {
           "id": {
             "kind": "positional"
+          },
+          "text": {
+            "kind": "flag",
+            "spellings": [
+              "--text"
+            ]
           }
         }
       }
@@ -14154,6 +14180,14 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "name",
+          "summary": "The computer's name as its owner knows it (`kith ask AGENT@NAME`). Kept with the epoch; only an `out` pairing is asked by name.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
         }
       ],
       "result": {
@@ -14185,6 +14219,12 @@
           },
           "epoch": {
             "kind": "positional"
+          },
+          "name": {
+            "kind": "flag",
+            "spellings": [
+              "--name"
+            ]
           }
         }
       }
@@ -14281,6 +14321,17 @@
           "schema": {}
         },
         {
+          "name": "toSent",
+          "summary": "The `--to` messages (`k` of `ask.peerOwed`'s `to`) the computer took: they are not owed any more.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
           "name": "kernel",
           "summary": "The kernel folder (default: the one this program finds).",
           "required": false,
@@ -14353,6 +14404,12 @@
               "--cost"
             ]
           },
+          "toSent": {
+            "kind": "flag",
+            "spellings": [
+              "--to-sent"
+            ]
+          },
           "kernel": {
             "kind": "flag",
             "spellings": [
@@ -14370,7 +14427,7 @@
     },
     {
       "name": "ask.peerOwed",
-      "summary": "What the host owes the link, from the rows (nothing is written): `send` (asked here, not yet answered by its computer: id, key, computer, epoch, agent, task, cont, lineage), `follow` (sent and open: the last row copied, `after`) and `stop` (a stop its computer has not confirmed). Only asks whose pairing is live. Answers `{send, follow, stop}`.",
+      "summary": "What the host owes the link, from the rows (nothing is written): `send` (asked here, not yet answered by its computer: id, key, computer, epoch, agent, task, cont, opts, lineage), `follow` (sent and open: the last row copied, `after`), `stop` (a stop its computer has not confirmed) and `to` (a `--to` message not yet taken: id, key, computer, epoch, k, text). Only asks whose pairing is live. Answers `{send, follow, stop, to}`.",
       "params": [],
       "result": {
         "name": "result",
@@ -14393,6 +14450,182 @@
         ],
         "requires": [],
         "args": {}
+      }
+    },
+    {
+      "name": "ask.peerList",
+      "summary": "The live pairings this core holds, for the host's reconcile (nothing is written): `{in: [{computer, epoch, name}], out: [...], ended: [{computer, dir, epoch}]}`: the live pairings, and the epochs that ended (never live again).",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "peer-list"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "ask.peerThread",
+      "summary": "The callee's end, for the host answering `peerThread`: the ask another computer sent here under `key`, as that computer follows it (nothing is written, no row is marked read): `{found, id, agent, state, rows, cost, waiting, session, conversation, takesTo}`, the rows after `after`, `cost` US$ of the run and what it asked. `{found: false}` for a key never seen. Refused when `epoch` is not the live pairing with `computer`.",
+      "params": [
+        {
+          "name": "computer",
+          "summary": "The computer that asked.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "key",
+          "summary": "Its ask id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "epoch",
+          "summary": "The pairing epoch the ask came under.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "after",
+          "summary": "The last row number the caller has.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "peer-thread"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "computer": {
+            "kind": "positional"
+          },
+          "key": {
+            "kind": "positional"
+          },
+          "epoch": {
+            "kind": "positional"
+          },
+          "after": {
+            "kind": "flag",
+            "spellings": [
+              "--after"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.peerStop",
+      "summary": "The callee's end, for the host answering `peerStop`: ends the ask another computer sent here under `key` (its run stopped, a queued one never starts); an ask that is over answers its state; a key never seen leaves a `stopped` row under `id`, so that ask, if it arrives later, finds it stopped. Answers `{state}`. Refused when `epoch` is not the live pairing with `computer`.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The row to leave when the key was never seen (the host's own id for the key).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "computer",
+          "summary": "The computer that asked.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "key",
+          "summary": "Its ask id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "epoch",
+          "summary": "The pairing epoch the ask came under.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner",
+        "host"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "peer-stop"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "computer": {
+            "kind": "positional"
+          },
+          "key": {
+            "kind": "positional"
+          },
+          "epoch": {
+            "kind": "positional"
+          }
+        }
       }
     },
     {

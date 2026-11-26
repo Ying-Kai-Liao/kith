@@ -108,6 +108,7 @@ fn every_row_is_well_formed() {
                 // A5b: the host answers what the computers it is paired with send.
                 "ask.peerThread",
                 "ask.peerStop",
+                "ask.peerList",
             ]
             .contains(&m.name)
         {

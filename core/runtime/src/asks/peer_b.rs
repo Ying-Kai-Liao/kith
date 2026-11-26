@@ -5,7 +5,7 @@
 //! - **`ask.peerThread`** (callee): the rows of an origin ask after the caller's last, its state and cost. Read only: the rows are
 //!   never marked read here (nobody here reads them), so a send that is answered twice gives the same rows twice.
 //! - **`ask.peerStop`** (callee): stops the origin ask of (computer, key); a stop that comes before the ask leaves a `stopped`
-//!   row, so the ask of that key, when it arrives, finds it and never runs (MacLink2 C1).
+//!   row, so the ask of that key, when it arrives, finds it and never runs (`MacLink2` C1).
 //! - **Limits** (mac-link, "Limits"): a computer has at most [`MAX_QUEUED`] asks waiting here (a refused row says so) and at most
 //!   [`MAX_RUNNING`] running at once (the claim of one more is refused as `held`: the turn stays queued and starts when a run ends).
 //! - **Expiry**: an origin ask whose turn nobody claimed in [`EXPIRE_MS`] expires `lost`, by this computer's clock.
@@ -207,7 +207,9 @@ pub(crate) fn stop(
         }
         let Some(a) = by_origin_in(tx, computer, key)? else {
             if get(tx, id)?.is_some() {
-                return Err(Error::Refused(format!("kith-core: asks: {id} is not this key's")));
+                return Err(Error::Refused(format!(
+                    "kith-core: asks: {id} is not this key's"
+                )));
             }
             let og = Origin {
                 computer,
@@ -291,11 +293,17 @@ pub(super) fn clear_to(a: &mut Ask, sent: &[String]) {
     if sent.is_empty() {
         return;
     }
-    let Some(extra) = a.extra.as_mut() else { return };
+    let Some(extra) = a.extra.as_mut() else {
+        return;
+    };
     if let Some(list) = extra.get_mut("to").and_then(Value::as_array_mut) {
         list.retain(|t| !t["k"].as_str().is_some_and(|k| sent.iter().any(|s| s == k)));
     }
-    if extra.get("to").and_then(Value::as_array).is_some_and(Vec::is_empty) {
+    if extra
+        .get("to")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty)
+    {
         extra.remove("to");
     }
 }

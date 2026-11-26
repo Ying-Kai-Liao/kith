@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 //! The client against a fake core: what each verb sends and says. The real rows are the core's own tests; the same words against
 //! the Python are `kernel/tests/difftest/corpus/ask-*.json`.
 
@@ -237,10 +238,123 @@ fn a_bg_ask_prints_its_start_line_and_sends_the_task_whole() {
 }
 
 #[test]
-fn bg_to_another_computer_is_refused_for_now() {
-    let (code, _, err) = go(&Fake::new(vec![]), &["--bg", "echo@mini", "hi"]);
+fn bg_to_a_computer_in_remotes_json_is_refused_for_now() {
+    let dir = scratch("bg-remote");
+    std::fs::create_dir_all(dir.join("machine")).unwrap();
+    std::fs::write(
+        dir.join("machine/remotes.json"),
+        r#"{"mini": {"ssh": "kai@mini", "kith": "kith"}}"#,
+    )
+    .unwrap();
+    let (code, _, err) = go_in(&Fake::new(vec![]), &["--bg", "echo@mini", "hi"], &dir);
     assert_eq!(code, 1);
     assert!(err.contains("use the foreground form"), "{err}");
+}
+
+#[test]
+fn a_paired_computer_is_asked_over_the_link_and_bg_prints_the_id() {
+    let fake = Fake::new(vec![(
+        "ask.open",
+        Ok(json!({"decision": null, "record": {}})),
+    )]);
+    let dir = scratch("bg-peer");
+    let (code, out, err) = go_in(
+        &fake,
+        &["--bg", "echo@mini", "-m", "opus", "-C", "/ignored", "do it"],
+        &dir,
+    );
+    assert_eq!((code, err.as_str()), (0, ""), "{out}");
+    assert!(
+        out.starts_with("started echo@mini in the background as bg-")
+            && out.contains("kith ask --wait bg-"),
+        "{out}"
+    );
+    let calls = fake.calls.borrow();
+    let p = &calls[0].1;
+    assert_eq!(calls[0].0, "ask.open");
+    assert_eq!(
+        (
+            p["mode"].as_str(),
+            p["peer"].as_str(),
+            p["asked"].as_str(),
+            p["task"].as_str(),
+            p["model"].as_str(),
+            p["crossing"].as_bool(),
+        ),
+        (
+            Some("peer"),
+            Some("mini"),
+            Some("echo"),
+            Some("do it"),
+            Some("opus"),
+            Some(true)
+        )
+    );
+    assert!(
+        p.get("folder").is_none(),
+        "this computer's folder stays here"
+    );
+    // The conversation is kept under the agent@computer, with the ask's id for `-c`.
+    let kept = std::fs::read_to_string(dir.join("machine/ask.json")).unwrap();
+    assert!(
+        kept.contains("echo@mini|") && kept.contains("peer_key"),
+        "{kept}"
+    );
+}
+
+#[test]
+fn a_name_that_is_neither_paired_nor_in_remotes_json_is_refused() {
+    let fake = Fake::new(vec![(
+        "ask.open",
+        Err("kith-core: asks: this computer is not paired with nope".into()),
+    )]);
+    let (code, _, err) = go_in(&fake, &["echo@nope", "hi"], &scratch("neither"));
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("nope is neither a computer paired with this one"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_foreground_ask_to_a_paired_computer_waits_for_its_rows_and_prints_the_answer() {
+    let fake = Fake::new(vec![
+        ("ask.open", Ok(json!({"decision": null, "record": {}}))),
+        (
+            "ask.read",
+            Ok(json!({"id": "x", "state": "answered",
+                      "rows": [{"n": 1, "as": "echo", "kind": "answer", "text": "forty-two", "at": 1}]})),
+        ),
+    ]);
+    let (code, out, _) = go_in(&fake, &["echo@mini", "what"], &scratch("fg-peer"));
+    assert_eq!((code, out.as_str()), (0, "forty-two\n"));
+}
+
+#[test]
+fn a_foreground_ask_whose_computer_gave_it_up_fails() {
+    let fake = Fake::new(vec![
+        ("ask.open", Ok(json!({"decision": null, "record": {}}))),
+        (
+            "ask.read",
+            Ok(json!({"id": "x", "state": "cut_off",
+                      "rows": [{"n": 1, "as": "echo", "kind": "lost", "text": "echo@mini was cut off", "at": 1}]})),
+        ),
+    ]);
+    let (code, out, _) = go_in(&fake, &["echo@mini", "what"], &scratch("fg-cut"));
+    assert_eq!((code, out.as_str()), (1, "echo@mini was cut off\n"));
+}
+
+#[test]
+fn a_to_for_an_ask_on_another_computer_is_kept_by_the_core_and_queues_nothing_here() {
+    let fake = Fake::new(vec![(
+        "ask.to",
+        Ok(json!({"id": "bg-1", "ok": true, "peer": "mini", "k": "abc"})),
+    )]);
+    let (code, out, err) = go(&fake, &["--to", "bg-1", "and this"]);
+    assert_eq!((code, out.as_str()), (0, "queued\n"), "{err}");
+    let calls = fake.calls.borrow();
+    assert_eq!(calls.len(), 1, "no wake here: {calls:?}");
+    assert_eq!(calls[0].1["text"], json!("and this"));
 }
 
 #[test]
@@ -336,7 +450,9 @@ fn a_core_that_cannot_answer_is_a_writer_but_unswitched_claims_read_the_files() 
     let by_words = claims(Err(
         "kith-core: claim.list: the claims are not switched to the core on this Mac".into(),
     ));
-    assert!(with_host(&by_words, &dir, |h| super::fg::writer_live(h, "s1")));
+    assert!(with_host(&by_words, &dir, |h| super::fg::writer_live(
+        h, "s1"
+    )));
     assert!(!with_host(&unswitched, &dir, |h| super::fg::writer_live(
         h, "s1"
     )));

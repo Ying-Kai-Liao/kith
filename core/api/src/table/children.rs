@@ -114,6 +114,12 @@ pub(super) const ROWS: &[Method] = &[
                 "`bg`, on the callee's computer: the pairing epoch the ask was sent under.",
             ),
             flag(
+                "lineage",
+                "json",
+                &["--lineage"],
+                "`bg`, on the callee's computer: the chain the asking computer sent, `{chain, hop, cross, from, cost}` (what `ask.peerOwed` listed). The caps are checked from it as for any ask that crossed.",
+            ),
+            flag(
                 "model",
                 "string",
                 &["--model"],
@@ -350,6 +356,12 @@ pub(super) const ROWS: &[Method] = &[
             pos("computer", "string", true, "The other computer."),
             pos("dir", "string", true, "`in` (asks that computer sends here) or `out` (asks sent there): the two directions are two pairings."),
             pos("epoch", "string", true, "The pairing epoch, as the host stores it (a hash: compared, never ordered)."),
+            flag(
+                "name",
+                "string",
+                &["--name"],
+                "The computer's name as its owner knows it (`kith ask AGENT@NAME`). Kept with the epoch; only an `out` pairing is asked by name.",
+            ),
         ],
         &["asks", "peer-link"],
     )
@@ -401,6 +413,13 @@ pub(super) const ROWS: &[Method] = &[
         "What the host owes the link, from the rows (nothing is written): `send` (asked here, not yet answered by its computer: id, key, computer, epoch, agent, task, cont, opts, lineage), `follow` (sent and open: the last row copied, `after`), `stop` (a stop its computer has not confirmed) and `to` (a `--to` message not yet taken: id, key, computer, epoch, k, text). Only asks whose pairing is live. Answers `{send, follow, stop, to}`.",
         &[],
         &["asks", "peer-owed"],
+    )
+    .principals(OWNER_HOST),
+    ask(
+        "ask.peerList",
+        "The live pairings this core holds, for the host's reconcile (nothing is written): `{in: [{computer, epoch, name}], out: [...], ended: [{computer, dir, epoch}]}`: the live pairings, and the epochs that ended (never live again).",
+        &[],
+        &["asks", "peer-list"],
     )
     .principals(OWNER_HOST),
     ask(
