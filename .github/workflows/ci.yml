@@ -1021,15 +1021,6 @@ jobs:
           tool: cargo-nextest@0.9.100
       - name: Host tests (kith-serve)
         run: cargo nextest run --manifest-path host/Cargo.toml -p kith-serve --profile ci-windows --locked --no-fail-fast
-      # Some kith-serve tests start a core, which starts a holder (and its stub) from host/target/debug and leaves it alive
-      # (nextest counts them as LEAK: hub::actors, remote::channel, remote::relay, routines::runner). Windows cannot replace
-      # a running exe, so the build below failed with "Access is denied" on kith-holder.exe. Stop them first; nothing
-      # after the tests needs them running.
-      - name: Stop programs the host tests left running
-        if: always()
-        shell: bash
-        run: |
-          taskkill //F //IM kith-holder.exe //IM kith-stub.exe //IM kith.exe //IM kith-serve.exe //IM kith-servew.exe || true
       # The two programs the Windows app bundles (apps/desktop/tools/native-host.mjs builds exactly these .exe names).
       - name: Bundled programs build
         run: |

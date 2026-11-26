@@ -70,6 +70,28 @@ pub fn forget_home(home: &Path) {
         .status();
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let _ = account;
+    #[cfg(windows)]
+    end_holders_of(home);
+}
+
+/// Windows: `stop` cannot send SIGTERM (there is no `kill`), so the host dies hard and never stops its core, and the
+/// holder the core started is built to outlive its starter (it breaks out of the starter's job). A holder left running
+/// keeps `target\debug\kith-holder.exe` open, and cargo cannot replace it later in the job ("Access is denied"). Ends
+/// the holders whose command line names this test home (the core starts them with `--dir <home>\...`).
+#[cfg(windows)]
+fn end_holders_of(home: &Path) {
+    use std::os::windows::process::CommandExt as _;
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    let script = "Get-CimInstance Win32_Process -Filter \"Name='kith-holder.exe'\" \
+        | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($env:KITH_TEST_HOME, 'OrdinalIgnoreCase') -ge 0 } \
+        | ForEach-Object { taskkill /F /T /PID $_.ProcessId | Out-Null }";
+    let _ = Command::new(Path::new(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe"))
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("KITH_TEST_HOME", home)
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// Runs `kith-serve serve` for `home` until it answers: the process and its base URL. A port
