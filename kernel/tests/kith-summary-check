@@ -64,7 +64,7 @@ check "forget twice: same answer" "\"$KITH\" memory summary forget --thread t1 -
 check "show, forgotten (text): says so, exit 1" "[ $rc = 1 ] && grep -q '^forgotten: t1' $T/o"
 
 # the stub host: forget goes through it when it is up (the row copy is the host's to strip, so the store alone leaves it)
-python3 - "$T/port" <<'PY' &
+PYTHONPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)${PYTHONPATH:+:$PYTHONPATH}" python3 - "$T/port" <<'PY' &
 import http.server, json, sys
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
@@ -73,8 +73,9 @@ class H(http.server.BaseHTTPRequestHandler):
         b = json.dumps({'forgotten': True}).encode()
         self.send_response(200); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
     def log_message(self, *a): pass
-s = http.server.HTTPServer(('127.0.0.1', 0), H)
-open(sys.argv[1], 'w').write(str(s.server_address[1]))
+import fakehost, os
+s = fakehost.UnixHTTPServer(fakehost.sock_path(os.environ['KITH_SERVE_DIR']), H)
+open(sys.argv[1], 'w').write('1')
 s.serve_forever()
 PY
 STUB=$!
