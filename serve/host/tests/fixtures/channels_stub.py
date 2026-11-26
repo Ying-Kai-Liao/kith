@@ -125,6 +125,7 @@ elif me == "kith":
         "withheld": sorted(k for k in env if k.startswith(("JEV_", "TELEGRAM_", "SLACK_", "DISCORD_", "HQ_DISCORD_", "KITH_DISCORD_"))
                            or k in ("HQ_AGENT", "KITH_AGENT")),
         "cwd": os.getcwd(),
+        "turn_claim": env.get("KITH_TURN_CLAIM"), "turn_conversation": env.get("KITH_TURN_CONVERSATION"),
     })
     counts = load("sessions", {})
     counts[agent] = counts.get(agent, 0) + 1

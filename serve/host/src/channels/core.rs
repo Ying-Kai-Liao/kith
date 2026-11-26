@@ -91,11 +91,33 @@ pub(super) struct Inner {
     pub history: HashMap<String, Vec<String>>,
     /// Short id -> work key, for Stop buttons.
     pub works: HashMap<String, String>,
+    /// The claimed wake turns the threads carry, by their note: in memory only. The core's turn is the record of an owed wake; a
+    /// batch on disk would replay the note after a restart and send the prompt twice.
+    pub claimed: HashMap<String, Arc<crate::cards::resume::ChannelWake>>,
 }
 
 impl Inner {
+    /// Whether a batch carries a claimed wake: a message never joins one.
+    pub fn carries_claim(&self, batch: &[String]) -> bool {
+        batch.iter().any(|m| self.claimed.contains_key(m))
+    }
+
+    /// The state as it is saved: without the claimed wake notes.
+    fn saved(&self) -> State {
+        let mut st = self.st.clone();
+        for q in st.inbox.values_mut() {
+            for b in q.iter_mut() {
+                b.retain(|m| !self.claimed.contains_key(m));
+            }
+            q.retain(|b| !b.is_empty());
+        }
+        st.inbox.retain(|_, q| !q.is_empty());
+        st
+    }
+
     pub fn save(&mut self) {
-        if let Err(e) = self.st.save(&self.path) {
+        let saved = if self.claimed.is_empty() { self.st.save(&self.path) } else { self.saved().save(&self.path) };
+        if let Err(e) = saved {
             tracing::error!(error = %e, "channels: can't write the state");
         }
     }
@@ -131,7 +153,14 @@ impl Core {
             gate: deps.gate,
             judge: deps.judge,
             backups: deps.backups,
-            inner: Mutex::new(Inner { st, path, busy: HashMap::new(), history: HashMap::new(), works: HashMap::new() }),
+            inner: Mutex::new(Inner {
+                st,
+                path,
+                busy: HashMap::new(),
+                history: HashMap::new(),
+                works: HashMap::new(),
+                claimed: HashMap::new(),
+            }),
             ads: Mutex::new(HashMap::new()),
             wakes: Mutex::new(Vec::new()),
             hinted: Mutex::new(HashSet::new()),

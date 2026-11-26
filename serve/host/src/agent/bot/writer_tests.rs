@@ -1208,6 +1208,34 @@ actor_test! {
 }
 
 actor_test! {
+    /// WK4c (a)/(c): a wake turn the core queued is handed to the bot's actor by its id. The actor begins that turn (one
+    /// `hostclaim.turn`, on the wake's conversation, as its person) and enqueues no second turn row for it; the one prompt carries
+    /// the notice, and the turn ends done.
+    async fn a_wake_turn_handed_by_its_id_is_begun_not_enqueued(rig) {
+        use crate::store::{EntryKind, Lane};
+        rig.w().turns.push((501, "queued".into(), None));
+        let lane = Lane::main("a");
+        let entry = rig.hub.add_entry(&lane, EntryKind::Notice, 0, &json!({"text": "two cards answered", "style": "info"})).unwrap();
+        let pulled = crate::agent::bot::Pulled { conversation: "acp:a:".into(), person: "kai".into() };
+        rig.hub
+            .send_cmd("a", Cmd::WakeBatch {
+                lane,
+                items: vec![(entry.id, "[kith wake run-5] two cards answered".into())],
+                by_id: Some((501, pulled)),
+            })
+            .unwrap();
+        pull_until(&rig, "the wake turn done", |r| r.turn_state(501) == "done").await;
+        let w = rig.w();
+        assert!(w.log.iter().all(|m| m != "hostclaim.enqueue"), "no second turn row: {:?}", w.log);
+        let claims: Vec<&serde_json::Value> =
+            w.asked.iter().filter(|(m, p)| m == "hostclaim.turn" && p["turn"] == 501).map(|(_, p)| p).collect();
+        assert_eq!(claims.len(), 1, "the wake's own turn is begun once: {claims:?}");
+        assert_eq!(claims[0]["conversation"], "acp:a:");
+        assert_eq!(claims[0]["person"], "kai");
+    }
+}
+
+actor_test! {
     /// A fired turn whose earlier claim was redeemed (a host restart cut it off) is cancelled "interrupted" and never run again.
     async fn a_fired_turn_redeemed_before_a_restart_is_cancelled_not_run(rig) {
         fire(&rig, 201, "daily", true);
