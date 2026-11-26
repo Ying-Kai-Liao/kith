@@ -43,10 +43,19 @@ pub struct Config {
     pub secret: String,
     /// Exit after this long with no core and nothing held. Zero: never.
     pub idle: Duration,
+    /// Drop an exit nobody acked after this long with no core connected (see `Holder::expire_exits`). Zero: never.
+    pub exit_keep: Duration,
 }
+
+/// How long a recorded exit waits for a core that is not connected, counted from the later of the exit and the link
+/// loss. Longer than a core restart (a core that comes back inside it still gets the exit and acks it as always),
+/// short enough that a holder whose core is gone for good (uninstall) leaves in minutes, not at reboot.
+pub const EXIT_KEEP: Duration = Duration::from_secs(10 * 60);
 
 struct Entry {
     held: Held,
+    /// The lease clock when the exit was recorded (`held.exit` is set); what `expire_exits` counts from.
+    exited_at: Duration,
     proc: Arc<Proc>,
     /// Input goes through its own thread: a program that stops reading blocks only itself. None once closed.
     input: Option<Sender<Vec<u8>>>,
@@ -181,6 +190,8 @@ struct State {
     /// can start between that decision and the exit.
     closing: bool,
     idle_since: Option<Instant>,
+    /// The lease clock when the core link was last lost (the start of the holder until a core has come).
+    core_lost: Duration,
     lease: Lease,
     /// The lease clock at each PONG sent to the current core, newest last. Forgotten at every hello: a seq from an
     /// older connection must not anchor a newer one (the skill's Later item L1).
@@ -195,6 +206,8 @@ struct Holder {
     secret: Vec<u8>,
     endpoint: PathBuf,
     idle: Duration,
+    /// See `Config::exit_keep`.
+    exit_keep: Duration,
     /// The lease clock; the tests move their own.
     clock: Clock,
 }
@@ -239,7 +252,9 @@ pub fn run_with(cfg: Config, serving: impl FnOnce()) -> io::Result<()> {
         }
         Err(e) => return Err(e),
     };
-    let holder = Arc::new(Holder::new(cfg.secret.into_bytes(), endpoint, cfg.idle));
+    let mut holder = Holder::new(cfg.secret.into_bytes(), endpoint, cfg.idle);
+    holder.exit_keep = cfg.exit_keep;
+    let holder = Arc::new(holder);
     serving();
     let watcher = holder.clone();
     std::thread::spawn(move || watcher.watch_idle());
@@ -319,6 +334,7 @@ impl Holder {
     }
 
     fn new(secret: Vec<u8>, endpoint: PathBuf, idle: Duration) -> Holder {
+        let clock = clock::lease_clock();
         Holder {
             state: Mutex::new(State {
                 procs: HashMap::new(),
@@ -329,6 +345,7 @@ impl Holder {
                 core: None,
                 closing: false,
                 idle_since: Some(Instant::now()),
+                core_lost: clock(),
                 lease: Lease::Unarmed,
                 pongs: VecDeque::new(),
             }),
@@ -337,7 +354,8 @@ impl Holder {
             secret,
             endpoint,
             idle,
-            clock: clock::lease_clock(),
+            exit_keep: EXIT_KEEP,
+            clock,
         }
     }
 
@@ -354,6 +372,7 @@ impl Holder {
         loop {
             std::thread::sleep(Duration::from_millis(100));
             let mut st = self.lock();
+            self.expire_exits(&mut st);
             if !self.idle.is_zero()
                 && st.core.is_none()
                 && st.procs.is_empty()
@@ -363,6 +382,26 @@ impl Holder {
                 st.closing = true;
                 self.exit();
             }
+        }
+    }
+
+    /// Drops an exit record nobody acked, only while no core is connected and only once `exit_keep` has passed since
+    /// the later of the exit and the link loss: a slow core that is connected keeps its record for ever, a core that
+    /// comes back inside the bound still gets it, and a holder whose core is gone for good ends instead of waiting
+    /// for a reboot. The record is data (the tree was swept before it was written, see `reap`), so dropping it is what
+    /// a holder crash after every process ended would do; the core's reconcile ends an unlisted claim as "unknown".
+    /// Model: verification/holder-idle (`Expire`; broken variant `RecordBeforeSweep`).
+    fn expire_exits(&self, st: &mut State) {
+        if self.exit_keep.is_zero() || st.core.is_some() {
+            return;
+        }
+        let (now, lost, keep) = ((self.clock)(), st.core_lost, self.exit_keep);
+        let before = st.procs.len();
+        st.procs.retain(|_, e| {
+            e.held.exit.is_none() || now.saturating_sub(e.exited_at.max(lost)) < keep
+        });
+        if st.procs.len() != before && st.procs.is_empty() {
+            st.idle_since = Some(Instant::now());
         }
     }
 
@@ -410,6 +449,7 @@ impl Holder {
         if let Some(core) = st.core.take() {
             let _ = core.stream.shutdown(std::net::Shutdown::Both);
             core.backlog.update(|b| *b = None);
+            st.core_lost = (self.clock)();
         }
         st.idle_since = Some(Instant::now());
     }
@@ -931,6 +971,7 @@ impl Holder {
                     exit: None,
                     locks: Vec::new(),
                 },
+                exited_at: Duration::ZERO,
                 proc: proc.clone(),
                 input: Some(input),
                 tail: VecDeque::new(),
@@ -1217,7 +1258,9 @@ impl Holder {
     /// The exit is recorded after the tree is swept and the last output forwarded; it stays until a core acks it.
     fn reap(&self, id: u32, proc: Arc<Proc>) {
         proc.wait_exit();
-        // The program is done; what it left behind goes too, before its exit is reported.
+        // The program is done; what it left behind goes too, before its exit is reported. The order matters: an exit
+        // recorded while a child still runs lets the core ack and free the claim, or the record expire, under a live
+        // writer (the model's broken variant RecordBeforeSweep, verification/holder-idle).
         proc.sweep();
         let exit = match proc.reap() {
             Ok(exit) => exit,
@@ -1251,6 +1294,7 @@ impl Holder {
             self.to_core(&st, wire::json_frame(p::EXITED, id, &exit));
             if let Some(e) = st.procs.get_mut(&id) {
                 e.held.exit = Some(exit);
+                e.exited_at = (self.clock)();
             }
         }
     }
@@ -1298,6 +1342,7 @@ mod tests {
                     exit: None,
                     locks: Vec::new(),
                 },
+                exited_at: Duration::ZERO,
                 proc: proc.clone(),
                 input: None,
                 tail: VecDeque::new(),
@@ -1356,6 +1401,7 @@ mod tests {
                     exit: None,
                     locks: Vec::new(),
                 },
+                exited_at: Duration::ZERO,
                 proc: proc.clone(),
                 input: None,
                 tail: VecDeque::new(),
@@ -1669,6 +1715,203 @@ mod tests {
             PathBuf::from("unused"),
             Duration::ZERO,
         ))
+    }
+
+    /// An entry with a real process behind it: finished with its exit recorded at `exited_at` on the fake clock, or
+    /// (None) still running.
+    fn put_entry(holder: &Holder, id: u32, exited_at: Option<Duration>) {
+        let argv = match exited_at {
+            Some(_) => vec!["true".to_string()],
+            None => vec!["sleep".to_string(), "30".to_string()],
+        };
+        let env = std::env::vars().collect();
+        let started = platform::spawn(&Spec {
+            argv: &argv,
+            env: &env,
+            cwd: "/",
+            mode: p::Mode::Pipes,
+            cols: 80,
+            rows: 24,
+            resident: None,
+        })
+        .unwrap();
+        let proc = Arc::new(started.proc);
+        let exit = exited_at.map(|_| {
+            proc.wait_exit();
+            proc.reap().unwrap()
+        });
+        holder.lock().procs.insert(
+            id,
+            Entry {
+                held: Held {
+                    instance: holder.instance.clone(),
+                    id,
+                    conv: format!("c{id}"),
+                    claim: 1,
+                    generation: 1,
+                    pid: proc.pid(),
+                    mode: p::Mode::Pipes,
+                    cols: 80,
+                    rows: 24,
+                    exit,
+                    locks: Vec::new(),
+                },
+                exited_at: exited_at.unwrap_or_default(),
+                proc,
+                input: None,
+                tail: VecDeque::new(),
+                readers: 0,
+                gone: AtomicBool::new(false),
+                kill_on_lease_loss: false,
+                lapsed: false,
+                ctl: None,
+                turn: Turn {
+                    claim: 1,
+                    released: None,
+                },
+                pending: VecDeque::new(),
+                reports: BTreeMap::new(),
+                requested: 0,
+            },
+        );
+    }
+
+    const KEEP: Duration = Duration::from_secs(60);
+
+    /// A holder with no core, a fake clock at zero and a short exit bound.
+    fn keeping(clock: &Fake) -> Holder {
+        stub_and_locks();
+        let mut holder = Holder::new(
+            b"0123456789abcdef".to_vec(),
+            PathBuf::from("unused"),
+            Duration::ZERO,
+        );
+        holder.clock = clock.clock();
+        holder.exit_keep = KEEP;
+        holder.lock().core_lost = Duration::ZERO;
+        holder
+    }
+
+    fn held_ids(holder: &Holder) -> Vec<u32> {
+        let mut ids: Vec<u32> = holder.lock().procs.keys().copied().collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    fn expire(holder: &Holder) {
+        holder.expire_exits(&mut holder.lock());
+    }
+
+    #[test]
+    fn an_unacked_exit_is_dropped_after_the_bound_with_no_core_and_the_holder_then_idles() {
+        // Model row idle-fix-live: Expire, then watch_idle's exit.
+        let clock = Fake::default();
+        let holder = keeping(&clock);
+        put_entry(&holder, 1, Some(Duration::ZERO));
+        holder.lock().idle_since = None;
+        clock.advance(KEEP - Duration::from_secs(1));
+        expire(&holder);
+        assert_eq!(held_ids(&holder), [1], "kept inside the bound");
+        clock.advance(Duration::from_secs(1));
+        expire(&holder);
+        assert!(held_ids(&holder).is_empty(), "dropped at the bound");
+        assert!(
+            holder.lock().idle_since.is_some(),
+            "an empty holder with no core starts counting to its idle exit"
+        );
+    }
+
+    #[test]
+    fn a_connected_core_never_loses_an_exit_however_slow_its_ack() {
+        let clock = Fake::default();
+        let (holder, _c) = leased(&clock);
+        put_entry(&holder, 7, Some(Duration::ZERO));
+        clock.advance(KEEP * 100);
+        expire(&holder);
+        assert_eq!(held_ids(&holder), [7]);
+        drop(holder.close_down(holder.lock()));
+    }
+
+    #[test]
+    fn a_core_back_inside_the_bound_still_gets_the_exit_and_can_ack_it() {
+        let clock = Fake::default();
+        let (holder, c) = leased(&clock);
+        put_entry(&holder, 7, Some(Duration::ZERO));
+        // The link drops (what `serve` does when the connection ends).
+        {
+            let mut st = holder.lock();
+            holder.drop_core(&mut st);
+        }
+        drop(c);
+        clock.advance(KEEP - Duration::from_secs(1));
+        expire(&holder);
+        assert_eq!(held_ids(&holder), [7]);
+        let mut back = connect_to(&holder, 1);
+        let held = back
+            .welcome
+            .procs
+            .iter()
+            .find(|h| h.id == 7)
+            .expect("listed")
+            .clone();
+        assert!(held.exit.is_some(), "the exit is still in the welcome");
+        // Connected again: no bound applies, however long.
+        clock.advance(KEEP * 100);
+        expire(&holder);
+        assert_eq!(back.ack(&held.held_id()).unwrap(), p::AckState::Acked);
+        assert!(held_ids(&holder).is_empty());
+        drop(holder.close_down(holder.lock()));
+    }
+
+    #[test]
+    fn the_bound_counts_from_the_later_of_the_exit_and_the_link_loss() {
+        let clock = Fake::default();
+        let holder = keeping(&clock);
+        let now = || (clock.clock())();
+        // The link was lost at 0, the exit came at 100: due at 160, not 60.
+        clock.advance(Duration::from_secs(100));
+        put_entry(&holder, 1, Some(now()));
+        clock.advance(KEEP - Duration::from_secs(1));
+        expire(&holder);
+        assert_eq!(held_ids(&holder), [1]);
+        clock.advance(Duration::from_secs(1));
+        expire(&holder);
+        assert!(held_ids(&holder).is_empty());
+        // An exit at 160, then the link lost again at 200: due at 260.
+        put_entry(&holder, 2, Some(Duration::from_secs(160)));
+        clock.advance(Duration::from_secs(40));
+        holder.lock().core_lost = now();
+        clock.advance(KEEP - Duration::from_secs(1));
+        expire(&holder);
+        assert_eq!(held_ids(&holder), [2], "counted from the latest link loss");
+        clock.advance(Duration::from_secs(1));
+        expire(&holder);
+        assert!(held_ids(&holder).is_empty());
+    }
+
+    #[test]
+    fn a_running_process_is_never_expired_and_keeps_the_holder_from_idling() {
+        let clock = Fake::default();
+        let holder = keeping(&clock);
+        put_entry(&holder, 1, Some(Duration::ZERO));
+        put_entry(&holder, 2, None);
+        holder.lock().idle_since = None;
+        clock.advance(KEEP * 10);
+        expire(&holder);
+        assert_eq!(held_ids(&holder), [2]);
+        assert!(holder.lock().idle_since.is_none(), "procs is not empty");
+        drop(holder.close_down(holder.lock()));
+    }
+
+    #[test]
+    fn a_zero_bound_never_drops_an_exit() {
+        let clock = Fake::default();
+        let mut holder = keeping(&clock);
+        holder.exit_keep = Duration::ZERO;
+        put_entry(&holder, 1, Some(Duration::ZERO));
+        clock.advance(KEEP * 1000);
+        expire(&holder);
+        assert_eq!(held_ids(&holder), [1]);
     }
 
     #[test]

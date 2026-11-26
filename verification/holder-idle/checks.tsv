@@ -1,0 +1,8 @@
+# cfg	expected	(what it shows; the properties are in the cfg)
+# today: no expiry, the core gone for good: the holder never idles out (HolderIdles FAILS). The open item.
+idle-today-live	fail
+idle-fix-live	pass
+idle-fix-safe-windows	pass
+idle-fix-safe-unix	pass
+# the exit recorded before the sweep: two writers, without any expiry; the sweep before the record is what makes ack and expiry safe
+idle-broken-RecordBeforeSweep-unix	fail
