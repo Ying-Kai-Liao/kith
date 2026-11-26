@@ -99,6 +99,7 @@ fn assert_bare(entry: &Value, state: &str) {
     assert_eq!(entry["data"]["agent"], "House");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_person_in_the_room_is_shown_that_the_agent_waits_and_nothing_of_the_card() {
     let (r, room, seat) = rig().await;
@@ -113,6 +114,7 @@ async fn a_person_in_the_room_is_shown_that_the_agent_waits_and_nothing_of_the_c
     assert_bare(&event_for(&r.hub.store, Some("sam"), ev).unwrap()["entry"], "waiting");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_parked_card_still_shows_the_pointer() {
     let (r, room, seat) = rig().await;
@@ -121,6 +123,7 @@ async fn a_parked_card_still_shows_the_pointer() {
     assert_eq!(shown(&r, &room).await.len(), 1);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_pointer_goes_when_the_owner_answers_and_a_person_hears_it_close() {
     let (r, room, seat) = rig().await;
@@ -142,6 +145,7 @@ async fn the_pointer_goes_when_the_owner_answers_and_a_person_hears_it_close() {
     assert_bare(&closed.expect("the close reached sam")["entry"], "closed");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_pointer_goes_when_the_card_is_withdrawn_or_cut_off_or_expires() {
     let (r, room, seat) = rig().await;
@@ -163,6 +167,7 @@ async fn the_pointer_goes_when_the_card_is_withdrawn_or_cut_off_or_expires() {
 }
 
 /// The card closed between its entry and its pointer: nothing finds a pointer to close, yet no read shows it.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_pointer_that_landed_after_its_cards_close_is_never_shown() {
     let (r, room, seat) = rig().await;
@@ -173,6 +178,7 @@ async fn a_pointer_that_landed_after_its_cards_close_is_never_shown() {
     assert_eq!(shown(&r, &room).await.len(), 0);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_pointer_is_not_shown_from_before_a_stay_nor_to_another_room_nor_after_a_leave() {
     let (r, room, seat) = rig().await;
@@ -202,6 +208,7 @@ async fn the_pointer_is_not_shown_from_before_a_stay_nor_to_another_room_nor_aft
 
 /// A restart closes the cards of the run before it without `set_entry` (`expire_pending`): the start-up sweep closes
 /// their pointers, with how their entries ended.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_restart_closes_the_pointers_of_cards_the_old_run_left() {
     let (r, room, seat) = rig().await;

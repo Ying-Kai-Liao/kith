@@ -45,6 +45,7 @@ async fn remove(r: &Rig, room: &str, person: &str) -> anyhow::Result<Value> {
     call(r, "removeRoomPerson", json!({"room": room, "person": person})).await
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn adding_is_refused_while_the_setting_is_off_and_taking_out_is_not() {
     let r = Rig::new().await;
@@ -59,6 +60,7 @@ async fn adding_is_refused_while_the_setting_is_off_and_taking_out_is_not() {
     assert_eq!(listed, json!({"enabled": false, "gen": 0, "people": []}));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_setting_is_on_unless_it_is_set_off() {
     let r = Rig::new().await;
@@ -67,6 +69,7 @@ async fn the_setting_is_on_unless_it_is_set_off() {
     assert!(!room_people::enabled(&r.hub.store));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_add_and_a_remove_each_take_one_gen_and_a_re_add_opens_a_new_stay() {
     let r = Rig::new().await;
@@ -103,6 +106,7 @@ async fn an_add_and_a_remove_each_take_one_gen_and_a_re_add_opens_a_new_stay() {
     );
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_person_not_granted_every_agent_of_the_room_is_refused_and_so_is_the_owner() {
     let r = Rig::new().await;
@@ -117,6 +121,7 @@ async fn a_person_not_granted_every_agent_of_the_room_is_refused_and_so_is_the_o
     assert!(r.hub.store.room_stays(&both).is_empty(), "nothing was written");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_room_takes_people_only_with_kith_agents_in_it() {
     let r = Rig::new().await;
@@ -162,6 +167,7 @@ async fn a_room_takes_people_only_with_kith_agents_in_it() {
     assert!(!room_people::room_member_may(&r.hub.store, "sam", &plain).await);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_agent_joins_a_room_with_people_only_when_every_person_has_it() {
     let r = Rig::new().await;
@@ -189,6 +195,7 @@ async fn an_agent_joins_a_room_with_people_only_when_every_person_has_it() {
     call(&r, "updateBot", json!({"id": room, "name": "Crew 2"})).await.unwrap();
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_revoke_writes_no_room_row_and_its_undo_gives_back_exactly_what_was_there() {
     let r = Rig::new().await;
@@ -210,6 +217,7 @@ async fn a_revoke_writes_no_room_row_and_its_undo_gives_back_exactly_what_was_th
     assert!(room_people::room_member_may(&r.hub.store, "sam", &room).await, "undone: may again");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn room_member_may_needs_an_open_stay_and_every_agent_live() {
     let r = Rig::new().await;
@@ -231,6 +239,7 @@ async fn room_member_may_needs_an_open_stay_and_every_agent_live() {
     assert!(!room_people::room_member_may(&r.hub.store, "sam", &room).await, "taken out");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_deleted_room_takes_its_people_with_it() {
     let r = Rig::new().await;
@@ -243,6 +252,7 @@ async fn a_deleted_room_takes_its_people_with_it() {
     assert_eq!(r.hub.store.room_gen(&room), 0);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_invited_person_cannot_call_the_methods_not_even_for_themselves() {
     let r = Rig::new().await;

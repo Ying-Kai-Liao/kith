@@ -106,6 +106,10 @@ async fn termination_exits_with_an_open_event_stream() {
     drop(stream);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn turn_with_approval_reaches_a_final_reply() {
     if Command::new(common::python()).arg("--version").output().is_err() {
@@ -245,6 +249,10 @@ fn query_param(url: &str, name: &str) -> String {
     url.split(['?', '&']).find_map(|p| p.strip_prefix(&format!("{name}="))).unwrap().to_owned()
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn phone_pairs_and_chats_over_the_direct_channel() {
     if Command::new(common::python()).arg("--version").output().is_err() {
@@ -298,6 +306,10 @@ async fn phone_pairs_and_chats_over_the_direct_channel() {
     assert_eq!(devices["devices"][0]["connected"], true);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 /// What is left of "personal workspaces": a room has no folder of its own, and deleting a kith agent's bot never
 /// touches the agent's folder (the agent is the kernel's, not the host's).
 #[tokio::test]
@@ -433,6 +445,10 @@ async fn catch_up(host: &Host) -> Vec<Value> {
     events
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 /// Older apps read what the host sends: a removed or retyped field breaks them. This fails
 /// until the field is kept, or `MIN_PROTOCOL` is raised the two-release way and the snapshot
 /// re-recorded. New fields only need recording (`KITH_SERVE_UPDATE_WIRE_SHAPE=1`).

@@ -1361,6 +1361,7 @@ mod tests {
     }
 
     /// Codex refuses a writable root with a symlink in it, so an ACP engine's extra folders reach it resolved, each once.
+    #[cfg(unix)]
     #[test]
     fn extra_folders_reach_another_engine_as_real_paths_once() {
         let root = std::env::temp_dir().join(format!("kith-add-dirs-{}", uuid::Uuid::new_v4()));

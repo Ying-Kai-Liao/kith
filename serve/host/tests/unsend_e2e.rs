@@ -68,6 +68,10 @@ fn python_missing() -> bool {
     missing
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn an_unsent_message_never_reaches_the_agent_and_the_next_still_goes() {
     if python_missing() {
@@ -101,6 +105,10 @@ async fn an_unsent_message_never_reaches_the_agent_and_the_next_still_goes() {
     assert_eq!(a["data"]["status"], "cancelled", "{a}");
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn a_message_waiting_in_a_task_can_be_unsent() {
     if python_missing() {
@@ -128,6 +136,10 @@ async fn a_message_waiting_in_a_task_can_be_unsent() {
     );
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "the host execs the kernel stand-in tests/fixtures/kernel_agents.py directly and Windows cannot exec a .py (os error 193); returns with retire-python P1-12 (one run path, no Python kernel)"
+)]
 #[tokio::test]
 async fn only_the_users_own_messages_can_be_unsent() {
     let host = host().await;

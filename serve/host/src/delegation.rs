@@ -298,6 +298,10 @@ mod tests {
     }
 
     // A host started inside an agent's run still changes the cap and marks cards, through the real kernel.
+    #[cfg_attr(
+        windows,
+        ignore = "runs the bash/Python kernel/bin/kith and kith-auth (WI2); returns with retire-python P1-12 and P3-4"
+    )]
     #[tokio::test]
     async fn a_host_started_from_an_agent_still_sets_the_cap_and_marks_cards() {
         use crate::channels::hq::TEST_ENV;
@@ -325,6 +329,10 @@ mod tests {
     }
 
     // Stop, a revoke and a removal end the delegations of a lane or a person through the real kernel (R5, R8).
+    #[cfg_attr(
+        windows,
+        ignore = "runs the bash/Python kernel/bin/kith and kith-auth (WI2); returns with retire-python P1-12 and P3-4"
+    )]
     #[tokio::test]
     async fn ending_settles_the_lanes_asks_and_the_persons_and_no_later_answer_wakes_anyone() {
         use crate::channels::hq::TEST_ENV;

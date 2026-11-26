@@ -336,6 +336,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn claimed_binds_the_owner_and_unclaimed_removes_it() {
         let _g = ONE_AT_A_TIME.lock().await;
@@ -358,6 +359,7 @@ mod tests {
         assert!(r.store.kv_get(APPLIED).is_none());
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn another_persons_handle_is_not_taken() {
         let _g = ONE_AT_A_TIME.lock().await;
@@ -370,6 +372,7 @@ mod tests {
         assert!(r.store.kv_get(APPLIED).is_none());
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn no_owner_person_creates_nobody() {
         let _g = ONE_AT_A_TIME.lock().await;
@@ -380,6 +383,7 @@ mod tests {
         assert!(!r.dir.join("auth.json").exists() || r.auth(&["people"]).contains("no people"));
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn link_code_is_the_owners_invite() {
         let _g = ONE_AT_A_TIME.lock().await;

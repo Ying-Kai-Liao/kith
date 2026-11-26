@@ -109,6 +109,7 @@ fn running(r: &Rig, room: &str, c: &Cards) -> String {
 }
 
 /// A revoke while the turn runs: the registry names the turn, its card goes, others stay. Model: jobs-revokekeepsturn.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_revoke_withdraws_the_card_of_a_running_room_turn_and_only_that_one() {
     let (r, room) = rig().await;
@@ -126,6 +127,7 @@ async fn a_revoke_withdraws_the_card_of_a_running_room_turn_and_only_that_one() 
 }
 
 /// A host that restarted lost its registry: the stored stays still name the epochs sam was part of.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_revoke_after_a_restart_withdraws_the_card_found_by_the_stored_stays() {
     let (r, room) = rig().await;
@@ -137,6 +139,7 @@ async fn a_revoke_after_a_restart_withdraws_the_card_found_by_the_stored_stays()
 }
 
 /// A person who left before an epoch began is not in its basis: that epoch's card stays.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_epoch_after_the_person_left_keeps_its_card() {
     let (r, room) = rig().await;
@@ -150,6 +153,7 @@ async fn an_epoch_after_the_person_left_keeps_its_card() {
 }
 
 /// An access change that takes an agent ends the turns whose basis holds the person: their cards go too.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_access_change_withdraws_the_card_of_the_room_turn_it_ended() {
     let (r, room) = rig().await;
@@ -173,6 +177,7 @@ async fn an_access_change_withdraws_the_card_of_the_room_turn_it_ended() {
 
 /// `kith people revoke` writes the core, then asks the host to end what the rows no longer allow: the same ending as an
 /// access change made in the app, and a person who only gained an agent loses nothing.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn enforce_person_access_ends_the_room_turn_when_an_agent_was_lost_and_not_when_one_was_gained() {
     let (r, room) = rig().await;
@@ -186,6 +191,7 @@ async fn enforce_person_access_ends_the_room_turn_when_an_agent_was_lost_and_not
 }
 
 /// A card under a secret write is left to its own steps.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_secret_card_being_written_is_left_alone() {
     let (r, room) = rig().await;
@@ -197,6 +203,7 @@ async fn a_secret_card_being_written_is_left_alone() {
 
 /// A turn parked on its card is still registered (it has not ended), so a revoke stops it and its card goes. A turn that
 /// ended (idle) has no registry entry: its card is found by the stored stays (the restart test above).
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_revoke_ends_a_parked_turn_and_withdraws_its_card() {
     let (r, room) = rig().await;
