@@ -13,7 +13,7 @@ touches a file over about 1,500 lines splits it first. The architect reviews thi
 
 ## 0. What exists, and the one-sentence diagnosis
 
-`core/kernel/src/engines.rs` is already the engine table: 27 rows, an `Enforces` struct of yes/no capabilities
+`core/kernel/src/engines.rs` is already the engine table: 28 rows, an `Enforces` struct of yes/no capabilities
 (`engines.rs:205`), `session_modes` (`:133`), `refuses_unbypassed` (`:160`), `allows_granted_mcp_asks` (`:175`),
 `serves_guests` (`:255`), `launch_spec` (`:332`). `engines/tui.rs:32` builds the Codex and Hermes terminal argv. Non-Claude
 one-shots run in `serve/host/src/engine_run.rs:278` over ACP (`core/acp`).
@@ -27,7 +27,7 @@ rest. That is the cost this design removes.
 
 ## 1. Inventory: where Kith treats a harness specially
 
-Columns: **C** Claude Code, **X** Codex, **A** other ACP engines (the 24 other table rows, one-shot and chat over ACP),
+Columns: **C** Claude Code, **X** Codex, **A** other ACP engines (the 25 other table rows, one-shot and chat over ACP),
 **H** Hermes. yes / partial / no / refused.
 
 Run kinds in the host today: terminal (`kith AGENT`, interactive), one-shot (`kith AGENT -- task`, also `kith ask`, a
@@ -129,17 +129,24 @@ binary (`kith kernel engines launch <id> --json`, already used at `bin/kith:886`
    impl Engine { pub fn can(&self, f: Feature, run: &RunShape) -> Support; }
    ```
 
-   `RunShape` is what the answer can depend on: `{ owner: bool, bypass: bool, kind: Terminal | OneShot | Chat |
-   Wake | Sched | Ask | Channel }`. Hermes' answer to `FolderFence` is `Refused(..)` unless `bypass`; Codex's to `Network` is
+   `RunShape` is what the answer can depend on: `{ owner: bool, bypass: bool, platform, kind: Terminal | OneShot | Chat |
+   Wake | Sched | Ask | Channel }`. **Answers are keyed by kind from the start**: a Claude host chat runs over ACP
+   (`claude-acp`, `_meta.claudeCode`), not natively, and Hermes' row says `per_run_mcp: true` and `FirstMessage` while its
+   terminal takes no MCP and gets the prompt by env (`tui.rs:148-169`); a flat per-engine flag would lock in answers that are
+   already wrong for some kinds. The same `RunShape` is passed on to engine-run as env (#1229's `KITH_RUN_OWNER` is the first
+   field); every launch path sets every field, none inherits it (the bash path does not set `KITH_RUN_OWNER`, `bin/kith:1537`).
+   Which features each kind asks `check` for is one table in the crate, not each caller's list. Gating is in two stages: a
+   static check before spawning, and a run-time check after ACP `initialize` (`session/load`, model options).
+   `can` takes the platform because the launch is Unix-only today (Windows answers No until its port). Hermes' answer to `FolderFence` is `Refused(..)` unless `bypass`; Codex's to `Network` is
    `Yes` for an owner in a sandbox. The existing `refuses_unbypassed` and `HERMES_REFUSES_WITHOUT_BYPASS` become one
    row's answer; the switch (Kai's) stays a single constant.
 
-2. **Drivers** (code, three of them), picked by a `Driver` field on the row: `Native` (Claude Code: its own argv, hooks,
+2. **Drivers** (code, three of them), a closed `enum Driver` with a `match` (not a trait object: the set is closed), chosen from the row *and* the kind of run: `Native` (Claude Code: its own argv, hooks,
    transcripts), `Acp` (the generic `kith_acp` path; every row with `oneshot: Acp`), and a `Tui` add-on for the rows that
-   have a terminal session (Codex, Hermes). A driver implements one small trait used by the run path:
+   have a terminal session (Codex, Hermes). The pure parts live in `core/kernel`; the async parts (usage reads, ACP update parsing) stay in the host and call the pure ones. The run path uses these functions per driver:
 
    ```rust
-   pub trait Driver {
+   impl Driver {   // each a match over the three variants
        fn start(&self, e: &Engine, run: &RunInputs) -> Start;   // argv+env, or an ACP command + RunSpec
        fn resume(&self, e: &Engine, s: &SessionRef) -> Resume;  // Continue(id) | New{note}
        fn limit(&self, signal: &Signal) -> Option<Depleted>;    // usage-limit detection for this engine
@@ -158,7 +165,7 @@ binary (`kith kernel engines launch <id> --json`, already used at `bin/kith:886`
    pub fn check(e: &Engine, f: &[Feature], run: &RunShape) -> Result<Notes, Refusal>;
    ```
 
-   `Refusal` carries the engine name, the feature and the reason, and renders the one sentence the person sees
+   `Refusal` carries the engine name, the feature, the reason and the context that picks the exit code (a guest refusal is 3, or 4 under a backup walk, `plan.rs:1096`; the launch-json refusal 1 or 4), and renders the one sentence the person sees
    (`"hermes can't be held to its folders unless the agent is in bypass mode ..."`, today `engines::refusal`). `Notes` are the
    `Partial` limits to print on stderr ("hermes takes no MCP servers per run"). Exit codes map from `Refusal` once
    (`CANNOT_HOLD` 79, `NOT_AVAILABLE` 78, `serves_guests` 3).
@@ -177,8 +184,13 @@ A caller never matches an engine id. It asks a feature:
 | `--resume continues Claude sessions` (`plan.rs:994`) | `e.can(Feature::Resume, shape)` and `SessionRef` |
 | `serves_guests()` | `e.can(Feature::Guests, shape)` (same answer, same table) |
 
-The agent's own harness is read once, in one function (`engines::of_agent(agent_md) -> &Engine`: unset is claude,
-`claude-code` is an alias), replacing the two copies of `harness_of_agent` (`core_ask.rs:318`, `wake_clock.rs:132`).
+Which engine runs a turn is decided once, in `engines::for_run(requested, session_ref, agent_harness) -> &Engine`: a resume
+runs on the engine that made the session; otherwise the requested engine (`-H`, the turn's); otherwise the agent's own
+(`harness:` of agent.md, unset is claude, `claude-code` an alias). Today the doors disagree: the wake door lets the agent's
+harness win (`wake_clock.rs:125`), the bg ask door lets a non-Claude turn engine win (`core_ask.rs:81-87`), and tests pin
+both. The plan's backup walk can change the engine after a door checked it (`plan.rs:865-913`), so `check` runs inside the
+plan once the engine is final, on every attempt; the doors only pre-check. Further copies of the rule: `launch_cmd.rs:108`,
+`plan.rs:798`, `bin/kith:294,767`, and the caller `core_runs.rs:167`.
 
 ### 2.4 The eight things the brief names
 
@@ -210,10 +222,13 @@ The agent's own harness is read once, in one function (`engines::of_agent(agent_
   `Depleted { resets_at }`, so the chain, the host's `mark_out` (`bot/failover.rs`) and the one-shot's `usage_limit`
   (`engine_run.rs:84`) read one type. Accounts exist per engine only where the row has a login dir (`claude`, `codex`
   today); `AccountChain` is `No("no account folders for X")` elsewhere, shown when a chain names it.
-- **Session and claim identity.** Every start takes the writer claim by `(conversation, pid)`: the same call for every
-  engine (C3L #1228 did this for the attach). What stays Claude-only is the **lock** under `kith-stub`, which wraps Claude's
-  process; the design keeps it where it is (`ClaimLock`: Claude `Yes`, others `Partial("claim only")`) and adds the engine to
-  the claim row: `terminal/core_claims.rs:235,330` stop writing `"claude"` for every host claim and write
+- **Session and claim identity.** Today a non-Claude command-line run takes no writer claim unless a door hands one in through the env
+  (`exec.rs:496-507`, `start.rs:248-260`); a host chat already runs every engine with claim and lock under
+  `kith-stub --resident` (`bot/hq.rs:390`), and `kith-stub` does not care what it wraps (`core/stub/src/main.rs:1-4`). The
+  design makes every start (command line included) take the claim and run under `kith-stub`, keyed by the turn's
+  conversation: `ClaimLock` is `Yes` for every driver. The thread-writers model has no such writer yet (its `core-term-no-lock`
+  row fails `OneWriter`, and engine-run counts as no writer), so **the architect writes that model before phase 4 is coded**.
+  The claim row also gets the engine: `terminal/core_claims.rs:235,330` stop writing `"claude"` for every host claim and write
   `engine.id`. One writer per thread holds per engine because the claim is one row keyed by conversation, not by engine;
   a conversation an engine did not make is never resumed by another (the `SessionRef` check above).
 
@@ -225,7 +240,7 @@ The agent's own harness is read once, in one function (`engines::of_agent(agent_
 | Codex | usage limit | one-shot reports `usage_limit` JSON (`engine_run.rs:84`); chain walks codex accounts | same |
 | Other ACP | usage limit | only if the adapter sets an RPC error kind | `Partial("no usage signal")`; the failure is a plain error, no walk |
 | Hermes | any | exit 79 outside bypass; usage not detected | same |
-| any | writer already holds the thread | claim refused, exit 10 (`TURN_CLAIM_EXIT`), requeue by the door | same: the claim is engine-blind |
+| any | writer already holds the thread | claim refused, exit 10 (`TURN_CLAIM_EXIT`), requeue by the door; two owner runs resuming the same Codex/Hermes session (`KITH_RESUME=<engine>:<id>`) both write it today, no claim | same, and closed by the claim on every start (a bug found in review, recorded in decisions.md) |
 
 ## 3. Capability matrix: what each harness supports and what degrades
 
@@ -246,8 +261,8 @@ never silently dropped.** A degrade is a refusal naming the engine and the featu
 | Cost row | Y (hook) | Y (one-shot) | Y (one-shot) | Y (one-shot) | chat turns on non-Claude: **gap**, a row is added in phase 5 |
 | Usage meters | Y | Y | N | N | no meter shown; "no usage reading for X" in `kith engines` |
 | Account chain / failover | Y | Y | N | N | chain entries on X rejected with "no account folders for X" |
-| Claim | Y | Y | Y | Y | n/a |
-| Lock (`kith-stub`) | Y | P (claim only) | P | P | none; the claim is the guard (`writer-lock` skill's model covers claim-only) |
+| Claim | Y | P (only when a door hands one in; a plain command-line run takes none) | P | P | none today for a bare run; see section 2.4 and the architect's point 3 |
+| Lock (`kith-stub`) | Y | host chat: Y (`bot/hq.rs:390`, resident stub, any engine); command line: N | same | same | none on the command line; a claim without the lock is a choice, not a harness limit, and the model does not allow dropping either (architect point 3) |
 | `--held` / take-over | Y | N | N | N | "holds claude sessions only" (exists) |
 | Wake / detached turn | Y | Y after phase 4 | Y after phase 4 | R outside bypass | today a cancel reason `ENGINE_GAP`; after: engine-agnostic launch, refusal only where the table says |
 | Schedules | Y | Y | Y | R outside bypass | a failed turn with the refusal text in the log (79) |
@@ -274,7 +289,7 @@ Merged: #1222 A2, #1228 C3L, #1210 (Hermes refusal), #1219 (prer4: `other_engine
 
 - **Changes.** Add `Feature`, `Support`, `RunShape`, `Engine::can` to `engines` with the *existing* facts only (every `can`
   answer is derived from today's `Enforces`, `serves_guests`, `refuses_unbypassed`, `session_modes`; no behaviour change).
-  Add `engines::of_agent(agent_md_text)` and `engines::is_claude_id`. Split `engines.rs` into `engines/{table,caps}.rs`.
+  Add `engines::for_run` (the one rule; both doors' current answers become cases of it, so their tests are updated in phase 2, not left to "pass unchanged"). Split `engines.rs` into `engines/{table,caps}.rs`.
   `kith engines --json` and `launch_spec` print the new answers (additive).
 - **Files.** `core/kernel/src/engines.rs` (+ new `engines/caps.rs`), `engines/tests`; no caller changes yet.
 - **Done when.** A unit test lists every row's `can` answers and equals the pre-change flags; `kith kernel version` lists an
@@ -296,7 +311,8 @@ Merged: #1222 A2, #1228 C3L, #1210 (Hermes refusal), #1219 (prer4: `other_engine
 - **Changes.** `engines::check` and `Refusal`; the three Hermes sites (`runonce.rs:91`, `engine_run.rs:286`,
   `bot/hq.rs:63`), the guest refusals (`plan.rs:1090`, `launch_cmd.rs:148`, `agent/hq.rs:199`) and the 78/79 exit codes call
   it. The new text for the one silent case, "other ACP engine runs in the adapter's own mode" (`engines.rs:149`), is added as
-  a `Partial` note. `model_for` moves the Claude-name guard out of `plan.rs:958` and `bin/kith:831`.
+  a `Partial` note. Rust only: `bin/kith` is R4's rollback target (#1227, open) and is not edited; R5 deletes it. Difftest
+  `intended.json` entries are planned for each behaviour change. `model_for` moves the Claude-name guard out of `plan.rs:958` and `bin/kith:831`.
 - **Files.** `engines/caps.rs`, `runonce.rs`, `engine_run.rs`, `agent/bot/hq.rs`, `plan.rs`, `launch_cmd.rs`, `kernel/bin/kith`
   (two sites, through the binary).
 - **Waits for.** #1229 (it changes `engine_run.rs` and `tui.rs`; phase 3 then moves its owner-network into `RunShape` and
