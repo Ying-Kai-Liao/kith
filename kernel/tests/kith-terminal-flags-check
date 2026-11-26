@@ -48,8 +48,10 @@ if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
 elif [[ ${KITH_LAUNCH_EXEC:-} == off ]]; then
   # The rollback proof until R5: a copy of the kernel folder without the `launch-exec` line, so the script's own body answers (the line is on
   # in the shipped file since R4).
-  cp -R "$KERNEL" "$T/kernel-off" && grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/kernel-off/lib/core-switched.txt" || { echo "FAIL launch-exec off: no kernel copy"; exit 1; }
-  KERNEL=$T/kernel-off
+  # The copy sits in a folder of its own with the checkout's serve/ beside it, where the program is looked for (kernel/../serve/host/target).
+  mkdir -p "$T/off" && cp -R "$KERNEL" "$T/off/kernel" && ln -s "$KERNEL/../serve" "$T/off/serve" \
+    && grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/off/kernel/lib/core-switched.txt" || { echo "FAIL launch-exec off: no kernel copy"; exit 1; }
+  KERNEL=$T/off/kernel
   echo "(launch-exec off: the script's own body runs the terminal and --held)"
 fi
 KITH=$KERNEL/bin/kith

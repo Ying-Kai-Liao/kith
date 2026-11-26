@@ -50,8 +50,10 @@ if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
 elif [[ ${KITH_LAUNCH_EXEC:-} == off ]]; then
   # The rollback proof until R5: a copy of the kernel folder without the `launch-exec` line, so the script's own body answers (the line is on
   # in the shipped file since R4).
-  cp -R "$KERNEL" "$T/kernel-off" && grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/kernel-off/lib/core-switched.txt" || { echo "FAIL launch-exec off: no kernel copy"; exit 1; }
-  KERNEL=$T/kernel-off
+  # The copy sits in a folder of its own with the checkout's serve/ beside it, where the program is looked for (kernel/../serve/host/target).
+  mkdir -p "$T/off" && cp -R "$KERNEL" "$T/off/kernel" && ln -s "$KERNEL/../serve" "$T/off/serve" \
+    && grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/off/kernel/lib/core-switched.txt" || { echo "FAIL launch-exec off: no kernel copy"; exit 1; }
+  KERNEL=$T/off/kernel
   echo "(launch-exec off: the script's own body runs the terminal and --held)"
 fi
 LOCKS=$KITH_STATE/core/locks
@@ -334,9 +336,10 @@ if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
 # a claim made on one side must be read by the other. Two copies of the shipped kernel folder, one with the line and one without; the program
 # is the same (KITH_BIN). A session started on one side is refused by the other while it runs (a), and resumed by it afterwards (a);
 # and a launch of each side started at once for one session lets exactly one run (c).
-FLIP_ON=$T/flip-on FLIP_OFF=$T/flip-off
-cp -R "$KERNEL0" "$FLIP_ON" && printf 'launch-exec\tlaunch-exec\n' >> "$FLIP_ON/lib/core-switched.txt" \
+FLIP_ON=$T/flip-on/kernel FLIP_OFF=$T/flip-off/kernel
+mkdir -p "$T/flip-on" "$T/flip-off" && cp -R "$KERNEL0" "$FLIP_ON" && printf 'launch-exec\tlaunch-exec\n' >> "$FLIP_ON/lib/core-switched.txt" \
   && cp -R "$KERNEL0" "$FLIP_OFF" && grep -v '^launch-exec[[:space:]]' "$KERNEL0/lib/core-switched.txt" > "$FLIP_OFF/lib/core-switched.txt" \
+  && ln -s "$KERNEL0/../serve" "$T/flip-on/serve" && ln -s "$KERNEL0/../serve" "$T/flip-off/serve" \
   || { echo "FAIL flip rows: no kernel copies"; exit 1; }
 export STUB_ARGS=$T/started.args
 # frun KERNEL SID OUT: a one-shot on the session, in the background; its pid is $RUNPID. fresume does the same with --resume SID.

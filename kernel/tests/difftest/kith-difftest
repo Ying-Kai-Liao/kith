@@ -106,6 +106,12 @@ def old_kernel():
             atexit.register(shutil.rmtree, tmp, True)
             dest = tmp / 'kernel'
             shutil.copytree(KERNEL, dest, symlinks=True, ignore=shutil.ignore_patterns('tests', '__pycache__'))
+            # The launch protects a checkout's own files in the settings: a kernel folder named `kernel` whose parent holds
+            # .github/kith-protected-paths counts as one (core/kernel/src/launch/guard.rs, Places::new). The copy must look the same.
+            prot = KERNEL.parent / '.github' / 'kith-protected-paths'
+            if prot.is_file():
+                (tmp / '.github').mkdir()
+                shutil.copy(prot, tmp / '.github' / 'kith-protected-paths')
             lines = (KERNEL / SWITCHED).read_text().splitlines(True)
             (dest / SWITCHED).write_text(''.join(l for l in lines if l.split('\t')[0] != 'launch-exec'))
             _OLD_KERNEL['dir'] = dest
@@ -131,6 +137,9 @@ def roots(side_dir):
     if _OLD_KERNEL['dir'] is not None:   # the OLD side's copy of it (old_kernel), in every form it can appear in
         for form in {str(_OLD_KERNEL['dir']), os.path.realpath(_OLD_KERNEL['dir'])}:
             pairs.append((form, '<KERNEL>'))
+        # ... and the folder around it, which the protected-path rules name: the checkout's own parent on the other side
+        for form in {str(_OLD_KERNEL['dir'].parent), os.path.realpath(_OLD_KERNEL['dir'].parent)}:
+            pairs.append((form, str(KERNEL.parent)))
     return sorted(pairs, key=lambda x: -len(x[0]))
 
 
