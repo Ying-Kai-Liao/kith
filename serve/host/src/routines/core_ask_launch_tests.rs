@@ -52,13 +52,29 @@ fn door(w: &World, host: &str, bin: std::path::PathBuf, harness: &'static str) {
 /// The claim of the ask's turn once the callee's launch attached it (running, on a process), as the core shows it.
 fn attached(w: &World, id: &str) -> Value {
     let conversation = format!("ask:{id}");
-    let mut seen = Value::Null;
-    until("the launch attached the ask's claim", || {
-        seen = crate::core_front::call_as_host(&w.folders, "hostclaim.show", &json!({"conversation": conversation}))
-            .map_or(Value::Null, |v| v["claim"].clone());
-        seen["state"] == "running" && seen["pid"].is_i64()
-    });
-    seen
+    let end = Instant::now() + Duration::from_secs(60);
+    loop {
+        let seen =
+            crate::core_front::call_as_host(&w.folders, "hostclaim.show", &json!({"conversation": conversation}))
+                .map_or(Value::Null, |v| v["claim"].clone());
+        if seen["state"] == "running" && seen["pid"].is_i64() {
+            return seen;
+        }
+        if Instant::now() >= end {
+            // What the launch said is in the run's own files: the out file and the log beside it.
+            let said = |ext: &str| {
+                std::fs::read_to_string(w.folders.machine.join("core/asks").join(format!("{id}.{ext}")))
+                    .unwrap_or_default()
+            };
+            panic!(
+                "the launch did not attach the ask's claim: {seen}\nout: {}\nerr: {}\nengine runs: {:?}",
+                said("out"),
+                said("err"),
+                w.runs()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn alive(pid: i64) -> bool {
