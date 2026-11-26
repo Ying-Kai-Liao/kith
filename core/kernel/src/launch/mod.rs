@@ -36,7 +36,7 @@ pub mod settings;
 #[cfg(unix)]
 pub mod start;
 pub mod winenv;
-// Windows: a run's launcher starts inside its named job object, in one call (the Unix `start` has `exec`).
+// Windows: a run's launcher starts its engine inside a kill-on-close job it holds itself, in one call (the Unix `start` has `exec`).
 #[cfg(windows)]
 pub mod winstart;
 // Unix only, with `exec` and `start` it stands on: a terminal run holds the session's claim (W12).
