@@ -124,7 +124,9 @@ impl<'a> Taker<'a> {
         }
         // The host's claim is a core row: in Files mode there is nothing to attach it to, and a run that started anyway would
         // leave it `claimed` with no process, for a host restart to requeue and prompt twice.
-        if self.turn_claim()?.is_some() {
+        let claimed = self.turn_claim()?.is_some();
+        self.turn_conversation(claimed)?;
+        if claimed {
             return Err(format!(
                 "{TURN_CLAIM_REFUSED}: the claims are not the core's here, so the host's claim cannot be attached; nothing was started"
             ));
@@ -172,6 +174,11 @@ impl<'a> Taker<'a> {
             ));
         }
         let turn_claim = self.turn_claim()?;
+        // The conversation the host's claim is for, when it is not `sid` (a channel thread's wake: the turn is on the thread's
+        // work key, the session is another conversation).
+        let turn_conversation = self
+            .turn_conversation(turn_claim.is_some())?
+            .filter(|c| c != sid);
         if let Some(why) = unclaimable {
             // A host-claimed turn is never run unclaimed: the host reads its claim's state to know the run is alive.
             if person.is_some()
@@ -211,8 +218,17 @@ impl<'a> Taker<'a> {
                 params["revokeSeen"] = json!(n);
             }
         }
-        if let Some(claim) = turn_claim {
-            self.attach_turn(claim, sid, pid, started.as_deref().unwrap_or_default())?;
+        // A claim for the run's own session is attached first (the `claim.external` after it by the same process answers
+        // `again`). One for another conversation is attached after the session's claim, so a session a writer holds never
+        // redeems a turn that did not run: held or refused, the launch exits before the attach.
+        if let (Some(claim), None) = (turn_claim, &turn_conversation) {
+            self.attach_turn(
+                claim,
+                sid,
+                None,
+                pid,
+                started.as_deref().unwrap_or_default(),
+            )?;
         }
         let ans = match self.ask("claim.external", &params) {
             Ok(a) => a,
@@ -228,6 +244,12 @@ impl<'a> Taker<'a> {
                         kind: "the Kith core (not answering)".to_owned(),
                         waiting: false,
                     }));
+                }
+                if turn_conversation.is_some() {
+                    // The wake's claim is attached after this one: with no core there is nothing to attach it to.
+                    return Err(format!(
+                        "{TURN_CLAIM_REFUSED}: the Kith core is not answering ({why}); nothing was started"
+                    ));
                 }
                 if let Some(p) = person {
                     return Err(format!(
@@ -278,6 +300,19 @@ impl<'a> Taker<'a> {
         if ans.get("claimId").is_none_or(Value::is_null) {
             return Err("the Kith core gave no claim for that session".to_owned());
         }
+        if let (Some(claim), Some(wk)) = (turn_claim, &turn_conversation)
+            && let Err(why) = self.attach_turn(
+                claim,
+                wk,
+                Some(sid),
+                pid,
+                started.as_deref().unwrap_or_default(),
+            )
+        {
+            // The session's claim has no turn to run: given back, so a refused launch leaves nothing held.
+            self.core_release(pid, Some(sid));
+            return Err(why);
+        }
         // A taker ends the intent and the 54-minute decision of the period before it (rules 12, 14).
         if !how.lifecycle_owner
             && let Some(state) = self.c.state.as_deref()
@@ -303,11 +338,38 @@ impl<'a> Taker<'a> {
             })
     }
 
+    /// The conversation the host's claim is for (`KITH_TURN_CONVERSATION`), when the turn is not on the session the launch runs.
+    /// It is read only with a claim: alone it is refused, nothing is started.
+    fn turn_conversation(&self, has_claim: bool) -> Result<Option<String>, String> {
+        let Some(raw) = (self.c.env)("KITH_TURN_CONVERSATION").filter(|v| !v.trim().is_empty())
+        else {
+            return Ok(None);
+        };
+        if !has_claim {
+            return Err(format!(
+                "{TURN_CLAIM_REFUSED}: KITH_TURN_CONVERSATION \"{raw}\" names no turn claim; nothing was started"
+            ));
+        }
+        Ok(Some(raw.trim().to_owned()))
+    }
+
     /// `claim.attach`: the launch's own process takes the host's claim for this turn before anything starts. The core's
     /// check-and-set refuses a claim that was cancelled, adopted by a host restart, another conversation's, or already
     /// attached by another process; the same process asking again (once per claim step) is told `again`.
-    fn attach_turn(&self, claim: i64, sid: &str, pid: i64, started: &str) -> Result<(), String> {
-        let params = json!({"claimId": claim, "conversation": sid, "pid": pid, "started": started});
+    fn attach_turn(
+        &self,
+        claim: i64,
+        sid: &str,
+        session: Option<&str>,
+        pid: i64,
+        started: &str,
+    ) -> Result<(), String> {
+        let mut params =
+            json!({"claimId": claim, "conversation": sid, "pid": pid, "started": started});
+        // The engine's real session, when the turn is on another conversation (`ask:<id>`): the core keeps it for `-c`.
+        if let Some(s) = session {
+            params["session"] = json!(s);
+        }
         match self.ask("claim.attach", &params) {
             Ok(a) if a.get("attached").is_some_and(truthy) => Ok(()),
             Ok(a) => {
@@ -326,12 +388,26 @@ impl<'a> Taker<'a> {
     /// `claim.attach` for a run the host claimed without a conversation of its own to name (a schedule's turn, a non-Claude
     /// one-shot): this process takes the claim before anything starts, as `kith-sched run-turn` did. The same check-and-set.
     pub fn attach_run(&self, claim: i64, pid: i64) -> Result<(), AttachErr> {
+        self.attach_run_in(claim, pid, None)
+    }
+
+    /// [`Self::attach_run`] naming the conversation the claim's turn is on, when the host said (`KITH_TURN_CONVERSATION`): a claim
+    /// of another conversation is refused by the core's check-and-set.
+    pub fn attach_run_in(
+        &self,
+        claim: i64,
+        pid: i64,
+        conversation: Option<&str>,
+    ) -> Result<(), AttachErr> {
         let Some(started) = os::proc_start(pid) else {
             return Err(AttachErr::Down(format!(
                 "cannot read the start time of pid {pid}"
             )));
         };
-        let params = json!({"claimId": claim, "pid": pid, "started": started});
+        let mut params = json!({"claimId": claim, "pid": pid, "started": started});
+        if let Some(c) = conversation {
+            params["conversation"] = json!(c);
+        }
         match self.ask("claim.attach", &params) {
             Ok(a) if a.get("attached").is_some_and(truthy) => Ok(()),
             Ok(a) => {

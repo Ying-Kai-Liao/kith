@@ -115,12 +115,28 @@ pub(crate) fn attach(
     started: &str,
     now: i64,
 ) -> Result<Value> {
+    attach_in(core, claim_id, conversation, None, pid, started, now)
+}
+
+/// [`attach`] that also says the engine's own session when it is not the turn's conversation (a `--bg` ask's turn is on
+/// `ask:<id>`, its Claude run on a session of its own): a `--bg` ask's record keeps that session, so `-c` resumes it.
+pub(crate) fn attach_in(
+    core: &mut Core,
+    claim_id: i64,
+    conversation: Option<&str>,
+    session: Option<&str>,
+    pid: u32,
+    started: &str,
+    now: i64,
+) -> Result<Value> {
     if started.is_empty() {
         return Err(Error::BadParams(
             "kith-core: claim.attach needs the process's start stamp".into(),
         ));
     }
     let tx = core.claim_tx()?;
+    // A run that names its own session (the engine's, apart from the turn's conversation) holds the writer claim on it, as this
+    // process: the core refuses an attach that came before the writer claim.
     // A run names its own conversation: a claim whose turn is another conversation's is refused, not attached. Only a
     // schedule's turn may omit it (the Python `kith-sched run-turn` still does).
     let n = tx.execute(
@@ -130,12 +146,14 @@ pub(crate) fn attach(
                AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = ?1 AND t.source IN {} AND t.state = 'claimed'
                            AND (?5 IS NULL OR t.conversation = ?5)
                            AND (?5 IS NOT NULL OR t.source = 'schedule')
+                           AND (?6 IS NULL OR EXISTS (SELECT 1 FROM claims w WHERE w.conversation = ?6 AND w.kind = 'external'
+                                                      AND w.state IN ('claimed', 'running') AND w.pid = ?3 AND w.pid_started = ?4))
                            AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.turn = t.id AND a.origin_computer IS NOT NULL
                                            AND NOT EXISTS (SELECT 1 FROM ask_peers p WHERE p.computer = a.origin_computer
                                                            AND p.dir = 'in' AND p.epoch = a.origin_epoch AND p.live = 1)))",
             super::detached::sources_sql()
         ),
-        params![claim_id, now, pid, started, conversation],
+        params![claim_id, now, pid, started, conversation, session],
     )?;
     if n == 1 {
         tx.execute(
@@ -145,9 +163,9 @@ pub(crate) fn attach(
         // A `--bg` ask's callee: its record learns the claim and the process (so `ask.end` finds the run exactly) and the
         // session it runs in (so `-c` resumes it), in the attach's own transaction (ask design R2, O2).
         tx.execute(
-            "UPDATE asks SET claim_id = ?1, pid = ?2, pid_at_ms = ?3, session = COALESCE(session, conversation)
+            "UPDATE asks SET claim_id = ?1, pid = ?2, pid_at_ms = ?3, session = COALESCE(session, ?4, conversation)
              WHERE turn = (SELECT id FROM turns WHERE claim_id = ?1 AND source = 'ask')",
-            params![claim_id, pid, now],
+            params![claim_id, pid, now, session],
         )?;
         tx.commit()?;
         return Ok(json!({ "attached": true }));

@@ -140,6 +140,18 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                     peer: word(params, "peer"),
                     cont: word(params, "cont"),
                     origin,
+                    opts: {
+                        let m: serde_json::Map<String, Value> =
+                            ["model", "effort", "folder", "project"]
+                                .into_iter()
+                                .filter_map(|k| {
+                                    word(params, k)
+                                        .filter(|v| !v.is_empty())
+                                        .map(|v| (k.to_owned(), json!(v)))
+                                })
+                                .collect();
+                        (!m.is_empty()).then_some(m)
+                    },
                 }),
             };
             if let Some(l) = &o.ledger {
