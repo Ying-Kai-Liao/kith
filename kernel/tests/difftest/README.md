@@ -399,9 +399,11 @@ OLD is the bash body (`kith AGENT task`), NEW is the program running it in one p
 `claude` that prints its arguments (the long prompt is one word), the settings and MCP files it is pointed at, the environment that carries the
 run's state, its pid, and whether the claim on its session names it; a fake `kith-stub` that prints the lock arguments and runs what follows `--`.
 Both sides run with `KITH_CORE=rust` (the hooks are the program's on both) and the claim files are compared with their pids and session ids masked
-(`normalize_paths`). The line `launch-exec` in `lib/core-switched.txt` is off, so the OLD side is the script; the router itself is proved by
-`kith-run-kind-check`, `kith-owner-launch-check` and `kith-launch-once-race-check`, which run once more with the line switched on in a copy of the
-kernel folder. Not here: a fake host (the run socket's `consumeAccess` and `issueAskToken`), so a guest's grants are compared with no answer.
+(`normalize_paths`). The line `launch-exec` in `lib/core-switched.txt` has been on since R4, so the harness runs the OLD side of every `launch-exec-*` case from a copy of the
+kernel folder without the line (`old_kernel()` in `kith-difftest`; its path is `<KERNEL>` in every facet), and the selftest fails if OLD's kernel folder still
+routes a one-shot to `kernel launch-exec`. The goldens are unchanged by that. The router itself is proved by `kith-run-kind-check`,
+`kith-owner-launch-check` and `kith-launch-once-race-check`, which run with the line on and with a copy without it, and by the rollback rows `(a)`, `(b)` and
+`(c)` of `kith-direct-lock-check` and `kith-held-check`. Not here: a fake host (the run socket's `consumeAccess` and `issueAskToken`), so a guest's grants are compared with no answer.
 
 
 ### launch-exec-term (retire-python P1-12 R3b)
