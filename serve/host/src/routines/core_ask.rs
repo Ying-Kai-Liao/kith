@@ -34,8 +34,10 @@ const WATCH_EVERY: Duration = Duration::from_secs(2);
 
 /// What the pull needs of the system outside the core, so the rule below is tested without it.
 pub(super) struct World<'a> {
-    /// The `kith` program (`agent::hq::bin()`).
+    /// The `kith` entry a Claude callee runs (`agent::hq::bin()`: the bash entry on a Mac without `KITH_KERNEL_BIN`).
     pub bin: Option<PathBuf>,
+    /// The program the Rust launch starts from for another engine (`kernel::launch_program()`): the bash entry has no `kernel` verb.
+    pub launch: Option<PathBuf>,
     /// The kernel folder.
     pub kernel: Option<PathBuf>,
     /// The `harness:` an agent's snapshot names, `claude` when it names none, `None` when it cannot be read.
@@ -162,7 +164,8 @@ impl Plan {
     fn of(t: &Value, engine: &str, task: &str, claim: i64, world: &World<'_>) -> Result<Self, String> {
         let opt = |k: &str| t["opts"][k].as_str().filter(|v| !v.is_empty()).map(str::to_owned);
         let claude = is_claude(engine);
-        let bin = world.bin.clone().ok_or_else(|| "no kith program here to run the callee".to_owned())?;
+        let program = if claude { &world.bin } else { &world.launch };
+        let bin = program.clone().ok_or_else(|| "no kith program here to run the callee".to_owned())?;
         if !claude && world.kernel.is_none() {
             return Err("no kith kernel here to run the callee".to_owned());
         }

@@ -147,6 +147,7 @@ fn pull(core: &Core, dir: &Path, harness: &'static str) {
 fn pull_as(writer: &Arc<CoreWriter>, core: &Core, dir: &Path, harness: &'static str) {
     let world = World {
         bin: Some(dir.join("kith")),
+        launch: Some(dir.join("kith")),
         kernel: Some(dir.join("kernel")),
         harness: &move |_| Some(harness.to_owned()),
         runtime: None,

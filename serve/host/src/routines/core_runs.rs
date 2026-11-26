@@ -162,6 +162,7 @@ impl Routines {
         }
         let world = super::core_ask::World {
             bin: crate::agent::hq::bin(),
+            launch: crate::kernel::launch_program(),
             kernel: crate::kernel::current_kernel(),
             harness: &super::core_ask::harness_of_agent,
             runtime: tokio::runtime::Handle::try_current().ok(),

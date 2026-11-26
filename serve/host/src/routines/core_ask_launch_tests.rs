@@ -35,12 +35,14 @@ fn open(w: &World, id: &str, extra: &Value) -> Value {
     w.core("ask.open", &p)
 }
 
-/// The door starts the callee: `bin` is the program it runs, the engine's world is the test's.
-fn door(w: &World, host: &str, bin: std::path::PathBuf, harness: &'static str) {
+/// The door starts the callee: `bin` is the entry a Claude callee runs, `launch` the program the Rust launch starts from for another
+/// engine, as production chooses it (`KITH_BIN`, else the host's own binary); the engine's world is the test's.
+fn door(w: &World, host: &str, bin: std::path::PathBuf, launch: Option<std::path::PathBuf>, harness: &'static str) {
     let writer = Arc::new(CoreWriter::with_instance(w.folders.clone(), host.to_owned()));
     let turns = writer.queued_from(&["ask"]).expect("the core lists the ask turns");
     let world = Door {
         bin: Some(bin),
+        launch,
         kernel: Some(repo_kernel()),
         harness: &move |_| Some(harness.to_owned()),
         runtime: None,
@@ -93,7 +95,7 @@ fn a_claude_callee_attaches_naming_ask_conversation_keeps_its_session_and_surviv
     let w = World::start();
     open(&w, "r1", &json!({}));
     std::fs::write(w.dir.join("hold"), "").unwrap();
-    door(&w, "kith-serve-host/1-a", repo_kernel().join("bin/kith"), "claude");
+    door(&w, "kith-serve-host/1-a", repo_kernel().join("bin/kith"), None, "claude");
     let claim = attached(&w, "r1");
     assert_eq!(claim["conversation"], "ask:r1", "the claim stays the turn's: {claim}");
     let pid = claim["pid"].as_i64().unwrap();
@@ -117,6 +119,8 @@ fn a_claude_callee_attaches_naming_ask_conversation_keeps_its_session_and_surviv
     let record = w.core("ask.record", &json!({"id": "r1"}));
     assert_eq!(record["session"], session.as_str(), "{record}");
     until("the ask is settled", || w.core("ask.record", &json!({"id": "r1"}))["state"] != "open");
+    assert_eq!(w.core("ask.record", &json!({"id": "r1"}))["state"], "answered");
+    assert_eq!(w.core("ask.read", &json!({"id": "r1"}))["rows"].as_array().map(Vec::len), Some(1));
     assert_eq!(w.runs().len(), 1, "the task reached an engine once");
 }
 
@@ -125,7 +129,10 @@ fn another_engine_attaches_naming_ask_conversation_through_the_kernels_launch() 
     let w = World::start();
     open(&w, "r2", &json!({"engine": "codex"}));
     std::fs::write(w.dir.join("hold"), "").unwrap();
-    door(&w, "kith-serve-host/1-a", built_kith(), "claude");
+    // The bash entry is the Claude entry here, as on a Mac without `KITH_KERNEL_BIN`: it has no `kernel` verb, so the launch must not
+    // be started from it.
+    let launch = crate::kernel::launch_program_of(Some(built_kith().into_os_string()), None);
+    door(&w, "kith-serve-host/1-a", repo_kernel().join("bin/kith"), launch, "claude");
     let claim = attached(&w, "r2");
     assert_eq!(claim["conversation"], "ask:r2", "{claim}");
     assert!(alive(claim["pid"].as_i64().unwrap()));
@@ -134,6 +141,8 @@ fn another_engine_attaches_naming_ask_conversation_through_the_kernels_launch() 
     // The engine records its start; the task reaches it later, over its conversation with the launch. The ask is settled when the
     // launch has ended, which is when everything the launch sent it is in the file.
     until("the ask is settled", || w.core("ask.record", &json!({"id": "r2"}))["state"] != "open");
+    assert_eq!(w.core("ask.record", &json!({"id": "r2"}))["state"], "answered");
+    assert_eq!(w.core("ask.read", &json!({"id": "r2"}))["rows"].as_array().map(Vec::len), Some(1));
     let sent = std::fs::read_to_string(w.dir.join("acp-in")).unwrap();
     assert!(sent.contains("do the ask task"), "the task reached the engine: {sent}");
     gone_vars(&w.runs()[0]);
