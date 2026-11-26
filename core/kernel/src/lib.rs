@@ -13,6 +13,7 @@ pub mod cost;
 pub mod delegation;
 pub mod engines;
 pub mod helpers;
+pub mod hostlocal;
 // Unix only: these write modes with mode(2), sync directories, send signals and read `ps`. The Windows build of this crate
 // (the `windows` CI job) is the modules in the Windows list of `MODULES`; the core runtime needs paths.
 #[cfg(unix)]

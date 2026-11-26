@@ -8,35 +8,13 @@ with the person the run is for. `kith-sched` asks for each scheduled run, `bin/k
 `chat` is null when the person has no app chat with the agent: there is no origin to stamp. The host makes the key
 and the outbox for exactly the agent and person named here, so the caller names the person its run is for and nothing
 the run itself sets can change it."""
-import json, os, subprocess, sys, urllib.request
-from pathlib import Path
-
-
-def host_endpoint():
-    """(data dir, port) of this Mac's host: the env overrides, else what `kith-serve endpoint` says."""
-    data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
-    if not (data and port):
-        try:
-            d, p = subprocess.run([str(Path(__file__).resolve().parent.parent / 'bin' / 'kith-serve'), 'endpoint'],
-                                  capture_output=True, text=True, timeout=4, check=True).stdout.split()
-        except Exception:  # noqa: BLE001 — fall back to the dev defaults
-            d, p = str(Path.home() / '.kith' / 'serve'), '19224'
-        data, port = data or d, port or p
-    return Path(data), port
+import json, sys
 
 
 def fetch(agent, person=None, outbox=False):
     """The host's `runEnv` answer, or None when it can't be reached or doesn't answer (an older host, a refusal)."""
-    try:
-        data, port = host_endpoint()
-        token = (data / 'token').read_text().strip()
-        body = {'agent': agent, 'person': person, 'outbox': outbox}
-        req = urllib.request.Request(f'http://127.0.0.1:{port}/api/runEnv', json.dumps(body).encode(),
-                                     {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=4) as r:
-            out = json.load(r)
-    except Exception:  # noqa: BLE001 — host down: no key, and the caller goes on as it did
-        return None
+    import kith_hostlocal  # the host's local endpoint, never loopback TCP
+    out, _ = kith_hostlocal.call('runEnv', {'agent': agent, 'person': person, 'outbox': outbox}, 4)
     return out if isinstance(out, dict) and isinstance(out.get('env'), dict) else None
 
 
