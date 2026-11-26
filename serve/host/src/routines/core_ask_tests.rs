@@ -31,6 +31,8 @@ impl Core {
         let folders = crate::kernel::folders(&home);
         // The claims are the core's (a callee attaches its claim through `claim.attach`, which serves only then): the real step,
         // before the daemon holds the core.
+        // The step writes the takers' tombstone in the terminal claims folder.
+        std::fs::create_dir_all(folders.state.join("live/terminal")).expect("terminal claims folder");
         // The step wants a stub program to exist (it is the writer lock's; nothing here runs it).
         let stub = home.join("kith-stub");
         std::fs::write(&stub, "#!/bin/sh\n").expect("stub");
