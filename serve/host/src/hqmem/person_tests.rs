@@ -53,7 +53,7 @@ fn lists_only_that_persons_files() {
         ["people/alan/deep/more.md", "people/alan/likes.md"]
     );
     assert_eq!(names(&person::list(&l, "video", "bot-7a0c9f07").unwrap()), ["people/bot-7a0c9f07/x.md"]);
-    assert!(names(&person::list(&l, "video", "nobody").unwrap()).is_empty());
+    assert_eq!(names(&person::list(&l, "video", "nobody").unwrap()).len(), 0);
     assert_eq!(person::list(&l, "video", "alan").unwrap()["shared"], json!([]));
     // Without a person the list is whole.
     assert_eq!(names(&list_files(&l, "video").unwrap()).len(), 5);
