@@ -67,7 +67,7 @@ pub(super) trait Ops {
     /// Cancels a turn at the core with a reason (true: it answered).
     fn cancel(&self, turn: i64, why: &str) -> bool;
     /// Claims a cron job's turn and starts its run (`core_cron.rs`). `job` is the job's id.
-    fn cron(&self, turn: &Value, job: &str) -> Started;
+    fn cron(&self, hub: &Hub, turn: &Value, job: &str) -> Started;
 }
 
 /// What [`Ops::cron`] came to: the detached-run module's answer (`run_door.rs`).
@@ -218,7 +218,7 @@ impl Routines {
             };
             if routine_of(self, job).is_none() {
                 // A cron job of kith-sched: its own process, for the owner and a guest alike.
-                match ops.cron(t, job) {
+                match ops.cron(hub, t, job) {
                     Started::Ran | Started::Later | Started::Gone => {}
                     // The module cancelled a launch error's turn already; the notice and a second (idempotent) cancel stay.
                     Started::Failed(why) | Started::Cancelled(why) => {

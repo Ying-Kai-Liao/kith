@@ -14,6 +14,10 @@ mod core_runs_tests;
 mod launch_turn_e2e_tests;
 pub(crate) mod run_door;
 mod runner;
+mod sched_launch;
+#[cfg(test)]
+#[cfg(unix)]
+mod sched_turn_e2e_tests;
 mod schedule;
 #[cfg(test)]
 mod schedule_golden;

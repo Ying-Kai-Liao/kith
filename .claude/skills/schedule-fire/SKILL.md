@@ -331,3 +331,11 @@ NoStuck`. Condition 6 itself lands in package F; re-check `OldWait` against its 
 - `Handover.tla`: the M4-5 handover model (variants `h-*`, switches in `base.handover.consts`), copied from the architect's folder.
 - `HostRuns.tla`: who runs a fired turn (variants `hr-*`, switches in `base.hostruns.consts`), copied from the architect's folder.
 - `checks.tsv`: the table `run.sh` enforces. `run.sh`: pinned tools and the table. `drift.sh`: sync commit and covered files.
+
+## Sched-turn S2 (2026-11-26) - prose only, no model row
+`routines/core_cron.rs` runs a cron job's turn as `kith kernel launch AGENT --exec --kernel K --turn N --claim C`
+(`routines/sched_launch.rs`) when the program lists `sched-turn`, and as `kith-sched run-turn` otherwise; the `kith-sched run-turn`
+row of the code table above is the second case. HostRuns' turn `c` is unchanged: the process the host starts attaches its own pid
+to the claim (check-and-set) before the engine, exits 4 when the claim is gone and 5 when the core does not answer, and the host
+reports its end (`run_over`) or `end_gone` does. The launch truncates and heads the run's log only after its attach has won, as
+`run-turn` did. Drift read: no action of `Fire.tla`, `Handover.tla` or `HostRuns.tla` changed; SYNC not moved.
