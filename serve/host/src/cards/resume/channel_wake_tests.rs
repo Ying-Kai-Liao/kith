@@ -308,3 +308,49 @@ async fn a_core_that_does_not_answer_is_asked_again_until_it_does() {
     assert!(!w.settled());
     assert!(asked.load(std::sync::atomic::Ordering::SeqCst) >= 8);
 }
+
+#[tokio::test]
+async fn a_core_that_refuses_to_say_ends_the_ask_and_settles_the_wake_instead_of_holding_the_worker() {
+    let r = rig().await;
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = asked.clone();
+    let (_core, _log) = scripted(&r, move |m, _| {
+        (m == "hostclaim.show").then(|| {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Answer::Refused("the claims module is rolled back".into())
+        })
+    });
+    let w = claimed();
+    assert!(
+        attempt_over(&r.hub, &w, &Seen { pid: Some(4242), code: Some(0) }).await,
+        "settled, no later attempt carries it"
+    );
+    assert!(w.settled());
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1, "a refusal is not asked again");
+}
+
+#[tokio::test]
+async fn a_given_back_wake_leaves_its_cards_wanted_so_the_next_pull_carries_them_again() {
+    let r = rig().await;
+    let id = a_card(&r);
+    let me = std::process::id();
+    let (_core, log) = scripted(&r, move |m, p| match m {
+        "hostclaim.show" if p["conversation"] == "sess-a" => Some(Answer::Done(
+            json!({"claim": {"claimId": 9, "state": "running", "kind": "terminal", "pid": me, "person": ""}}),
+        )),
+        "hostclaim.show" if p["claimId"] == 41 => {
+            Some(Answer::Done(json!({"claim": {"claimId": 41, "state": "claimed", "kind": "turn", "pid": null}})))
+        }
+        _ => None,
+    });
+    let mut w = claimed();
+    w.cards = vec![id.clone()];
+    // The process spawned, the launch never attached (a terminal holds the session): the claim is requeued.
+    super::started(&r.hub, &w);
+    assert!(!attempt_over(&r.hub, &w, &Seen { pid: Some(4242), code: Some(1) }).await);
+    unattached(&r.hub, &w, false).await;
+    until("the requeue", || !calls(&log, "hostclaim.stop").is_empty()).await;
+    // The next pull's `handle` keeps only the cards `wanted` says are: this one is still owed, so the wake is carried again.
+    let card = r.hub.store.card(&id).unwrap();
+    assert!(card.applied_at.is_none() && super::super::wanted(&card), "{card:?}");
+}

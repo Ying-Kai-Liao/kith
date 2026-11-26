@@ -374,7 +374,7 @@ async fn a_wake_whose_claim_was_given_back_leaves_the_inbox_even_inside_a_correc
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_claimed_wakes_launch_gets_the_claim_and_the_work_key_and_a_later_message_gets_neither() {
+async fn a_claimed_wakes_launch_gets_the_claim_and_the_work_key() {
     use crate::cards::resume::ChannelWake;
     let r = Rig::new();
     r.send(&Rig::msg("1", "@house hello")).await;
