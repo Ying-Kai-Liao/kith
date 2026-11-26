@@ -338,7 +338,8 @@ async fn a_claimed_wake_is_a_batch_of_its_own_that_is_never_saved_and_no_message
     let end = Instant::now() + Duration::from_secs(20);
     while r.fake.posts().len() < 3 {
         let (posts, inbox) = (r.fake.posts(), r.core.with(|i| i.st.inbox.clone()));
-        assert!(Instant::now() < end, "both turns never ran: posts {posts:?}, inbox {inbox:?}");
+        let calls = std::fs::read_to_string(r.dir.join("stub/calls.jsonl")).unwrap_or_default();
+        assert!(Instant::now() < end, "both turns never ran: posts {posts:?}, inbox {inbox:?}, stub calls {calls}");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert_eq!(r.fake.posts().len(), 3, "exactly the first answer, the wake and the message: {:?}", r.fake.posts());
