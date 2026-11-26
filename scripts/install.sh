@@ -225,14 +225,18 @@ while pid > 1:
     mine.add(pid)
     out = subprocess.run(['ps', '-o', 'ppid=', '-p', str(pid)], capture_output=True, text=True).stdout.strip()
     pid = int(out) if out.isdigit() else 0
-WRITER = re.compile(os.environ.get('KITH_QUIESCE_MATCH') or r'(^|[/\s])(kith-auth|kith_settings(\.py)?|kith\s+kernel\s+(settings|secrets))(\s|$)')   # the env is for tests
-# A long-lived process that imported the old kith_settings ignores the lock and can write until it restarts, and its
-# command line need not name kith-auth or kith_settings (the bridge, the host's launcher). So also: a process with no
-# terminal whose program is a file of the installed kernel. Only the program counts (argv[0], or the script an
-# interpreter or launcher runs), never a path further along: an agent run holds kernel paths in its system prompt
-# argument, and killing one mid-turn after 30s is wrong.
+# A writer is a process whose program is kith-auth or kith_settings, or a kith binary whose first words are `kernel
+# settings` / `kernel secrets`. A long-lived process that imported the old kith_settings ignores the lock and can write
+# until it restarts, and its command line need not name either (the bridge, the host's launcher). So also: a process
+# with no terminal whose program is a file of the installed kernel. Only the program counts (argv[0], or the script an
+# interpreter or launcher runs), never a word further along: an agent run holds kith-auth, `kith kernel settings` and
+# kernel paths in its system prompt argument, and killing one mid-turn after 30s is wrong.
+MATCH = os.environ.get('KITH_QUIESCE_MATCH')        # tests: a regex over the command line instead of the program rule
+ONLY = os.environ.get('KITH_QUIESCE_PIDS')          # tests: look at these pids only, so a check never signals a real process
+ONLY = {int(p) for p in re.split(r'[\s,]+', ONLY) if p.isdigit()} if ONLY is not None else None
 ROOTS = [r.rstrip('/') + '/' for r in os.environ.get('KITH_QUIESCE_ROOTS', '').split(os.pathsep) if r]
-INTERPRETERS = re.compile(r'^(?:.*?/)?(?:python[0-9.]*|sh|bash|zsh|env|node|uv|kith-uv|hq-uv)\s+(.*)$', re.I)   # a framework python shows as .../Python, and paths have spaces
+INTERPRETERS = re.compile(r'^(?:python[0-9.]*|sh|bash|zsh|env|node|uv|kith-uv|hq-uv)$', re.I)   # a framework python is .../Python
+WRITERS = ('kith-auth', 'kith_settings', 'kith_settings.py')
 
 
 def seconds(etime):                                 # [[dd-]hh:]mm:ss
@@ -250,21 +254,56 @@ def started_by_swap(etime):                         # etime has whole seconds, s
         return False
 
 
-def kernel_program(command):                        # (the program's path inside the kernel, the words after it), or None
-    starts = [command]
-    m = INTERPRETERS.match(command)
-    if m:
-        words = m.group(1).split()
-        for i in range(min(len(words), 7)):         # the first words that are not options: `kith-uv run --script <file>`
-            if words[i] in ('-c', '-e'):
+def argv_of(pid, command):                          # the real argument list: ps joins it with spaces, and paths have spaces
+    try:
+        with open('/proc/%d/cmdline' % pid, 'rb') as fh:
+            raw = fh.read()
+        return [a.decode('utf-8', 'replace') for a in raw.rstrip(b'\0').split(b'\0')] if raw.strip(b'\0') else command.split()
+    except OSError:
+        pass
+    try:                                            # macOS: KERN_PROCARGS2 = argc, the exec path, NULs, then argv
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        mib, size = (ctypes.c_int * 3)(1, 49, pid), ctypes.c_size_t(0)
+        if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) == 0:
+            buf = ctypes.create_string_buffer(size.value)
+            if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0) == 0:
+                raw = buf.raw[:size.value]
+                argc = int.from_bytes(raw[:4], sys.byteorder)
+                rest = raw[4:]
+                rest = rest[rest.index(b'\0'):].lstrip(b'\0')
+                args = rest.split(b'\0')[:argc]
+                if len(args) == argc and argc:
+                    return [a.decode('utf-8', 'replace') for a in args]
+    except Exception:
+        pass
+    return command.split()
+
+
+def programs(argv):                                 # [(path, the arguments after it)]: argv[0], and what an interpreter runs
+    found = [(argv[0], argv[1:])] if argv else []
+    if argv and INTERPRETERS.match(os.path.basename(argv[0])):
+        for i in range(1, min(len(argv), 8)):       # the first word that is not an option: `kith-uv run --script <file>`,
+            a = argv[i]                             # `env A=b python3 <file>`
+            if a in ('-c', '-e'):
                 break
-            if not words[i].startswith('-'):
-                starts.append(' '.join(words[i:]))
-    for c in starts:
+            if a.startswith('-') or a == 'run' or re.match(r'^\w+=', a) or INTERPRETERS.match(os.path.basename(a)):
+                continue
+            found.append((a, argv[i + 1:]))
+            break
+    return found
+
+
+def writer(progs):
+    return any(os.path.basename(p) in WRITERS or (os.path.basename(p) == 'kith' and args[:2] in (['kernel', 'settings'], ['kernel', 'secrets']))
+               for p, args in progs)
+
+
+def kernel_program(progs):                          # (the program's path inside the kernel, the arguments after it), or None
+    for p, args in progs:
         for r in ROOTS:
-            if c.startswith(r):
-                words = c[len(r):].split()
-                return (words[0] if words else ''), words[1:]
+            if p.startswith(r):
+                return p[len(r):], args
     return None
 
 
@@ -281,8 +320,8 @@ AGENT_RUN = {
 }
 
 
-def old_kernel_program(command):
-    prog = kernel_program(command)
+def old_kernel_program(progs):
+    prog = kernel_program(progs)
     return prog is not None and not AGENT_RUN.get(prog[0], lambda args: False)(prog[1])
 
 
@@ -299,10 +338,14 @@ def process_table():                                # [(pid, (pid, start), etime
 def old_writers():                                  # keyed by (pid, start time), so a reused pid is never taken for an old one
     found = set()
     for pid, key, etime, tty, command in process_table():
-        if pid in mine:
+        if pid in mine or (ONLY is not None and pid not in ONLY) or not started_by_swap(etime):
             continue
-        if (WRITER.search(command) or (tty.startswith('?') and old_kernel_program(command))) and started_by_swap(etime):
+        if MATCH and re.search(MATCH, command):
             found.add(key)
+        elif 'kith' in command or any(r in command for r in ROOTS):   # read the real argv only where it can matter
+            progs = programs(argv_of(pid, command))
+            if (not MATCH and writer(progs)) or (tty.startswith('?') and old_kernel_program(progs)):
+                found.add(key)
     return found
 
 
@@ -405,6 +448,7 @@ if [ -d "$OLD_KERNEL" ]; then
   done
 fi
 export KITH_QUIESCE_ROOTS
+unset KITH_QUIESCE_MATCH KITH_QUIESCE_PIDS            # the tests' overrides never narrow a real install's drain
 if have python3 && [ -d "$(dirname "$AUTH_LOCK")" ]; then
   python3 "$WORK/quiesce.py" "$AUTH_LOCK" "$SETTINGS_LOCK" "${KITH_INSTALL_DRAIN_S:-30}" sh "$WORK/swap.sh" || { [ ! -s "$WORK/gate.last" ] || exit 1; die "could not install kith to $PREFIX"; }
 else

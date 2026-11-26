@@ -1189,6 +1189,20 @@ impl Launch {
         }
     }
 
+    /// `add_dirs` as real paths, each once, for ACP's `additionalDirectories`: Codex refuses a writable root with a
+    /// symlink in it (`~/.kith/cli/current`, `~/kith`), and then every command. A folder that can't be resolved stays
+    /// as given. The one-shot path does the same (`kernel/adapters/harness.py`).
+    pub fn real_add_dirs(&self) -> Vec<String> {
+        let mut dirs: Vec<String> = Vec::new();
+        for dir in &self.add_dirs {
+            let real = std::fs::canonicalize(dir).map_or_else(|_| dir.clone(), |p| p.to_string_lossy().into_owned());
+            if !dirs.contains(&real) {
+                dirs.push(real);
+            }
+        }
+        dirs
+    }
+
     /// `session/new` (or, with `session`, `session/load`) for this launch. No ACP `mcpServers` of the host's own:
     /// hq's are in `_meta`.
     pub fn session_params(&self, cfg: &BotConfig, session: Option<&str>) -> Value {
@@ -1344,6 +1358,22 @@ mod tests {
         for server in ["chat", "memory", "team", "routines", "connectors", "composio"] {
             assert!(!meta.to_string().contains(&format!("\"{server}\"")), "{server}");
         }
+    }
+
+    /// Codex refuses a writable root with a symlink in it, so an ACP engine's extra folders reach it resolved, each once.
+    #[test]
+    fn extra_folders_reach_another_engine_as_real_paths_once() {
+        let root = std::env::temp_dir().join(format!("kith-add-dirs-{}", uuid::Uuid::new_v4()));
+        let real = root.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = root.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let real_path = std::fs::canonicalize(&real).unwrap().to_string_lossy().into_owned();
+        let missing = root.join("missing").to_string_lossy().into_owned();
+        let dirs = [link.join("."), link.clone(), real.clone()].map(|p| p.to_string_lossy().into_owned());
+        let launch = printed_launch(json!({"harness": "codex", "add_dirs": [dirs[0], dirs[1], missing, dirs[2]]}));
+        assert_eq!(launch.real_add_dirs(), [real_path, missing]);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
