@@ -89,7 +89,17 @@ impl World {
             std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let acp = bin.join("acp-engine");
-        let echo = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/echo_agent.py");
+        // The echo agent of the bot tests, offering the session modes a codex run asks for.
+        let echo = dir.join("acp_agent.py");
+        let fixture =
+            std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/echo_agent.py"))
+                .unwrap();
+        let with_modes = fixture.replace(
+            r#"{"sessionId": f"s{sessions}"}"#,
+            r#"{"sessionId": f"s{sessions}", "modes": {"availableModes": [{"id": "read-only"}, {"id": "auto"}, {"id": "full-access"}]}}"#,
+        );
+        assert_ne!(with_modes, fixture, "the echo agent's session/new answer changed");
+        std::fs::write(&echo, with_modes).unwrap();
         std::fs::write(
             &acp,
             format!(
