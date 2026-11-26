@@ -30,6 +30,15 @@ use crate::threads::writer::{ProcErr, Taker};
 use crate::threads::{self, Ctx, claim_wait};
 use crate::{accounts, paths};
 
+/// What the host hands a run for its claimed turn: the claim and the conversation it is on. The launch attaches it; neither
+/// reaches the engine or a nested `kith`.
+const TURN_VARS: [&str; 4] = [
+    "KITH_TURN_CLAIM",
+    "HQ_TURN_CLAIM",
+    "KITH_TURN_CONVERSATION",
+    "HQ_TURN_CONVERSATION",
+];
+
 /// What a run here asks of the world outside the kernel crate: the host (to name a thread), the core (the claims) and, for
 /// `--held`, the core's terminal calls and the attach client (none: nothing can hold a terminal).
 pub struct Deps<'a> {
@@ -220,7 +229,7 @@ impl ExecHooks for Steps<'_> {
         // The attempts are runs of the run's own environment, without the claim (it is attached above, and each attempt would
         // try to attach its own pid).
         let mut attempt_env = self.env.clone();
-        for k in ["KITH_TURN_CLAIM", "HQ_TURN_CLAIM"] {
+        for k in TURN_VARS {
             attempt_env.remove(k);
         }
         let Ok(me) = std::env::current_exe() else {
@@ -414,8 +423,9 @@ fn run_one(
     };
     let mut env = plan.env.clone();
     // The host's claim is this launch's to attach; the engine and a nested `kith` never see it.
-    env.remove("KITH_TURN_CLAIM");
-    env.remove("HQ_TURN_CLAIM");
+    for k in TURN_VARS {
+        env.remove(k);
+    }
     if let Some(s) = sched
         && let Err(code) = s.attach(&taker, pid)
     {

@@ -499,6 +499,24 @@ impl CoreWriter {
         }
     }
 
+    /// Whether the core still holds the claim of a detached run as the run's own (`claimed` or `running`): `Some(false)` once it
+    /// ended or is `ending`, which only a stop (`ask.end`, a Stop, a revoke) puts it in before the run's own report, `None` when the core did not answer (the run goes on: silence is not an end).
+    pub fn claim_alive(&self, claim: i64) -> Option<bool> {
+        let v = self.data("hostclaim.show", &json!({"claimId": claim})).ok()?;
+        Some(matches!(v["claim"]["state"].as_str(), Some("claimed" | "running")))
+    }
+
+    /// `ask.finish` for the run of a `--bg` ask (design 2026-11-24-ask-ledger R3): `out` is what the run's out file held, `turn` the
+    /// turn whose run ended (a settle goes by the ask's current turn). A refusal is an answer (no such ask, or a stopped one: the
+    /// core left it alone); only [`Told::Down`] is asked again. The core settles each ask once, so asking twice is safe.
+    pub fn ask_finish(&self, id: &str, turn: i64, out: &str) -> Told {
+        match self.call("ask.finish", &json!({"id": id, "turn": turn, "out": out})) {
+            Answer::Done(_) => Told::Done,
+            Answer::Refused(said) => Told::Refused(said),
+            Answer::Down { why, .. } => Told::Down(why),
+        }
+    }
+
     /// `pid: None` sends a report that names no process: the core keeps the claim `ending` and `end_gone` ends it once the
     /// recorded process and its group are gone.
     fn report(&self, claim: i64, kind: &str, pid: Option<u32>, extra: &Value) -> Result<(), String> {

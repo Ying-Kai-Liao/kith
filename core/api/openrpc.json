@@ -11331,6 +11331,14 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "session",
+          "summary": "Optional: the engine's own session when it is not that conversation; a `--bg` ask's record keeps it for `-c`.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
         }
       ],
       "result": {
@@ -11359,6 +11367,9 @@
             "kind": "caller"
           },
           "conversation": {
+            "kind": "caller"
+          },
+          "session": {
             "kind": "caller"
           }
         },
@@ -13025,6 +13036,38 @@
           }
         },
         {
+          "name": "model",
+          "summary": "`bg`: the model (`-m`) the host's run of the callee gets. Kept on the row; a row without it runs on the agent's own.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "effort",
+          "summary": "`bg`: the effort (`-e`) the host's run of the callee gets.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "folder",
+          "summary": "`bg`: the folder (`-C`, an absolute path) the host's run of the callee works in.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "summary": "`bg`: the project (`-p`) the host's run of the callee works on.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "checkOnly",
           "summary": "Decide, write nothing.",
           "required": false,
@@ -13178,6 +13221,30 @@
             "kind": "flag",
             "spellings": [
               "--origin-epoch"
+            ]
+          },
+          "model": {
+            "kind": "flag",
+            "spellings": [
+              "--model"
+            ]
+          },
+          "effort": {
+            "kind": "flag",
+            "spellings": [
+              "--effort"
+            ]
+          },
+          "folder": {
+            "kind": "flag",
+            "spellings": [
+              "--folder"
+            ]
+          },
+          "project": {
+            "kind": "flag",
+            "spellings": [
+              "--project"
             ]
           },
           "checkOnly": {
@@ -15994,7 +16061,7 @@
     },
     {
       "name": "hostclaim.queued",
-      "summary": "The turns the core queued that no host began (a schedule's fire, a wake's take or a `--bg` ask: `enq_key` NULL, source `schedule`, `wake` or `ask`) and that wait (queued or parked): `{turns: [{turn, source, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. An `ask` turn also carries `ask` (the ask's id) and `out` (the file its run gives the callee as stdout). A `wake` turn also carries `door` (`run` or `host`), `requestIds` (the requests it carries, in order) and `note`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed. `sources` (default `[\"schedule\"]`) picks which detached sources are listed: a host that runs only cron jobs never sees a wake's turn.",
+      "summary": "The turns the core queued that no host began (a schedule's fire, a wake's take or a `--bg` ask: `enq_key` NULL, source `schedule`, `wake` or `ask`) and that wait (queued or parked): `{turns: [{turn, source, conversation, agent, engine, job, person, owner, prompt, deadline, parkedReason, redeemedBefore}]}`. An `ask` turn also carries `ask` (the ask's id) `out` (the file its run gives the callee as stdout), `opts` (`{model, effort, folder, project}` the caller gave, or null), `askedBy` (the asking agent) and `askSession` (the callee's session once it has one). A `wake` turn also carries `door` (`run` or `host`), `requestIds` (the requests it carries, in order) and `note`. The host runs each by its id, or cancels one whose earlier claim was redeemed (`redeemedBefore`: its prompt may have gone; it is never run again). `owner` says the turn runs as the owner. A turn a host enqueued (it carries a key) is never listed. `sources` (default `[\"schedule\"]`) picks which detached sources are listed: a host that runs only cron jobs never sees a wake's turn.",
       "params": [
         {
           "name": "sources",
