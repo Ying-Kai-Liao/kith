@@ -298,7 +298,12 @@ fn run_in_job(command: &Command) -> Result<Value> {
     // The whole environment the tool gets: ours, less what `command` removed, plus what it set (names are not case
     // sensitive here).
     let mut env: Vec<(String, String)> = std::env::vars_os()
-        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+        .map(|(k, v)| {
+            (
+                k.to_string_lossy().into_owned(),
+                v.to_string_lossy().into_owned(),
+            )
+        })
         .collect();
     for (k, v) in command.get_envs() {
         let k = k.to_string_lossy().into_owned();
