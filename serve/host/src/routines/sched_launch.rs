@@ -28,11 +28,11 @@ pub(crate) const OFF_ENV: &str = "KITH_SCHED_LAUNCH";
 /// The capability token of a program whose `launch --exec` takes `--turn N --claim C`.
 const TOKEN: &str = "sched-turn";
 
-/// The program the launch is started from: `$KITH_BIN`, else this very binary (the host and the kernel crate are one program).
-/// A test of the runner gives it a stand-in.
+/// The program the launch is started from: `kernel::launch_program()` (`$KITH_BIN`, else this very binary). A test of the runner
+/// gives it a stand-in.
 #[cfg(not(test))]
 fn program_here() -> Option<PathBuf> {
-    std::env::var_os("KITH_BIN").map(PathBuf::from).filter(|p| p.is_file()).or_else(|| std::env::current_exe().ok())
+    crate::kernel::launch_program()
 }
 
 #[cfg(test)]

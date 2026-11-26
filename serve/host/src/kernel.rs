@@ -254,8 +254,7 @@ pub fn find_holder(exe: &Path) -> Option<PathBuf> {
 
 /// The program the Rust launch (`<program> kernel launch AGENT --exec ...`) is started from: `$KITH_BIN`, else this very binary (the host
 /// and the kernel crate are one program). Not [`crate::agent::hq::bin`]: that is the bash entry when `KITH_KERNEL_BIN` is unset, and the
-/// bash entry has no `kernel` verb. The same choice as the schedule's launch (`routines/sched_launch.rs`, S2, #1220), which keeps its
-/// own copy until that lands; whichever lands second switches to this one.
+/// bash entry has no `kernel` verb. The schedule's launch (`routines/sched_launch.rs`) makes the same choice through it.
 pub fn launch_program() -> Option<PathBuf> {
     launch_program_of(std::env::var_os("KITH_BIN"), std::env::current_exe().ok())
 }
