@@ -344,9 +344,11 @@ fn a_host_restarted_mid_run_leaves_the_callee_running_and_its_answer_is_told_onc
     assert_eq!(shown["claim"]["state"], "running", "{shown}");
     release(&dir);
     until("the ask is answered", || core.state("a6") == "answered");
-    // The core's tick finds nothing left to settle: the answer was told once, from the out file.
-    assert!(matches!(call_host(&core.folders, "wake.tick", &json!({})), Answer::Done(_)));
+    // One answer row. The core's tick then finds nothing left to settle: the ask stays as it is, with no second row.
     assert_eq!(core.rows("a6").len(), 1);
+    assert!(matches!(call_host(&core.folders, "wake.tick", &json!({})), Answer::Done(_)));
+    assert_eq!(core.state("a6"), "answered");
+    assert!(core.rows("a6").is_empty(), "the one row was read above and no second one came");
     assert_eq!(engines(&dir), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
