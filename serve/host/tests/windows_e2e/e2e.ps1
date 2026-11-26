@@ -202,11 +202,37 @@ Check 'kernel cost refuses by name until W5a' ($cost.Code -ne 0 -and ($cost.Err 
 
 # --- stop and uninstall ------------------------------------------------------------------------------------------------------
 Section 'stop and uninstall'
+# The core holder runs with `--dir <KITH_STATE>\core\holder` (the machine folder is the state folder here). Match the tail from
+# the state folder's own name, not its full path: the runner's temp dir shows as RUNNER~1 in a command line.
+$holderTail = (Split-Path $KithState -Leaf) + '\core\holder'
+function Holder-Cmdlines { @(Get-CimInstance Win32_Process -Filter "Name = 'kith-holder.exe'" -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.CommandLine }) }
+function Core-Holders($tail) { @(Holder-Cmdlines | Where-Object { $_ -match '--dir' -and $_.IndexOf($tail, [StringComparison]::OrdinalIgnoreCase) -ge 0 }) }
+# True once no holder with that --dir tail is left, false if one is still there after $seconds.
+function Wait-HolderGone($tail, $seconds) {
+  $until = (Get-Date).AddSeconds($seconds)
+  do {
+    if (@(Core-Holders $tail).Count -eq 0) { return $true }
+    Start-Sleep -Seconds 3
+  } while ((Get-Date) -lt $until)
+  return $false
+}
+$holderBefore = @(Core-Holders $holderTail)
+Check 'the core holder was running right before stop (the filter matches it)' ($holderBefore.Count -ge 1) $holderTail
+# Negative proof: while that holder is alive the wait must report it is not gone.
+Check 'the idle-out wait reports failure while the core holder is alive' (-not (Wait-HolderGone $holderTail 4)) ($holderBefore -join ' | ')
 $stop = Run-Cap $Kith @('stop') 60 'stop'
 Check 'kith stop exits 0' ($stop.Code -eq 0) ($stop.Out + $stop.Err)
 Start-Sleep -Seconds 2
-$left = Host-Procs
-Check 'stop ended the whole tree: no program of the zip is left running' (@($left).Count -eq 0) (($left | ForEach-Object { $_.Name }) -join ',')
+# `stop` ends the host and the core daemon inside it, and the opt-in supervising holder. It never ends the core's own
+# holder or the runs it keeps: that holder leaves by itself once no core is connected and it holds nothing (120 s idle),
+# the same as on the Mac (decisions.md, 2026-11-27).
+$left = @(Host-Procs | Where-Object { $_.Name -match '^kith-servew?$' })
+$supervisors = @(Holder-Cmdlines | Where-Object { $_ -match 'supervise' })
+Check 'stop ended the host: no kith-servew, kith-serve or supervising holder is left' ($left.Count -eq 0 -and $supervisors.Count -eq 0) ((($left | ForEach-Object { $_.Name }) + $supervisors) -join ',')
+# The core holder outlives stop by design and idles out in 120 s; its going away also proves the core acked every exit.
+$gone = Wait-HolderGone $holderTail 150
+$coreHolder = @(Core-Holders $holderTail)
+Check "the core holder idled out within 150 s of stop (kith-holder.exe with --dir ...\$holderTail is gone)" $gone ($coreHolder -join ' | ')
 $down = $false
 try { Invoke-RestMethod "http://127.0.0.1:$Port/health" -TimeoutSec 3 | Out-Null } catch { $down = $true }
 Check 'the host no longer answers' $down

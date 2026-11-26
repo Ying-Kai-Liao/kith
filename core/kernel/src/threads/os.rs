@@ -249,7 +249,7 @@ pub fn signal_started(pid: i64, stamp: Option<&str>, _sig: i32) {
         .and_then(|s| s.strip_prefix('e'))
         .and_then(|s| s.parse::<i64>().ok());
     if let (Some(p), Some(ms)) = (u32::try_from(pid).ok().filter(|p| *p > 0), ms) {
-        let _ = kith_winsys::procs::terminate_started(p, ms, 1);
+        let _ = kith_winsys::kill::terminate_if_started_at(p, ms);
     }
 }
 

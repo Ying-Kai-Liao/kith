@@ -82,6 +82,7 @@ jobs:
       secrets: ${{ steps.f.outputs.secrets }}
       rooms: ${{ steps.f.outputs.rooms }}
       lease: ${{ steps.f.outputs.lease }}
+      holder_idle: ${{ steps.f.outputs.holder_idle }}
       registry: ${{ steps.f.outputs.registry }}
       schedule_fire: ${{ steps.f.outputs.schedule_fire }}
       # <marker>_full: the model's filter matched and no pass is remembered for its inputs, so its job runs the full
@@ -99,6 +100,8 @@ jobs:
       schedule_fire_key: ${{ steps.keys.outputs.schedule_fire_key }}
       lease_full: ${{ steps.f.outputs.lease == 'true' && steps.pass_lease.outputs.cache-hit != 'true' }}
       lease_key: ${{ steps.keys.outputs.lease_key }}
+      holder_idle_full: ${{ steps.f.outputs.holder_idle == 'true' && steps.pass_holder_idle.outputs.cache-hit != 'true' }}
+      holder_idle_key: ${{ steps.keys.outputs.holder_idle_key }}
       secrets_full: ${{ steps.f.outputs.secrets == 'true' && steps.pass_secrets.outputs.cache-hit != 'true' }}
       secrets_key: ${{ steps.keys.outputs.secrets_key }}
       procstart: ${{ steps.f.outputs.procstart }}
@@ -336,6 +339,12 @@ jobs:
               - 'core/holder/src/client.rs'
               - 'core/holder/src/clock.rs'
               - 'core/runtime/src/holder_link.rs'
+            # The TLA+ model of the holder's unacked exit records and its idle exit, and the code it covers (the list in the holder-idle skill).
+            holder_idle:
+              - 'verification/holder-idle/**'
+              - '.claude/skills/holder-idle/**'
+              - 'core/holder/src/holder.rs'
+              - 'core/runtime/src/holder_link.rs'
             # kith-procstart on macOS (the other jobs read the process table on Linux only).
             procstart:
               - 'core/procstart/**'
@@ -448,6 +457,9 @@ jobs:
       - id: pass_lease
         uses: actions/cache/restore@v4
         with: { path: .model-pass, key: "${{ steps.keys.outputs.lease_key }}", lookup-only: true }
+      - id: pass_holder_idle
+        uses: actions/cache/restore@v4
+        with: { path: .model-pass, key: "${{ steps.keys.outputs.holder_idle_key }}", lookup-only: true }
       - id: pass_secrets
         uses: actions/cache/restore@v4
         with: { path: .model-pass, key: "${{ steps.keys.outputs.secrets_key }}", lookup-only: true }
@@ -494,7 +506,7 @@ jobs:
   # (verification/<m>/drift.sh: covered code changed since its SYNC). A drift.sh that cannot run is an error here.
   model-drift:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.threads == 'true' || needs.changes.outputs.writer_lock == 'true' || needs.changes.outputs.revoke == 'true' || needs.changes.outputs.secrets == 'true' || needs.changes.outputs.lease == 'true' || needs.changes.outputs.schedule_fire == 'true') }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.threads == 'true' || needs.changes.outputs.writer_lock == 'true' || needs.changes.outputs.revoke == 'true' || needs.changes.outputs.secrets == 'true' || needs.changes.outputs.lease == 'true' || needs.changes.outputs.holder_idle == 'true' || needs.changes.outputs.schedule_fire == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -509,6 +521,7 @@ jobs:
           REVOKE: ${{ needs.changes.outputs.revoke }}
           SECRETS: ${{ needs.changes.outputs.secrets }}
           LEASE: ${{ needs.changes.outputs.lease }}
+          HOLDER_IDLE: ${{ needs.changes.outputs.holder_idle }}
           SCHEDULE_FIRE: ${{ needs.changes.outputs.schedule_fire }}
         run: |
           models=()
@@ -517,6 +530,7 @@ jobs:
           [ "$REVOKE" != true ] || models+=(revoke)
           [ "$SECRETS" != true ] || models+=(secrets)
           [ "$LEASE" != true ] || models+=(lease)
+          [ "$HOLDER_IDLE" != true ] || models+=(holder-idle)
           [ "$SCHEDULE_FIRE" != true ] || models+=(schedule-fire)
           verification/model-keys.sh drift "$BASE" "${models[@]}"
   # The kernel's own checks in three parallel shards, balanced by measured time (about 2.5 minutes each). Every check
@@ -878,6 +892,33 @@ jobs:
           path: .model-pass
           key: ${{ needs.changes.outputs.lease_key }}
 
+  # The same for the holder's unacked exit records (an exit is dropped only while no core is connected, then the holder
+  # idles out): verification/holder-idle/checks.tsv.
+  holder-idle:
+    needs: changes
+    if: needs.changes.outputs.holder_idle_full == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.MODEL_JAVA }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/holder-idle/run.sh') }}
+      - name: TLA+ model check
+        run: verification/holder-idle/run.sh
+      - name: Remember the pass
+        run: mkdir -p .model-pass && echo "$GITHUB_SHA" > .model-pass/holder-idle
+      - uses: actions/cache/save@v4
+        if: success() && needs.changes.outputs.holder_idle_full == 'true'
+        with:
+          path: .model-pass
+          key: ${{ needs.changes.outputs.holder_idle_key }}
+
   # The same for the transcripts registry cutover (write-ahead spool, file from the row, reconcile): verification/registry/checks.tsv.
   # mode=model runs it too:  gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=model
   registry-step:
@@ -1021,6 +1062,13 @@ jobs:
           tool: cargo-nextest@0.9.100
       - name: Host tests (kith-serve)
         run: cargo nextest run --manifest-path host/Cargo.toml -p kith-serve --profile ci-windows --locked --no-fail-fast
+      # Evidence for W11's graceful stop: the e2e hosts now leave through the stop event, so what is listed here is what a host's
+      # stop leaves behind (the core's holder outlives its host and leaves by itself after its idle time).
+      - name: Holders left after the host tests
+        if: always()
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Process -Filter "Name='kith-holder.exe'" | Select-Object ProcessId, CommandLine | Format-List
       # The two programs the Windows app bundles (apps/desktop/tools/native-host.mjs builds exactly these .exe names).
       - name: Bundled programs build
         run: |
@@ -1759,7 +1807,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
-    needs: [changes, kernel, kernel-program, host, windows, host-build, host-checks, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, model-drift, holder-lease, registry-step, schedule-fire, procstart-macos, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, kernel-program, host, windows, host-build, host-checks, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, thread-writers-slow, writer-lock, model-drift, holder-lease, holder-idle, registry-step, schedule-fire, procstart-macos, revoke-access, secret-cards, rooms-with-people, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

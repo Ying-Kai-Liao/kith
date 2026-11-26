@@ -69,7 +69,12 @@ fn main() -> ExitCode {
     };
     let idle = Duration::from_secs(idle);
     let result = match command.as_str() {
-        "serve" => holder::run(holder::Config { dir, secret, idle }),
+        "serve" => holder::run(holder::Config {
+            dir,
+            secret,
+            idle,
+            exit_keep: holder::EXIT_KEEP,
+        }),
         "start" => match std::env::current_exe() {
             Ok(exe) => launch::ensure(&exe, &dir, &secret, idle),
             Err(e) => Err(e),
@@ -139,6 +144,7 @@ fn supervise_command(mut args: impl Iterator<Item = String>) -> ExitCode {
         dir,
         secret,
         idle: Duration::ZERO,
+        exit_keep: holder::EXIT_KEEP,
     };
     match supervise::run(cfg, &argv, &policy) {
         Ok(()) => ExitCode::SUCCESS,
