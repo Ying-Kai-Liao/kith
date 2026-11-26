@@ -308,6 +308,128 @@ async fn an_approved_cards_wake_is_its_own_turn_and_a_refusal_leaves_nothing_beh
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_claimed_wake_is_a_batch_of_its_own_that_is_never_saved_and_no_message_joins() {
+    use super::Wake;
+    use crate::cards::resume::ChannelWake;
+    let r = Rig::new();
+    r.send(&Rig::msg("1", "@house hello")).await;
+    until("the answer", || !r.fake.posts().is_empty()).await;
+    r.idle().await;
+    r.core.resume(&r.ad);
+    let wk = "fake/x:room:1#house";
+    let note = "[kith wake run-9] the staging box is ready";
+    let w = ChannelWake::for_test("run-9", 7, 41, wk);
+    assert_eq!(r.core.wake_claimed(wk, note, w), Wake::Queued);
+    // The wake waits in the inbox in memory, and the saved state never has it: a batch on disk would replay the note after a
+    // restart and send the prompt twice.
+    assert!(r.core.with(|i| i.st.inbox.get(wk).is_some_and(|q| q.iter().flatten().any(|m| m == note))));
+    let saved = std::fs::read_to_string(r.dir.join("data/state.json")).unwrap();
+    assert!(!saved.contains("staging box"), "the wake batch is memory only: {saved}");
+    assert!(!r.core.with(|i| i.st.wakes.contains_key(wk)), "not among the card wake notes either");
+    // A restart loads what was saved: no batch of it comes back to replay the note.
+    let reloaded = super::state::State::load(&r.dir.join("data/state.json"));
+    assert!(
+        !reloaded.inbox.values().flatten().flatten().any(|m| m.contains("staging box")),
+        "a saved inbox never holds the wake batch: {:?}",
+        reloaded.inbox
+    );
+    // A message sent while the wake batch waits starts a batch of its own.
+    r.send(&Rig::in_thread(Rig::msg("1", "and the lights?"), "fake/x:room:1")).await;
+    // Each turn is looked for by what it posted, not by where: the wake's own text, and the message's.
+    let (wake_post, message_post) = (echo(note), |t: &str| t.contains("and the lights?"));
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let posts = r.fake.posts();
+        if posts.iter().any(|p| p.1 == wake_post) && posts.iter().any(|p| message_post(&p.1)) {
+            break;
+        }
+        let inbox = r.core.with(|i| i.st.inbox.clone());
+        let calls = std::fs::read_to_string(r.dir.join("stub/calls.jsonl")).unwrap_or_default();
+        assert!(Instant::now() < end, "both turns never ran: posts {posts:?}, inbox {inbox:?}, stub calls {calls}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    r.idle().await;
+    let posts = r.fake.posts();
+    assert_eq!(posts.iter().filter(|p| p.1 == wake_post).count(), 1, "the wake ran once, alone: {posts:?}");
+    let with_message: Vec<_> = posts.iter().filter(|p| message_post(&p.1)).collect();
+    assert_eq!(with_message.len(), 1, "the message ran once: {posts:?}");
+    assert!(!with_message[0].1.contains("staging box"), "no message joined the wake batch: {posts:?}");
+    r.idle().await;
+    assert!(r.core.with(|i| i.claimed.is_empty()), "the claim is spent with its run");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_wake_whose_claim_was_given_back_leaves_the_inbox_even_inside_a_corrections_batch() {
+    use crate::cards::resume::ChannelWake;
+    let r = Rig::new();
+    r.send(&Rig::msg("1", "@house hello")).await;
+    until("the answer", || !r.fake.posts().is_empty()).await;
+    r.idle().await;
+    r.core.resume(&r.ad);
+    let wk = "fake/x:room:1#house";
+    let note = "[kith wake run-9] the staging box is ready";
+    let w = ChannelWake::for_test("run-9", 7, 41, wk);
+    // The worker's debounce keeps the batch in the inbox for a moment; a correction folds its message into the same batch.
+    r.core.with(|i| i.busy.insert(wk.to_owned(), core::Busy::default()));
+    assert_eq!(r.core.wake_claimed(wk, note, w.clone()), super::Wake::Queued);
+    r.core.with(|i| i.st.inbox.get_mut(wk).unwrap()[0].push("and the lights?".to_owned()));
+    // The launch never attached: the claim goes back, so the note must not run from the inbox as well.
+    r.core.forget_wake(&w);
+    r.core.with(|i| {
+        assert!(i.claimed.is_empty(), "the claim record is gone");
+        let left: Vec<&String> = i.st.inbox.values().flatten().flatten().collect();
+        assert_eq!(left, ["and the lights?"], "only the user's own message stays");
+    });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_claimed_wakes_launch_gets_the_claim_and_the_work_key() {
+    use crate::cards::resume::ChannelWake;
+    let r = Rig::new();
+    r.send(&Rig::msg("1", "@house hello")).await;
+    until("the answer", || !r.fake.posts().is_empty()).await;
+    r.idle().await;
+    r.core.resume(&r.ad);
+    let wk = "fake/x:room:1#house";
+    let w = ChannelWake::for_test("run-9", 7, 41, wk);
+    assert_eq!(r.core.wake_claimed(wk, "[kith wake run-9] the staging box is ready", w), super::Wake::Queued);
+    until("the wake ran", || r.fake.posts().len() >= 2).await;
+    let calls = std::fs::read_to_string(r.dir.join("stub/calls.jsonl")).unwrap();
+    let ran: Vec<Value> = calls
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|c| c["tool"] == "kith" && c["task"].as_str().is_some_and(|t| t.contains("staging box")))
+        .collect();
+    assert_eq!(ran.len(), 1, "{calls}");
+    assert_eq!(
+        (ran[0]["turn_claim"].as_str(), ran[0]["turn_conversation"].as_str()),
+        (Some("41"), Some(wk)),
+        "{ran:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stop_drops_a_claimed_wake_waiting_in_the_inbox() {
+    use crate::cards::resume::ChannelWake;
+    let r = Rig::new();
+    r.send(&Rig::msg("1", "@house hello")).await;
+    until("the answer", || !r.fake.posts().is_empty()).await;
+    r.idle().await;
+    r.core.resume(&r.ad);
+    let wk = "fake/x:room:1#house";
+    let w = ChannelWake::for_test("run-9", 7, 41, wk);
+    // The worker's debounce keeps the batch in the inbox for a moment: a Stop finds it there.
+    r.core.with(|i| i.busy.insert(wk.to_owned(), core::Busy::default()));
+    r.core.with(|i| {
+        i.claimed.insert("[kith wake run-9] x".to_owned(), w);
+        i.st.inbox.insert(wk.to_owned(), vec![vec!["[kith wake run-9] x".to_owned()]]);
+    });
+    r.core.drop_claimed(wk);
+    assert!(r.core.with(|i| i.claimed.is_empty()));
+    r.core.with(|i| i.busy.remove(wk));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_room_default_and_the_default_command() {
     let r = Rig::new();
     let mut chat = Rig::msg("1", "hi there");

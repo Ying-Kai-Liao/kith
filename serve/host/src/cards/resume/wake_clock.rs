@@ -22,6 +22,7 @@
 //!
 //! The run's output goes where `kith-ask` reads a follow-up's words: `<logs>/wake/<run>.log` and `.err`.
 
+use super::channel_wake::Pull;
 use super::{
     Card, TAKEN, clear_held, give_up, handle, lock, rebuilt, set_held, spawn_with, state_of, unstarted, wake, wanted,
 };
@@ -58,6 +59,23 @@ static SWEEPING: AtomicBool = AtomicBool::new(false);
 static ASKING: AtomicBool = AtomicBool::new(false);
 static LAST_LIFECYCLE: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(Mutex::default);
 
+/// The turn is begun again after a pause (a wake of the thread holds the key, a writer holds the session, the connection is down).
+pub(super) fn later(run: &str) {
+    lock(&HANDED).remove(run);
+    lock(&LATER).insert(run.to_owned(), Instant::now());
+}
+
+/// [`later`] with a longer pause: the turn waits `extra` more than [`LATER_FOR`] (a launch that keeps refusing the claim).
+pub(super) fn later_extra(run: &str, extra: Duration) {
+    lock(&HANDED).remove(run);
+    lock(&LATER).insert(run.to_owned(), Instant::now() + extra);
+}
+
+/// A door of the old kind said what became of the turn it was handed: it is not held back any more.
+pub(super) fn released(run: &str) {
+    lock(&HANDED).remove(run);
+}
+
 /// One pass of the clock. `false`: the module is not switched, and the caller's old path (`drive`) is the one that runs the
 /// queue. `true`: the core's queue is this pass's, whether or not this host may tick it.
 pub(super) async fn step(hub: &Arc<Hub>) -> bool {
@@ -74,7 +92,8 @@ pub(super) async fn step(hub: &Arc<Hub>) -> bool {
     // Not the Writer: the core's claims are another host's or the files', and nothing here ticks or begins a turn.
     let Some(core) = writer else { return true };
     super::reap(hub);
-    lock(&HANDED).retain(|_, at| at.elapsed() < HANDED_FOR);
+    // A turn an actor was handed by its id stays handed until the actor says it began or did not.
+    lock(&HANDED).retain(|run, at| at.elapsed() < HANDED_FOR || lock(&super::PULLED).contains_key(run));
     // A run that ended some other way than starting (withdrawn, cancelled, already ran) leaves its wait behind: forgotten once old.
     lock(&LATER).retain(|_, at| at.elapsed() < LATER_FOR * 4);
     let st = state.clone();
@@ -178,7 +197,8 @@ async fn begin(hub: &Arc<Hub>, core: &Arc<CoreWriter>, state: &Path, t: &Value) 
     };
     if old_door(session) {
         lock(&HANDED).insert(run.to_owned(), Instant::now());
-        return handle(hub, carried).await;
+        let pull = Pull { core, turn, person: t["person"].as_str().unwrap_or_default().to_owned() };
+        return handle(hub, carried, Some(pull)).await;
     }
     door(hub, core, t, turn, &carried).await;
 }
@@ -417,3 +437,7 @@ fn ask_command() -> Option<Command> {
         cmd
     })
 }
+
+#[cfg(all(test, unix))]
+#[path = "wake_clock_core_tests.rs"]
+mod core_tests;

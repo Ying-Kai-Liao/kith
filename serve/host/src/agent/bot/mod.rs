@@ -83,6 +83,8 @@ pub enum Cmd {
     WakeBatch {
         lane: Lane,
         items: Vec<(String, String)>,
+        /// The core's wake turn the batch is, begun by its id (no turn is enqueued for it), with its conversation and person.
+        by_id: Option<(i64, Pulled)>,
     },
     /// The router's answer for a message sent while the bot worked (see `chat::router`).
     Routed {

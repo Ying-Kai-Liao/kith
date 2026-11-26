@@ -168,6 +168,12 @@ impl TestDaemon {
         self.0.stop();
     }
 
+    /// The `turns` rows of a conversation: (id, state). Unix only: its callers are the real-core wake tests (a Unix socket daemon).
+    #[cfg(unix)]
+    pub fn turns(&self, conversation: &str) -> Vec<(i64, String)> {
+        self.0.turns_of_for_test(conversation).expect("the turns")
+    }
+
     /// The holder's first hello, for a test core that has none: the claims wait for it.
     pub fn reconciled(&self) {
         self.0.mark_reconciled_without_holder().expect("the reconcile mark");
