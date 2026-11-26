@@ -149,13 +149,13 @@ thread_local! {
 }
 
 /// Whether the thread holds the core lock (a test's check that nothing reads a folder then).
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(crate) fn lock_held() -> bool {
     LOCK_HELD.with(std::cell::Cell::get)
 }
 
 /// A test that runs a call without the daemon says so, for the same check.
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(crate) fn mark_lock_held(held: bool) {
     LOCK_HELD.with(|h| h.set(held));
 }
@@ -196,7 +196,6 @@ impl Shared {
     /// Runs the revoke order again for every removal whose record is still open (a crash, or an error mid-order). At
     /// core start and on the supervisor's pass; each pass re-reads every row, and a row goes only after its effect.
     /// The writers it would kill are ended by the holder's reconcile and `end_gone`; a failure is logged, not fatal.
-    #[cfg(unix)]
     pub(crate) fn replay_open_removals(&self) {
         #[allow(clippy::cast_possible_truncation)]
         let now = std::time::SystemTime::now()
@@ -212,18 +211,13 @@ impl Shared {
         }
     }
 
-    /// The revoke order (and the authority tables it reads) is unix-only for now.
-    #[cfg(not(unix))]
-    #[allow(clippy::unused_self)]
-    pub(crate) fn replay_open_removals(&self) {}
-
     /// Runs `f` on the core. The core is gone once the daemon has stopped.
     /// Whether the authority is the core's (its switch is taken). Until it is, core.db knows only the people the import
     /// found and the narrowings mirrored since, so a run token's person that it does not know is not refused for that
     /// alone (`authority::run_allowed_in`). Read from the switch file on each call; an unreadable one is "switched",
     /// which refuses more, never less.
     pub(crate) fn authority_switched(&self) -> bool {
-        // The cutover framework is Unix only for now, and so are run tokens (`call::run_identity_allowed` refuses elsewhere).
+        // The cutover framework is Unix only (`import` and `cutover` stay there, WI1); a Windows core is born switched (WI13).
         #[cfg(unix)]
         {
             crate::cutover::authority_switched(&self.layout)
@@ -231,7 +225,7 @@ impl Shared {
         #[cfg(not(unix))]
         {
             let _ = &self.layout;
-            true
+            crate::switched::on_windows("authority")
         }
     }
 
@@ -359,7 +353,6 @@ impl Shared {
     }
 
     /// A call that reads package facts: see `packages::run_call`.
-    #[cfg(unix)]
     fn with_packages<R>(
         &self,
         method: &str,
@@ -371,7 +364,6 @@ impl Shared {
 
     /// Queues the repair of the folders an earlier run left under an old id: every person with a `was` list, on the
     /// package thread. Idempotent (a folder that is already where it belongs is not looked at twice), so it runs at every start.
-    #[cfg(unix)]
     pub(crate) fn queue_repairs(&self) {
         let life = crate::authority::revoke::Life::own(&self.own);
         match self.with_core(|c| crate::authority::call::earlier_moves(c, &life)) {
@@ -568,7 +560,6 @@ impl Shared {
             return Ok(answer);
         }
         // The owner's authority writes are claim transactions too (M2-2).
-        #[cfg(unix)]
         {
             if crate::authority::call::serves(method) {
                 // The tokens of a revoked or removed person end in the same locked call that committed it.
@@ -597,9 +588,16 @@ impl Shared {
             }
         }
         // The guest doors: start, mark live, end and the sweep are claim transactions (M2-14).
-        #[cfg(unix)]
         {
             if crate::doors::serves(method) {
+                // The rows are served, a door's start is not: a box for it is W27's, and a row for a door nothing can run
+                // would only wait for a sweep.
+                if cfg!(not(unix)) && method == "doors.start" {
+                    return Err(Error::Refused(
+                        "kith-core: doors.start: guest doors are not served on Windows yet (windows-owner W27)"
+                            .into(),
+                    ));
+                }
                 let answer = self.with_packages(method, params, || {
                     self.with_core(|c| crate::doors::call(c, method, params, &crate::gate::System))
                 })?;
@@ -974,13 +972,11 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         if shared.stopping() {
             return;
         }
-        #[cfg(unix)]
         let core = core.with_packages(shared.packages.clone());
         *slot = Some(core);
     }
     shared.replay_open_removals();
     // Folders a rename did not finish moving (the daemon died, the disk was stuck) go to their person's current id.
-    #[cfg(unix)]
     {
         let logs = shared.logs.clone();
         shared.packages.set_log(Arc::new(move |n| {

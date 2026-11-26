@@ -404,9 +404,10 @@ impl Envelope {
                         .map_err(|_| Error::Io("kith-core: random bytes unavailable".into()))?;
                     self.store.add(fresh.as_slice())?;
                     // Adopt whatever well-formed key the store now holds: if another core won a mint race, its key
-                    // is the one (this table is empty, so nothing was sealed under ours). On Linux `secret-tool store`
-                    // replaces, so there the race stays open: the last minter wins and the other core's first
-                    // records would not open.
+                    // is the one (this table is empty, so nothing was sealed under ours). The store's add is create-if-
+                    // absent: the Keychain's own, and on Windows the key store's add (get, write, read-back) under one
+                    // per-user lock (WI15). On Linux `secret-tool store` replaces, so there the race stays open: the
+                    // last minter wins and the other core's first records would not open.
                     let adopted = self
                         .store
                         .get()?

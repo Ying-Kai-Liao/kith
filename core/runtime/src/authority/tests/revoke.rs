@@ -1015,6 +1015,7 @@ fn a_database_imported_before_handles_cannot_say_a_person_is_unused() {
 
 // --- lane B filled by the import ---------------------------------------------------------------------------------------------
 
+#[cfg(unix)] // the import stays Unix (windows-owner WI1: a Windows install has nothing to import)
 /// A world the real importer fills: a person with an `agent@<id>` grant, one who owns a profile, one it is lent to, one with
 /// nothing, and an owned profile of an id that is no longer a person.
 fn imported_world() -> Rig {
@@ -1036,6 +1037,7 @@ fn imported_world() -> Rig {
     rig
 }
 
+#[cfg(unix)]
 #[test]
 fn after_an_import_remove_unused_refuses_a_person_with_a_grant_a_profile_or_one_lent_to_them() {
     let mut rig = imported_world();
@@ -1055,6 +1057,7 @@ fn after_an_import_remove_unused_refuses_a_person_with_a_grant_a_profile_or_one_
         .unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn after_an_import_a_removed_persons_id_is_kept_while_they_own_a_profile() {
     let mut rig = imported_world();
@@ -1073,6 +1076,7 @@ fn after_an_import_a_removed_persons_id_is_kept_while_they_own_a_profile() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_database_imported_before_the_tables_were_filled_cannot_say_an_id_is_free_or_a_person_unused() {
     let mut rig = imported_world();
@@ -1364,12 +1368,14 @@ fn a_login_typed_as_the_owner_stays_unowned() {
 }
 
 /// `kith-auth person <old> id=<new>` over a file holding `auth`, or `None` where there is no python3.
+#[cfg(unix)]
 fn python_rename(auth: &Value, old: &str, new: &str) -> Option<Value> {
     python_person(auth, &[old, &format!("id={new}")], None).map(|(auth, _)| auth)
 }
 
 /// `kith-auth person ARGS` over a file holding `auth` (with `kernel` as its kernel folder, for the service specs):
 /// the file after, and what it printed. `None` where there is no python3.
+#[cfg(unix)]
 fn python_person(
     auth: &Value,
     args: &[&str],
@@ -1412,6 +1418,8 @@ fn python_person(
     ))
 }
 
+// Compares against the Python kith-auth, which is Unix only (`import fcntl`) until retire-python P1.
+#[cfg(unix)]
 #[test]
 fn the_secrets_after_a_rename_are_what_kith_auth_leaves() {
     let mut a = secrets_world();
@@ -1457,6 +1465,8 @@ fn the_secrets_after_a_rename_are_what_kith_auth_leaves() {
     assert_eq!(narrow(&profiles), narrow(&py["profiles"]));
 }
 
+// Compares against the Python kith-auth, which is Unix only (`import fcntl`) until retire-python P1.
+#[cfg(unix)]
 #[test]
 fn the_owner_change_is_what_kith_auth_leaves() {
     // Python's input holds the default logins unmarked; the import stores them as the owner's id.
