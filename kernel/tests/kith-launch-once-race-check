@@ -104,10 +104,13 @@ if [[ -n $BIN ]]; then
   done
 fi
 
-# The helper's one-shot: two at once on the one grant, each by the script (KERNEL, the line off) or by the program (ON, the line on).
+# The helper's one-shot: two at once on the one grant, each by the script (the copy without the line) or by the program (ON, the line on).
 if [[ -n $BIN ]]; then
   cp -R "$KERNEL" "$T/kernel-on"
   printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt"
+  # The script's side is a copy without the line (it is on in the shipped file since R4), as well as KITH_CORE=python.
+  mkdir -p "$T/off" && cp -R "$KERNEL" "$T/off/kernel" && ln -s "$KERNEL/../serve" "$T/off/serve"
+  grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/off/kernel/lib/core-switched.txt"
   check "the program lists launch-exec" "'$BIN' kernel version | grep -q '\"launch-exec\"'"
   # raceexec KERNEL0 CORE0 KERNEL1 CORE1: sets $codes, $out0/$out1 and $exec_ran (how many of them the program ran in one process)
   raceexec() {
@@ -138,10 +141,10 @@ if [[ -n $BIN ]]; then
     check "$name: the program ran $want of the one-shots in one process (it ran $exec_ran)" "[ '$exec_ran' = '$want' ]"
   }
   for n in 1 2 3; do
-    roundexec "one-shot, script round $n" "$KERNEL" python "$KERNEL" python 0
+    roundexec "one-shot, script round $n" "$T/off/kernel" python "$T/off/kernel" python 0
     roundexec "one-shot, program round $n" "$T/kernel-on" rust "$T/kernel-on" rust 2
-    roundexec "one-shot, mixed round $n (script, program)" "$KERNEL" python "$T/kernel-on" rust 1
-    roundexec "one-shot, mixed round $n (program, script)" "$T/kernel-on" rust "$KERNEL" python 1
+    roundexec "one-shot, mixed round $n (script, program)" "$T/off/kernel" python "$T/kernel-on" rust 1
+    roundexec "one-shot, mixed round $n (program, script)" "$T/kernel-on" rust "$T/off/kernel" python 1
   done
 fi
 exit $fail

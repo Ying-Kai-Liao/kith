@@ -48,8 +48,11 @@ unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE HQ_HOME HQ_STATE 
   KITH_CLAUDE_ARGS KITH_REQUIRE_STUB KITH_RUN_TOKEN KITH_ASK_TOKEN KITH_DETACH_KEY KITH_CORE
 mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/designer/role" "$CLAUDE_CONFIG_DIR" "$T/bin" "$T/work"
 printf -- '---\nname: designer\ndescription: test agent\n---\nbody\n' > "$KITH_HOME/agents/designer/role/agent.md"
-# KITH_LAUNCH_EXEC=on: the same checks with the runs done by the program (`kith kernel launch-exec`, token launch-exec-term): a copy of the
-# kernel folder with the `launch-exec` line switched on, the program being $BIN. Unset (the default): the script's own body.
+# KITH_LAUNCH_EXEC: `on` = the runs done by the program (`kith kernel launch-exec`, token launch-exec-term): a copy of the kernel folder with the
+# `launch-exec` line switched on, the program being $BIN. `off` = the same checks on the script's own body (a copy without the line:
+# the rollback proof until R5). Unset = on (the shipped state).
+KERNEL0=$KERNEL   # the shipped kernel folder: the rollback rows build their own on and off copies from it
+case ${KITH_LAUNCH_EXEC:-} in off|on) ;; *) KITH_LAUNCH_EXEC=on ;; esac   # (the program is always here: the check skips without it)
 if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
   LE_BIN=$BIN
   [[ -n $LE_BIN && -x $LE_BIN ]] || { echo "FAIL launch-exec on: no kith program"; exit 1; }
@@ -57,6 +60,14 @@ if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
   cp -R "$KERNEL" "$T/kernel-on" && printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt" || { echo "FAIL launch-exec on: no kernel copy"; exit 1; }
   KERNEL=$T/kernel-on; export KITH_BIN=$LE_BIN
   echo "(launch-exec on: the program runs the terminal and --held)"
+elif [[ ${KITH_LAUNCH_EXEC:-} == off ]]; then
+  # The rollback proof until R5: a copy of the kernel folder without the `launch-exec` line, so the script's own body answers (the line is on
+  # in the shipped file since R4).
+  # The copy sits in a folder of its own with the checkout's serve/ beside it, where the program is looked for (kernel/../serve/host/target).
+  mkdir -p "$T/off" && cp -R "$KERNEL" "$T/off/kernel" && ln -s "$KERNEL/../serve" "$T/off/serve" \
+    && grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/off/kernel/lib/core-switched.txt" || { echo "FAIL launch-exec off: no kernel copy"; exit 1; }
+  KERNEL=$T/off/kernel
+  echo "(launch-exec off: the script's own body runs the terminal and --held)"
 fi
 KITH=$KERNEL/bin/kith
 fail=0
@@ -236,6 +247,40 @@ is "(3) the engine's exit code reaches kith attach" "$(rc_of p4t)" 7
 out=$(list); [[ $out != *"$S3"* ]] && ok "(3) an ended terminal is not listed" || bad "(3) still listed" "$out"
 out=$("$KITH" attach nobody-here 2>&1); rc=$?
 [[ $rc == 1 && $out == *"nothing held"* ]] && ok "kith attach <unknown>: one line, exit 1" || bad "attach unknown" "$rc $out"
+
+# --- rollback row (b) (R4): --held opened on one side of the `launch-exec` line, attached and ended on the other (the flip while it is held)
+# Two copies of the shipped kernel folder, one with the line and one without, on the same program, daemon and holder.
+if [[ $KITH_LAUNCH_EXEC == on ]]; then
+  FLIP_ON=$T/flip-on/kernel FLIP_OFF=$T/flip-off/kernel
+  mkdir -p "$T/flip-on" "$T/flip-off" && cp -R "$KERNEL0" "$FLIP_ON" && printf 'launch-exec\tlaunch-exec\n' >> "$FLIP_ON/lib/core-switched.txt" \
+    && cp -R "$KERNEL0" "$FLIP_OFF" && grep -v '^launch-exec[[:space:]]' "$KERNEL0/lib/core-switched.txt" > "$FLIP_OFF/lib/core-switched.txt" \
+    && ln -s "$KERNEL0/../serve" "$T/flip-on/serve" && ln -s "$KERNEL0/../serve" "$T/flip-off/serve" \
+    || { echo "FAIL flip rows: no kernel copies"; exit 1; }
+  flip_held() {   # NAME OPEN_KERNEL ATTACH_KERNEL SID
+    local n=$1 ko=$2 ka=$3 sid=$4 ep
+    pty fo env KITH_CLAUDE_ARGS="--session-id $sid" "$ko/bin/kith" designer --held
+    waitfor 'saw fo "engine ready"' && ok "$n: --held opened" || bad "$n: --held did not come up" "$(cat "$T/fo.out") $(cat "$T/daemon.out")"
+    ep=$(engine_pid "$sid")
+    kill -9 "$PTY_PID" 2>/dev/null   # the window closes, and the line flips
+    { wait "$PTY_PID"; } 2>/dev/null
+    sleep 1
+    kill -0 "$ep" 2>/dev/null && ok "$n: the engine runs on after the window closes" || bad "$n: the engine died with the window"
+    "$ka/bin/kith" attach 2>&1 | grep -q "$sid" && ok "$n: the other side lists the held terminal" || bad "$n: not listed by the other side" "$("$ka/bin/kith" attach 2>&1)"
+    pty fa "$ka/bin/kith" attach "$sid"
+    waitfor 'saw fa "engine ready"' && ok "$n: the other side attaches" || bad "$n: attach failed" "$(cat "$T/fa.out")"
+    keys fa 'hello\r'
+    waitfor 'grep -q "GOT:hello" "$T/log"' && ok "$n: typing through the other side reaches the engine" || bad "$n: typed text never arrived" "$(cat "$T/fa.out")"
+    keys fa 'quit\r'; WAIT=80 waitfor '[[ -n $(rc_of fa) ]]'
+    is "$n: ended through the other side: the engine's exit code reaches it" "$(rc_of fa)" 7
+    sleep 1
+    kill -0 "$ep" 2>/dev/null && bad "$n: the engine is still running after it ended" || ok "$n: the engine ended"
+    "$ka/bin/kith" attach 2>&1 | grep -q "$sid" && bad "$n: an ended terminal is still listed" "$("$ka/bin/kith" attach 2>&1)" || ok "$n: an ended terminal is not listed"
+    cp_=$(claim_pid "$sid")   # a claim file may stay behind, but with no live pid in it
+    [[ -z $cp_ ]] || ! kill -0 "$cp_" 2>/dev/null && ok "$n: no live claim left behind" || bad "$n: the claim is still held" "pid $cp_"
+  }
+  flip_held "rollback (b), opened on, attached and ended off" "$FLIP_ON" "$FLIP_OFF" f1111111-1111-4111-8111-111111111111
+  flip_held "rollback (b), opened off, attached and ended on" "$FLIP_OFF" "$FLIP_ON" f2222222-2222-4222-8222-222222222222
+fi
 
 # --- (7a) --resume + --held opens, handing the shell's claim over
 R1=a1111111-1111-4111-8111-111111111111

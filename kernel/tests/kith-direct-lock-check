@@ -35,8 +35,11 @@ unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE HQ_HOME HQ_STATE 
   KITH_CLAUDE_ARGS KITH_REQUIRE_STUB KITH_RUN_TOKEN KITH_ASK_TOKEN
 mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/designer/role" "$CLAUDE_CONFIG_DIR" "$T/bin" "$T/work"
 printf -- '---\nname: designer\ndescription: test agent\n---\nbody\n' > "$KITH_HOME/agents/designer/role/agent.md"
-# KITH_LAUNCH_EXEC=on: the same checks with the runs done by the program (`kith kernel launch-exec`, token launch-exec-term): a copy of the
-# kernel folder with the `launch-exec` line switched on, the program being ${KITH_BIN:-}. Unset (the default): the script's own body.
+# KITH_LAUNCH_EXEC: `on` = the runs done by the program (`kith kernel launch-exec`, token launch-exec-term): a copy of the kernel folder with the
+# `launch-exec` line switched on, the program being ${KITH_BIN:-}. `off` = the same checks on the script's own body (a copy without the line:
+# the rollback proof until R5). Unset = on when KITH_BIN is a program (the shipped state), else off.
+KERNEL0=$KERNEL   # the shipped kernel folder: the rollback rows at the end build their own on and off copies from it
+case ${KITH_LAUNCH_EXEC:-} in off|on) ;; *) if [[ -n ${KITH_BIN:-} && -x ${KITH_BIN:-} ]]; then KITH_LAUNCH_EXEC=on; else KITH_LAUNCH_EXEC=off; fi ;; esac
 if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
   LE_BIN=${KITH_BIN:-}
   [[ -n $LE_BIN && -x $LE_BIN ]] || { echo "FAIL launch-exec on: no kith program"; exit 1; }
@@ -44,6 +47,14 @@ if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
   cp -R "$KERNEL" "$T/kernel-on" && printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt" || { echo "FAIL launch-exec on: no kernel copy"; exit 1; }
   KERNEL=$T/kernel-on; export KITH_BIN=$LE_BIN
   echo "(launch-exec on: the program runs the terminal and --held)"
+elif [[ ${KITH_LAUNCH_EXEC:-} == off ]]; then
+  # The rollback proof until R5: a copy of the kernel folder without the `launch-exec` line, so the script's own body answers (the line is on
+  # in the shipped file since R4).
+  # The copy sits in a folder of its own with the checkout's serve/ beside it, where the program is looked for (kernel/../serve/host/target).
+  mkdir -p "$T/off" && cp -R "$KERNEL" "$T/off/kernel" && ln -s "$KERNEL/../serve" "$T/off/serve" \
+    && grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/off/kernel/lib/core-switched.txt" || { echo "FAIL launch-exec off: no kernel copy"; exit 1; }
+  KERNEL=$T/off/kernel
+  echo "(launch-exec off: the script's own body runs the terminal and --held)"
 fi
 LOCKS=$KITH_STATE/core/locks
 REG=$KITH_STATE/live/terminal
@@ -67,6 +78,7 @@ cat > "$T/bin/claude" <<'FAKE'
 [[ $1 == --version ]] && { echo "2.1.300 (Claude Code)"; exit 0; }
 [[ $1 == plugin ]] && exit 0
 echo "$$ $PPID" >> "$STUB_STARTED"
+[[ -z ${STUB_ARGS:-} ]] || echo "$*" >> "$STUB_ARGS"
 while [[ ! -e $STUB_GO ]]; do sleep 0.1; done
 FAKE
 chmod +x "$T/bin/claude"
@@ -317,6 +329,67 @@ if declare -F ptyrun >/dev/null; then
   touch "$T/go"; wait $R10
 fi
 rm -f "$REG/claims.tombstone"
+fi
+
+if [[ ${KITH_LAUNCH_EXEC:-} == on ]]; then
+# The rollback rows (R4): the `launch-exec` line is the whole rollback, and a Mac can flip it between two runs (or while two are starting), so
+# a claim made on one side must be read by the other. Two copies of the shipped kernel folder, one with the line and one without; the program
+# is the same (KITH_BIN). A session started on one side is refused by the other while it runs (a), and resumed by it afterwards (a);
+# and a launch of each side started at once for one session lets exactly one run (c).
+FLIP_ON=$T/flip-on/kernel FLIP_OFF=$T/flip-off/kernel
+mkdir -p "$T/flip-on" "$T/flip-off" && cp -R "$KERNEL0" "$FLIP_ON" && printf 'launch-exec\tlaunch-exec\n' >> "$FLIP_ON/lib/core-switched.txt" \
+  && cp -R "$KERNEL0" "$FLIP_OFF" && grep -v '^launch-exec[[:space:]]' "$KERNEL0/lib/core-switched.txt" > "$FLIP_OFF/lib/core-switched.txt" \
+  && ln -s "$KERNEL0/../serve" "$T/flip-on/serve" && ln -s "$KERNEL0/../serve" "$T/flip-off/serve" \
+  || { echo "FAIL flip rows: no kernel copies"; exit 1; }
+export STUB_ARGS=$T/started.args
+# frun KERNEL SID OUT: a one-shot on the session, in the background; its pid is $RUNPID. fresume does the same with --resume SID.
+frun() {
+  ( cd "$T/work" && KITH_CLAIM_WAIT=1 KITH_CLAUDE_ARGS="--session-id $2" exec "$1/bin/kith" designer "task" ) > "$3" 2>&1 &
+  RUNPID=$!
+}
+fresume() {
+  ( cd "$T/work" && KITH_CLAIM_WAIT=1 exec "$1/bin/kith" designer --resume "$2" "task" ) > "$3" 2>&1 &
+  RUNPID=$!
+}
+flip_session() {   # NAME FIRST SECOND SID: started on FIRST, refused by SECOND while it runs, resumed by SECOND afterwards
+  local n=$1 ka=$2 kb=$3 sid=$4 ra rc
+  rm -f "$T/go" "$T/started" "$STUB_ARGS"
+  frun "$ka" "$sid" "$T/fa.out"; ra=$RUNPID
+  waitfor '[[ -s $T/started ]]' && ok "$n: the first side started the session" || bad "$n: the first side never started" "$(cat "$T/fa.out")"
+  is "$n: the claim names the first side's pid" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$REG/$sid.claim" 2>/dev/null)" "$ra"
+  frun "$kb" "$sid" "$T/fb.out"; wait $RUNPID; rc=$?
+  [[ $rc != 0 ]] && ok "$n: the other side is refused while it runs (exit $rc)" || bad "$n: the other side was let in" "$(cat "$T/fb.out")"
+  [[ $(grep -c . "$T/started") == 1 ]] && ok "$n: the other side started no second engine" || bad "$n: a second engine started" "$(cat "$T/started")"
+  touch "$T/go"; wait $ra; is "$n: the first side's run exits 0" "$?" 0
+  unheld "$sid" && ok "$n: the claim ended with the run" || bad "$n: the claim is still held"
+  # the other side resumes it: the same session, from a transcript on disk
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/p"
+  printf '{"cwd":"%s","type":"user","message":{"content":"hi"}}\n' "$T/work" > "$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl"
+  : > "$STUB_ARGS"
+  fresume "$kb" "$sid" "$T/fr.out"; wait $RUNPID; rc=$?
+  is "$n: the other side resumes it (exit 0)" "$rc" 0
+  grep -q -- "$sid" "$STUB_ARGS" && ok "$n: the resumed engine got the session id" || bad "$n: the resumed engine did not get the session" "$(cat "$STUB_ARGS" "$T/fr.out")"
+  unheld "$sid" && ok "$n: the claim ended with the resumed run" || bad "$n: the claim is still held after the resume"
+}
+flip_session "rollback (a), started on, resumed off" "$FLIP_ON" "$FLIP_OFF" aaaa1111-1111-4111-8111-111111111111
+flip_session "rollback (a), started off, resumed on" "$FLIP_OFF" "$FLIP_ON" aaaa2222-2222-4222-8222-222222222222
+flip_race() {   # NAME FIRST SECOND SID: one launch on each side at once for one session: exactly one runs
+  local n=$1 ka=$2 kb=$3 sid=$4 ra rb ca cb
+  rm -f "$T/go" "$T/started"
+  frun "$ka" "$sid" "$T/ra.out"; ra=$RUNPID
+  frun "$kb" "$sid" "$T/rb.out"; rb=$RUNPID
+  waitfor '[[ -s $T/started ]]' && ok "$n: one of the two started" || bad "$n: neither started" "$(cat "$T/ra.out" "$T/rb.out")"
+  sleep 2   # the other has been refused (or is waiting out KITH_CLAIM_WAIT) by now
+  [[ $(grep -c . "$T/started") == 1 ]] && ok "$n: exactly one engine is running" || bad "$n: not one engine" "$(cat "$T/started")"
+  touch "$T/go"; wait $ra; ca=$?; wait $rb; cb=$?
+  [[ $(printf '%s\n' "$ca" "$cb" | sort | tr '\n' ' ') == "0 "[1-9]* ]] && ok "$n: one run exited 0 and the other was refused ($ca, $cb)" || bad "$n: exits were $ca and $cb"
+  [[ $(grep -c . "$T/started") == 1 ]] && ok "$n: the engine never started twice" || bad "$n: a second engine started later" "$(cat "$T/started")"
+  unheld "$sid" && ok "$n: no claim left behind" || bad "$n: a claim is still held"
+}
+for round in 1 2 3; do
+  flip_race "rollback (c), race round $round (on, off)" "$FLIP_ON" "$FLIP_OFF" "cccc$round$round$round$round-1111-4111-8111-111111111111"
+  flip_race "rollback (c), race round $round (off, on)" "$FLIP_OFF" "$FLIP_ON" "dddd$round$round$round$round-1111-4111-8111-111111111111"
+done
 fi
 
 [[ $fail == 0 ]] && echo "all checks passed"

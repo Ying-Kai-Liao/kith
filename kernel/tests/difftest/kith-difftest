@@ -17,6 +17,7 @@ is not in intended.json fails the run; an intended difference that no longer occ
 See README.md for the case format. Standard library only.
 """
 import argparse
+import atexit
 import concurrent.futures
 import copy
 import difflib
@@ -35,6 +36,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -87,6 +89,43 @@ GENERIC = [
 ]
 
 
+# The OLD side of a launch-exec case is the bash body, and since R4 the shipped lib/core-switched.txt has the `launch-exec` line on: through the
+# real kernel folder OLD would route to `kith kernel launch-exec` too and every comparison would be the program with itself. So OLD runs a copy of
+# the kernel folder (made once per run, without its tests) whose switch file has no such line. The copy is a plain kernel folder, so the facets
+# are the script's, and its path (and the real path, and the quoted forms) is `<KERNEL>` like the checkout's.
+_OLD_KERNEL = {'dir': None}
+_OLD_KERNEL_LOCK = threading.Lock()
+SWITCHED = Path('lib') / 'core-switched.txt'
+
+
+def old_kernel():
+    """-> the kernel folder the OLD side of a launch-exec case runs: this one with its `launch-exec` line removed."""
+    with _OLD_KERNEL_LOCK:
+        if _OLD_KERNEL['dir'] is None:
+            tmp = Path(tempfile.mkdtemp(prefix='kith-difftest-old-kernel.')).resolve()
+            atexit.register(shutil.rmtree, tmp, True)
+            dest = tmp / 'kernel'
+            shutil.copytree(KERNEL, dest, symlinks=True, ignore=shutil.ignore_patterns('tests', '__pycache__'))
+            # The launch protects a checkout's own files in the settings: a kernel folder named `kernel` whose parent holds
+            # .github/kith-protected-paths counts as one (core/kernel/src/launch/guard.rs, Places::new). The copy must look the same.
+            prot = KERNEL.parent / '.github' / 'kith-protected-paths'
+            if prot.is_file():
+                (tmp / '.github').mkdir()
+                shutil.copy(prot, tmp / '.github' / 'kith-protected-paths')
+            lines = (KERNEL / SWITCHED).read_text().splitlines(True)
+            (dest / SWITCHED).write_text(''.join(l for l in lines if l.split('\t')[0] != 'launch-exec'))
+            _OLD_KERNEL['dir'] = dest
+        return _OLD_KERNEL['dir']
+
+
+def default_prefix(case, side, prefixes):
+    """The command prefix a case runs on a side when it names no program of its own."""
+    p = prefixes['default'][side]
+    if side == 'old' and case.get('bin_both') and str(case.get('name', '')).startswith('launch-exec-') and p == [str(KERNEL / 'bin' / 'kith')]:
+        return [str(old_kernel() / 'bin' / 'kith')]
+    return p
+
+
 def roots(side_dir):
     """The throwaway roots of one side and their placeholders, longest path first (macOS resolves /var to /private/var)."""
     pairs = []
@@ -95,6 +134,12 @@ def roots(side_dir):
         for form in {str(p), os.path.realpath(p)}:
             pairs.append((form, ph))
     pairs.append((str(KERNEL), '<KERNEL>'))   # the checkout the program runs from: a golden record must not hold one machine's path
+    if _OLD_KERNEL['dir'] is not None:   # the OLD side's copy of it (old_kernel), in every form it can appear in
+        for form in {str(_OLD_KERNEL['dir']), os.path.realpath(_OLD_KERNEL['dir'])}:
+            pairs.append((form, '<KERNEL>'))
+        # ... and the folder around it, which the protected-path rules name: the checkout's own parent on the other side
+        for form in {str(_OLD_KERNEL['dir'].parent), os.path.realpath(_OLD_KERNEL['dir'].parent)}:
+            pairs.append((form, str(KERNEL.parent)))
     return sorted(pairs, key=lambda x: -len(x[0]))
 
 
@@ -553,7 +598,7 @@ def compare(case, prefixes, keep=False):
                 return prefixes[s]
             if s == 'new' and case.get('new_prog') == 'rust':   # the Rust program itself, for a verb the router does not reach yet
                 return [RUST_BIN]
-            return prefixes['default'][s]
+            return default_prefix(case, s, prefixes)
         if GOLDEN and RECORD:
             got = {'old': run_side('old', work, case, prefix('old')), 'new': {}}
         elif GOLDEN:
