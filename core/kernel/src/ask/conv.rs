@@ -53,8 +53,8 @@ fn turns(v: &Value) -> i64 {
 pub(super) fn ls(host: &Host, as_json: bool, out: &mut dyn Write) -> i32 {
     let mut kept: Vec<(String, Value)> = load(host).into_iter().collect();
     let at = |v: &Value| v.get("at").and_then(Value::as_str).unwrap_or("").to_owned();
-    // `sorted(..., reverse=True)` keeps equal keys in their first order.
-    kept.sort_by_key(|a| std::cmp::Reverse(at(&a.1)));
+    // Newest first; `at` has second resolution, so ties go by key (as kith-ask does) and never by the file's order.
+    kept.sort_by(|a, b| at(&b.1).cmp(&at(&a.1)).then_with(|| a.0.cmp(&b.0)));
     if as_json {
         let rows: Vec<Value> = kept
             .iter()

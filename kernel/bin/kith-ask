@@ -110,7 +110,8 @@ def keep(key, value):
 
 
 def ls(as_json=False):
-    kept = sorted(load().items(), key=lambda kv: kv[1].get('at', ''), reverse=True)
+    # Newest first; same-second ties by key, so the order never depends on the file's (or the Rust map's) own order.
+    kept = sorted(sorted(load().items()), key=lambda kv: kv[1].get('at', ''), reverse=True)
     if as_json:
         print(json.dumps({'conversations': [
             {'key': key, 'agent': v.get('agent'), 'dir': key.split('|', 1)[-1], 'at': v.get('at'), 'turns': v.get('turns', 0),
