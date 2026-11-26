@@ -7,11 +7,13 @@
 set -u
 
 target=""
+list_crates=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --target) target="${2:?--target needs a triple}"; shift 2 ;;
+    --list-crates) list_crates=1; shift ;;
     --target=*) target="${1#--target=}"; shift ;;
-    *) echo "usage: $0 [--target <triple>]" >&2; exit 2 ;;
+    *) echo "usage: $0 [--target <triple> | --list-crates]" >&2; exit 2 ;;
   esac
 done
 
@@ -21,6 +23,12 @@ manifest="$root/serve/host/Cargo.toml"
 # kith-stub joins once core/stub exists on the branch (as the CI step did).
 all_targets="-p kith-holder -p kith-winsys -p kith-core -p kith-api -p kith-kernel -p kith-attach"
 [ -d "$root/core/stub" ] && all_targets="$all_targets -p kith-stub"
+
+# The crate names, one per line, for scripts/ci/windows-filter-check.sh (which keeps CI's `windows` path filter in step).
+if [ "$list_crates" = 1 ]; then
+  { printf '%s\n' $all_targets | grep -v '^-p$'; echo kith-serve; }
+  exit 0
+fi
 
 sub=clippy
 extra=""
