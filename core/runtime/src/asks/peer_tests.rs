@@ -632,7 +632,7 @@ fn a_failed_try_shows_waiting_on_the_computer_and_a_call_it_answered_clears_it()
     assert!(since.is_i64(), "{w}");
     // Nothing was settled and nothing was written: the ask is open, still owed its send, with no row and no wake.
     assert_eq!(r.ask_state("p1"), "open");
-    assert!(r.rows("p1").is_empty());
+    assert_eq!(r.rows("p1"), Vec::<(String, bool)>::new());
     assert_eq!(wakes(&r), wakes_before);
     assert_eq!(
         r.host("ask.peerOwed", &json!({}))["send"][0]["id"],

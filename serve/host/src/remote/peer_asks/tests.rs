@@ -468,7 +468,7 @@ async fn one_failed_pass_shows_waiting_on_the_computer_and_a_good_one_clears_it_
         let w = waiting_of(&a, id);
         assert_eq!((&w["on"], &w["computer"]), (&json!("computer"), &json!("macB")), "{id}: {w}");
         assert_eq!(a.state(id), "open");
-        assert!(a.rows(id).is_empty());
+        assert_eq!(a.rows(id), Vec::<Value>::new());
     }
     assert_eq!(b.queued(), Vec::<Value>::new());
     // The computer is back: the next pass that reaches it clears the mark.
