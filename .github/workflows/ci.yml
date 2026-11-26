@@ -398,7 +398,7 @@ jobs:
               - '!**/*.md'
             # The Windows job builds and tests the holder (and kith-core when the branch has it) and what they stand on.
             windows:
-              - '{core/holder/**,core/stub/**,core/attach/**,core/winsys/**,core/runtime/**,core/api/**,serve/host/tests/support/fakemodel/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
+              - '{core/holder/**,core/stub/**,core/attach/**,core/winsys/**,core/runtime/**,core/api/**,serve/host/tests/support/fakemodel/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,scripts/ci/windows-clippy.sh,.github/workflows/ci.yml}'
               - '!**/*.md'
             cloud:
               - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
