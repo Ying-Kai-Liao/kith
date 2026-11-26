@@ -41,18 +41,15 @@ async fn house(host: &Host) -> String {
     panic!("house never appeared");
 }
 
-/// Sends `go` and returns the ACP agent's requests once it has answered a prompt (so the session exists and its mode
-/// is settled). A send that lands while a restarted host is still settling can be lost, so the same message (the same
-/// clientNonce, which the host takes once) is sent again until a turn really reaches the agent: the test never passes
-/// without a `session/prompt`. When none comes, the failure shows the chat's entries (the host's own notice, if any).
+/// Sends `go` once and returns the ACP agent's requests once it has answered a prompt (so the session exists and its
+/// mode is settled). The send is not repeated: the host answers a clientNonce it already saved with the saved entry
+/// and starts nothing (api/bots.rs, `find_by_nonce`), so a repeat could not start a turn and would only hide a lost
+/// one. The deadline is generous for a loaded CI box; a turn that never reaches the agent fails the test, with the
+/// requests and the chat's entries (the host's own notice, if any) in the message.
 async fn requests_after_a_turn(host: &Host, bot: &str, home: &Path) -> Vec<Value> {
     let deadline = Instant::now() + Duration::from_secs(90);
-    let mut next_send = Instant::now();
+    host.call("send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
     loop {
-        if Instant::now() >= next_send {
-            host.call("send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
-            next_send = Instant::now() + Duration::from_secs(10);
-        }
         let text = std::fs::read_to_string(home.join("requests.jsonl")).unwrap_or_default();
         let all: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         if all.iter().any(|r| r["method"] == "session/prompt") {
