@@ -1,0 +1,15 @@
+# cfg	expected	(what it shows; the properties are in the cfg)
+# today: no expiry, the core gone for good: the holder never idles out (HolderIdles FAILS). The open item.
+idle-today-live	fail
+idle-fix-live	pass
+idle-fix-safe-windows	pass
+idle-fix-safe-unix	pass
+# the exit recorded before the sweep: two writers, without any expiry; the sweep before the record is what makes ack and expiry safe
+idle-broken-RecordBeforeSweep-unix	fail
+# the claim across link drops, core restarts and holder restarts (HolderIdleGen.tla; the core's reconcile as the code runs it:
+# open_claims once per core generation, step 7 on a new holder instance)
+# the holder keeps its records and ENDS when the bound passes with no core linked: a returning core meets a new instance
+gen-exit-live	pass
+gen-exit-idle	pass
+# broken: the holder drops an unacked record and stays; a plain reconnect ends nothing, the claim stays held (ClaimEnds FAILS)
+gen-drop-live	fail

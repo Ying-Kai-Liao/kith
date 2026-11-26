@@ -7,6 +7,7 @@
 //! - [`tree`]: the parent chain of a process (Toolhelp32), for the run-token ancestry check.
 //! - [`event`]: a named event, the host's stop signal.
 //! - [`job`]: a named job object, and a process created inside it in one call (W12's launcher rule).
+//! - [`kill`]: end a process only if it began at the recorded time, on one handle.
 //! - [`pipe`]: a named pipe only this account can open, the host's run channel for `kith permit`.
 //!
 //! Compiled on Windows only; on every other platform the crate is empty.
@@ -17,6 +18,7 @@ pub mod acl;
 pub mod cred;
 pub mod event;
 pub mod job;
+pub mod kill;
 pub mod pipe;
 pub mod tree;
 

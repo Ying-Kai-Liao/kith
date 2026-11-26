@@ -211,6 +211,10 @@ pub fn proc_start(pid: u32) -> Option<String> {
 /// The start time of `pid` as `ps` prints it in the C locale, in UTC when `utc`: the text Claude Code's own session files
 /// and registry files from before stamps hold.
 pub(super) fn lstart(pid: u32, utc: bool) -> Option<String> {
+    // No `ps` on Windows: its starts are stamps only, and an old row's text is never read there.
+    if cfg!(windows) {
+        return None;
+    }
     lstart_via(std::process::Command::new("ps"), pid, utc)
 }
 
@@ -235,7 +239,13 @@ pub fn pid_runs(pid: u32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
 }
 
-#[cfg(not(unix))]
+/// Through `procstart`: only "no such process" is gone (an unreadable one is still there).
+#[cfg(windows)]
+pub fn pid_runs(pid: u32) -> bool {
+    super::winproc::alive(pid)
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn pid_runs(_pid: u32) -> bool {
     false
 }
