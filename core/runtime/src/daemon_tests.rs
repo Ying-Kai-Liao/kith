@@ -11,7 +11,7 @@ use super::{Config, Daemon, Reached};
 use crate::Error;
 use crate::holder_link::HolderConfig;
 use crate::layout::Layout;
-use crate::tests::{machine, open, open_all, paths};
+use crate::tests::{DAEMON_UP, machine, open, open_all, paths};
 
 fn quiet() -> Config {
     Config {
@@ -33,7 +33,7 @@ fn hosted() -> Config {
 
 fn serving(p: &Paths, cfg: Config) -> Daemon {
     let d = Daemon::spawn_with(p, cfg);
-    d.ready(Duration::from_secs(10)).expect("the daemon serves");
+    d.ready(DAEMON_UP).expect("the daemon serves");
     d
 }
 
@@ -368,7 +368,7 @@ fn the_daemon_waits_out_an_embedded_command_and_an_embedded_call_defers_to_the_d
         Reached::NoDaemon
     ));
     drop(embedded);
-    d.ready(Duration::from_secs(10))
+    d.ready(DAEMON_UP)
         .expect("it takes over once the command is done");
     let log = std::fs::read_to_string(m.join(crate::log::FILE)).expect("core.log");
     assert!(log.contains("daemon: a command"), "{log}");
@@ -1967,9 +1967,7 @@ fn a_host_daemon_waits_out_a_daemon_that_holds_the_lock_and_then_is_host() {
     );
     standalone.stop();
     drop(standalone);
-    serve
-        .ready(Duration::from_secs(20))
-        .expect("the serve takes the lock");
+    serve.ready(DAEMON_UP).expect("the serve takes the lock");
     let mine = crate::owner::forget_host_secret(&l).expect("the serve's secret");
     crate::owner::set_host_secret(&l, &mine);
     assert_eq!(

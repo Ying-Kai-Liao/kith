@@ -9,7 +9,7 @@ use super::{Config, Daemon, Reached};
 use crate::error::Error;
 use crate::holder_link::HolderConfig;
 use crate::layout::Layout;
-use crate::tests::{machine, open_all as open, paths};
+use crate::tests::{DAEMON_UP, machine, open_all as open, paths};
 
 fn quiet() -> Config {
     Config {
@@ -38,7 +38,7 @@ fn a_daemon_keeps_retrying_behind_an_embedded_command_and_says_so_once() {
         Ok(()) => panic!("it cannot serve while the command holds the core"),
     }
     drop(embedded);
-    d.ready(Duration::from_secs(10))
+    d.ready(DAEMON_UP)
         .expect("it comes up once the command is done");
     assert!(matches!(
         crate::reach(&p, "kernel.version", &json!({}), true),
