@@ -14,6 +14,8 @@ struct RootView: View {
     @State private var welcomed = false
     /// A call the person accepted, until its voice call ends.
     @State private var answered: AnsweredCall?
+    /// Crew or Feed: each keeps its own navigation stack.
+    @State private var homeTab = HomeTab.crew
 
     /// The open bot, as a NavigationStack path.
     private var path: Binding<[BotReference]> {
@@ -139,16 +141,24 @@ struct RootView: View {
         }
     }
 
-    /// Home is one stack: Crew, with a chat pushed over it. Usage, Extensions, Computers and Settings are sheets from
-    /// the profile menu; opening a bot (notification, widget, link) pushes its chat.
+    /// Home is two places, each with its own stack: Crew, with a chat pushed over it, and Feed. Usage, Extensions,
+    /// Computers and Settings are sheets from the profile menu; opening a bot (notification, widget, link) pushes its chat.
     private var tabs: some View {
-        NavigationStack(path: path) {
-            BotListView()
-                .navigationDestination(for: BotReference.self) { ref in
-                    ChatScreen(ref: ref)
-                }
+        ZStack {
+            NavigationStack(path: path) {
+                BotListView(tab: $homeTab)
+                    .navigationDestination(for: BotReference.self) { ref in
+                        ChatScreen(ref: ref)
+                    }
+            }
+            .tint(Palette.text)
+            .opacity(homeTab == .crew ? 1 : 0)
+            .allowsHitTesting(homeTab == .crew)
+            .accessibilityHidden(homeTab != .crew)
+            if homeTab == .feed { HomeFeedStack(tab: $homeTab) }
         }
-        .tint(Palette.text)
+        // A chat opened from a notification, widget or link is in Crew.
+        .onChange(of: accounts.selection) { _, new in if new != nil { homeTab = .crew } }
     }
 
     // MARK: incoming calls

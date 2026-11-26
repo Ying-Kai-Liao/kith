@@ -1,29 +1,27 @@
 import KithKit
 import SwiftUI
 
-public enum CrewBoardTab: String, CaseIterable, Sendable {
+/// The two places the top bar switches between (Work is not a place).
+public enum HomeTab: String, CaseIterable, Sendable {
     case crew = "Crew"
-    case board = "Board"
+    case feed = "Feed"
 }
 
-/// The segmented glass switch in the top bar: Crew | Board, with the Board's waiting count as a 16 pt badge.
-public struct CrewBoardSwitch: View {
-    @Binding var selection: CrewBoardTab
-    let boardCount: Int
+/// The segmented glass switch in the top bar: Crew | Feed.
+public struct HomeTabSwitch: View {
+    @Binding var selection: HomeTab
     @Namespace private var ns
 
-    public init(selection: Binding<CrewBoardTab>, boardCount: Int = 0) {
+    public init(selection: Binding<HomeTab>) {
         _selection = selection
-        self.boardCount = boardCount
     }
 
     public var body: some View {
         HStack(spacing: 2) {
-            ForEach(CrewBoardTab.allCases, id: \.self) { tab in
+            ForEach(HomeTab.allCases, id: \.self) { tab in
                 Button { withAnimation(.snappy(duration: 0.2)) { selection = tab } } label: {
                     HStack(spacing: 6) {
                         Text(tab.rawValue).kithText(.topBar).foregroundStyle(Palette.ink)
-                        if tab == .board { CountBadge(boardCount, size: KithSize.countBadgeBoard) }
                     }
                     .padding(.horizontal, 16)
                     .frame(minHeight: KithSize.topButton - 6)
@@ -119,13 +117,13 @@ public struct TopBarText: View {
 }
 
 #Preview("Top bar") {
-    @Previewable @State var tab = CrewBoardTab.crew
+    @Previewable @State var tab = HomeTab.crew
     return ZStack(alignment: .top) {
         SkyBackground(.home, edgeToEdge: false)
         HStack {
             ProfileTopButton(action: {}) { SkyPatch(id: "kai", size: 38, isYou: true) }
             Spacer()
-            CrewBoardSwitch(selection: $tab, boardCount: 3)
+            HomeTabSwitch(selection: $tab)
             Spacer()
             TopGlassMenu("New chat") {
                 Button("New bot", systemImage: "plus.square") {}

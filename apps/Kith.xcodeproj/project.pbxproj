@@ -29,6 +29,10 @@
 		A11CE0000000000000000D12 /* SharingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D11 /* SharingView.swift */; };
 		A11CE0000000000000000D22 /* ShareFlowSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D21 /* ShareFlowSheet.swift */; };
 		A11CE0000000000000000D32 /* SharingPersonSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D31 /* SharingPersonSheet.swift */; };
+		C7E300000000000000000101 /* CrewPeople.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E300000000000000000100 /* CrewPeople.swift */; };
+		C7E300000000000000000103 /* CrewListParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E300000000000000000102 /* CrewListParts.swift */; };
+		C7E300000000000000000105 /* HomeTopBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E300000000000000000104 /* HomeTopBar.swift */; };
+		C7E300000000000000000107 /* FeedPlaceholderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E300000000000000000106 /* FeedPlaceholderView.swift */; };
 		A11CE0000000000000000F2 /* ShareAgentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000F1 /* ShareAgentSheet.swift */; };
 		A11CE0000000000000000F4 /* KeysView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000F3 /* KeysView.swift */; };
 		501377099B6CF42761B230CB /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D57A7C09154869DD84BACE19 /* WelcomeView.swift */; };
@@ -167,6 +171,10 @@
 		A11CE0000000000000000D11 /* SharingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharingView.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000D21 /* ShareFlowSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareFlowSheet.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000D31 /* SharingPersonSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharingPersonSheet.swift; sourceTree = "<group>"; };
+		C7E300000000000000000100 /* CrewPeople.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewPeople.swift; sourceTree = "<group>"; };
+		C7E300000000000000000102 /* CrewListParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewListParts.swift; sourceTree = "<group>"; };
+		C7E300000000000000000104 /* HomeTopBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeTopBar.swift; sourceTree = "<group>"; };
+		C7E300000000000000000106 /* FeedPlaceholderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedPlaceholderView.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000F1 /* ShareAgentSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareAgentSheet.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000F3 /* KeysView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeysView.swift; sourceTree = "<group>"; };
 		CE63C84233B14A2D63640EAA /* Capture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Capture.swift; sourceTree = "<group>"; };
@@ -311,6 +319,10 @@
 				A11CE0000000000000000D11 /* SharingView.swift */,
 				A11CE0000000000000000D21 /* ShareFlowSheet.swift */,
 				A11CE0000000000000000D31 /* SharingPersonSheet.swift */,
+				C7E300000000000000000100 /* CrewPeople.swift */,
+				C7E300000000000000000102 /* CrewListParts.swift */,
+				C7E300000000000000000104 /* HomeTopBar.swift */,
+				C7E300000000000000000106 /* FeedPlaceholderView.swift */,
 				A11CE0000000000000000F1 /* ShareAgentSheet.swift */,
 				A11CE0000000000000000F3 /* KeysView.swift */,
 				B3B62ACA7CC342EEB0829556 /* MacProblemCard.swift */,
@@ -705,6 +717,10 @@
 				A11CE0000000000000000D12 /* SharingView.swift in Sources */,
 				A11CE0000000000000000D22 /* ShareFlowSheet.swift in Sources */,
 				A11CE0000000000000000D32 /* SharingPersonSheet.swift in Sources */,
+				C7E300000000000000000101 /* CrewPeople.swift in Sources */,
+				C7E300000000000000000103 /* CrewListParts.swift in Sources */,
+				C7E300000000000000000105 /* HomeTopBar.swift in Sources */,
+				C7E300000000000000000107 /* FeedPlaceholderView.swift in Sources */,
 				A11CE0000000000000000F2 /* ShareAgentSheet.swift in Sources */,
 				A11CE0000000000000000F4 /* KeysView.swift in Sources */,
 				7E5F670CFFA0E4373F44DB41 /* AccountSession.swift in Sources */,

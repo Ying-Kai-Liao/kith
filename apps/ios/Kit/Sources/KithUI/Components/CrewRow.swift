@@ -25,6 +25,8 @@ public struct CrewRowModel: Identifiable, Equatable, Sendable {
         case team(CrewFace, personId: String)
         /// A room with several agents: two bots on the diagonal and one sky patch. Named in Inter, never Nunito.
         case group(CrewFace, CrewFace, personId: String)
+        /// A person you share with: their sky patch alone.
+        case person(personId: String)
     }
 
     public var id: String
@@ -45,10 +47,12 @@ public struct CrewRowModel: Identifiable, Equatable, Sendable {
     public var tag: String?
     /// A bot from outside's chat: its provider, for the small badge on the agent's face. Nil on every other row.
     public var botProvider: String?
+    /// A person whose access is paused: the row is dimmed.
+    public var dimmed: Bool
 
     public init(id: String, shape: Shape, name: String, withPerson: String? = nil, trailing: String? = nil,
                 status: String? = nil, count: Int = 0, unread: Bool = false, state: BotAvatarState = .idle, tag: String? = nil,
-                botProvider: String? = nil) {
+                botProvider: String? = nil, dimmed: Bool = false) {
         self.id = id
         self.shape = shape
         self.name = name
@@ -60,6 +64,7 @@ public struct CrewRowModel: Identifiable, Equatable, Sendable {
         self.state = state
         self.tag = tag
         self.botProvider = botProvider
+        self.dimmed = dimmed
     }
 }
 
@@ -101,6 +106,7 @@ public struct CrewRow: View {
         .padding(.horizontal, KithSpacing.gutter)
         .padding(.vertical, 9)
         .frame(minHeight: 64)
+        .opacity(model.dimmed ? 0.55 : 1)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(accessibilityText))
@@ -139,6 +145,8 @@ struct CrewRowFace: View {
                 SkyPatch(id: person, size: 22).offset(x: -4, y: 4)
             }
             .frame(width: box, height: box)
+        case .person(let person):
+            SkyPatch(id: person, size: box).frame(width: box, height: box)
         case .group(let a, let b, let person):
             ZStack {
                 bot(a, size: 30).position(x: 15, y: 15)

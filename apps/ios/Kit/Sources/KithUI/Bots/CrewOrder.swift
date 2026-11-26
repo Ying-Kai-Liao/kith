@@ -25,8 +25,12 @@ public struct CrewOrderItem: Equatable, Sendable {
     public var lastAt: Int64
     public var needsYou: Bool
     public var working: Bool
+    /// A person, not a room: no stored position, never pinned; sorts by recency among the rest and after every
+    /// room in Manual.
+    public var isPerson: Bool
 
-    public init(id: String, computer: Int = 0, pinned: Bool, position: Int, lastAt: Int64, needsYou: Bool = false, working: Bool = false) {
+    public init(id: String, computer: Int = 0, pinned: Bool, position: Int, lastAt: Int64, needsYou: Bool = false, working: Bool = false,
+                isPerson: Bool = false) {
         self.id = id
         self.computer = computer
         self.pinned = pinned
@@ -34,6 +38,7 @@ public struct CrewOrderItem: Equatable, Sendable {
         self.lastAt = lastAt
         self.needsYou = needsYou
         self.working = working
+        self.isPerson = isPerson
     }
 }
 
@@ -56,6 +61,8 @@ public enum CrewOrder {
     /// Computers in their stored order, then each computer's own order: positions are per computer, so interleaving
     /// two computers' rooms by position would put a dropped room where it can't be written.
     private static func manual(_ a: CrewOrderItem, _ b: CrewOrderItem) -> Bool {
+        if a.isPerson != b.isPerson { return b.isPerson }
+        if a.isPerson { return a.lastAt != b.lastAt ? a.lastAt > b.lastAt : a.id < b.id }
         if a.computer != b.computer { return a.computer < b.computer }
         if a.position != b.position { return a.position < b.position }
         if a.lastAt != b.lastAt { return a.lastAt > b.lastAt }
