@@ -989,19 +989,6 @@ jobs:
         run: cargo clippy --manifest-path host/Cargo.toml -p kith-holder --all-targets --locked -- -D warnings
       - name: Holder and platform layer tests
         run: cargo test --manifest-path host/Cargo.toml -p kith-holder --locked -- --test-threads=1
-      - name: Diagnose kith-holder (after holder tests)
-        if: always()
-        shell: pwsh
-        run: |
-          Write-Host "diag after holder tests at $(Get-Date -Format o)"
-          $h = Get-CimInstance Win32_Process -Filter "Name='kith-holder.exe'"
-          if (-not $h) { Write-Host "no kith-holder.exe running" }
-          $h | Select-Object ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine | Format-List | Out-String -Width 400 | Write-Host
-          foreach ($p in $h) {
-            $par = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)"
-            if ($par) { Write-Host "parent of $($p.ProcessId): $($par.Name) $($par.ProcessId) created $($par.CreationDate): $($par.CommandLine)" } else { Write-Host "parent $($p.ParentProcessId) of $($p.ProcessId) is gone" }
-          }
-          exit 0
       # kith-kernel has Unix-only modules (threads) behind cfg; kith-core takes its lifetime lock with LockFileEx and
       # checks owner-only access lists natively (core/winsys). Both only prove themselves here.
       - name: Kernel and core runtime tests
@@ -1034,21 +1021,6 @@ jobs:
           tool: cargo-nextest@0.9.100
       - name: Host tests (kith-serve)
         run: cargo nextest run --manifest-path host/Cargo.toml -p kith-serve --profile ci-windows --locked --no-fail-fast
-      - name: Diagnose kith-holder (before bundled build)
-        if: always()
-        shell: pwsh
-        run: |
-          Write-Host "diag before bundled build at $(Get-Date -Format o)"
-          $h = Get-CimInstance Win32_Process -Filter "Name='kith-holder.exe'"
-          if (-not $h) { Write-Host "no kith-holder.exe running" }
-          $h | Select-Object ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine | Format-List | Out-String -Width 400 | Write-Host
-          foreach ($p in $h) {
-            $par = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)"
-            if ($par) { Write-Host "parent of $($p.ProcessId): $($par.Name) $($par.ProcessId) created $($par.CreationDate): $($par.CommandLine)" } else { Write-Host "parent $($p.ParentProcessId) of $($p.ProcessId) is gone" }
-          }
-          Get-ChildItem $env:TEMP -Filter 'kith-*' | ForEach-Object { Write-Host "temp: $($_.Name)" }
-          if (Test-Path "$env:TEMP\kith-forget.log") { Get-Content "$env:TEMP\kith-forget.log" | Write-Host } else { Write-Host "no kith-forget.log" }
-          exit 0
       # The two programs the Windows app bundles (apps/desktop/tools/native-host.mjs builds exactly these .exe names).
       - name: Bundled programs build
         run: |
