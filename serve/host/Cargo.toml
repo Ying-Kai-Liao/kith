@@ -18,6 +18,10 @@ path = "src/main.rs"
 [[bin]]
 name = "kith-serve"
 path = "src/main.rs"
+# Same source as `kith`: its unit tests compile and run once, under bin `kith`. The binary itself still builds.
+test = false
+doctest = false
+bench = false
 
 # The memory crate builds here and is mirrored to its own repository (docs/design/bot-memory.md#packaging).
 [workspace]

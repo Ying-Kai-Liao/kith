@@ -188,6 +188,24 @@ pub fn plan(
     env0: Env,
     mode: &Mode<'_>,
 ) -> Result<Plan, i32> {
+    plan_in(agent, argv, kernel, env0, mode, None)
+}
+
+/// [`plan`] for the folder `cwd` names, without moving this process there: the host plans in process, and the process folder
+/// is shared by everything else in it. `None` is the process's own folder (the terminal, and the program the host used to start).
+pub fn plan_in(
+    agent: &str,
+    argv: &[String],
+    kernel: &Path,
+    env0: Env,
+    mode: &Mode<'_>,
+    cwd: Option<&Path>,
+) -> Result<Plan, i32> {
+    let here = || -> PathBuf {
+        cwd.map(Path::to_path_buf)
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_default()
+    };
     let exec = match mode {
         Mode::LaunchJson => None,
         Mode::Exec(x) => Some(x),
@@ -195,6 +213,19 @@ pub fn plan(
     let a = parse_args(argv);
     let mut env = env0;
     sync_env(&mut env);
+    // Windows: a process has `USERPROFILE`, and `HOME` only under Git Bash, which spells it `/c/Users/x` (no drive: not a
+    // path here). Every rule below reads the home as `HOME`, so it is the profile folder unless it is already a Windows path.
+    #[cfg(not(unix))]
+    if !Path::new(get(&env, "HOME")).is_absolute() {
+        let profile = env
+            .get("USERPROFILE")
+            .cloned()
+            .or_else(|| std::env::var("USERPROFILE").ok())
+            .filter(|p| Path::new(p).is_absolute());
+        if let Some(profile) = profile {
+            env.insert("HOME".to_owned(), profile);
+        }
+    }
     let kernel_s = s(kernel);
     env.insert("KITH_ROOT".to_owned(), kernel_s.clone());
     let home_dir = PathBuf::from(get(&env, "HOME"));
@@ -229,6 +260,13 @@ pub fn plan(
     let mut p_env_names = String::new();
     let mut member = settings::Member::owner();
     let person = get(&env, "KITH_PERSON").to_owned();
+    // WI6: no guest is launched on Windows, whatever else is missing. This is before anything is read or made for the run.
+    if cfg!(not(unix))
+        && let Some(why) = windows_guest_refusal(&env)
+    {
+        say(&why);
+        return Err(3);
+    }
     if !person.is_empty() {
         let mut sctx = secrets::Ctx::from_process(kernel);
         sctx.person = Some(person.clone());
@@ -454,12 +492,7 @@ pub fn plan(
     let mut ctmp = String::new();
     let mut ctmp_note = String::new();
     if !p_owner {
-        // Guests are parked on Windows (this module is Unix-only today; the refusal waits for the lift of its gate).
-        #[cfg(windows)]
-        {
-            say(&format!("kith: {}", crate::GUESTS_NOT_ON_WINDOWS));
-            return Err(3);
-        }
+        // A guest on Windows never gets here: `windows_guest_refusal` above refuses it first.
         let plain = p_id.starts_with(|c: char| c.is_ascii_lowercase())
             && p_id
                 .chars()
@@ -674,7 +707,7 @@ pub fn plan(
         let ctx = crate::project::Ctx {
             state: p.state.clone(),
             home: home_dir.clone(),
-            cwd: std::env::current_dir().unwrap_or_default(),
+            cwd: here(),
             guest: None,
         };
         let out = crate::project::run(&ctx, &[]);
@@ -696,15 +729,13 @@ pub fn plan(
 
     // ---- the prompt
     let cwd_logical = {
-        let phys = std::env::current_dir().unwrap_or_default();
+        let phys = here();
         match env.get("PWD").filter(|d| !d.is_empty()) {
             Some(d) if fs::canonicalize(d).ok() == fs::canonicalize(&phys).ok() => d.clone(),
             _ => s(&phys),
         }
     };
-    let date = Sys { env: &env }
-        .out("date", &["+%F"], false)
-        .unwrap_or_default();
+    let date = today(&env);
     let who = prompt::Who {
         owner: p_owner,
         id: p_id.clone(),
@@ -1165,6 +1196,7 @@ pub fn plan(
             ctmp: &ctmp,
             claude_version: cver.as_deref(),
             guest_domains: guest_domains.as_deref().map_err(String::as_str),
+            windows: cfg!(windows),
             env: &envf,
         })
     };
@@ -1178,15 +1210,19 @@ pub fn plan(
     for w in &out.warnings {
         say(w);
     }
-    let physical_cwd = if out.cwd == cwd_logical {
-        std::env::current_dir()
+    let physical_cwd = match cwd {
+        // A named folder: this process is not moved there, so the folder is resolved the way `cd` and `pwd -P` would.
+        Some(_) if out.cwd == cwd_logical => s(&paths::realpath(&here())),
+        Some(_) => s(&paths::realpath(Path::new(&out.cwd))),
+        None if out.cwd == cwd_logical => std::env::current_dir()
             .map(|d| s(&d))
-            .unwrap_or(out.cwd.clone())
-    } else {
-        let _ = std::env::set_current_dir(&out.cwd);
-        std::env::current_dir()
-            .map(|d| s(&d))
-            .unwrap_or(out.cwd.clone())
+            .unwrap_or(out.cwd.clone()),
+        None => {
+            let _ = std::env::set_current_dir(&out.cwd);
+            std::env::current_dir()
+                .map(|d| s(&d))
+                .unwrap_or(out.cwd.clone())
+        }
     };
     let mut settings_val = out.settings.clone();
     if claude {
@@ -1328,6 +1364,39 @@ pub fn plan(
         permit_mcp: guest_mcp_arg(permit_bin.as_deref(), kernel),
         granted: granted.unwrap_or_else(|| json!({"mcpServers": {}})),
     })
+}
+
+/// What stops a run for anyone but the owner on Windows (WI6, fail closed): an invited person, a bot guest or a room's people
+/// carry a `KITH_PERSON`, and a guest run's token (`KITH_RUN_TOKEN`, `KITH_RUN_SOCKET`) is the host's mark of one. None of them
+/// is on Windows, where guests are not offered: a guest is never started unsandboxed. `None`: the owner's run.
+pub fn windows_guest_refusal(env: &Env) -> Option<String> {
+    let guest = [
+        "KITH_PERSON",
+        "KITH_RUN_TOKEN",
+        "KITH_RUN_SOCKET",
+        "KITH_ROOM_MEMBERS",
+        "KITH_ROOM_AUTHOR",
+        "KITH_CORE_RUN_SOCKET",
+    ]
+    .iter()
+    .any(|k| !get(env, k).is_empty());
+    guest.then(|| {
+        format!(
+            "kith: {} Nothing was started.",
+            crate::GUESTS_NOT_ON_WINDOWS
+        )
+    })
+}
+
+/// `date +%F`: today's date where the run is. Windows has no `date` program on PATH.
+#[cfg(unix)]
+fn today(env: &Env) -> String {
+    Sys { env }.out("date", &["+%F"], false).unwrap_or_default()
+}
+
+#[cfg(not(unix))]
+fn today(_env: &Env) -> String {
+    chrono::Local::now().format("%F").to_string()
 }
 
 /// The pid that `--hold` defaults to: the process that started this one.
