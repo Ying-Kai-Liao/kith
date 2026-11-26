@@ -114,9 +114,11 @@ fn another_engine_attaches_naming_ask_conversation_through_the_kernels_launch() 
     assert!(alive(claim["pid"].as_i64().unwrap()));
     std::fs::remove_file(w.dir.join("hold")).unwrap();
     until("the engine ran", || w.runs().len() == 1);
+    // The engine records its start; the task reaches it later, over its conversation with the launch. The ask is settled when the
+    // launch has ended, which is when everything the launch sent it is in the file.
+    until("the ask is settled", || w.core("ask.record", &json!({"id": "r2"}))["state"] != "open");
     let sent = std::fs::read_to_string(w.dir.join("acp-in")).unwrap();
     assert!(sent.contains("do the ask task"), "the task reached the engine: {sent}");
     gone_vars(&w.runs()[0]);
-    until("the ask is settled", || w.core("ask.record", &json!({"id": "r2"}))["state"] != "open");
     assert_eq!(w.runs().len(), 1);
 }
