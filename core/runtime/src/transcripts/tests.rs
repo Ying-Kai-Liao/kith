@@ -287,6 +287,8 @@ fn answered_looks_for_the_wake_marker_in_the_conversations_transcript() {
     assert!(!r.answered("c1", "run-9"));
 }
 
+// `conversation.transcript` is Unix only (call.rs); Windows has no such row until the transcripts module is switched there.
+#[cfg(unix)]
 #[test]
 fn the_conversation_transcript_row_reads_the_stored_sessions() {
     use kith_api::Principal;
@@ -434,6 +436,8 @@ fn run_line(w: &World, conn: &Connection, line: &[String]) -> (i32, String, Stri
     }
 }
 
+// The goldens are `kith-sessions` runs (Python, Unix only): Windows has no Python claim path (W12 split section 3).
+#[cfg(unix)]
 #[test]
 fn the_core_reads_the_golden_latest_pick_and_resolve_cases_as_kith_sessions_does() {
     let corpus: Vec<Value> =
