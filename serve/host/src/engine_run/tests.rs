@@ -157,3 +157,12 @@ async fn an_agent_stored_on_the_dropped_dsh_engine_gets_a_clear_refusal() {
     };
     assert!(run(args).await.is_err_and(|e| format!("{e:#}").contains("no engine called dsh")));
 }
+
+#[test]
+fn only_a_network_flag_of_1_gives_the_sandbox_network() {
+    assert!(run_network(Some("1")));
+    assert!(!run_network(Some("0")));
+    assert!(!run_network(Some("true")));
+    // KITH_RUN_OWNER=1 alone leaves KITH_RUN_NETWORK unset, which is no network: the old name is gone.
+    assert!(!run_network(None));
+}

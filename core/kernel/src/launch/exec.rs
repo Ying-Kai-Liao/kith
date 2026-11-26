@@ -585,11 +585,12 @@ fn run_folder(plan: &plan::Plan, pid: i64) -> Result<PathBuf, String> {
 }
 
 /// Another harness: the same run, handed to `kernel engine-run` (prompt in a file, directories and MCP configs as lists).
-/// Always written, so an inherited `KITH_RUN_OWNER=1` never reaches a guest's engine.
-fn set_run_owner(env: &mut Env, owner: bool) {
+/// Network inside the engine's sandbox: the owner's run of an agent that does not read others' text. Always written, so an
+/// inherited `KITH_RUN_NETWORK=1` (or the old `KITH_RUN_OWNER`) never gives it.
+fn set_run_network(env: &mut Env, owner: bool, reads_others: bool) {
     env.insert(
-        "KITH_RUN_OWNER".to_owned(),
-        if owner { "1" } else { "0" }.to_owned(),
+        "KITH_RUN_NETWORK".to_owned(),
+        if owner && !reads_others { "1" } else { "0" }.to_owned(),
     );
 }
 
@@ -622,8 +623,8 @@ fn other_engine(
     );
     env.insert("KITH_RUN_DIRS".to_owned(), dirs.join("\n"));
     env.insert("KITH_RUN_MCP".to_owned(), mcp);
-    // Only the owner's own run gets network inside the engine's sandbox (`owner` is the plan's, as for the other owner-only rules).
-    set_run_owner(&mut env, plan.owner);
+    // Network inside the sandbox: the owner's run of an agent with `reads_others: false` (the cap's own reading, missing = reader).
+    set_run_network(&mut env, plan.owner, plan.out.reads_others);
     // Global skills load unless the role turned them off.
     env.insert(
         "KITH_RUN_GLOBAL_SKILLS".to_owned(),
@@ -677,13 +678,19 @@ mod tests {
     }
 
     #[test]
-    fn the_run_owner_flag_follows_the_plan_not_the_inherited_env() {
-        let mut env = Env::new();
-        env.insert("KITH_RUN_OWNER".to_owned(), "1".to_owned());
-        set_run_owner(&mut env, false);
-        assert_eq!(env["KITH_RUN_OWNER"], "0");
-        set_run_owner(&mut env, true);
-        assert_eq!(env["KITH_RUN_OWNER"], "1");
+    fn the_run_network_flag_is_the_owner_of_a_non_reader_and_never_inherited() {
+        for (owner, reads, want) in [
+            (true, false, "1"),
+            (true, true, "0"),
+            (false, false, "0"),
+            (false, true, "0"),
+        ] {
+            let mut env = Env::new();
+            env.insert("KITH_RUN_NETWORK".to_owned(), "1".to_owned());
+            env.insert("KITH_RUN_OWNER".to_owned(), "1".to_owned());
+            set_run_network(&mut env, owner, reads);
+            assert_eq!(env["KITH_RUN_NETWORK"], want, "owner {owner} reads {reads}");
+        }
     }
 
     #[test]

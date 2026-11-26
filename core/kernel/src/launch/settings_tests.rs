@@ -508,6 +508,23 @@ fn owner_is_held_to_auto_when_the_agent_reads_other_peoples_text() {
 }
 
 #[test]
+fn the_output_carries_the_reads_others_reading_the_cap_used() {
+    let t = Tree::new();
+    // no capabilities.yaml: a reader
+    assert!(t.settings(&Member::owner(), "").unwrap().reads_others);
+    t.put(
+        "kith/agents/echo/role/capabilities.yaml",
+        "reads_others: false\n",
+    );
+    assert!(!t.settings(&Member::owner(), "").unwrap().reads_others);
+    t.put(
+        "kith/agents/echo/role/capabilities.yaml",
+        "reads_others: true  # reads other people's posts\n",
+    );
+    assert!(t.settings(&Member::owner(), "").unwrap().reads_others);
+}
+
+#[test]
 fn owner_bypass_at_the_terminal_typed_or_this_macs_wins_over_the_reader_cap_and_nothing_else_does()
 {
     let t = Tree::new();

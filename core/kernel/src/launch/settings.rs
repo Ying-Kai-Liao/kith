@@ -195,6 +195,8 @@ pub struct Output {
     pub allowed_tools: Vec<String>,
     pub add_dirs: Vec<String>,
     pub disable_slash_commands: bool,
+    /// capabilities.yaml's `reads_others` (true when missing or unreadable): the one reading the bypass cap and the engine's network use.
+    pub reads_others: bool,
     /// The working folder the run starts in (a guest's is never wider than they may read).
     pub cwd: String,
     /// Lines `kith` would write to stderr on the way.
@@ -786,6 +788,7 @@ pub fn build(i: &Input<'_>) -> R<Output> {
             allowed_tools: vec![],
             add_dirs: dirs,
             disable_slash_commands,
+            reads_others,
             cwd,
             warnings,
         });
@@ -1103,6 +1106,7 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         allowed_tools: allowed,
         add_dirs: dirs,
         disable_slash_commands,
+        reads_others,
         cwd,
         warnings,
     })

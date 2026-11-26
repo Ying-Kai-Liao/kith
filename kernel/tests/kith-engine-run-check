@@ -89,18 +89,61 @@ KITH_OUTPUT=json run -- hi
 check "the engine's environment has no KITH_RUN_*" "[ -s '$T/engine-env' ] && ! grep -q '^KITH_RUN_' '$T/engine-env'"
 printf '#!/bin/sh\nexec python3 "%s/fakes/fake-acp-agent"\n' "$T" > "$T/bin/opencode"
 
-# KITH_RUN_OWNER (network inside codex's sandbox) follows who runs, never what the caller's environment carried: a spy in front
-# of the program writes what `kernel engine-run` was given, then runs the real one.
-printf '#!/bin/sh\n[ "$1 $2" = "kernel engine-run" ] && printf %%s "${KITH_RUN_OWNER-unset}" > "%s/owner-seen"\nexec "%s" "$@"\n' "$T" "$BIN" > "$T/bin/kith-spy"
-chmod +x "$T/bin/kith-spy"
+# KITH_RUN_NETWORK (network inside codex's sandbox) is the owner's AND the agent's (reads_others: false), never what the caller's
+# environment carried. It is read in flight: a hung engine, its parent engine-run's environment and command line, and the
+# launcher above that (a spy in front of the program can't see engine-run when launch-exec runs the launch: the program starts
+# it itself). The launcher word is the proof of which path ran, so a silent fallback to bash can't pass the launch-exec rows.
+cp -R "$KERNEL" "$T/kernel-on"
+printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt"
 "$KERNEL/bin/kith-auth" person guest name=Guest >/dev/null 2>&1
 "$KERNEL/bin/kith-auth" member echo guest mode=default >/dev/null 2>&1
-owner_seen() { rm -f "$T/owner-seen"; KITH_BIN=$T/bin/kith-spy KITH_OUTPUT=json "$@" >"$T/out" 2>"$T/err"; cat "$T/owner-seen" 2>/dev/null; }
-check "owner launch: the engine-run gets KITH_RUN_OWNER=1" "[ \"\$(owner_seen env -u KITH_RUN_OWNER '$KITH' echo -- hi)\" = 1 ]"
-check "owner launch: an inherited KITH_RUN_OWNER=0 is replaced by 1" "[ \"\$(owner_seen env KITH_RUN_OWNER=0 '$KITH' echo -- hi)\" = 1 ]"
+net_seen() {   # net_seen KITH_PROGRAM ENV..: "<KITH_RUN_NETWORK> <launcher: launch-exec|bash> <--permission-mode value or none>"
+  local K=$1 run_pid engine_pid er info net launcher pm
+  shift
+  rm -f "$T/pid"
+  FAKE_ACP_MODE=hang FAKE_ACP_PIDFILE=$T/pid KITH_OUTPUT=json "$@" "$K" echo -- hang >"$T/out" 2>"$T/err" & run_pid=$!
+  for _ in $(seq 1 100); do [ -s "$T/pid" ] && break; kill -0 "$run_pid" 2>/dev/null || break; sleep 0.1; done
+  engine_pid=$(cat "$T/pid" 2>/dev/null || echo 0)
+  if [ "$engine_pid" != 0 ]; then
+    er=$(ps -o ppid= -p "$engine_pid" | tr -d ' ')
+    if [ -r "/proc/$er/environ" ]; then
+      info="$(tr '\0' ' ' < "/proc/$er/environ") $(tr '\0' ' ' < "/proc/$er/cmdline")"
+      launcher=$(tr '\0' ' ' < "/proc/$(ps -o ppid= -p "$er" | tr -d ' ')/cmdline")
+    else
+      info=$(ps -E -ww -o command= -p "$er")
+      launcher=$(ps -ww -o command= -p "$(ps -o ppid= -p "$er" | tr -d ' ')")
+    fi
+    net=$(printf '%s' "$info" | grep -o 'KITH_RUN_NETWORK=[01]' | head -n 1 | cut -d= -f2)
+    pm=$(printf '%s' "$info" | grep -o -e '--permission-mode [A-Za-z]*' | head -n 1 | cut -d' ' -f2)
+    case $launcher in *launch-exec*) launcher=launch-exec ;; *) launcher=bash ;; esac
+    printf '%s %s %s' "${net:-unset}" "$launcher" "${pm:-none}"
+    kill -TERM "$run_pid" 2>/dev/null
+  fi
+  wait "$run_pid" 2>/dev/null
+  [ "$engine_pid" = 0 ] || kill -KILL "$engine_pid" 2>/dev/null || true
+}
+caps() { printf '%s\n' "$@" > "$A/capabilities.yaml"; }
+macmode() { printf '{"agents": {"echo": {"permission_mode": "%s"}}}\n' "$1" > "$KITH_HOME/settings.json"; }
+network_rows() {   # network_rows LABEL KITH_PROGRAM LAUNCHER
+  local P=$1 K=$2 L=$3
+  rm -f "$A/capabilities.yaml" "$KITH_HOME/settings.json"
+  caps 'reads_others: false'
+  check "${P}owner, reads_others false, sandboxed: network 1" "[ \"\$(net_seen '$K' env -u KITH_RUN_NETWORK)\" = '1 $L none' ]"
+  rm -f "$A/capabilities.yaml"
+  check "${P}owner, no capabilities.yaml (a reader), inherited KITH_RUN_NETWORK=1 and KITH_RUN_OWNER=1: network 0" "[ \"\$(net_seen '$K' env KITH_RUN_NETWORK=1 KITH_RUN_OWNER=1)\" = '0 $L none' ]"
+  caps 'reads_others: true  # reads other people'"'"'s posts'
+  check "${P}owner, explicit reads_others true with a comment: network 0" "[ \"\$(net_seen '$K' env KITH_RUN_NETWORK=1)\" = '0 $L none' ]"
+  macmode bypassPermissions
+  check "${P}capped: a reader agent chosen as bypass on this Mac, launched nested, runs as auto with network 0" "[ \"\$(net_seen '$K' env KITH_AGENT=boss)\" = '0 $L auto' ]"
+  caps 'reads_others: false'
+  check "${P}control: the same nested run of a reads_others false agent keeps bypass, network 1" "[ \"\$(net_seen '$K' env KITH_AGENT=boss)\" = '1 $L bypassPermissions' ]"
+  rm -f "$A/capabilities.yaml" "$KITH_HOME/settings.json"
+}
+network_rows "" "$KITH" bash
+network_rows "launch-exec on: " "$T/kernel-on/bin/kith" launch-exec
 # A guest never reaches engine-run through this script (non-Claude engines are refused for anyone but the owner), so an inherited
-# KITH_RUN_OWNER=1 cannot get to a guest's engine here: the spy must not run at all.
-check "guest launch: refused before engine-run, so an inherited KITH_RUN_OWNER=1 reaches no engine" "[ -z \"\$(owner_seen env KITH_PERSON=guest KITH_RUN_OWNER=1 '$KITH' echo -- hi)\" ] && grep -q 'need Claude Code' '$T/err'"
+# KITH_RUN_NETWORK=1 cannot get to a guest's engine here: no engine starts at all.
+check "guest launch: refused before engine-run, so an inherited KITH_RUN_NETWORK=1 reaches no engine" "[ -z \"\$(net_seen '$KITH' env KITH_PERSON=guest KITH_RUN_NETWORK=1)\" ] && grep -q 'need Claude Code' '$T/err'"
 
 # A TERM to the run stops the engine (positive control: without it the hung engine is still there). Twice: through the script's
 # trap, and with `launch-exec` switched on in a copy of the kernel folder, where the program passes the TERM on itself.
@@ -119,8 +162,6 @@ term_rows() {   # term_rows LABEL KITH_PROGRAM
   [ "$engine_pid" = 0 ] || kill -KILL "$engine_pid" 2>/dev/null || true
 }
 term_rows "" "$KITH"
-cp -R "$KERNEL" "$T/kernel-on"
-printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt"
 term_rows "launch-exec on: " "$T/kernel-on/bin/kith"
 
 # pi has no ACP path: engine-run exits 78 before it starts anything, and that is the final answer (no native run).

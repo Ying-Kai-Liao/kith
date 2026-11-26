@@ -23,7 +23,7 @@ fn run(
         model: model.to_owned(),
         effort: effort.to_owned(),
         bypass,
-        owner: false,
+        network: false,
         global_skills,
     }
 }
@@ -150,9 +150,9 @@ fn codex_bypass_with_every_kind_of_server_and_global_skills() {
 }
 
 #[test]
-fn codex_owner_sandbox_gets_network_and_nobody_else_does() {
+fn codex_sandbox_gets_network_only_when_the_launcher_said_so() {
     let owner_run = RunInputs {
-        owner: true,
+        network: true,
         ..run(&["/private/tmp"], &json!({}), "", "", false, false)
     };
     let owner = tui_argv("codex", &owner_run).unwrap();
@@ -176,7 +176,7 @@ fn codex_owner_sandbox_gets_network_and_nobody_else_does() {
             "/private/tmp",
         ])
     );
-    // A guest's run (owner unset) has no network key, and neither does the owner's bypass run, which has no sandbox at all.
+    // A run without the flag has no network key, and neither does a bypass run, which has no sandbox at all.
     let guest = tui_argv(
         "codex",
         &run(&["/private/tmp"], &json!({}), "", "", false, false),
@@ -184,7 +184,7 @@ fn codex_owner_sandbox_gets_network_and_nobody_else_does() {
     .unwrap();
     assert!(!guest.argv.iter().any(|a| a.contains("network_access")));
     let owner_bypass = RunInputs {
-        owner: true,
+        network: true,
         ..run(&["/private/tmp"], &json!({}), "", "", true, false)
     };
     let bypass = tui_argv("codex", &owner_bypass).unwrap();
