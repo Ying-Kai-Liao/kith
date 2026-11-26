@@ -448,6 +448,9 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     `agent/bot/lifecycle.rs` (liveness via procstart); `core/kernel/src/threads/*` and `lifecycle/*` (LockFileEx, spawn
     instead of fork); D6 graceful stop; the transcript reader accepts a torn last line.
   - The core-fired schedule turn runs here as a normal host turn, once P2-4 lands.
+  - **W12-2 (core probe and kernel tools): done.** P1 rows, `end_groups` empty on Windows (P2) and a torn last line (P4) are tests;
+    the kernel tools (`runtools.rs`) run in a core-held, unnamed kill-on-close job (`Job::create_kill_on_close`, started with
+    `spawn_in_job`) that the core ends through its own handle on a timeout or when the tool is done.
   - **Rules the model needs** (each one's broken run fails; `model-w12/results.md`). The model is `WinClaims.tla`, which
     extends S4's model with processes and job objects. Workers build these:
     1. **One named job per detached run,** named by the claim id. It is created without kill-on-close, so the run outlives a
@@ -456,12 +459,12 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
        `create_in_job` does). Never suspend-assign-resume: a host restart between create and resume leaves a launcher
        suspended in the job for ever (`extra-stranded`). Never assign after it runs: its engine starts outside the job.
     3. **The job forbids breakaway** (no `BREAKAWAY_OK` or `SILENT_BREAKAWAY_OK`), so no tool child leaves it.
-    4. **`recorded_gone` on Windows asks the job:** the launcher's pid with its start time, and then the job's active process
-       count, opened by name. **A name lives only while a process holds a handle to the job** (W8's test: it was not found after the
-       creator's handle closed, with the run still going). So "name not found" is NOT "gone" by itself: a process that
-       outlives host restarts (the holder, per the architect's 2026-11-26 recommendation) must hold each run's job handle and
-       close it only when the job has no processes, and "not found" counts as gone only while that holder is alive. W12 needs the
-       model re-run for this before code. Any error answers "not gone" (S4: safe but stuck until the next probe).
+    4. **P1: `recorded_gone` on Windows is the recorded pid's procstart stamp alone** (architect re-run 2026-11-27, the
+       launcher-held job, `w12-split.md`). The recorded process holds the run's only kill-on-close job and everything it
+       started is in it, so "the recorded process is gone" means "the writer is gone": no job query, no name, no other
+       holder. The same stamp means alive, another stamp means gone, an unreadable stamp means gone only when procstart says
+       Gone, and any error is not gone (S4: safe but stuck until the next probe). `Liveness::orphan_group` stays false.
+       This is today's code. **Done in W12-2** (Windows test rows, `conversations/tests.rs`).
     5. **R3a stays:** a report puts the claim to `ending`; only `end_gone` ends it.
     6. **Host-door engines run in a host-held job that kills on close.** On Windows a child does not die with its parent, so
        without the job a warm engine outlives a host restart while its claim is ended.

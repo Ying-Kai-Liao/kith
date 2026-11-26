@@ -231,6 +231,43 @@ pub fn spawn_in_job(job: &Job, launch: &Launch<'_>) -> io::Result<Child> {
     Ok(child)
 }
 
+impl Job {
+    /// An unnamed job that ends every process in it when its last handle closes (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`),
+    /// with no breakaway flags. The handle is not inheritable and has no name, so the maker is its only holder: the core's
+    /// kernel tools (`runtools`) run in one, and a core that dies takes them with it (W12 rules H1 and H4).
+    pub fn create_kill_on_close() -> io::Result<Self> {
+        // SAFETY: null attributes mean the default security and a handle that is not inheritable; a null name is an
+        // unnamed job.
+        let h = unsafe { CreateJobObjectW(null(), null()) };
+        if h.is_null() {
+            return Err(last_err());
+        }
+        // The handle closes on drop, also when the limit below is refused.
+        let job = Self(Handle(h));
+        // SAFETY: an all-zero extended limit structure is valid; only the flag is set.
+        let mut info: windows_sys::Win32::System::JobObjects::JOBOBJECT_EXTENDED_LIMIT_INFORMATION =
+            unsafe { std::mem::zeroed() };
+        info.BasicLimitInformation.LimitFlags =
+            windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `info` is the structure this information class takes, and its size is passed.
+        let ok = unsafe {
+            windows_sys::Win32::System::JobObjects::SetInformationJobObject(
+                job.0.0,
+                windows_sys::Win32::System::JobObjects::JobObjectExtendedLimitInformation,
+                (&raw const info).cast(),
+                u32::try_from(size_of::<
+                    windows_sys::Win32::System::JobObjects::JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+                >())
+                .unwrap_or(0),
+            )
+        };
+        if ok == 0 {
+            return Err(last_err());
+        }
+        Ok(job)
+    }
+}
+
 /// `spawn_in_job`, but the process is made suspended (its first instruction has not run) and the main thread's handle is
 /// given back: for a test that asks the job about the process before it can do anything. Never used to start a run.
 #[cfg(test)]
