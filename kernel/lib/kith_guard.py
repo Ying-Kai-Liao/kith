@@ -263,6 +263,18 @@ OWNER_ALLOW = ("Running a script or inline code the agent wrote itself (python3 
                "scratch folder or the project the run works in. It covers no secret (a project .env, a key, a token), "
                "no trust file (.claude, .github, kith's protected paths, shell start-up files), no delete outside the "
                "run's own writable folders and its working copy, no network post and no code fetched from outside.")
+# The second owner sentence: reading what anyone can see on the web (a GET, parsed as data) is routine, through a public
+# mirror too when the site refuses automated readers. It names what it does not cover: anything sent with or in the
+# request, a POST, and running the download.
+OWNER_WEB = ("Reading a public web page or a public read-only API with a GET (curl, wget, WebFetch) and parsing the "
+             "reply as data (jq, grep, head, python3 -c that reads JSON or HTML) is routine on the owner's run, "
+             "including through a public read-only mirror or front end when the site itself refuses automated readers "
+             "(api.fxtwitter.com, vxtwitter.com, cdn.syndication.twimg.com, r.jina.ai, web.archive.org, an oEmbed "
+             "endpoint) and with a browser User-Agent: a page anyone can see without an account is not unauthorized "
+             "access, and saving it under the agent's own folders or the run's scratch folder is routine too. It "
+             "covers no login, cookie, key or token sent with the request, nothing behind a sign-in or a paywall, no "
+             "POST or upload, nothing from the owner's files or memory in the URL, and never running what was "
+             "downloaded as code.")
 # What a sentence for autoMode.allow may not name (kith-pkg check).
 SENTENCE = {
     "secret": re.compile(r"(?i)\b(passwords?|tokens?|credentials?|keychain|api[ _-]?keys?|secrets?|logins?|sign[ -]?in)\b"),

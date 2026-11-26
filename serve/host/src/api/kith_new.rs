@@ -222,8 +222,15 @@ exit 1
             Self { dir, hub, _one: one }
         }
 
+        /// The calls `make` asks for itself. The roster sync also starts `project ls --json` in the background, which
+        /// can land in the log at any time, so it is left out.
         fn calls(&self) -> Vec<String> {
-            std::fs::read_to_string(self.dir.join("calls")).unwrap_or_default().lines().map(str::to_owned).collect()
+            std::fs::read_to_string(self.dir.join("calls"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|c| !c.starts_with("project "))
+                .map(str::to_owned)
+                .collect()
         }
 
         async fn make(&self, extra: Value) -> Result<Value> {

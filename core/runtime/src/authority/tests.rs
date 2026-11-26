@@ -16,6 +16,8 @@ use serde_json::{Value, json};
 use super::{Authority, snapshot};
 use crate::authority::load::{empty, load};
 
+// Unix only: these set the cutover record, and a Windows core is born switched (windows-owner WI13).
+#[cfg(unix)]
 mod card;
 mod cards;
 mod gaps;
@@ -25,6 +27,7 @@ mod requests;
 mod revoke;
 mod router;
 mod runs;
+#[cfg(unix)]
 mod secret_writes;
 mod writes;
 

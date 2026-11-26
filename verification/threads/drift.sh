@@ -8,15 +8,16 @@
 # set SYNC below to the commit you checked (and in .claude/skills/thread-writers/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below: origin/rust-rebuild after #1015 (rule K, the host
-# runner of the core's queued turns) and #1016 (L-clear), re-read before the claims step runs on a Mac:
-# every change to the files below up to it re-read, the claim files as before (#324) and the core writer (CoreWriter in
-# Threads.tla: the claim is a core row, the stub's lock the second layer). What that read did not cover is in the skill.
-SYNC=f9b5e509f476bb88f6203a125ae863369ba03aa9
+# The commit at which the model was confirmed to describe the files below: origin/main after #1173 (R3a, `kith kernel
+# launch-exec`, shipped off), the re-sync of 2026-11-25: every change to the files below since f9b5e509 (#1015-#1017) re-read,
+# the claim files as before (#324) and the core writer (CoreWriter in Threads.tla: the claim is a core row, the stub's lock the
+# second layer); the Rust takers (R5) and the one-shot in one process (R3a) are the same steps. What that read did not cover is
+# in the skill ("Re-sync 2026-11-25 (R3a)").
+SYNC=b7a965f99ab55841bba314ea714f80fe5edfbfe7
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run
-  kernel/bin/kith                     # --resume: resolve + r_sid; csid: claim / terminal before claude; exec run (the Rust `kernel threads run` when the program lists threads-run, else the Python)
+  kernel/bin/kith                     # --resume: resolve + r_sid; csid: claim / terminal before claude; exec run (the Rust `kernel threads run` when the program lists threads-run, else the Python); a one-shot to `kernel launch-exec` while switched; KITH_TURN_CLAIM only to the claim calls
   core/kernel/src/lifecycle/sweep.rs  # the Rust compact and end: Taker::take (lifecycle_owner) for the parked child's pid, still(), then it execs claude; end
   core/kernel/src/lifecycle/proc.rs   # parked(): the fork that is claude (or the stub), held before its exec; reap
   kernel/bin/kith-wake                # deliver/drain: kith AGENT --resume SESSION (resolve claims), skip writer_live; take: host-door items
@@ -47,6 +48,8 @@ FILES=(
   core/kernel/src/threads/registry.rs # the twin's registry reads and writes
   serve/host/src/hub/actors.rs        # working_lanes, Cmd::ForgetLoaded fan-out
   serve/host/src/terminal/core_writer.rs  # CoreWriter: begin (gate, settle, claim_next, take, redeem), finish, abandon, adopt
+  serve/host/src/cards/resume/wake_clock.rs # WK4b: the wake clock and the run door by turn id: wake.tick, hostclaim.queued, may_use_checked at the door, the wakeRun claim before any process, redeemedBefore cancels
+  serve/host/src/routines/run_door.rs # WK4b: claim_run_as, then the spawn; a claim refused as held is Later, nothing starts beside the writer
   serve/host/src/terminal/warm_stub.rs    # the host's resident stub: take / release / kill_group
   serve/host/src/agent/bot/writer.rs      # the actor's use of CoreWriter: orphaned begins, the mode
   serve/host/src/agent/bot/writer_turn.rs # End choice (Done / Died / Killed / OutOfUsage / Left), abandon + settle_gone, failover
@@ -69,6 +72,8 @@ FILES=(
   core/kernel/src/launch/start.rs     # R3a: the claim for this pid (claim_start, oneshot) before the engine, the guest's grants after it (I3), execve keeps the pid (I2); Windows spawns and waits
   core/kernel/src/launch/plan.rs      # R3a: the --resume claim's place in the order (the plan's sync hold, resolve, the account walk)
   core/kernel/src/launch/session.rs   # R3a: the session id (--session-id / --resume / a new uuid), the stub's lock key and --lock-alone
+  core/runtime/src/conversations/sched_run.rs # claim.attach: the check-and-set a launch's claim makes first when handed KITH_TURN_CLAIM (no thread caller yet)
+  core/runtime/src/conversations/detached.rs  # a report never ends a detached run's claim while its group lives (wakeRun: a host claim on a thread's session)
   core/kernel/src/launch/terminal.rs  # R3b: the terminal's claim (kind terminal) for this pid, not for a resumed session, then `threads run` in process: claude is this pid's child under the stub (I2)
   core/kernel/src/launch/held.rs      # R3b: `kith_held_launch` in Rust: the resumed claim is given back, then terminal.open (I7); busy 75; exit 5 never repeated; the claim again on the direct fallback
   serve/host/src/launch_cmd.rs        # R3b: HeldPort maps the core-call ends (refused 4, lost 5, no daemon 3) that held.rs reads: exit 5 is never repeated
