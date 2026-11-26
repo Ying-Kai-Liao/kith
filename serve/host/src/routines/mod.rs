@@ -7,6 +7,8 @@ pub(crate) mod core_cron;
 mod core_runs;
 #[cfg(test)]
 mod core_runs_tests;
+#[cfg(all(test, unix))]
+mod launch_turn_e2e_tests;
 pub(crate) mod run_door;
 mod runner;
 mod schedule;
