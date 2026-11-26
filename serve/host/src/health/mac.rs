@@ -16,7 +16,8 @@ fn sysctl<T: Copy>(name: &str) -> Option<T> {
     let mut v = MaybeUninit::<T>::zeroed();
     let mut len = size_of::<T>();
     // SAFETY: `v` is `len` writable bytes and the name is NUL-terminated; sysctl writes at most `len` bytes.
-    let rc = unsafe { libc::sysctlbyname(cname.as_ptr(), v.as_mut_ptr().cast(), &mut len, std::ptr::null_mut(), 0) };
+    let rc =
+        unsafe { libc::sysctlbyname(cname.as_ptr(), v.as_mut_ptr().cast(), &raw mut len, std::ptr::null_mut(), 0) };
     // SAFETY: zeroed to begin with, and `T` is plain data (see above).
     (rc == 0 && len == size_of::<T>()).then(|| unsafe { v.assume_init() })
 }
@@ -37,7 +38,12 @@ fn cpu_ticks() -> Option<[u32; 4]> {
     let mut count = libc::HOST_CPU_LOAD_INFO_COUNT;
     // SAFETY: `info` has room for `count` integers; the call fills it and updates `count`.
     let rc = unsafe {
-        libc::host_statistics(libc::mach_host_self(), libc::HOST_CPU_LOAD_INFO, info.as_mut_ptr().cast(), &mut count)
+        libc::host_statistics(
+            libc::mach_host_self(),
+            libc::HOST_CPU_LOAD_INFO,
+            info.as_mut_ptr().cast(),
+            &raw mut count,
+        )
     };
     // SAFETY: filled by the call when it returned 0.
     (rc == 0).then(|| unsafe { info.assume_init() }.cpu_ticks)
@@ -60,7 +66,7 @@ fn used_bytes() -> Option<u64> {
     let mut count = libc::HOST_VM_INFO64_COUNT;
     // SAFETY: `vm` has room for `count` integers; the call fills it and updates `count`.
     let rc = unsafe {
-        libc::host_statistics64(libc::mach_host_self(), libc::HOST_VM_INFO64, vm.as_mut_ptr().cast(), &mut count)
+        libc::host_statistics64(libc::mach_host_self(), libc::HOST_VM_INFO64, vm.as_mut_ptr().cast(), &raw mut count)
     };
     if rc != 0 {
         return None;

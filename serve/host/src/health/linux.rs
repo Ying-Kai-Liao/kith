@@ -10,7 +10,8 @@ const CPU_WINDOW: Duration = Duration::from_millis(250);
 
 /// The aggregate `cpu` line of /proc/stat as (busy, total) ticks: user, nice, system are busy; idle and iowait not.
 fn cpu_line(stat: &str) -> Option<(u64, u64)> {
-    let f: Vec<u64> = stat.lines().next()?.strip_prefix("cpu")?.split_whitespace().map_while(|x| x.parse().ok()).collect();
+    let f: Vec<u64> =
+        stat.lines().next()?.strip_prefix("cpu")?.split_whitespace().map_while(|x| x.parse().ok()).collect();
     if f.len() < 4 {
         return None;
     }
@@ -50,7 +51,10 @@ fn unescape(s: &str) -> String {
 }
 
 fn is_disk_fs(fstype: &str) -> bool {
-    matches!(fstype, "ext2" | "ext3" | "ext4" | "xfs" | "btrfs" | "zfs" | "f2fs" | "vfat" | "exfat" | "ntfs" | "ntfs3" | "fuseblk")
+    matches!(
+        fstype,
+        "ext2" | "ext3" | "ext4" | "xfs" | "btrfs" | "zfs" | "f2fs" | "vfat" | "exfat" | "ntfs" | "ntfs3" | "fuseblk"
+    )
 }
 
 pub fn disks() -> Vec<Disk> {
