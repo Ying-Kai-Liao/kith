@@ -29,6 +29,7 @@ mod tests;
 pub mod warm_stub;
 #[cfg(all(test, unix))]
 mod warm_stub_tests;
+pub(crate) mod winproc;
 
 #[cfg(test)]
 pub use sync::scan;
