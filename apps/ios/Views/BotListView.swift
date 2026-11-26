@@ -641,7 +641,7 @@ struct BotListView: View {
             }
             .padding(.horizontal, KithSpacing.gutter)
         }
-        .padding(.vertical, 4)
+        .padding(.top, 10).padding(.bottom, 4)
     }
 
     private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
