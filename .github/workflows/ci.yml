@@ -397,9 +397,11 @@ jobs:
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
-            # The Windows job builds and tests the holder (and kith-core when the branch has it) and what they stand on.
+            # The Windows job builds and tests the holder (and kith-core when the branch has it) and what they stand on, and
+            # clippies every crate scripts/ci/windows-clippy.sh lists. scripts/ci/windows-filter-check.sh (a kernel check)
+            # fails when a path that builds into those crates is missing here.
             windows:
-              - '{core/holder/**,core/stub/**,core/attach/**,core/winsys/**,core/runtime/**,core/api/**,serve/host/tests/support/fakemodel/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,scripts/ci/windows-clippy.sh,.github/workflows/ci.yml}'
+              - '{core/holder/**,core/stub/**,core/attach/**,core/winsys/**,core/runtime/**,core/api/**,core/kernel/**,core/acp/**,core/procstart/**,serve/host/src/**,serve/host/build.rs,serve/host/clippy.toml,serve/host/crates/memory/**,serve/host/crates/wire/**,serve/host/crates/guest/**,serve/host/tests/support/fakemodel/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,kernel/tests/fixtures/access_requests_parity.json,kernel/tests/difftest/golden-lib/guard-must-ask.json,scripts/ci/windows-clippy.sh,scripts/ci/windows-filter-check.sh,.github/workflows/ci.yml}'
               - '!**/*.md'
             cloud:
               - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
@@ -555,6 +557,7 @@ jobs:
               Cutover check|kernel/tests/kith-cutover-check
               Serve launch check|kernel/tests/kith-serve-launch-check
               Protected paths check (.github/kith-protected-paths)|kernel/tests/kith-protected-paths-check
+              Windows filter check (the windows path filter covers every crate windows-clippy.sh builds)|scripts/ci/windows-filter-check.sh
           - shard: 2
             checks: |
               Auth property check|kernel/tests/kith-auth-props

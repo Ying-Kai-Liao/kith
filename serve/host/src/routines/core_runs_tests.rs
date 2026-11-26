@@ -6,7 +6,7 @@
 
 use super::core_runs::{Ops, Started};
 use super::switch_tests::{hub, routine};
-use super::{LockExt, Value, json};
+use super::{Hub, LockExt, Value, json};
 use std::cell::RefCell;
 
 fn fired(turn: i64, agent: &str, job: &str) -> Value {
@@ -28,13 +28,13 @@ impl Ops for Fake {
         self.cancelled.borrow_mut().push((turn, why.to_owned()));
         true
     }
-    fn cron(&self, t: &Value, job: &str) -> Started {
+    fn cron(&self, _hub: &Hub, t: &Value, job: &str) -> Started {
         self.crons.borrow_mut().push((t["turn"].as_i64().unwrap(), job.to_owned()));
         self.start.borrow_mut().take().unwrap_or(Started::Ran)
     }
 }
 
-fn own_bot(hub: &super::Hub, id: &str, agent: &str) {
+fn own_bot(hub: &Hub, id: &str, agent: &str) {
     hub.store
         .save_bot(
             &serde_json::from_value(json!({"id": id, "name": agent, "cwd": "/tmp", "backend": "custom",
@@ -44,7 +44,7 @@ fn own_bot(hub: &super::Hub, id: &str, agent: &str) {
         .unwrap();
 }
 
-fn notices(hub: &super::Hub, bot: &str) -> Vec<String> {
+fn notices(hub: &Hub, bot: &str) -> Vec<String> {
     hub.store
         .history(bot, i64::MAX, 50)
         .unwrap()

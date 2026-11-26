@@ -4,7 +4,8 @@
 //! (`{prompt, settings, person, job: {id, cron, ...}, origin: {NAME: value}}`) and has already opened the log as stdout and stderr.
 //!
 //! The order is the old one (PromptOnce): the person is refused first, then the claim is attached by this very pid (the engine
-//! descends from it), and only then is the log truncated and headed. A claim that is gone leaves the log as the winner wrote it.
+//! descends from it), and only then is the log truncated and headed. A claim that is gone leaves the winner's header and lines in place: the host opens the log for appending, so the refusal is
+//! written after them.
 //!
 //! The same module attaches a claimed run that has no conversation to name (a `KITH_TURN_CLAIM` handed to a non-Claude one-shot).
 

@@ -1,0 +1,416 @@
+//! The schedule door end to end (design 2026-11-24-sched-turn, S2; the architect's MUST before the host uses the token): a real
+//! core (the daemon the host tests start, its authority stepped from a real `auth.json`), the real host code (`Live::cron`, the
+//! claim, the report), and the built `kith` as the program that runs the launch. Only the engine is a stand-in: a `claude` script
+//! that records what it was started with. The core fires the job (`schedule.runNow`), the host pulls the turn it queued
+//! (`hostclaim.queued`) and runs it.
+//!
+//! - an owner's job on a Mac with two accounts, the first out of usage: the launch walks to the second, with the schedule's env
+//! - a guest's job, run directly: `KITH_PERSON` is the guest, its outbox is its own, and the run needs no `kith-sched`
+//! - both: the claim's pid is the launch's (an ancestor of the engine), and the host's report ends the turn `done`
+//!
+//! The program is `target/<profile>/kith` beside the test binary: a `cargo test` of the package builds it.
+
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+use crate::routines::core_cron::{Live, TEST_KERNEL};
+use crate::routines::core_runs::Ops;
+use crate::routines::run_door::Started;
+use crate::routines::sched_launch::{SPAWNED, TEST_ENV, TEST_PROGRAM};
+use crate::routines::switch_tests::hub;
+use crate::terminal::core_writer::CoreWriter;
+use kith_kernel::paths::Paths;
+use serde_json::{Value, json};
+use std::fmt::Write as _;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// The stand-ins are the process's: one world at a time.
+static SERIAL: Mutex<()> = Mutex::new(());
+
+fn repo_kernel() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel").canonicalize().unwrap()
+}
+
+/// The built `kith`, beside the folder the test binary runs from (`target/debug/deps/..`).
+fn built_kith() -> PathBuf {
+    let exe = std::env::current_exe().unwrap();
+    let kith = exe.parent().unwrap().parent().unwrap().join("kith");
+    assert!(kith.is_file(), "the built kith is not at {}: build the package's binaries first", kith.display());
+    kith
+}
+
+fn until(what: &str, secs: u64, mut f: impl FnMut() -> bool) {
+    let end = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < end {
+        if f() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("gave up waiting for {what}; what the runs wrote:\n{}", written());
+}
+
+/// The folder whose files a failing wait shows: the logs of the world that is running.
+static DIAG: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn written() -> String {
+    fn walk(dir: &Path, out: &mut String) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                let _ = writeln!(out, "--- {}\n{text}", path.display());
+            }
+        }
+    }
+    let mut out = String::new();
+    if let Some(dir) = DIAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
+        walk(&dir, &mut out);
+    }
+    out
+}
+
+struct World {
+    dir: PathBuf,
+    folders: Paths,
+    /// What the engine stand-in recorded: one file per run.
+    rec: PathBuf,
+    env: Vec<(String, String)>,
+    daemon: Option<crate::core_front::TestDaemon>,
+    _held: std::sync::MutexGuard<'static, ()>,
+}
+
+impl World {
+    /// A home with agent `house`, the owner `kai` and a guest `sam` who may use `house`, two accounts for claude (`a`, `b`) after
+    /// the main one, and a core serving it.
+    fn start(jobs: &Value) -> Self {
+        let held = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Short, for the core's socket.
+        let dir = PathBuf::from("/tmp").join(format!("kst-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
+        let (home, machine) = (dir.join("home"), dir.join("machine"));
+        let kernel = repo_kernel();
+        let bin = dir.join("bin");
+        let rec = dir.join("rec");
+        for d in [&home, &machine, &bin, &rec, &home.join("agents/house/role"), &machine.join("live/terminal")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(
+            home.join("agents/house/role/agent.md"),
+            "---\nname: house\ndescription: test agent\n---\nbody\n",
+        )
+        .unwrap();
+        std::fs::write(home.join("agents/house/jobs.json"), jobs.to_string()).unwrap();
+        // The engine: logged in when its config dir holds `.fake-login`; an account named in FAKE_LIMIT_FOR is out of usage;
+        // else it records its argv, env and the pids above it.
+        let claude = r#"#!/bin/sh
+case "$1 $2" in
+  "--version "*) echo "2.1.309 (Claude Code)"; exit 0 ;;
+  "plugin list") echo '[]'; exit 0 ;;
+  "auth status") [ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.fake-login" ] && { echo '{"loggedIn":true}'; exit 0; }; echo '{"loggedIn":false}'; exit 1 ;;
+  "auth login") mkdir -p "$CLAUDE_CONFIG_DIR" && touch "$CLAUDE_CONFIG_DIR/.fake-login"; echo "fake login"; exit 0 ;;
+esac
+who=$(basename "${CLAUDE_CONFIG_DIR:-default}")
+case " ${FAKE_LIMIT_FOR:-} " in *" $who "*) echo "You've hit your weekly limit · resets 9pm"; exit 1 ;; esac
+while [ -e "$HOLD" ]; do sleep 0.1; done
+echo "engine-still-writing-after-the-host-restart"
+f="$REC/$who.$$"
+{
+  echo "who=$who"
+  p=$PPID
+  while [ "$p" -gt 1 ]; do echo "anc=$p"; p=$(ps -o ppid= -p "$p" | tr -d ' '); [ -n "$p" ] || break; done
+  echo "argv=$*"
+  env | sort
+} > "$f.tmp"
+mv "$f.tmp" "$f"
+exit 0
+"#;
+        let engine = bin.join("claude");
+        std::fs::write(&engine, claude).unwrap();
+        std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(home.join(".claude/.fake-login"), "").unwrap();
+
+        let vars = [
+            ("KITH_STATE", machine.to_string_lossy().into_owned()),
+            ("KITH_HOME", home.to_string_lossy().into_owned()),
+            ("KITH_AGENTS", home.join("agents").to_string_lossy().into_owned()),
+        ];
+        let lookup = |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone());
+        let folders = kith_kernel::paths::paths(&home, &kernel, &lookup);
+        std::fs::create_dir_all(&folders.secrets).unwrap();
+        let auth = folders.secrets.join("auth.json");
+        let mut env: Vec<(String, String)> = vars.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect();
+        let p = |x: &Path| x.to_string_lossy().into_owned();
+        env.extend([
+            ("HOME".to_owned(), p(&home)),
+            ("PATH".to_owned(), format!("{}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", bin.display())),
+            ("REC".to_owned(), p(&rec)),
+            ("HOLD".to_owned(), p(&dir.join("hold"))),
+            ("KITH_AUTH".to_owned(), p(&auth)),
+            ("KITH_KERNEL".to_owned(), p(&kernel)),
+            ("KITH_BIN".to_owned(), p(&built_kith())),
+            // No host here: nothing is asked of one.
+            ("KITH_SERVE_DIR".to_owned(), p(&dir.join("serve"))),
+            ("KITH_SERVE_PORT".to_owned(), "1".to_owned()),
+            ("TZ".to_owned(), "UTC".to_owned()),
+        ]);
+        SPAWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+        *DIAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(folders.logs.clone());
+        let world = Self { dir, folders, rec, env, daemon: None, _held: held };
+        world.python(&kernel, &["person", "kai", "owner"]);
+        world.python(&kernel, &["person", "sam", "name=Sam"]);
+        world.python(&kernel, &["member", "house", "sam", "mode=default"]);
+        // The claims are the core's (`claim.attach` is refused until this step, and the host runs turns this way in Writer mode
+        // only), then the authority, as the cutover's own order has it.
+        world.kith(&["kernel", "cutover", "step", "claims"]);
+        let said = crate::core_front::step_authority_for_test(&world.folders, &kernel).expect("the authority step");
+        assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
+        let mut world = world;
+        // Two accounts after the main one: a run that finds the main one out of usage moves to `a`.
+        for a in ["a", "b"] {
+            world.kith(&["account", "add", "claude", a, "--yes"]);
+        }
+        world.kith(&["account", "set", "claude", "claude:a", "claude:b"]);
+        let daemon = crate::core_front::serve_for_test(&world.folders);
+        daemon.reconciled();
+        world.daemon = Some(daemon);
+        *TEST_KERNEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(kernel);
+        *TEST_PROGRAM.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(built_kith());
+        world
+    }
+
+    fn command(&self, program: &Path) -> Command {
+        let mut c = Command::new(program);
+        c.env_clear().envs(self.env.iter().map(|(k, v)| (k, v)));
+        c
+    }
+
+    fn python(&self, kernel: &Path, args: &[&str]) {
+        let out = self.command(Path::new("python3")).arg(kernel.join("bin/kith-auth")).args(args).output().unwrap();
+        assert!(out.status.success(), "kith-auth {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    fn kith(&self, args: &[&str]) {
+        let out = self.command(&built_kith()).args(args).stdin(std::process::Stdio::null()).output().unwrap();
+        assert!(
+            out.status.success(),
+            "kith {args:?}: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The engine's environment: what the launch and the walk gave it.
+    fn set_child_env(&self, extra: &[(&str, &str)]) {
+        let mut env = self.env.clone();
+        env.extend(STRAY.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())));
+        env.extend(extra.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())));
+        *TEST_ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(env);
+    }
+
+    fn core(&self, method: &str, params: &Value) -> Value {
+        crate::core_front::ask(&self.folders, method, params)
+            .unwrap_or_else(|| panic!("{method}: the core did not answer"))
+    }
+
+    /// The claim `hostclaim.show` names by `params` (`{claimId}` or `{conversation}`); null when there is none.
+    fn show(&self, params: &Value) -> Value {
+        crate::core_front::call_as_host(&self.folders, "hostclaim.show", params)
+            .map_or(Value::Null, |v| v["claim"].clone())
+    }
+
+    /// Fires `job` now and runs the turn it queued through the host's door, the engine held until the claim has been read;
+    /// returns the turn's id, its claim and the runs the engine recorded once the claim has ended.
+    fn fire_and_run(&self, job: &str) -> (i64, i64, Vec<String>) {
+        std::fs::write(self.dir.join("hold"), "").unwrap();
+        let fired = self.core("schedule.runNow", &json!({"agent": "house", "id": job, "key": format!("e2e-{job}")}));
+        assert_eq!(fired["outcome"], "fired", "{fired}");
+        let writer = Arc::new(CoreWriter::new(self.folders.clone()));
+        let turns = writer.queued().expect("the core's queue");
+        let t = turns.iter().find(|t| t["job"] == job).unwrap_or_else(|| panic!("no turn for {job}: {turns:?}"));
+        let turn = t["turn"].as_i64().unwrap();
+        let conversation = t["conversation"].clone();
+        let hub = hub();
+        let started = Live(writer).cron(&hub, t, job);
+        assert_eq!(started, Started::Ran);
+        let mut claim = 0;
+        until("the launch to attach the claim", 60, || {
+            let c = self.show(&json!({"conversation": conversation}));
+            claim = c["claimId"].as_i64().unwrap_or(0);
+            c["pid"].is_i64()
+        });
+        assert_eq!(
+            self.show(&json!({"claimId": claim}))["pid"],
+            World::launch_pid(),
+            "the claim's pid is the pid the host started"
+        );
+        std::fs::remove_file(self.dir.join("hold")).unwrap();
+        until("the claim to end", 120, || self.show(&json!({"claimId": claim}))["state"] == "ended");
+        let runs = std::fs::read_dir(&self.rec)
+            .unwrap()
+            .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
+            .collect();
+        (turn, claim, runs)
+    }
+
+    /// The pid of the process the host started as the launch.
+    fn launch_pid() -> i64 {
+        let spawned = SPAWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(spawned.len(), 1, "the host started one launch: {spawned:?}");
+        i64::from(spawned[0])
+    }
+
+    fn log_text(&self) -> String {
+        let dir = self.folders.logs.join("sched/runs/house");
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        if let Some(d) = self.daemon.take() {
+            d.stop();
+        }
+        *TEST_KERNEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *TEST_PROGRAM.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *TEST_ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+// What a host started by launchd or a run could carry in its own environment: none of it may reach the engine.
+const STRAY: [(&str, &str); 8] = [
+    ("KITH_RUN_TOKEN", "stray-token"),
+    ("KITH_RUN_SOCKET", "/nonexistent/run.sock"),
+    ("KITH_CORE_RUN_SOCKET", "/nonexistent/core-run.sock"),
+    ("KITH_PERSON", "mallory"),
+    ("HQ_PERSON", "mallory"),
+    ("KITH_TURN_CLAIM", "99999"),
+    ("HQ_TURN_CLAIM", "99999"),
+    ("KITH_SCHED_NOW", "2020-01-01T00:00"),
+];
+
+fn value_of(run: &str, name: &str) -> Option<String> {
+    run.lines().find_map(|l| l.strip_prefix(&format!("{name}=")).map(str::to_owned))
+}
+
+fn ancestors(run: &str) -> Vec<i64> {
+    run.lines().filter_map(|l| l.strip_prefix("anc=")?.parse().ok()).collect()
+}
+
+#[test]
+fn an_owners_job_walks_to_the_second_account_when_the_first_is_out_of_usage() {
+    let w = World::start(&json!([{"id": "walk", "cron": "0 8 * * *", "task": "do the walk"}]));
+    w.set_child_env(&[("FAKE_LIMIT_FOR", "default")]);
+    let (turn, claim, runs) = w.fire_and_run("walk");
+    assert_eq!(runs.len(), 1, "only the second account's attempt ran the engine: {runs:?}");
+    let run = &runs[0];
+    assert_eq!(value_of(run, "who").as_deref(), Some("a"), "the first account was out of usage");
+    assert_eq!(value_of(run, "KITH_ACCOUNT_ID").as_deref(), Some("claude:a"));
+    assert_eq!(value_of(run, "KITH_VIA").as_deref(), Some("schedule"));
+    assert_eq!(value_of(run, "KITH_SCHED_JOB").as_deref(), Some("walk"));
+    assert_eq!(value_of(run, "KITH_BACKUP_CHAIN").as_deref(), Some("on"));
+    assert_eq!(value_of(run, "KITH_PERSON"), None, "the owner is no person");
+    assert_eq!(value_of(run, "KITH_RUN_OUTBOX"), None, "the owner has no app chat with house here: no outbox");
+    let argv = run.as_str(); // the whole record: the prompt has lines of its own
+    assert!(argv.contains("Scheduled job \"walk\" of house, cron `0 8 * * *`, core turn"), "{argv}");
+    assert_eq!(w.show(&json!({"claimId": claim}))["pid"], World::launch_pid(), "turn {turn}");
+    assert!(ancestors(run).contains(&World::launch_pid()), "the engine descends from the launch: {:?}", ancestors(run));
+    for (gone, _) in STRAY {
+        assert_eq!(value_of(run, gone), None, "{gone} was in the host's environment and does not reach the engine");
+    }
+    assert!(argv.contains("do the walk"), "the job's task is the prompt: {argv}");
+    let log = w.log_text();
+    assert!(log.starts_with("# ") && log.contains(" house walk (core turn "), "the log is headed once: {log}");
+    assert!(log.contains("out of usage; moving to claude:a"), "{log}");
+}
+
+#[test]
+fn a_guests_job_runs_directly_as_the_guest_with_its_own_outbox() {
+    let w = World::start(&json!([{"id": "g", "cron": "0 9 * * *", "task": "x", "person": "sam"}]));
+    w.set_child_env(&[]);
+    let (_, claim, runs) = w.fire_and_run("g");
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    let run = &runs[0];
+    assert_eq!(value_of(run, "KITH_PERSON").as_deref(), Some("sam"));
+    assert_eq!(value_of(run, "KITH_VIA").as_deref(), Some("schedule"));
+    let outbox = value_of(run, "KITH_RUN_OUTBOX").expect("a guest's run has an outbox (dropped when it has no chat)");
+    let meta: Value = serde_json::from_str(&std::fs::read_to_string(format!("{outbox}.json")).unwrap()).unwrap();
+    assert_eq!(
+        (meta["person"].as_str(), meta["via"].as_str(), meta["job"].as_str()),
+        (Some("sam"), Some("schedule"), Some("g"))
+    );
+    assert_eq!(w.show(&json!({"claimId": claim}))["pid"], World::launch_pid());
+    assert!(ancestors(run).contains(&World::launch_pid()), "the engine descends from the launch: {:?}", ancestors(run));
+    for (gone, _) in STRAY.iter().filter(|(k, _)| !k.ends_with("PERSON")) {
+        assert_eq!(value_of(run, gone), None, "{gone} was in the host's environment and does not reach the engine");
+    }
+    assert_eq!(value_of(run, "HQ_PERSON").as_deref(), Some("sam"), "the guest, not the host's stray person");
+    assert!(!w.folders.machine.join("sched/state.json").exists(), "no kith-sched ran: its state file is never written");
+    let _ = std::fs::remove_dir_all(&outbox);
+    let _ = std::fs::remove_file(format!("{outbox}.json"));
+}
+
+#[test]
+fn a_host_restarted_mid_run_leaves_the_run_writing_its_log_and_the_core_ends_the_claim_once_it_is_gone() {
+    use crate::routines::run_door::spawn_cmd;
+    use crate::routines::sched_launch::{Which, build};
+    use crate::terminal::core_writer::RunClaim;
+    let w = World::start(&json!([{"id": "slow", "cron": "0 8 * * *", "task": "do the slow one"}]));
+    w.set_child_env(&[]);
+    // The engine holds until this file is gone.
+    std::fs::write(w.dir.join("hold"), "").unwrap();
+    let fired = w.core("schedule.runNow", &json!({"agent": "house", "id": "slow", "key": "e2e-slow"}));
+    assert_eq!(fired["outcome"], "fired", "{fired}");
+    let host1 = CoreWriter::with_instance(w.folders.clone(), "kith-serve-host/1-a".to_owned());
+    let turns = host1.queued().expect("the core's queue");
+    let t = turns.iter().find(|t| t["job"] == "slow").expect("the turn");
+    let (turn, conversation, person) = (
+        t["turn"].as_i64().unwrap(),
+        t["conversation"].as_str().unwrap().to_owned(),
+        t["person"].as_str().unwrap().to_owned(),
+    );
+    let RunClaim::Claimed(claim) = host1.claim_run_as("scheduleRun", &conversation, &person, turn) else {
+        panic!("the claim");
+    };
+    // The host's door as `start` does it, without the thread that waits and reports: that thread is what a restart takes away.
+    let which = Which { agent: "house", job: "slow", person: None, turn, claim };
+    let built = build(&hub(), &w.folders, &built_kith(), &repo_kernel(), t, &which).unwrap();
+    let mut child = spawn_cmd(built.cmd, &built.spec).unwrap();
+    let pid = child.id();
+    std::thread::spawn(move || child.wait());
+    until("the launch to attach the claim", 60, || w.show(&json!({"claimId": claim}))["pid"] == i64::from(pid));
+    until("the launch to head the log", 30, || {
+        std::fs::read_to_string(&built.log).unwrap_or_default().starts_with("# ")
+    });
+
+    // The host restarts: another instance adopts. A claim with a live process stays the writer.
+    let host2 = CoreWriter::with_instance(w.folders.clone(), "kith-serve-host/2-b".to_owned());
+    host2.adopt().expect("adopt");
+    let state = |w: &World| w.show(&json!({"claimId": claim}))["state"].as_str().unwrap_or_default().to_owned();
+    assert_eq!(state(&w), "running", "the run goes on, and is the writer");
+
+    // The run was started with a file for its output, so it still writes after the restart.
+    std::fs::remove_file(w.dir.join("hold")).unwrap();
+    let alive = |pid: u32| Command::new("kill").args(["-0", &pid.to_string()]).output().unwrap().status.success();
+    until("the run to end", 120, || !alive(pid));
+    let log = std::fs::read_to_string(&built.log).unwrap();
+    assert!(log.contains("engine-still-writing-after-the-host-restart"), "the log kept being written: {log}");
+    let ran = std::fs::read_dir(&w.rec).unwrap().count();
+    assert_eq!(ran, 1, "the engine ran exactly once");
+
+    // Nothing reported it: the core ends the claim once the process is gone.
+    until("the core to end the claim", 60, || {
+        let _ = crate::core_front::call_as_host(&w.folders, "hostclaim.settle", &json!({}));
+        state(&w) == "ended"
+    });
+}

@@ -18,7 +18,9 @@
 
 use super::core_runs::Ops;
 use super::run_door::{Launch, Run, Started, detach, start};
-use crate::terminal::core_writer::CoreWriter;
+use super::sched_launch;
+use crate::hub::Hub;
+use crate::terminal::core_writer::{CoreWriter, Mode};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -38,7 +40,7 @@ impl Ops for Live {
         self.0.cancel_turn(turn, why)
     }
 
-    fn cron(&self, t: &Value, job: &str) -> Started {
+    fn cron(&self, hub: &Hub, t: &Value, job: &str) -> Started {
         let (Some(turn), Some(conversation), Some(person)) =
             (t["turn"].as_i64(), t["conversation"].as_str(), t["person"].as_str())
         else {
@@ -51,18 +53,41 @@ impl Ops for Live {
         };
         let agent = t["agent"].as_str().unwrap_or_default();
         let spec = json!({"prompt": t["prompt"], "settings": t["settings"], "person": spec_person});
+        // A program that lists `sched-turn` runs the turn as the launch; one that does not (an older one, a Mac whose program
+        // list lacks it) keeps `kith-sched run-turn` (design 2026-11-24-sched-turn S-R3).
+        // The gate is `Routines::pull`'s Writer check (`core_runs.rs`): turns are pulled only on a Mac whose claims are the core's, and
+        // `run-turn` attaches through the same `claim.attach`, so it is no fallback on an unswitched Mac. This read only covers a mode
+        // that flipped between the two reads; both paths fail closed.
+        let program = sched_launch::program().filter(|_| self.0.mode() == Mode::Writer);
         let run = Run {
             turn,
             conversation,
             person,
             kind: "scheduleRun",
-            what: "kith-sched run-turn",
+            what: if program.is_some() { "kith kernel launch" } else { "kith-sched run-turn" },
             ended: "the scheduled run",
         };
-        start(&self.0, &run, |claim| {
+        let outbox = std::cell::RefCell::new(None);
+        let started = start(&self.0, &run, |claim| {
             let kernel = kernel_here().ok_or_else(|| "no kith kernel here to run the job".to_owned())?;
+            if let Some(program) = &program {
+                let w = sched_launch::Which { agent, job, person: spec_person.as_str(), turn, claim };
+                let built = sched_launch::build(hub, self.0.folders(), program, &kernel, t, &w)?;
+                *outbox.borrow_mut() = built.outbox;
+                return Ok(Launch {
+                    cmd: built.cmd,
+                    stdin: Some(built.spec),
+                    err_file: Some(built.log),
+                    bind: sched_launch::note_pid(),
+                });
+            }
             Ok(Launch { cmd: command(&kernel, agent, job, turn, claim), stdin: Some(spec), err_file: None, bind: None })
-        })
+        });
+        // A launch that never started leaves no run for its outbox to belong to.
+        if let (Started::Cancelled(_), Some(dir)) = (&started, outbox.borrow().as_deref()) {
+            sched_launch::remove_outbox(dir);
+        }
+        started
     }
 }
 
