@@ -46,7 +46,7 @@ fn door(w: &World, host: &str, bin: std::path::PathBuf, launch: Option<std::path
         kernel: Some(repo_kernel()),
         harness: &move |_| Some(harness.to_owned()),
         runtime: None,
-        env: w.env.clone(),
+        env: w.env.iter().cloned().chain([("ANSWER".to_owned(), "the answer".to_owned())]).collect(),
     };
     take(&writer, &turns, &world);
 }
@@ -120,7 +120,8 @@ fn a_claude_callee_attaches_naming_ask_conversation_keeps_its_session_and_surviv
     assert_eq!(record["session"], session.as_str(), "{record}");
     until("the ask is settled", || w.core("ask.record", &json!({"id": "r1"}))["state"] != "open");
     assert_eq!(w.core("ask.record", &json!({"id": "r1"}))["state"], "answered");
-    assert_eq!(w.core("ask.read", &json!({"id": "r1"}))["rows"].as_array().map(Vec::len), Some(1));
+    let rows = w.core("ask.read", &json!({"id": "r1"}))["rows"].clone();
+    assert!(rows.to_string().contains("the answer"), "the answer of the callee: {rows}");
     assert_eq!(w.runs().len(), 1, "the task reached an engine once");
 }
 

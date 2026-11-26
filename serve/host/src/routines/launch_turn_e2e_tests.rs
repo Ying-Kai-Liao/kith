@@ -49,6 +49,8 @@ while [ -e "$HOLD" ]; do sleep 0.1; done
   echo "argv=$*"
   env | sort
 } > "$REC/run.$$"
+# What a run that answers says on stdout (the ask tests set it; the callee's out file is its answer).
+[ -z "$ANSWER" ] || echo "$ANSWER"
 exit 0
 "#;
 
