@@ -1,9 +1,10 @@
 //! `kith-permit issue AGENT SESSION PID`: ask the host for an owner ask token bound to PID and print export lines for sh.
 
-use super::host::{HOST_START_S, host_call, host_up, restart_host};
+use super::host::{HOST_START_S, host_call, host_status, restart_host};
 use super::pyval::{self, repr_str, str_of, truthy};
 use super::{Env, Out};
 use crate::cost::pyfmt::shell_quote;
+use crate::hostlocal::{OLDER_HOST, Status};
 use serde_json::{Map, Value, json};
 use std::path::Path;
 use std::time::Duration;
@@ -110,7 +111,22 @@ pub fn issue(env: &Env, kernel: &Path, agent: &str, session: &str, pid: &str) ->
     let body = Value::Object(body);
     let ask = || host_call(env, kernel, "issueAskToken", &body, Duration::from_secs(8));
     let mut r = ask().filter(|v| !v.is_null());
-    if r.is_none() && !host_up(env, kernel) {
+    let status = if r.is_none() {
+        host_status(env, kernel)
+    } else {
+        Status::Up
+    };
+    if status == Status::Older {
+        // Up, but with no local endpoint: restarting it would end its running turns, so it is named instead.
+        return Out {
+            stderr: format!(
+                "kith: no approval cards for this run: {OLDER_HOST}; asks are refused\n"
+            ),
+            code: 1,
+            ..Out::default()
+        };
+    }
+    if r.is_none() && status == Status::Down {
         // The host is down: its job is restarted once (rule 5) and asked again, else nothing can show a card. A terminal
         // start (KITH_PERMIT_NO_RESTART) never waits for that: the run starts, the hook prints nothing.
         let restarted = env.get("KITH_PERMIT_NO_RESTART").is_none()

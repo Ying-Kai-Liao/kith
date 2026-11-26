@@ -44,6 +44,16 @@ impl Holder {
 pub const TURN_CLAIM_REFUSED: &str = "the turn claim was refused";
 pub const TURN_CLAIM_EXIT: i32 = 10;
 
+/// The exit code of a refused claim: [`TURN_CLAIM_EXIT`] for a refused turn claim, else 1 (a held writer), as `kith threads claim`
+/// and `terminal` exit. One place for every launch path, so they cannot drift apart.
+pub fn claim_exit(refusal: &str) -> i32 {
+    if refusal.starts_with(TURN_CLAIM_REFUSED) {
+        TURN_CLAIM_EXIT
+    } else {
+        1
+    }
+}
+
 /// Why [`Taker::attach_run`] did not attach: the claim is no longer this run's (cancelled, adopted, attached by another), or the
 /// core could not say.
 #[derive(Debug, PartialEq, Eq)]

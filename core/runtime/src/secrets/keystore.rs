@@ -49,8 +49,8 @@ const WAIT: Duration = Duration::from_secs(30);
 /// caller can never mistake "could not read" for "no key".
 pub(crate) trait KeyStore: Send {
     fn get(&self) -> Result<Option<Zeroizing<Vec<u8>>>>;
-    /// Writes the key. macOS adds only (an existing item is kept); Linux's `secret-tool store` always replaces, so two
-    /// cores minting at once can still race there. The caller reads back and adopts whatever key the store holds.
+    /// Writes the key. macOS adds only (an existing item is kept), and so does Windows (under the mint lock); Linux's
+    /// `secret-tool store` always replaces, so two cores minting at once can still race there. The caller reads back and adopts whatever key the store holds.
     fn add(&self, key: &[u8]) -> Result<()>;
 }
 
@@ -263,7 +263,9 @@ impl KeyStore for CredentialManager {
 
     fn add(&self, key: &[u8]) -> Result<()> {
         // Like the Keychain: an item that is there stays, so the loser of a mint race does not overwrite the winner's key.
-        // The two calls are not one step; the caller reads back and adopts whatever key the store holds.
+        // Credential Manager has no add-only write, so the get, the write and the read-back are one step under an
+        // exclusive lock that every core of this user takes (WI15). The caller still reads back and adopts the key.
+        let _minting = self.mint_lock()?;
         if self.get()?.is_some() {
             return Ok(());
         }
@@ -272,8 +274,85 @@ impl KeyStore for CredentialManager {
             Error::Io(format!(
                 "kith-core: Credential Manager would not store the secrets master key: {e}"
             ))
-        })
+        })?;
+        // Inside the lock: what a reader finds now is what this core wrote, or the write did not land.
+        match self.get()? {
+            Some(back) if back.as_slice() == key => Ok(()),
+            _ => Err(Error::Io(
+                "kith-core: Credential Manager did not keep the new secrets master key; no secret was stored"
+                    .into(),
+            )),
+        }
     }
+}
+
+#[cfg(windows)]
+impl CredentialManager {
+    /// The exclusive mint lock of this user's key item. The file is named for the Credential Manager target and lives in
+    /// the user's own local folder, not in any layout, so two layouts (two cores) of one user take the same lock. It is
+    /// held until the returned file is dropped; a wait that outlasts [`WAIT`] is a refusal, never a hang.
+    fn mint_lock(&self) -> Result<std::fs::File> {
+        use fs2::FileExt as _;
+        let dir = mint_lock_dir();
+        if !dir.exists() {
+            std::fs::create_dir_all(&dir)?;
+            kith_winsys::acl::restrict(&dir, true).map_err(|e| {
+                Error::Permissions(format!(
+                    "kith-core: can't make {} private: {e}",
+                    dir.display()
+                ))
+            })?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(dir.join(mint_lock_name(&self.target)))?;
+        let end = Instant::now() + WAIT;
+        loop {
+            match file.try_lock_exclusive() {
+                Ok(()) => return Ok(file),
+                Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+                    if Instant::now() >= end {
+                        return Err(Error::Busy(
+                            "kith-core: another kith core is making the secrets master key; try again"
+                                .into(),
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+}
+
+/// The folder of the mint lock: the `locks` folder under the install root `%LOCALAPPDATA%\\Kith` (private to the user), else the user's temp folder.
+#[cfg(windows)]
+fn mint_lock_dir() -> std::path::PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .filter(|d| !d.is_empty())
+        .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
+        .join("Kith")
+        .join("locks")
+}
+
+/// The lock file's name for a Credential Manager target: the target with every character that is not a letter, digit,
+/// dot or dash made an underscore, so it is one plain file name and the same in every layout.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn mint_lock_name(target: &str) -> String {
+    let plain: String = target
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{plain}.mint.lock")
 }
 
 /// Tests only: a store in memory. Clones share the one slot, so a test can open the "same machine" twice, or hand a

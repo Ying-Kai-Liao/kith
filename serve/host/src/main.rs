@@ -1981,6 +1981,8 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
     let locked = started.elapsed();
     watchdog::blocking("binary-identity", service::capture_binary_identity).await??;
     let identified = started.elapsed().saturating_sub(locked);
+    // Before the port opens: a client that finds the port without this endpoint takes the host for an older one.
+    let local = api::local::bind(&service::data_dir());
     let listener =
         tokio::net::TcpListener::bind((bind, port)).await.with_context(|| format!("binding {bind}:{port}"))?;
     cap_log();
@@ -1995,6 +1997,16 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
         binary_identity_ms = identified.as_millis(),
         "start-up: the host lock and the binary's identity"
     );
+    let local = match local {
+        Ok(endpoint) => Some(std::sync::Arc::new(endpoint)),
+        Err(error) => {
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "local endpoint not started: owner tools cannot reach this host"
+            );
+            None
+        }
+    };
     let (store, host_id, token) = open_store()?;
     write_token_file(&token)?;
     let identity = identity::Identity::load_or_create(&service::data_dir())?;
@@ -2030,7 +2042,11 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
         "kith-serve listening"
     );
     // Peer addresses: some settings may only be changed from this computer.
-    let app = api::router(hub.clone()).into_make_service_with_connect_info::<std::net::SocketAddr>();
+    let router = api::router(hub.clone());
+    if let Some(endpoint) = &local {
+        api::local::serve(endpoint.clone(), router.clone());
+    }
+    let app = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
     // SSE/WebSocket clients can stay connected forever. Stop agents immediately
     // on the signal instead of waiting for those connections to finish.
     let server = axum::serve(listener, app).into_future();
@@ -2040,6 +2056,9 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
         () = shutdown_signal() => {},
     }
     service::mark_exiting();
+    if let Some(endpoint) = &local {
+        endpoint.close();
+    }
     hub.shutdown().await;
     agent::acp::stopped().await;
     analytics::flush_before_exit(&hub).await;
@@ -2141,22 +2160,17 @@ async fn confirm_owner_here(port: u16) -> Result<()> {
     Ok(())
 }
 
-/// Calls the running host's local API (`~/.kith/serve/token` over loopback).
+/// Calls the running host's local API (`~/.kith/serve/token` over its local endpoint).
 async fn local_call(port: u16, method: &str, body: serde_json::Value) -> Result<serde_json::Value> {
     let not_running =
         || anyhow::anyhow!("kith-serve isn't running here. Start it with `kith-serve install` (or `serve`).");
     let token = std::fs::read_to_string(service::data_dir().join("token")).map_err(|_| not_running())?;
-    let res = http()
-        .post(format!("http://127.0.0.1:{port}/api/{method}"))
-        .bearer_auth(token.trim())
-        .json(&body)
-        .timeout(Duration::from_secs(20))
-        .send()
-        .await
-        .map_err(|_| not_running())?;
-    let status = res.status();
-    let v: serde_json::Value = res.json().await.context("reading the host's answer")?;
-    if !status.is_success() {
+    // Over the host's local endpoint, never loopback TCP; a host with no such endpoint is an older one and says so.
+    let (ok, v) =
+        api::local::call(service::data_dir(), port, token.trim().to_owned(), method, &body, Duration::from_secs(20))
+            .await
+            .map_err(|why| if why.contains("older") { anyhow::anyhow!("{why}") } else { not_running() })?;
+    if !ok {
         anyhow::bail!("{}", v["error"].as_str().unwrap_or("the host refused"));
     }
     Ok(v)
@@ -2397,13 +2411,15 @@ async fn statusline(port: u16, wrapped: String) {
     // The user's line prints first and unchanged; the usage POST comes after and is capped short.
     let ingest = || async {
         if let Ok(token) = std::fs::read_to_string(service::data_dir().join("token")) {
-            let _ = http()
-                .post(format!("http://127.0.0.1:{port}/ingest/statusline"))
-                .bearer_auth(token.trim())
-                .json(&v)
-                .timeout(Duration::from_millis(300))
-                .send()
-                .await;
+            let _ = api::local::post_to(
+                service::data_dir(),
+                port,
+                "/ingest/statusline".to_owned(),
+                token.trim().to_owned(),
+                v.to_string(),
+                Duration::from_millis(300),
+            )
+            .await;
         }
     };
     if !wrapped.trim().is_empty() {

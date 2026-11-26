@@ -112,19 +112,20 @@ where
 async fn iphones_paired(port: u16) -> bool {
     let devices = async {
         let token = std::fs::read_to_string(service::data_dir().join("token")).ok()?;
-        let res: serde_json::Value = crate::http()
-            .post(format!("http://127.0.0.1:{port}/api/devices"))
-            .bearer_auth(token.trim())
-            .json(&serde_json::json!({}))
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await
-            .ok()?
-            .error_for_status()
-            .ok()?
-            .json()
-            .await
-            .ok()?;
+        // Over the host's local endpoint: a host older than this one has none, and is assumed to serve iPhones.
+        let (ok, res) = crate::api::local::call(
+            service::data_dir(),
+            port,
+            token.trim().to_owned(),
+            "devices",
+            &serde_json::json!({}),
+            Duration::from_secs(5),
+        )
+        .await
+        .ok()?;
+        if !ok {
+            return None;
+        }
         Some(res["devices"].as_array()?.iter().any(|d| d["platform"] == "ios"))
     };
     devices.await.unwrap_or(true)
