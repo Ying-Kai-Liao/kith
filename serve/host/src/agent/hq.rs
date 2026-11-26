@@ -48,6 +48,14 @@ fn found() -> Option<PathBuf> {
     if !cli.ok {
         return None;
     }
+    // The kernel folder on Windows has no entry script: the launch is planned in process (`launch_text`), so the program named
+    // here is this one, which the verbs that still start `kith` would run (and refuse by name).
+    #[cfg(windows)]
+    {
+        cli.kernel.as_deref()?;
+        std::env::current_exe().ok()
+    }
+    #[cfg(not(windows))]
     crate::kernel::entry_in(cli.kernel.as_deref()?)
 }
 
@@ -756,6 +764,79 @@ pub async fn project_add(id: &str, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// What `kith <agent> --launch-json` prints, by running the program.
+#[cfg(not(windows))]
+async fn launch_text(
+    bin: &Path,
+    args: &[&str],
+    cwd: &str,
+    person: Option<&str>,
+    env: &[(String, String)],
+    grant: Option<&crate::runauth::RunGrant>,
+) -> Result<String> {
+    run_bound(bin, args, Some(cwd), LAUNCH_TIMEOUT, person, env, grant).await
+}
+
+/// What `kith <agent> --launch-json` prints, made in this process: Windows has no `kith` entry script to run, and the kernel's
+/// plan is a library call (`kith_kernel::launch::assemble::launch_in`, which plans for the folder named without moving this
+/// process). The environment is what the program's would be: the host's, the VIA and stub the host names, the person's and
+/// the caller's, with the run token only the host hands out taken out.
+///
+/// A run for anyone but the owner is refused here, in the words the kernel's own plan would use (WI6): there is no Windows
+/// sandbox yet, and a guest is never launched without one.
+#[cfg(windows)]
+async fn launch_text(
+    _bin: &Path,
+    args: &[&str],
+    cwd: &str,
+    person: Option<&str>,
+    extra: &[(String, String)],
+    _grant: Option<&crate::runauth::RunGrant>,
+) -> Result<String> {
+    use kith_kernel::launch::{assemble, winenv};
+    if person.is_some() {
+        return Err(Refused(format!("{} Nothing was started.", kith_kernel::GUESTS_NOT_ON_WINDOWS)).into());
+    }
+    let Some(kernel) = crate::kernel::current_kernel() else { bail!("{}", missing()) };
+    let Some((agent, flags)) = args.split_first() else { bail!("no launch arguments") };
+    if !Path::new(cwd).is_dir() {
+        bail!("`kith {agent} --launch-json`: the folder {cwd} isn't there");
+    }
+    let mut env = winenv::process_env();
+    env.extend(crate::kernel::both("VIA", "serve"));
+    // A room's people, a run token: the plan's own marks of a guest, refused here in words the person can read.
+    let marked: assemble::Env = extra.iter().cloned().collect();
+    if let Some(why) = kith_kernel::launch::plan::windows_guest_refusal(&marked) {
+        return Err(Refused(why.trim_start_matches("kith: ").to_owned()).into());
+    }
+    env.extend(crate::kernel::stub_env());
+    for name in [
+        crate::runauth::TOKEN_ENV,
+        crate::runauth::SOCKET_ENV,
+        crate::runauth::CORE_SOCKET_ENV,
+        "KITH_PERSON",
+        "HQ_PERSON",
+        // The host's own working folder says nothing of the run's.
+        "PWD",
+    ] {
+        env.remove(name);
+    }
+    env.extend(extra.iter().cloned());
+    let (agent, flags, cwd) =
+        (agent.to_string(), flags.iter().map(|f| (*f).to_owned()).collect::<Vec<_>>(), cwd.to_owned());
+    let shown = format!("kith {agent} --launch-json");
+    let plan = tokio::task::spawn_blocking({
+        let agent = agent.clone();
+        move || assemble::launch_in(&agent, &flags, &kernel, env, Path::new(&cwd))
+    });
+    match tokio::time::timeout(LAUNCH_TIMEOUT, plan).await {
+        Err(_) => bail!("`{shown}` took longer than {}s", LAUNCH_TIMEOUT.as_secs()),
+        Ok(Err(e)) => bail!("`{shown}` stopped: {e}"),
+        Ok(Ok(Err(code))) => bail!("`{shown}` failed (exit {code}); the host's log has what it said"),
+        Ok(Ok(Ok(json))) => Ok(json),
+    }
+}
+
 /// Asks hq how to start `agent` for a run in `cwd`; `project` goes as `-p <id>`, so hq loads that project's context.
 /// Model, effort and permission mode are hq's (the agent's `agent.md`, this Mac's kith settings): the bot's own copy of
 /// them is never passed (`-m`, `-e` or `--permission-mode` would win over hq), so what runs is what the apps show.
@@ -807,7 +888,7 @@ pub async fn launch(
         })
         .map(|dir| crate::kernel::both("RUN_OUTBOX", &dir.to_string_lossy()));
     env.extend(outbox.iter().flatten().cloned());
-    let out = run_bound(bin, &args, Some(cwd), LAUNCH_TIMEOUT, person, &env, access.map(|(g, _)| g)).await?;
+    let out = launch_text(bin, &args, cwd, person, &env, access.map(|(g, _)| g)).await?;
     let mut launch: Launch = serde_json::from_str(out.trim())
         .with_context(|| format!("`kith {agent} --launch-json` didn't print a launch object"))?;
     launch.env.extend(outbox.into_iter().flatten());
