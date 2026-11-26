@@ -511,7 +511,7 @@ impl CoreWriter {
 
     /// The claim `claim` in whatever state it is (`hostclaim.show` by id): `{state, pid, ...}`, `None` when the core has none of
     /// that id. `Err(why)`: the core did not answer. A run the host started reads it to know whether its launch attached.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn claim_row(&self, claim: i64) -> Result<Option<Value>, String> {
         let said = self.data("hostclaim.show", &json!({"claimId": claim}))?;
         Ok(Some(said["claim"].clone()).filter(Value::is_object))

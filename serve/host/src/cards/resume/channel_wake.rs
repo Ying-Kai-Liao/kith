@@ -50,7 +50,7 @@ pub struct ChannelWake {
 
 impl ChannelWake {
     /// A claimed wake for a test of the channel's batch.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn for_test(run: &str, turn: i64, claim: i64, wk: &str) -> Arc<Self> {
         Arc::new(Self {
             run: run.to_owned(),
