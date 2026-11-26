@@ -16,6 +16,8 @@
 
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::{Said, core, folders_of};
@@ -23,6 +25,28 @@ use crate::api::UserError;
 use crate::hub::Hub;
 
 static PAIRING: Mutex<()> = Mutex::const_new(());
+
+/// Whether the reconcile has run to its end since the host last failed to reach the core (false at start). The core starts
+/// nothing of a pairing it was not told of again in its own run (`asks::peer_b::busy_origin_in`), and the callee answers nothing
+/// until this is true ([`settled`]): so nothing for a pairing the host ended while the core was away starts in between.
+static SETTLED: AtomicBool = AtomicBool::new(false);
+
+/// How many times a call of the core was skipped because it did not answer; a reconcile that saw one go by is not settled.
+static SKIPPED: AtomicU64 = AtomicU64::new(0);
+
+fn owe() {
+    SKIPPED.fetch_add(1, Ordering::AcqRel);
+    SETTLED.store(false, Ordering::Release);
+}
+
+/// The callee's gate: true when the pairings agree (the reconcile runs first when they have not been shown to).
+pub(crate) async fn settled(hub: &Hub) -> bool {
+    if SETTLED.load(Ordering::Acquire) {
+        return true;
+    }
+    reconcile(hub).await;
+    SETTLED.load(Ordering::Acquire)
+}
 
 /// The pairing lock: pair, unpair and the reconcile take it, one at a time.
 pub(crate) async fn lock() -> MutexGuard<'static, ()> {
@@ -38,6 +62,7 @@ pub(crate) async fn link(hub: &Hub, computer: &str, dir: &str, epoch: &str, name
         Ok(_) => Ok(()),
         Err(Said::Down(why)) => {
             tracing::warn!(computer, dir, why, "the core did not hear of a pairing; the reconcile tells it");
+            owe();
             Ok(())
         }
         Err(Said::Refused(why)) => Err(anyhow!(UserError(format!("This pairing can't start: {why}")))),
@@ -52,6 +77,7 @@ pub(crate) async fn end(hub: &Hub, computer: &str, dir: &str) -> Result<()> {
         Ok(_) => Ok(()),
         Err(Said::Down(why)) => {
             tracing::warn!(computer, dir, why, "the core did not hear a pairing end; the reconcile ends it");
+            owe();
             Ok(())
         }
         Err(Said::Refused(why)) => Err(anyhow!("the core would not end the pairing with {computer}: {why}")),
@@ -112,7 +138,10 @@ pub(crate) fn plan(listed: &Value, host_in: &[(Held, String)], host_out: &[(Held
 pub(crate) async fn reconcile(hub: &Hub) {
     let Some(folders) = folders_of(hub) else { return };
     let _one = lock().await;
-    let Ok(listed) = core(&folders, "ask.peerList", json!({})).await else { return };
+    let Ok(listed) = core(&folders, "ask.peerList", json!({})).await else {
+        owe();
+        return;
+    };
     let host_in: Vec<(Held, String)> =
         hub.store.peers_in().unwrap_or_default().into_iter().map(|p| ((p.computer_id, p.epoch), p.name)).collect();
     let host_out: Vec<(Held, String)> = hub
@@ -122,12 +151,26 @@ pub(crate) async fn reconcile(hub: &Hub) {
         .into_iter()
         .filter_map(|p| p.epoch.map(|e| ((p.computer_id, e), p.name)))
         .collect();
+    let skipped = SKIPPED.load(Ordering::Acquire);
+    let mut clean = true;
+    // A pairing both ends hold is told to the core again: that is what lets the core start its asks after a restart.
+    for (dir, held) in [("in", &host_in), ("out", &host_out)] {
+        for ((computer, epoch), name) in held {
+            let live = listed[dir].as_array().is_some_and(|rows| {
+                rows.iter().any(|r| field(r, "computer") == *computer && field(r, "epoch") == *epoch)
+            });
+            if live && link(hub, computer, dir, epoch, name).await.is_err() {
+                clean = false;
+            }
+        }
+    }
     for step in plan(&listed, &host_in, &host_out) {
         match step {
             Step::End { computer, dir } => {
                 tracing::info!(computer, dir, "the core holds a pairing this host no longer has; ending it");
                 if let Err(e) = end(hub, &computer, dir).await {
                     tracing::warn!(error = format!("{e:#}"), "couldn't end a pairing the host dropped");
+                    clean = false;
                 }
             }
             Step::Remove { computer, dir } => {
@@ -140,15 +183,22 @@ pub(crate) async fn reconcile(hub: &Hub) {
                 match removed {
                     Ok(true) if dir == "in" => hub.auth_changed(),
                     Ok(_) => {}
-                    Err(e) => tracing::warn!(error = format!("{e:#}"), "couldn't remove an ended pairing"),
+                    Err(e) => {
+                        tracing::warn!(error = format!("{e:#}"), "couldn't remove an ended pairing");
+                        clean = false;
+                    }
                 }
             }
             Step::Tell { computer, dir, epoch, name } => {
                 // A pairing from before the link carried asks, or one made while the core was down: the core learns of it.
                 if let Err(e) = link(hub, &computer, dir, &epoch, &name).await {
                     tracing::warn!(error = format!("{e:#}"), computer, dir, "couldn't tell the core of a pairing");
+                    clean = false;
                 }
             }
         }
+    }
+    if clean && SKIPPED.load(Ordering::Acquire) == skipped {
+        SETTLED.store(true, Ordering::Release);
     }
 }

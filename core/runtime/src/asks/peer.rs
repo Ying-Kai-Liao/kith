@@ -53,6 +53,17 @@ pub(crate) fn live_in(tx: &Connection, computer: &str, dir: &str, epoch: &str) -
     )?)
 }
 
+/// Names this core process: a pairing the host confirmed under another name was not confirmed since this core started.
+pub(crate) fn boot() -> &'static str {
+    static BOOT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BOOT.get_or_init(|| {
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        format!("{}-{at}", std::process::id())
+    })
+}
+
 /// The live `out` pairing epoch with `computer`, if any.
 fn epoch_in(tx: &Connection, computer: &str) -> Result<Option<String>> {
     Ok(tx
@@ -495,6 +506,11 @@ pub(crate) fn link(
             .optional()?;
         match kept {
             Some(true) => {
+                // The host telling the pairing again (its reconcile does, after a start) confirms it for this process.
+                tx.execute(
+                    "UPDATE ask_peers SET boot = ?4 WHERE computer = ?1 AND dir = ?2 AND epoch = ?3",
+                    params![computer, dir, epoch, boot()],
+                )?;
                 // The same pairing again may tell its name (a computer renamed since).
                 if let Some(n) = name {
                     tx.execute(
@@ -510,8 +526,8 @@ pub(crate) fn link(
             None => {
                 let ended = end_epoch_in(tx, st, computer, dir, now)?;
                 tx.execute(
-                    "INSERT INTO ask_peers (computer, dir, epoch, live, name) VALUES (?1, ?2, ?3, 1, ?4)",
-                    params![computer, dir, epoch, name],
+                    "INSERT INTO ask_peers (computer, dir, epoch, live, name, boot) VALUES (?1, ?2, ?3, 1, ?4, ?5)",
+                    params![computer, dir, epoch, name, boot()],
                 )?;
                 Ok(ended)
             }

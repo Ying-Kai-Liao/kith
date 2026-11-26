@@ -14,7 +14,7 @@
 
 use std::collections::BTreeSet;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension as _, params};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
@@ -80,7 +80,7 @@ pub(super) fn room_in(tx: &Connection, computer: &str) -> Result<()> {
 /// The fence of a claim that is about running: the computer whose ask `turn` is, when it already has [`MAX_RUNNING`] other runs
 /// going. The claim is refused for now (the turn stays queued), never cancelled.
 pub(crate) fn busy_origin_in(tx: &Connection, turn: i64) -> Result<Option<String>> {
-    let found: Option<(String, i64)> = rusqlite::OptionalExtension::optional(tx.query_row(
+    let found: Option<(String, i64)> = tx.query_row(
         "SELECT a.origin_computer,
                 (SELECT COUNT(*) FROM asks b JOIN turns u ON u.id = b.turn
                  WHERE b.origin_computer = a.origin_computer AND u.id <> t.id AND u.state IN ('claimed', 'running'))
@@ -88,8 +88,26 @@ pub(crate) fn busy_origin_in(tx: &Connection, turn: i64) -> Result<Option<String
          WHERE t.id = ?1 AND t.source = 'ask' AND a.origin_computer IS NOT NULL",
         [turn],
         |r| Ok((r.get(0)?, r.get(1)?)),
-    ))?;
-    Ok(found.filter(|(_, n)| *n >= MAX_RUNNING).map(|(c, _)| c))
+    )
+    .optional()?;
+    if let Some((c, n)) = found
+        && n >= MAX_RUNNING
+    {
+        return Ok(Some(c));
+    }
+    // A pairing the host has not confirmed since this core started may already be ended on the host (an unlink while the core
+    // was away): nothing of it starts until the host's reconcile has told the core (`ask.peerLink` again), and the turn waits.
+    Ok(tx
+        .query_row(
+            "SELECT a.origin_computer FROM turns t JOIN asks a ON a.turn = t.id
+             WHERE t.id = ?1 AND t.source = 'ask' AND a.origin_computer IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM ask_peers p
+                               WHERE p.computer = a.origin_computer AND p.dir = 'in'
+                                 AND p.epoch = a.origin_epoch AND p.live = 1 AND p.boot = ?2)",
+            params![turn, super::peer::boot()],
+            |r| r.get(0),
+        )
+        .optional()?)
 }
 
 /// The tick's expiry: an ask that came from another computer and whose turn nobody claimed in [`EXPIRE_MS`] ends `lost`, with

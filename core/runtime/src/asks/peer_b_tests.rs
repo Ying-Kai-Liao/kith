@@ -153,6 +153,27 @@ fn a_computer_runs_at_most_two_at_once_and_the_third_waits_queued() {
     assert!(!was_refused(&again), "{again:?}");
 }
 
+#[test]
+fn a_pairing_not_confirmed_since_the_core_started_starts_nothing_until_the_host_tells_it_again() {
+    let r = Rig::new();
+    link_in(&r, 1);
+    let turn = turn_of(&origin(&r, "o1", "k1", 1));
+    // The core was restarted: the host has not told it of the pairing in this process yet.
+    r.d.shared()
+        .with_core(|c| {
+            c.conn()
+                .execute("UPDATE ask_peers SET boot = 'an older core'", [])?;
+            Ok(())
+        })
+        .unwrap();
+    let held = try_claim(&r, "o1", turn);
+    assert!(was_refused(&held), "{held:?}");
+    assert_eq!(r.turn_state(turn), "queued", "it waits, never cancelled");
+    link_in(&r, 1); // the reconcile tells it again
+    let again = try_claim(&r, "o1", turn);
+    assert!(!was_refused(&again), "{again:?}");
+}
+
 // ---- the day ----
 
 #[test]

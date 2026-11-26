@@ -71,6 +71,10 @@ async fn ask_method(hub: &Arc<Hub>, computer_id: &str, method: &'static str, b: 
     };
     let folders = crate::remote::peer_asks::folders_of(hub)
         .ok_or_else(|| UserError("This computer can't hold asks for another computer yet.".into()))?;
+    // Nothing is answered for a pairing until the reconcile has agreed it with the core (an unlink while the core was away).
+    if !crate::remote::peer_asks::fence::settled(hub).await {
+        return Err(UserError("This computer is still settling its pairings; try again shortly.".into()).into());
+    }
     let agents: std::collections::BTreeSet<String> =
         owner_agents(hub).iter().filter_map(|a| a["agent"].as_str().map(str::to_owned)).collect();
     let caller = crate::remote::peer_asks::callee::Caller { computer: computer_id, name: &pairing.name, epoch };
