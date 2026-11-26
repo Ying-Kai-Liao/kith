@@ -445,8 +445,8 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     W11: `serve stop` routing, and finding the supervising holder without the CIM search.
   - **Finding for W12.** A graceful host stop drops the core, but the core's holder (kith-holder.exe) is built to outlive its
     host and leaves only after its idle time (120 s, `holder_link.rs` `idle`), so it still holds `target\debug\kith-holder.exe`
-    right after a stop. The tests' `end_holders_of` stays for that reason; W12's graceful stop (D6) decides whether a host stop
-    should end an idle holder at once.
+    right after a stop. The tests' `end_holders_of` stays for that reason. Rule (architect, 2026-11-27): `stop` ends the host and
+    the core inside it, never the core's holder or its runs; the holder idles out by itself, as on the Mac. The e2e checks both.
 - [ ] **W12. Claims, held terminals and host turns on Windows.** Owner: unowned. Status: not started. L. **Model passed 2026-11-24** (`model-w12/`, below). Ready for
   workers once its WAITS are met, and only with the W1 premise answers in hand (P-W12a and P-W12b).
   - **WAITS P1-19** (no Python claim path left) and P1-12 R5. Depends: W2b, W5a, W8.

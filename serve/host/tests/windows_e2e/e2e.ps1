@@ -205,8 +205,22 @@ Section 'stop and uninstall'
 $stop = Run-Cap $Kith @('stop') 60 'stop'
 Check 'kith stop exits 0' ($stop.Code -eq 0) ($stop.Out + $stop.Err)
 Start-Sleep -Seconds 2
-$left = Host-Procs
-Check 'stop ended the whole tree: no program of the zip is left running' (@($left).Count -eq 0) (($left | ForEach-Object { $_.Name }) -join ',')
+# `stop` ends the host and the core daemon inside it, and the opt-in supervising holder. It never ends the core's own
+# holder or the runs it keeps: that holder leaves by itself once no core is connected and it holds nothing (120 s idle),
+# the same as on the Mac (decisions.md, 2026-11-27).
+function Holder-Cmdlines { @(Get-CimInstance Win32_Process -Filter "Name = 'kith-holder.exe'" -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.CommandLine }) }
+$left = @(Host-Procs | Where-Object { $_.Name -match '^kith-servew?$' })
+$supervisors = @(Holder-Cmdlines | Where-Object { $_ -match 'supervise' })
+Check 'stop ended the host: no kith-servew, kith-serve or supervising holder is left' ($left.Count -eq 0 -and $supervisors.Count -eq 0) ((($left | ForEach-Object { $_.Name }) + $supervisors) -join ',')
+# The core holder outlives stop by design and idles out in 120 s; its going away also proves the core acked every exit.
+$coreHolder = @()
+$deadline = (Get-Date).AddSeconds(150)
+do {
+  $coreHolder = @(Holder-Cmdlines | Where-Object { $_ -match '--dir' -and $_ -match [regex]::Escape('machine-state\core\holder') })
+  if ($coreHolder.Count -eq 0) { break }
+  Start-Sleep -Seconds 3
+} while ((Get-Date) -lt $deadline)
+Check 'the core holder idled out within 150 s of stop (kith-holder.exe with --dir machine-state\core\holder is gone)' ($coreHolder.Count -eq 0) ($coreHolder -join ' | ')
 $down = $false
 try { Invoke-RestMethod "http://127.0.0.1:$Port/health" -TimeoutSec 3 | Out-Null } catch { $down = $true }
 Check 'the host no longer answers' $down

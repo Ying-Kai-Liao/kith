@@ -48,17 +48,14 @@ pub fn stop() -> Result<()> {
 
 /// Signals the host's named stop event and waits up to [`GRACE`] for the host to leave, so it stops its agents and its core
 /// the way it does on SIGTERM. No event (no host, or one older than the event) or a host that stays: the caller ends it hard.
-/// The supervisor may start the host again in the meantime; the caller's `taskkill /T` takes that one too.
+/// The supervisor may start the host again in the meantime; the caller's `taskkill /T` takes that one too. The core's own
+/// holder is not ended here: it outlives `stop` by design and leaves by itself once idle (decisions.md, 2026-11-27).
 fn stop_gracefully() {
     let name = kith_winsys::event::stop_event_name(&data_dir());
     let Ok(Some(event)) = kith_winsys::event::StopEvent::open(&name) else { return };
     if event.signal().is_err() {
         return;
     }
-    // `taskkill /T` walks down from a live parent. Once the host has left, what it started (the core's holder, which
-    // outlives its starter on purpose) hangs from nothing, and `stop` is meant to end the whole tree. So the tree is
-    // listed before the host is asked to leave and ended after it.
-    let tree = supervisor_tree();
     let deadline = std::time::Instant::now() + GRACE;
     while std::time::Instant::now() < deadline {
         // The host holds `host.lock` until it is gone.
@@ -67,53 +64,6 @@ fn stop_gracefully() {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    end_listed(&tree);
-}
-
-/// Runs a PowerShell script (the environment carries its input, so nothing needs quoting) and returns its output lines.
-fn powershell(script: &str, env: &[(&str, &str)]) -> Vec<String> {
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-    let exe = Path::new(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
-    let mut command = Command::new(exe);
-    command
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-        .stdin(Stdio::null())
-        .stderr(Stdio::null());
-    for (k, v) in env {
-        command.env(k, v);
-    }
-    command
-        .output()
-        .map(|o| {
-            String::from_utf8_lossy(&o.stdout).lines().map(|l| l.trim().to_owned()).filter(|l| !l.is_empty()).collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Every process below a running `kith-servew.exe`, as `pid name`.
-fn supervisor_tree() -> Vec<String> {
-    let script = "$all = @(Get-CimInstance Win32_Process); \
-        $todo = @($all | Where-Object { $_.Name -eq $env:KITH_ROOT_IMAGE } | ForEach-Object { $_.ProcessId }); \
-        $seen = @{}; \
-        while ($todo.Count -gt 0) { \
-          $next = @(); \
-          foreach ($p in $todo) { foreach ($c in @($all | Where-Object { $_.ParentProcessId -eq $p })) { \
-            if (-not $seen.ContainsKey($c.ProcessId)) { $seen[$c.ProcessId] = $c.Name; $next += $c.ProcessId } } } \
-          $todo = $next } \
-        $seen.GetEnumerator() | ForEach-Object { \"$($_.Key) $($_.Value)\" }";
-    powershell(script, &[("KITH_ROOT_IMAGE", SUPERVISOR)])
-}
-
-/// Ends the listed processes that are still running under the same name (a reused pid is left alone).
-fn end_listed(tree: &[String]) {
-    if tree.is_empty() {
-        return;
-    }
-    let script = "foreach ($l in ($env:KITH_LISTED -split ';')) { $pid_, $name = $l -split ' ', 2; \
-        $p = Get-Process -Id $pid_ -ErrorAction SilentlyContinue; \
-        if ($p -and ($p.ProcessName + '.exe') -eq $name) { taskkill /F /PID $pid_ | Out-Null } }";
-    powershell(script, &[("KITH_LISTED", &tree.join(";"))]);
 }
 
 /// Ends the `kith-holder supervise` process whose command line names `dir` as a whole quoted word (install quotes every

@@ -74,8 +74,9 @@ pub fn forget_home(home: &Path) {
     end_holders_of(home);
 }
 
-/// Windows: `stop` cannot send SIGTERM (there is no `kill`), so the host dies hard and never stops its core, and the
-/// holder the core started is built to outlive its starter (it breaks out of the starter's job). A holder left running
+/// Windows: `stop` ends the host and its core but, by the architect's rule (decisions.md, 2026-11-27), never the core's own
+/// holder: it is built to outlive its starter (it breaks out of the starter's job) and leaves by itself once idle, after
+/// 120 s, as on the Mac. A test home is gone long before that, and a holder left running
 /// keeps `target\debug\kith-holder.exe` open, and cargo cannot replace it later in the job ("Access is denied"). Ends
 /// the holders whose command line names this test home (the core starts them with `--dir <home>\...`). Matches on the
 /// home's folder name (`kith-e2e-<uuid>`), not its full path: the runner's temp dir is spelled `RUNNER~1` in the holder's
