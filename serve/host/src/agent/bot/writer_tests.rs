@@ -1218,7 +1218,7 @@ actor_test! {
         let entry = rig.hub.add_entry(&lane, EntryKind::Notice, 0, &json!({"text": "two cards answered", "style": "info"})).unwrap();
         let pulled = crate::agent::bot::Pulled { conversation: "acp:a:".into(), person: "kai".into() };
         rig.hub
-            .send_cmd("a", crate::agent::bot::Cmd::WakeBatch {
+            .send_cmd("a", Cmd::WakeBatch {
                 lane,
                 items: vec![(entry.id, "[kith wake run-5] two cards answered".into())],
                 by_id: Some((501, pulled)),

@@ -399,7 +399,7 @@ impl CoreWriter {
     }
 
     /// A row that answers data: `Err(why)` when the core did not answer (down, or it refused the call itself).
-    fn data(&self, method: &str, params: &Value) -> Result<Value, String> {
+    pub(crate) fn data(&self, method: &str, params: &Value) -> Result<Value, String> {
         match self.call(method, params) {
             Answer::Done(v) => Ok(v),
             Answer::Refused(said) => Err(said),

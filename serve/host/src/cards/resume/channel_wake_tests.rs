@@ -1,4 +1,4 @@
-//! The channel door by turn id (WK4c), on a real hub with a scripted core: which rows each end of an attempt calls. The core's own
+//! The channel door by turn id (`WK4c`), on a real hub with a scripted core: which rows each end of an attempt calls. The core's own
 //! rules for the same rows (the attach naming the work key, the requeue, R4's answer) are tested in `core/runtime`; the launch's
 //! side (the writer claim on the session first) in `core/kernel`; the channel's batch in `channels/tests.rs`.
 
@@ -123,7 +123,7 @@ async fn the_wake_is_claimed_on_the_work_key_and_a_connection_that_is_down_gives
     until("the requeue", || !calls(&log, "hostclaim.stop").is_empty()).await;
     let stops = calls(&log, "hostclaim.stop");
     assert_eq!((stops[0]["claimId"].as_i64(), stops[0]["requeue"].as_bool()), (Some(41), Some(true)));
-    assert!(calls(&log, "hostclaim.cancel").is_empty());
+    assert_eq!(calls(&log, "hostclaim.cancel"), Vec::<Value>::new());
 }
 
 #[tokio::test]
@@ -154,7 +154,7 @@ async fn an_attempt_that_attached_reports_its_end_once_and_later_attempts_carry_
     let reports = calls(&log, "hostclaim.report");
     assert_eq!((reports[0]["claimId"].as_i64(), reports[0]["kind"].as_str()), (Some(41), Some("done")));
     // Not `answered` by the host: the core answers it from its turn.
-    assert!(calls(&log, "wake.done").is_empty());
+    assert_eq!(calls(&log, "wake.done"), Vec::<Value>::new());
 }
 
 #[tokio::test]
@@ -185,7 +185,7 @@ async fn a_launch_that_stopped_before_the_attach_leaves_the_claim_open_for_the_n
     assert!(!w.settled(), "the next attempt carries it again");
     // A run that never spawned (a refusal before it, a spawn error, Windows' early NotStarted) has no pid: the same branch.
     assert!(!attempt_over(&r.hub, &w, &Seen::default()).await);
-    assert!(calls(&log, "hostclaim.report").is_empty());
+    assert_eq!(calls(&log, "hostclaim.report"), Vec::<Value>::new());
 }
 
 #[tokio::test]
@@ -214,7 +214,7 @@ async fn a_wake_nobody_attached_and_no_writer_holds_is_freed_and_after_a_stop_wi
     unattached(&r.hub, &w, false).await;
     until("the cancel", || !calls(&log, "hostclaim.cancel").is_empty()).await;
     assert_eq!(calls(&log, "hostclaim.cancel")[0]["turn"], 7);
-    assert!(calls(&log, "hostclaim.stop").is_empty());
+    assert_eq!(calls(&log, "hostclaim.stop"), Vec::<Value>::new());
 
     // A Stop before the attach is one `wake.withdraw` (the wake module's own call, which cancels the unredeemed turn and withdraws
     // its requests in one transaction), not a cancel and a done as two calls: a restart between them gives back what the Stop took.

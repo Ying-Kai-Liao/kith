@@ -353,7 +353,7 @@ async fn a_stop_drops_a_claimed_wake_waiting_in_the_inbox() {
     let wk = "fake/x:room:1#house";
     let w = ChannelWake::for_test("run-9", 7, 41, wk);
     // The worker's debounce keeps the batch in the inbox for a moment: a Stop finds it there.
-    r.core.with(|i| i.busy.insert(wk.to_owned(), super::core::Busy::default()));
+    r.core.with(|i| i.busy.insert(wk.to_owned(), core::Busy::default()));
     r.core.with(|i| {
         i.claimed.insert("[kith wake run-9] x".to_owned(), w);
         i.st.inbox.insert(wk.to_owned(), vec![vec!["[kith wake run-9] x".to_owned()]]);

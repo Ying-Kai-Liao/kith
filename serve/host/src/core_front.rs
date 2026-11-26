@@ -164,6 +164,13 @@ impl TestDaemon {
         self.0.stop();
     }
 
+    /// `module` switched as the step leaves it (no import), so the core answers its rows: `claims` for a launch's
+    /// `claim.external` and `claim.attach`.
+    #[cfg(unix)]
+    pub fn switched(&self, folders: &Paths, module: &str) {
+        self.0.switch_for_test(folders, module).expect("the switch");
+    }
+
     /// The holder's first hello, for a test core that has none: the claims wait for it.
     pub fn reconciled(&self) {
         self.0.mark_reconciled_without_holder().expect("the reconcile mark");
