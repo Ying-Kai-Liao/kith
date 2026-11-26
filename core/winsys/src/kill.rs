@@ -4,7 +4,8 @@
 
 use windows_sys::Win32::Foundation::{ERROR_INVALID_PARAMETER, FILETIME, GetLastError};
 use windows_sys::Win32::System::Threading::{
-    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, TerminateProcess,
+    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+    TerminateProcess,
 };
 
 use crate::Handle;
@@ -36,7 +37,13 @@ pub fn terminate_if_started_at(pid: u32, recorded_epoch_ms: i64) -> Killed {
         return Killed::NotThatProcess;
     }
     // SAFETY: a plain call with a pid; a null handle means failure.
-    let h = unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    let h = unsafe {
+        OpenProcess(
+            PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+            0,
+            pid,
+        )
+    };
     if h.is_null() {
         // SAFETY: reads the calling thread's last error.
         return if unsafe { GetLastError() } == ERROR_INVALID_PARAMETER {
@@ -89,7 +96,10 @@ mod tests {
             .unwrap();
         let ms = epoch_ms(crate::tree::creation_time(child.id()).unwrap());
         // Another start time: a stranger holding the pid. Not touched.
-        assert_eq!(terminate_if_started_at(child.id(), ms + 5_000), Killed::NotThatProcess);
+        assert_eq!(
+            terminate_if_started_at(child.id(), ms + 5_000),
+            Killed::NotThatProcess
+        );
         assert!(child.try_wait().unwrap().is_none(), "still running");
         assert_eq!(terminate_if_started_at(child.id(), ms), Killed::Yes);
         child.wait().unwrap();

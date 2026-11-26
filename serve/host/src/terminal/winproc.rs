@@ -28,7 +28,11 @@ pub(crate) fn judge(recorded: Option<&str>, probe: &Probe) -> Seen {
         Probe::Alive(Some(now)) => match recorded.map(str::trim) {
             // A row written before stamps (old `lstart` text, none): unknown, not gone.
             Some(rec) if is_stamp(rec) && comparable(rec, now) => {
-                if same_process(rec, now) { Seen::Same } else { Seen::Other }
+                if same_process(rec, now) {
+                    Seen::Same
+                } else {
+                    Seen::Other
+                }
             }
             _ => Seen::Unsure,
         },

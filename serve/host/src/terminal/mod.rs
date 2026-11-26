@@ -23,13 +23,13 @@ mod jsonl;
 mod registry;
 pub(crate) use registry::{pid_runs, proc_start};
 mod sync;
-pub(crate) mod winproc;
 #[cfg(test)]
 mod tests;
 #[cfg(unix)]
 pub mod warm_stub;
 #[cfg(all(test, unix))]
 mod warm_stub_tests;
+pub(crate) mod winproc;
 
 #[cfg(test)]
 pub use sync::scan;
