@@ -190,7 +190,7 @@ Each row gives the gap, its evidence, and the package (W) or retire-python item 
 |---|---|---|
 | Run key service exists but is never compiled | `service/windows.rs`, `bin/kith-servew.rs`; `one-bot-model.md:387` | W2 |
 | `kith serve start/stop/restart/status` are bash verbs | `kernel.rs:22` | W11 (P4-8 on Mac) |
-| Stop is `taskkill /F /T /IM` plus a PowerShell CIM search | `service/windows.rs:37-74` | W11 (named stop event, D5) |
+| Stop is `taskkill /F /T /IM` plus a PowerShell CIM search | `service/windows.rs:37-74` | W11 (named stop event, D5); the event half is done (windows-owner-build-2-stopevent): the host waits on `kith-serve-stop-<hash of its data folder>`, `stop` signals it first and keeps taskkill as the fallback; the holder-by-folder half stays |
 | Host only takes SIGTERM on Unix | `serve/host/src/main.rs:1859-1872` | W2 (Ctrl-C plus the stop event) |
 | `--supervise` refused off Unix | `serve/host/src/supervise.rs:45-49` | not needed: `kith-servew` is the supervisor on Windows |
 | launchd jobs serve, cost, sched, backup, monitor | retire-python section 2; `kith-sched:705-720`, `kith-state:251-258` | W11 host timers (D3); sched and wake after P2 |
@@ -439,6 +439,14 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     `service/windows.rs:37-150` (stop through the named event, holder found by folder, no `/IM`); a host timer module (cost
     sync, backup, the daemon's wake drain once it exists).
   - The same timers can later replace the Mac plists (P1-10, P4-14).
+  - **Stop through the named event: done (windows-owner-build-2-stopevent).** `shutdown_signal` also resolves on the event
+    `kith-serve-stop-<hash of the data folder>` (`core/winsys` `stop_event_name`; the host clears it at start); `service::stop`
+    signals it, waits up to 10 s for `host.lock`, then falls back to taskkill; the e2e helper `stop` signals it too. Left for
+    W11: `serve stop` routing, and finding the supervising holder without the CIM search.
+  - **Finding for W12.** A graceful host stop drops the core, but the core's holder (kith-holder.exe) is built to outlive its
+    host and leaves only after its idle time (120 s, `holder_link.rs` `idle`), so it still holds `target\debug\kith-holder.exe`
+    right after a stop. The tests' `end_holders_of` stays for that reason. Rule (architect, 2026-11-27): `stop` ends the host and
+    the core inside it, never the core's holder or its runs; the holder idles out by itself, as on the Mac. The e2e checks both.
 - [ ] **W12. Claims, held terminals and host turns on Windows.** Owner: unowned. Status: in progress (W12-1, the job held by its recorded process, H1 H2 H5 H7 and the P-W12c probe, is built: windows-owner-build-2-w12-1). L. **Model passed 2026-11-24** (`model-w12/`, below). Ready for
   workers once its WAITS are met, and only with the W1 premise answers in hand (P-W12a and P-W12b).
   - **WAITS P1-19** (no Python claim path left) and P1-12 R5. Depends: W2b, W5a, W8.
