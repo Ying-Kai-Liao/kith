@@ -384,6 +384,35 @@ fn a_bg_open_makes_one_turn_and_a_replay_makes_no_second() {
 }
 
 #[test]
+fn a_bg_open_keeps_what_the_caller_asked_for_and_the_run_door_lists_it() {
+    let r = Rig::new();
+    let o = r.open(
+        "o1",
+        "bg",
+        &json!({"task": "do the thing", "model": "opus", "effort": "high", "folder": "/work/x", "project": "kith"}),
+        &[],
+    );
+    assert_eq!(r.turn_state(turn_of(&o)), "queued");
+    let first = r.host("hostclaim.queued", &json!({"sources": ["ask"]}));
+    let item = &first["turns"][0];
+    assert_eq!(
+        item["opts"],
+        json!({"model": "opus", "effort": "high", "folder": "/work/x", "project": "kith"})
+    );
+    assert_eq!(item["askSession"], Value::Null);
+    // An ask opened without them (a row from before the fields) lists none, and an empty word is not one.
+    r.open("o2", "bg", &json!({"task": "t", "model": ""}), &[]);
+    let listed = r.host("hostclaim.queued", &json!({"sources": ["ask"]}));
+    let plain = listed["turns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["ask"] == "o2")
+        .unwrap();
+    assert_eq!(plain["opts"], Value::Null);
+}
+
+#[test]
 fn the_run_door_covers_the_ask_turn() {
     let r = Rig::new();
     let turn = turn_of(&r.open_bg("a1"));
@@ -790,7 +819,8 @@ fn every_ledger_row_checks_its_params() {
     let ok = r.call(
         Principal::Owner,
         "ask.open",
-        &json!({"id": "p1", "asked": "echo", "mode": "bg", "task": "t", "engine": "claude", "cliPid": 1, "cliStart": "s"}),
+        &json!({"id": "p1", "asked": "echo", "mode": "bg", "task": "t", "engine": "claude", "cliPid": 1, "cliStart": "s",
+               "model": "m", "effort": "low", "folder": "/f", "project": "p"}),
     );
     assert!(ok.is_ok(), "{ok:?}");
     let bad_mode = r.call(
@@ -1143,4 +1173,46 @@ fn a_bg_ask_on_a_named_conversation_has_its_lost_reports_cost_booked_once() {
     r.tick();
     r.tick();
     assert!((cost_of(&r, "n1") - 0.25).abs() < 1e-9);
+}
+
+#[test]
+fn the_attach_records_the_engines_own_session_when_it_is_not_the_turns_conversation() {
+    // C3L: a Claude callee runs in a session of its own while its turn is on `ask:<id>`; `-c` must resume that session.
+    let r = Rig::new();
+    let turn = turn_of(&r.open_bg("a1"));
+    let claim = r.claim("a1", turn);
+    let pid = std::process::id();
+    let started = kith_kernel::procstart::start_stamp(pid).unwrap();
+    // The launch holds the writer claim on its session first (the core refuses an attach that names a session without it).
+    let held = r
+        .d
+        .shared()
+        .with_core(|c| {
+            crate::conversations::external::call_at(
+                c,
+                "claim.external",
+                &json!({"conversation": "sess-real", "pid": pid, "started": started, "person": "", "agent": "echo"}),
+                ms(),
+                &crate::gate::System,
+            )
+        })
+        .unwrap();
+    assert!(held["claimId"].is_i64(), "{held}");
+    let said =
+        r.d.shared()
+            .with_core(|c| {
+                sched_run::attach_in(
+                    c,
+                    claim,
+                    Some("ask:a1"),
+                    Some("sess-real"),
+                    pid,
+                    &started,
+                    ms(),
+                )
+            })
+            .unwrap();
+    assert_eq!(said, json!({"attached": true}));
+    let session: String = r.sql("SELECT session FROM asks WHERE id = ?1", "a1");
+    assert_eq!(session, "sess-real");
 }

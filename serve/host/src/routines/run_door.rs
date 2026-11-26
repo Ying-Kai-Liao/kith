@@ -76,12 +76,33 @@ pub(crate) struct Launch {
 /// What a kind does with the started process's pid, and what it keeps until the run is reported.
 pub(crate) type Bind = Box<dyn FnOnce(u32) -> Box<dyn Any + Send> + Send>;
 
+/// What a kind adds to the waiter that holds its child (the `ask` kind's: a stop of the ask ends the claim, and the child is the
+/// waiter's to kill; the answer is told to the ask once the run is reported).
+pub(crate) struct Watch {
+    /// How often `ended` is asked while the child lives.
+    pub every: Duration,
+    /// Whether the core ended the run's claim (`ask.end`, a Stop, a revoke): the child is stopped, and the end is reported as usual.
+    pub ended: Box<dyn Fn() -> bool + Send>,
+    /// Run once on the waiter's thread after the end was reported (the core's answer to the report settles nothing for an ask).
+    pub after: Box<dyn FnOnce() + Send>,
+}
+
 /// Claims `run`'s turn, starts what `launch` makes of the claim's id and reports its end. Blocking until the process is started
 /// (the wait and the report are a thread of their own).
 pub(crate) fn start(
     writer: &Arc<CoreWriter>,
     run: &Run<'_>,
     launch: impl FnOnce(i64) -> Result<Launch, String>,
+) -> Started {
+    start_with(writer, run, |claim| launch(claim).map(|l| (l, None)))
+}
+
+/// [`start`] for a kind that also gives the waiter a [`Watch`]. One start, whatever the kind: the claim, the spawn and the report
+/// are the same code.
+pub(crate) fn start_with(
+    writer: &Arc<CoreWriter>,
+    run: &Run<'_>,
+    launch: impl FnOnce(i64) -> Result<(Launch, Option<Watch>), String>,
 ) -> Started {
     let claim = match writer.claim_run_as(run.kind, run.conversation, run.person, run.turn) {
         RunClaim::Claimed(id) => id,
@@ -96,13 +117,29 @@ pub(crate) fn start(
             return Started::Cancelled(why);
         }
     };
-    let Launch { cmd, stdin, err_file, bind } = launched;
+    let (Launch { cmd, stdin, err_file, bind }, watch) = launched;
     match spawn_with(cmd, stdin.as_ref()) {
         Ok(child) => {
             let keep = bind.map(|bind| bind(child.id()));
             let (writer, turn, ended) = (writer.clone(), run.turn, run.ended);
             std::thread::spawn(move || {
-                over_with(&writer, child, claim, turn, &Pace::LIVE, err_file.as_deref(), ended);
+                match watch {
+                    None => over_with(&writer, child, claim, turn, &Pace::LIVE, err_file.as_deref(), ended),
+                    Some(Watch { every, ended: gone, after }) => {
+                        let pace = &Pace::LIVE;
+                        over_watching(
+                            &writer,
+                            child,
+                            claim,
+                            turn,
+                            pace,
+                            err_file.as_deref(),
+                            ended,
+                            Some((every, &*gone)),
+                        );
+                        after();
+                    }
+                }
                 drop(keep);
             });
             Started::Ran
@@ -204,12 +241,28 @@ pub(crate) fn over(writer: &CoreWriter, child: Child, claim: i64, turn: i64, pac
 /// [`over`] for a run whose stderr may be a file (`err_file`): the reason is the last line of what the run said.
 pub(crate) fn over_with(
     writer: &CoreWriter,
+    child: Child,
+    claim: i64,
+    turn: i64,
+    pace: &Pace,
+    err_file: Option<&Path>,
+    ended: &str,
+) {
+    over_watching(writer, child, claim, turn, pace, err_file, ended, None);
+}
+
+/// [`over_with`] for a run whose claim the core may end under it: with `watch` (how often to look, and the question) the child is
+/// stopped when the claim is gone, by this waiter, the one that holds it.
+#[allow(clippy::too_many_arguments, reason = "over_with's own, plus the watch")]
+pub(crate) fn over_watching(
+    writer: &CoreWriter,
     mut child: Child,
     claim: i64,
     turn: i64,
     pace: &Pace,
     err_file: Option<&Path>,
     ended: &str,
+    watch: Option<(Duration, &(dyn Fn() -> bool + Send))>,
 ) {
     let pid = child.id();
     // Until the run is the engine, stderr is its refusal; the engine's own output goes to its log, so this is EOF by then.
@@ -217,7 +270,10 @@ pub(crate) fn over_with(
     if let Some(mut err) = child.stderr.take() {
         let _ = err.read_to_string(&mut said);
     }
-    let status = child.wait();
+    let status = match watch {
+        Some((every, gone)) => wait_watching(&mut child, every, gone),
+        None => child.wait(),
+    };
     if said.is_empty()
         && let Some(file) = err_file
     {
@@ -233,4 +289,50 @@ pub(crate) fn over_with(
         until_told("cancel", turn, pace, || writer.cancel_told(turn, &why));
     }
     until_told("report", turn, pace, || writer.run_over(claim, pid, clean, &why));
+}
+
+/// Waits for the child, asking `gone` every `every`: when the core ended the run's claim, the child is stopped (its group first, so
+/// the engine and its tools go with it) and its end is read as any other.
+fn wait_watching(
+    child: &mut Child,
+    every: Duration,
+    gone: &(dyn Fn() -> bool + Send),
+) -> std::io::Result<std::process::ExitStatus> {
+    let step = every.min(Duration::from_millis(100));
+    let mut since = Duration::ZERO;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if since >= every {
+            since = Duration::ZERO;
+            if gone() {
+                stop_group(child);
+                return child.wait();
+            }
+        }
+        std::thread::sleep(step);
+        since += step;
+    }
+}
+
+/// Ends the child and its group: a TERM, then a KILL if it is still there after a grace. Windows has no group to signal by pid:
+/// the child alone is killed (the launch's job object, windows-owner, takes the tree).
+fn stop_group(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        if let Ok(group) = i32::try_from(child.id()) {
+            // SAFETY: killpg only sends a signal; the group is the one `detach` made for this child.
+            unsafe { libc::killpg(group, libc::SIGTERM) };
+            for _ in 0..50 {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            // SAFETY: as above.
+            unsafe { libc::killpg(group, libc::SIGKILL) };
+        }
+    }
+    let _ = child.kill();
 }

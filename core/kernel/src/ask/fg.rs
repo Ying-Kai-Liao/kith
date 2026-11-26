@@ -102,15 +102,6 @@ fn short(flag: &str) -> String {
     }
 }
 
-/// The flag as the usage names it: `-p`, `-m`, `-e`.
-fn short_flag(flag: &str) -> &'static str {
-    match short(flag).as_str() {
-        "-p" => "-p",
-        "-m" => "-m",
-        _ => "-e",
-    }
-}
-
 /// Where the agent works: -C, else the folder of the project -p names, else a named conversation's own folder; the process
 /// goes there (the conversation belongs to the directory it ran in).
 fn work_in(host: &Host, agent: &str, p: &Parsed, err: &mut dyn Write) -> R<()> {
@@ -244,6 +235,27 @@ fn claim_file_alive(path: &std::path::Path) -> bool {
     }
 }
 
+/// A continued conversation keeps its project, model, effort and harness unless this call names new ones.
+fn merged_opts(p: &Parsed, prev: Option<&Value>) -> Vec<(String, String)> {
+    let mut kith_opts = p.opts.clone();
+    for (flag, alias) in [
+        ("-p", "--project"),
+        ("-m", "--model"),
+        ("-e", "--effort"),
+        ("-H", "--harness"),
+    ] {
+        let given = p.opts.iter().any(|(f, _)| f == flag || f == alias);
+        let kept = prev
+            .and_then(|v| v.get("opts"))
+            .and_then(|o| o.get(flag))
+            .and_then(Value::as_str);
+        if let (false, Some(v)) = (given, kept) {
+            kith_opts.push((flag.to_owned(), v.to_owned()));
+        }
+    }
+    kith_opts
+}
+
 /// The text of `kith ask AGENT ...` (the agent is the first word; `bg` was named anywhere before the task's `--`).
 pub(super) fn ask(
     host: &Host,
@@ -254,44 +266,13 @@ pub(super) fn ask(
     err: &mut dyn Write,
 ) -> R<i32> {
     let p = parse(rest)?;
-    if bg {
-        // The row has no field for these yet (A2/S1 #1194): refuse by name rather than run the agent without them.
-        let named = p.dir.as_ref().map(|_| "-C").or_else(|| {
-            p.opts
-                .iter()
-                .find(|(f, _)| !matches!(f.as_str(), "-H" | "--harness"))
-                .map(|(f, _)| short_flag(f))
-        });
-        if let Some(flag) = named {
-            return Err(die(format!(
-                "kith ask: {flag} is not carried by a background ask yet"
-            )));
-        }
-    }
     let started = std::env::current_dir().unwrap_or_default();
     work_in(host, agent, &p, err)?;
     let at = conversation(host, agent, &p);
-    if bg && let Some(prev) = at.prev.as_ref() {
-        // The conversation being continued keeps options and a folder the row cannot carry either.
-        let kept = ["-p", "-m", "-e"].into_iter().find(|f| {
-            prev.get("opts")
-                .and_then(|o| o.get(*f))
-                .is_some_and(|v| !v.is_null())
-        });
-        let elsewhere = prev
-            .get("dir")
-            .and_then(Value::as_str)
-            .is_some_and(|d| std::path::Path::new(d) != started);
-        if let Some(flag) = kept.or(elsewhere.then_some("-C")) {
-            return Err(die(format!(
-                "kith ask: this conversation keeps {flag}, which a background ask does not carry yet"
-            )));
-        }
-    }
+    let prev = at.prev.as_ref();
     if bg {
         return background(host, agent, rest, &p, &at, out);
     }
-    let prev = at.prev.as_ref();
     // The conversation is still running (a `--bg` job, or another run holds its session): the message is its next turn. (The
     // Python looked the job up by its key in `ask-bg/`; the ledger's `--bg` callee holds the session, which this finds.)
     if let Some(sid) = prev_str(prev, "session_id")
@@ -331,23 +312,7 @@ pub(super) fn ask(
         )));
     }
 
-    // A continued conversation keeps its project, model, effort and harness unless this call names new ones.
-    let mut kith_opts = p.opts.clone();
-    for (flag, alias) in [
-        ("-p", "--project"),
-        ("-m", "--model"),
-        ("-e", "--effort"),
-        ("-H", "--harness"),
-    ] {
-        let given = p.opts.iter().any(|(f, _)| f == flag || f == alias);
-        let kept = prev
-            .and_then(|v| v.get("opts"))
-            .and_then(|o| o.get(flag))
-            .and_then(Value::as_str);
-        if let (false, Some(v)) = (given, kept) {
-            kith_opts.push((flag.to_owned(), v.to_owned()));
-        }
-    }
+    let kith_opts = merged_opts(&p, prev);
     let mut opts = Map::new();
     for (f, v) in &kith_opts {
         opts.insert(short(f), json!(v));
@@ -633,14 +598,19 @@ fn background(
     if let Some(last) = rest.last() {
         open["brief"] = json!(last);
     }
-    // -m, -e, -C and -p were refused by name before (the row has no field for them yet: TODO A2/S1 #1194). -H names the engine.
-    if let Some((_, h)) = p
-        .opts
-        .iter()
-        .rev()
-        .find(|(f, _)| f == "-H" || f == "--harness")
-    {
+    // The host's run gets what `-m -e -C -p` said (a continued conversation keeps its own), and the folder this call works in: the
+    // detached wrapper ran in the caller's folder, and the host's run has none of its own. -H names the engine.
+    let kith_opts = merged_opts(p, at.prev.as_ref());
+    for (flag, key) in [("-m", "model"), ("-e", "effort"), ("-p", "project")] {
+        if let Some((_, v)) = kith_opts.iter().rev().find(|(f, _)| short(f) == flag) {
+            open[key] = json!(v);
+        }
+    }
+    if let Some((_, h)) = kith_opts.iter().rev().find(|(f, _)| short(f) == "-H") {
         open["engine"] = json!(h);
+    }
+    if let Ok(dir) = std::env::current_dir() {
+        open["folder"] = json!(dir.to_string_lossy());
     }
     // `-c` goes on the session the last turn of this conversation kept.
     if let Some(sid) = prev_str(at.prev.as_ref(), "session_id") {

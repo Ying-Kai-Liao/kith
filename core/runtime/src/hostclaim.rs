@@ -433,7 +433,8 @@ fn sources_of(p: &Value) -> Result<Vec<&str>> {
 /// (`SkipRedeemed`). Every schedule turn in this core.db was fired on this Mac, for an agent the index lists here. Each item
 /// carries its `source`; a `wake` turn also answers its `door` (`run`: the kernel resumes it; `host`: the host takes it), the
 /// ids of the requests it carries (`requestIds`, in the order they came in) and the `note` it was made from (its prompt); an `ask`
-/// turn (a `--bg` ask's callee) answers `ask` (the ask's id) and `out` (the file its run gives the callee as stdout).
+/// turn (a `--bg` ask's callee) answers `ask` (the ask's id), `out` (the file its run gives the callee as stdout), `opts`, `askedBy` and
+/// `askSession`.
 fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
     let owner = owner_id(core);
     let mut st = core.conn().prepare(&format!(
@@ -444,7 +445,10 @@ fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
                 t.source,
                 (SELECT s.door FROM wake_turns w JOIN wake_sessions s ON s.session = w.session WHERE w.turn_id = t.id),
                 (SELECT w.run FROM wake_turns w WHERE w.turn_id = t.id),
-                (SELECT a.id || char(0) || COALESCE(a.out_path, '') FROM asks a WHERE a.turn = t.id)
+                (SELECT a.id || char(0) || COALESCE(a.out_path, '') FROM asks a WHERE a.turn = t.id),
+                (SELECT a.extra FROM asks a WHERE a.turn = t.id),
+                (SELECT a.caller_agent FROM asks a WHERE a.turn = t.id),
+                (SELECT a.session FROM asks a WHERE a.turn = t.id)
          FROM turns t JOIN conversations c ON c.id = t.conversation
          WHERE t.enq_key IS NULL AND t.source IN {} AND t.state IN ('queued', 'parked')
          ORDER BY t.id",
@@ -484,6 +488,15 @@ fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
             if let Some((id, out)) = asked.as_deref().and_then(|a| a.split_once('\0')) {
                 item["ask"] = json!(id);
                 item["out"] = if out.is_empty() { Value::Null } else { json!(out) };
+                // What the caller asked for (`-m -e -C -p`), who asked, and the callee's session once it has one (a card's resume
+                // goes on it): a row from before the fields has none of them.
+                let extra: Option<String> = r.get(15)?;
+                item["opts"] = extra
+                    .and_then(|e| serde_json::from_str::<Value>(&e).ok())
+                    .and_then(|e| e.get("opts").cloned())
+                    .unwrap_or(Value::Null);
+                item["askedBy"] = json!(r.get::<_, Option<String>>(16)?);
+                item["askSession"] = json!(r.get::<_, Option<String>>(17)?);
             }
             if wake {
                 let run: Option<String> = r.get(13)?;

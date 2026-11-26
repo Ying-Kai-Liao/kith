@@ -18,6 +18,9 @@ use super::*;
 /// keeps what it was asked.
 struct Fake {
     attach: Option<Value>,
+    external: Value,
+    /// `claim.external` is not answered (no core).
+    external_down: bool,
     calls: RefCell<Vec<(String, Value)>>,
 }
 
@@ -25,8 +28,21 @@ impl Fake {
     fn new(attach: Option<Value>) -> Self {
         Self {
             attach,
+            external: json!({"claimId": 41}),
+            external_down: false,
             calls: RefCell::new(Vec::new()),
         }
+    }
+
+    /// What `claim.external` answers (a writer that holds the session).
+    fn holding(mut self, external: Value) -> Self {
+        self.external = external;
+        self
+    }
+
+    fn external_down(mut self) -> Self {
+        self.external_down = true;
+        self
     }
 
     fn asked(&self) -> Vec<String> {
@@ -42,7 +58,10 @@ impl Core for Fake {
         match (method, &self.attach) {
             ("claim.attach", Some(a)) => Ok(a.clone()),
             ("claim.attach", None) => Err(CoreErr::NoAnswer("no core daemon answers".to_owned())),
-            ("claim.external", _) => Ok(json!({"claimId": 41})),
+            ("claim.external", _) if self.external_down => {
+                Err(CoreErr::NoAnswer("no core daemon answers".to_owned()))
+            }
+            ("claim.external", _) => Ok(self.external.clone()),
             _ => Ok(json!({})),
         }
     }
@@ -209,6 +228,119 @@ fn a_run_without_a_conversation_attaches_for_its_own_pid_and_says_why_it_did_not
     ));
 }
 
+#[test]
+fn a_claim_for_another_conversation_is_attached_after_the_sessions_claim_and_names_it() {
+    // A channel thread's wake: the turn is on the work key, the launch runs the thread's session (WK4c, O3).
+    let t = switched();
+    let env = run_env(&[
+        ("KITH_TURN_CLAIM", "41"),
+        ("KITH_TURN_CONVERSATION", "tg:7#house"),
+    ]);
+    let c = ctx(&t, &env);
+    let core = Fake::new(Some(json!({"attached": true})));
+    let holder = Sleeper::new();
+    Taker::new(&c, Some(&core))
+        .claim_start("s-1", holder.pid(), "oneshot", Duration::ZERO, None, None)
+        .expect("claim_start");
+    assert_eq!(core.asked(), ["claim.external", "claim.attach"]);
+    let attach = core.calls.borrow()[1].1.clone();
+    assert_eq!(attach["claimId"], 41);
+    assert_eq!(attach["conversation"], "tg:7#house");
+    assert_eq!(attach["session"], "s-1", "the engine's own session is told");
+    assert_eq!(attach["pid"], holder.pid());
+}
+
+#[test]
+fn a_session_a_writer_holds_never_attaches_the_wake() {
+    let t = switched();
+    let env = run_env(&[
+        ("KITH_TURN_CLAIM", "41"),
+        ("KITH_TURN_CONVERSATION", "tg:7#house"),
+    ]);
+    let c = ctx(&t, &env);
+    let holder = Sleeper::new();
+    let pid = holder.pid().to_string();
+    let core = Fake::new(Some(json!({"attached": true})))
+        .holding(json!({"refused": "held", "holder": {"pid": 99, "kind": "terminal"}}));
+    let o = cli::run(
+        &c,
+        &NoHost,
+        Some(&core),
+        &args(&["claim", "s-1", &pid]),
+        &String::new,
+    );
+    assert_ne!(o.code, 0, "{}", o.stderr);
+    // A held session is asked again while the one-shot waits; the wake's claim is never attached.
+    assert!(
+        core.asked().iter().all(|m| m == "claim.external"),
+        "the wake is not redeemed: {:?}",
+        core.asked()
+    );
+}
+
+#[test]
+fn a_refused_attach_of_the_wake_gives_the_sessions_claim_back_and_exits_10() {
+    let t = switched();
+    let env = run_env(&[
+        ("KITH_TURN_CLAIM", "41"),
+        ("KITH_TURN_CONVERSATION", "tg:7#house"),
+    ]);
+    let c = ctx(&t, &env);
+    let holder = Sleeper::new();
+    let pid = holder.pid().to_string();
+    let core = Fake::new(Some(json!({"refused": "gone", "state": "ended"})));
+    let o = cli::run(
+        &c,
+        &NoHost,
+        Some(&core),
+        &args(&["claim", "s-1", &pid]),
+        &String::new,
+    );
+    assert_eq!(o.code, TURN_CLAIM_EXIT, "{}", o.stderr);
+    assert_eq!(
+        core.asked(),
+        ["claim.external", "claim.attach", "claim.release"]
+    );
+}
+
+#[test]
+fn a_conversation_without_a_claim_is_refused_and_one_equal_to_the_session_is_attached_first() {
+    let t = switched();
+    let holder = Sleeper::new();
+    let pid = holder.pid().to_string();
+    let alone = run_env(&[("KITH_TURN_CONVERSATION", "tg:7#house")]);
+    let core = Fake::new(Some(json!({"attached": true})));
+    let o = cli::run(
+        &ctx(&t, &alone),
+        &NoHost,
+        Some(&core),
+        &args(&["claim", "s-1", &pid]),
+        &String::new,
+    );
+    assert_eq!(o.code, TURN_CLAIM_EXIT, "{}", o.stderr);
+    assert!(core.asked().is_empty(), "{:?}", core.asked());
+    // The run door's own conversation is the session: the order stays attach, then claim.
+    let same = run_env(&[("KITH_TURN_CLAIM", "41"), ("KITH_TURN_CONVERSATION", "s-1")]);
+    let core = Fake::new(Some(json!({"attached": true})));
+    Taker::new(&ctx(&t, &same), Some(&core))
+        .claim_start("s-1", holder.pid(), "oneshot", Duration::ZERO, None, None)
+        .expect("claim_start");
+    assert_eq!(core.asked(), ["claim.attach", "claim.external"]);
+}
+
+#[test]
+fn attaching_a_run_can_name_the_conversation_its_turn_is_on() {
+    let t = switched();
+    let me = i64::from(std::process::id());
+    let env = run_env(&[]);
+    let c = ctx(&t, &env);
+    let core = Fake::new(Some(json!({"attached": true})));
+    Taker::new(&c, Some(&core))
+        .attach_run_in(41, me, Some("tg:7#house"))
+        .expect("attached");
+    assert_eq!(core.calls.borrow()[0].1["conversation"], "tg:7#house");
+}
+
 /// Every launch path exits a refused claim the way `kith threads claim|terminal` does: 10 for the host's turn claim, 1 for a
 /// held writer (a stale claim is taken over before it gets here).
 #[test]
@@ -222,4 +354,56 @@ fn a_refused_turn_claim_exits_10_and_any_other_refusal_1() {
         claim_exit("that session is busy: held by terminal (pid 7); try again in a moment"),
         1
     );
+}
+
+#[test]
+fn a_refused_attach_after_the_sessions_claim_gives_it_back_and_exits_10() {
+    let t = switched();
+    let env = run_env(&[
+        ("KITH_TURN_CLAIM", "41"),
+        ("KITH_TURN_CONVERSATION", "ask:a1"),
+    ]);
+    let c = ctx(&t, &env);
+    let holder = Sleeper::new();
+    let pid = holder.pid().to_string();
+    let core = Fake::new(Some(json!({"refused": "gone", "state": "cancelled"})));
+    let o = cli::run(
+        &c,
+        &NoHost,
+        Some(&core),
+        &args(&["claim", "s-1", &pid]),
+        &String::new,
+    );
+    assert_eq!(o.code, TURN_CLAIM_EXIT, "{}", o.stderr);
+    assert!(!o.stdout.contains("lock-alone"), "{}", o.stdout);
+    assert_eq!(
+        core.asked(),
+        ["claim.external", "claim.attach", "claim.release"]
+    );
+    let release = core.calls.borrow()[2].1.clone();
+    assert_eq!(release["conversation"], "s-1", "{release}");
+    assert_eq!(release["pid"], holder.pid());
+}
+
+#[test]
+fn a_core_that_does_not_answer_the_sessions_claim_exits_10_and_attaches_nothing() {
+    let t = switched();
+    let env = run_env(&[
+        ("KITH_TURN_CLAIM", "41"),
+        ("KITH_TURN_CONVERSATION", "ask:a1"),
+    ]);
+    let c = ctx(&t, &env);
+    let holder = Sleeper::new();
+    let pid = holder.pid().to_string();
+    let core = Fake::new(Some(json!({"attached": true}))).external_down();
+    let o = cli::run(
+        &c,
+        &NoHost,
+        Some(&core),
+        &args(&["claim", "s-1", &pid]),
+        &String::new,
+    );
+    assert_eq!(o.code, TURN_CLAIM_EXIT, "{}", o.stderr);
+    assert!(!o.stdout.contains("lock-alone"), "{}", o.stdout);
+    assert!(!core.asked().iter().any(|m| m == "claim.attach"));
 }

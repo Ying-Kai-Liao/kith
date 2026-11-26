@@ -83,6 +83,11 @@ pub(super) const ROWS: &[Method] = &[
                 "string",
                 "The conversation the run is for: a claim whose turn is another's is refused.",
             ),
+            caller(
+                "session",
+                "string",
+                "Optional: the engine's own session when it is not that conversation; a `--bg` ask's record keeps it for `-c`.",
+            ),
         ],
     ),
     external(

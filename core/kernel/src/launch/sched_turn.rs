@@ -163,7 +163,7 @@ fn build(
     }
     // The test clock is the host's, not the run's; the claim is this process's to attach, so the engine and a nested kith never
     // see it.
-    for k in ["SCHED_NOW", "TURN_CLAIM"] {
+    for k in ["SCHED_NOW", "TURN_CLAIM", "TURN_CONVERSATION"] {
         env.remove(&format!("KITH_{k}"));
         env.remove(&format!("HQ_{k}"));
     }
@@ -316,6 +316,13 @@ fn remove_outbox(outbox: Option<&Path>) {
 pub fn env_claim(env: &Env) -> Result<Option<i64>, i32> {
     let raw = get(env, "KITH_TURN_CLAIM").trim();
     if raw.is_empty() {
+        // The conversation of a claim that is not there names nothing: refused, nothing is started.
+        if !get(env, "KITH_TURN_CONVERSATION").trim().is_empty() {
+            eprintln!(
+                "kith: {TURN_CLAIM_REFUSED}: KITH_TURN_CONVERSATION names no turn claim; nothing was started"
+            );
+            return Err(TURN_CLAIM_EXIT);
+        }
         return Ok(None);
     }
     match raw.parse::<i64>() {
@@ -338,7 +345,8 @@ pub fn attach_env_claim(env: &Env, taker: &Taker<'_>, pid: i64) -> Option<i32> {
         Ok(None) => return None,
         Err(code) => return Some(code),
     };
-    match taker.attach_run(claim, pid) {
+    let conversation = Some(get(env, "KITH_TURN_CONVERSATION").trim()).filter(|c| !c.is_empty());
+    match taker.attach_run_in(claim, pid, conversation) {
         Ok(()) => None,
         Err(AttachErr::Gone(s) | AttachErr::Down(s)) => {
             eprintln!("kith: {TURN_CLAIM_REFUSED}: claim {claim}: {s}; nothing was started");
@@ -445,6 +453,18 @@ mod tests {
             assert!(!env.contains_key(k), "{k}");
         }
         assert_eq!(get(&env, "KITH_VIA"), "schedule");
+    }
+
+    #[test]
+    fn a_turn_conversation_needs_a_claim_and_a_bad_claim_is_still_refused() {
+        let mut env = Env::new();
+        assert_eq!(env_claim(&env), Ok(None));
+        env.insert("KITH_TURN_CONVERSATION".to_owned(), "tg:7#house".to_owned());
+        assert_eq!(env_claim(&env), Err(TURN_CLAIM_EXIT));
+        env.insert("KITH_TURN_CLAIM".to_owned(), "41".to_owned());
+        assert_eq!(env_claim(&env), Ok(Some(41)));
+        env.insert("KITH_TURN_CLAIM".to_owned(), "soon".to_owned());
+        assert_eq!(env_claim(&env), Err(TURN_CLAIM_EXIT));
     }
 
     #[test]
