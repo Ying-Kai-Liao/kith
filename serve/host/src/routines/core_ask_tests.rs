@@ -45,7 +45,7 @@ impl Core {
         assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
         let daemon = serve_for_test(&folders);
         daemon.reconciled();
-        let writer = Arc::new(CoreWriter::with_instance(folders.clone(), "test-host".to_owned()));
+        let writer = Arc::new(CoreWriter::with_instance(folders.clone(), "kith-serve-host/1-a".to_owned()));
         Self { home, folders, daemon: Some(daemon), writer }
     }
 
@@ -304,9 +304,9 @@ fn a_host_restarted_between_claim_and_attach_requeues_the_turn_and_the_task_runs
     until("the first callee started", || pids(&dir).len() == 1);
     let first = claims_given(&dir)[0];
     // The host is restarted before the callee attached: the next host's adopt gives the turn back.
-    core.call_host_row("hostclaim.adopt", &json!({"instance": "host-2"}));
+    core.call_host_row("hostclaim.adopt", &json!({"instance": "kith-serve-host/2-b"}));
     until("the turn is queued again", || core.queued().len() == 1);
-    let second_writer = Arc::new(CoreWriter::with_instance(core.folders.clone(), "host-2".to_owned()));
+    let second_writer = Arc::new(CoreWriter::with_instance(core.folders.clone(), "kith-serve-host/2-b".to_owned()));
     pull_as(&second_writer, &core, &dir, "claude");
     until("the second callee started", || pids(&dir).len() == 2);
     let given = claims_given(&dir);
@@ -337,7 +337,7 @@ fn a_host_restarted_mid_run_leaves_the_callee_running_and_its_answer_is_told_onc
     let claim = claims_given(&dir)[0];
     assert_eq!(attach(&core, &dir, claim, "ask:a6", pid)["attached"], true);
     // The host is restarted: the attached claim is a run of its own and the callee goes on; nothing is requeued.
-    core.call_host_row("hostclaim.adopt", &json!({"instance": "host-2"}));
+    core.call_host_row("hostclaim.adopt", &json!({"instance": "kith-serve-host/2-b"}));
     assert!(alive(pid), "the callee keeps running");
     assert!(core.queued().is_empty(), "nothing is given back: the prompt is out");
     let shown = core.call_host_row("hostclaim.show", &json!({"claimId": claim}));
