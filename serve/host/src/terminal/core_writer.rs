@@ -311,6 +311,16 @@ pub enum Begin {
     },
 }
 
+/// What the core said to a read of one claim.
+#[derive(Debug)]
+pub enum RowSaid {
+    Row(Option<Value>),
+    /// The core ran its rules and will not answer (the module was rolled back, this host is not the writer).
+    Refused(String),
+    /// Nothing answered: asking again is right.
+    Down,
+}
+
 /// How a turn ended, for [`CoreWriter::finish`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum End {
@@ -501,9 +511,19 @@ impl CoreWriter {
 
     /// The claim `claim` in whatever state it is (`hostclaim.show` by id): `{state, pid, ...}`, `None` when the core has none of
     /// that id. `Err(why)`: the core did not answer. A run the host started reads it to know whether its launch attached.
+    #[cfg(test)]
     pub fn claim_row(&self, claim: i64) -> Result<Option<Value>, String> {
         let said = self.data("hostclaim.show", &json!({"claimId": claim}))?;
         Ok(Some(said["claim"].clone()).filter(Value::is_object))
+    }
+
+    /// [`Self::claim_row`] that tells a core that is down (ask again) from one that refused (it will not say: stop asking).
+    pub fn claim_row_said(&self, claim: i64) -> RowSaid {
+        match self.call("hostclaim.show", &json!({"claimId": claim})) {
+            Answer::Done(v) => RowSaid::Row(Some(v["claim"].clone()).filter(Value::is_object)),
+            Answer::Refused(why) => RowSaid::Refused(why),
+            Answer::Down { .. } => RowSaid::Down,
+        }
     }
 
     /// Gives a claim whose run never attached back and queues its turn again (`hostclaim.stop` with `requeue`): the turn is

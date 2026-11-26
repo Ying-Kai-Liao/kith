@@ -13,7 +13,7 @@ use crate::channels::Wake;
 use crate::hub::Hub;
 use crate::routines::run_door::{self, Pace};
 use crate::terminal::core_holders::{Reader, Reading};
-use crate::terminal::core_writer::{CoreWriter, RunClaim};
+use crate::terminal::core_writer::{CoreWriter, RowSaid, RunClaim};
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -172,13 +172,21 @@ fn attached_by(row: &Value, pid: u32) -> bool {
 /// attempt should carry the claim (it attached, or it is ended or taken).
 pub async fn attempt_over(hub: &Arc<Hub>, w: &ChannelWake, seen: &Seen) -> bool {
     let Some(pid) = seen.pid else { return false };
-    let Some(core) = writer(hub).await else { return w.settle() };
+    let Some(core) = writer(hub).await else {
+        tracing::warn!(run = %w.run, "channel wake: this host is not the claims writer any more; the claim is left for the core's own end");
+        return w.settle();
+    };
     // Asked until the core answers: a claim nobody settled stays the host's while it lives, so a guess here would hold the
     // thread's next wake until a restart.
     let row = loop {
         let (c, claim) = (core.clone(), w.claim);
-        match wake::blocking(move || c.claim_row(claim)).await {
-            Some(Ok(r)) => break r,
+        match wake::blocking(move || c.claim_row_said(claim)).await {
+            Some(RowSaid::Row(r)) => break r,
+            // The core ran its rules and will not say: asking again would hold the thread's worker for ever.
+            Some(RowSaid::Refused(why)) => {
+                tracing::warn!(run = %w.run, why, "channel wake: the core refused to say whether the launch attached");
+                return w.settle();
+            }
             _ => tokio::time::sleep(Duration::from_secs(1)).await,
         }
     };

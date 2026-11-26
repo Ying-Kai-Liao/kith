@@ -374,6 +374,32 @@ async fn a_wake_whose_claim_was_given_back_leaves_the_inbox_even_inside_a_correc
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_claimed_wakes_launch_gets_the_claim_and_the_work_key_and_a_later_message_gets_neither() {
+    use crate::cards::resume::ChannelWake;
+    let r = Rig::new();
+    r.send(&Rig::msg("1", "@house hello")).await;
+    until("the answer", || !r.fake.posts().is_empty()).await;
+    r.idle().await;
+    r.core.resume(&r.ad);
+    let wk = "fake/x:room:1#house";
+    let w = ChannelWake::for_test("run-9", 7, 41, wk);
+    assert_eq!(r.core.wake_claimed(wk, "[kith wake run-9] the staging box is ready", w), super::Wake::Queued);
+    until("the wake ran", || r.fake.posts().len() >= 2).await;
+    let calls = std::fs::read_to_string(r.dir.join("stub/calls.jsonl")).unwrap();
+    let ran: Vec<Value> = calls
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|c| c["tool"] == "kith" && c["task"].as_str().is_some_and(|t| t.contains("staging box")))
+        .collect();
+    assert_eq!(ran.len(), 1, "{calls}");
+    assert_eq!(
+        (ran[0]["turn_claim"].as_str(), ran[0]["turn_conversation"].as_str()),
+        (Some("41"), Some(wk)),
+        "{ran:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stop_drops_a_claimed_wake_waiting_in_the_inbox() {
     use crate::cards::resume::ChannelWake;
     let r = Rig::new();
