@@ -23,19 +23,30 @@ pub(crate) mod os;
 pub mod pick;
 pub mod registry;
 pub mod resolve;
+// `run` forks claude and passes signals on: Unix only. The Windows terminal launch is W12-5 and W12-6.
+#[cfg(unix)]
 pub mod run;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod run_tests;
 // The unsafe half of `run` (fork, sigaction, waitpid); it allows `unsafe` itself.
+#[cfg(unix)]
 pub(crate) mod runproc;
 pub mod spool;
-#[cfg(test)]
+// The Unix suites start `sh`, `sleep` and files with modes; the Windows ones are in `win_tests`.
+#[cfg(all(test, unix))]
 mod tests;
+#[cfg(all(test, windows))]
+mod win_tests;
 pub mod writer;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod writer_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod writer_turn_tests;
+
+/// What `kith kernel threads run` says on Windows, where the wrapper that runs claude under a claim is not ported yet (the
+/// terminal launch, windows-owner W12-5 and W12-6). The router refuses by this text, never a silent no-op.
+#[cfg(windows)]
+pub const RUN_NOT_ON_WINDOWS: &str = "kith: not on Windows yet: `threads run`, the terminal wrapper that runs claude under the writer claim (windows-owner W12-5, W12-6)";
 
 use std::fs::File;
 use std::io::Write as _;
@@ -119,21 +130,47 @@ fn tmp_name(base: &str) -> String {
     )
 }
 
-fn create_private_dir(dir: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt as _;
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)
+/// Mode 0600 on a file about to be made. Windows has no modes: the account's own folders are owner-only by their access list.
+pub(crate) fn private_file(opts: &mut std::fs::OpenOptions) -> &mut std::fs::OpenOptions {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        opts.mode(0o600)
+    }
+    #[cfg(not(unix))]
+    {
+        opts
+    }
+}
+
+/// `chmod 0700` of a folder that exists; nothing on Windows (see [`private_file`]).
+pub(crate) fn chmod_private_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
+}
+
+pub(crate) fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut b = std::fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        b.mode(0o700);
+    }
+    b.create(dir)
 }
 
 fn create_new_private(path: &Path, body: &str) -> std::io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt as _;
     let _ = std::fs::remove_file(path);
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    private_file(std::fs::OpenOptions::new().write(true).create_new(true))
         .open(path)?
         .write_all(body.as_bytes())
 }
@@ -141,40 +178,43 @@ fn create_new_private(path: &Path, body: &str) -> std::io::Result<()> {
 /// `json.dump` of `value` to `path` through a temp file and a rename, 0600, in a 0700 folder (made when missing;
 /// `chmod_dir`: also set when it exists, as the registry's `write_atomic` does).
 pub(crate) fn write_json(path: &Path, value: &Value, chmod_dir: bool) -> std::io::Result<()> {
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
     let parent = path.parent().unwrap_or(Path::new("."));
     create_private_dir(parent)?;
     if chmod_dir {
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+        chmod_private_dir(parent)?;
     }
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let tmp = parent.join(tmp_name(&name));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&tmp)?;
+    let mut file = private_file(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true),
+    )
+    .open(&tmp)?;
     file.write_all(pyjson::dumps(value).as_bytes())?;
     drop(file);
+    // Windows refuses a rename onto a file another handle holds open (a reader of the claim); std's rename replaces the
+    // target (MOVEFILE_REPLACE_EXISTING), which is all the Unix rename gives too.
     std::fs::rename(&tmp, path)
 }
 
-/// An exclusive flock on a lock file (made 0600 when missing), held until dropped.
+/// An exclusive lock on a lock file (made 0600 when missing), held until dropped: flock on Unix, LockFileEx on Windows
+/// (`fs2` makes the one call both ways, and Windows frees it when the handle closes or the process dies, as flock does).
 struct Lock(#[allow(dead_code)] File);
 
 impl Lock {
     fn exclusive(path: &Path) -> std::io::Result<Self> {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(path)?;
+        let file = private_file(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false),
+        )
+        .open(path)?;
         file.lock_exclusive()?;
         Ok(Self(file))
     }
