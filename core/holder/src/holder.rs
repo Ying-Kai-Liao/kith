@@ -43,18 +43,18 @@ pub struct Config {
     pub secret: String,
     /// Exit after this long with no core and nothing held. Zero: never.
     pub idle: Duration,
-    /// Drop an exit nobody acked after this long with no core connected (see `Holder::expire_exits`). Zero: never.
+    /// Exit after this long with no core and only unacked exits held (see `Holder::should_idle_out`). Zero: never.
     pub exit_keep: Duration,
 }
 
-/// How long a recorded exit waits for a core that is not connected, counted from the later of the exit and the link
-/// loss. Longer than a core restart (a core that comes back inside it still gets the exit and acks it as always),
+/// How long a holder holding only unacked exits waits for a core that is not connected before it ends, counted from
+/// the later of the newest exit and the link loss. Longer than a core restart (a core that comes back inside it still gets the exit and acks it as always),
 /// short enough that a holder whose core is gone for good (uninstall) leaves in minutes, not at reboot.
 pub const EXIT_KEEP: Duration = Duration::from_secs(10 * 60);
 
 struct Entry {
     held: Held,
-    /// The lease clock when the exit was recorded (`held.exit` is set); what `expire_exits` counts from.
+    /// The lease clock when the exit was recorded (`held.exit` is set); what `should_idle_out` counts from.
     exited_at: Duration,
     proc: Arc<Proc>,
     /// Input goes through its own thread: a program that stops reading blocks only itself. None once closed.
@@ -372,12 +372,7 @@ impl Holder {
         loop {
             std::thread::sleep(Duration::from_millis(100));
             let mut st = self.lock();
-            self.expire_exits(&mut st);
-            if !self.idle.is_zero()
-                && st.core.is_none()
-                && st.procs.is_empty()
-                && st.idle_since.is_some_and(|t| t.elapsed() >= self.idle)
-            {
+            if self.should_idle_out(&st) {
                 // The lock stays held through the exit: a hello or spawn cannot land in between.
                 st.closing = true;
                 self.exit();
@@ -385,24 +380,30 @@ impl Holder {
         }
     }
 
-    /// Drops an exit record nobody acked, only while no core is connected and only once `exit_keep` has passed since
-    /// the later of the exit and the link loss: a slow core that is connected keeps its record for ever, a core that
-    /// comes back inside the bound still gets it, and a holder whose core is gone for good ends instead of waiting
-    /// for a reboot. The record is data (the tree was swept before it was written, see `reap`), so dropping it is what
-    /// a holder crash after every process ended would do; the core's reconcile ends an unlisted claim as "unknown".
-    /// Model: verification/holder-idle (`Expire`; broken variant `RecordBeforeSweep`).
-    fn expire_exits(&self, st: &mut State) {
-        if self.exit_keep.is_zero() || st.core.is_some() {
-            return;
+    /// Whether the holder ends now: it never trims its list, it leaves with it. With idle set and no core
+    /// connected, either the list is empty and idle time has passed, or every entry is an unacked exit and
+    /// `exit_keep` has passed since the later of the newest exit and the link loss. A running entry blocks
+    /// the exit. A core that comes back to a holder that left meets a new instance, and the reconcile's step 7
+    /// ends the claim it no longer finds listed (a reconnect to the same instance would end nothing, which is
+    /// why records are kept rather than dropped). `supervise` (idle zero) never exits and keeps every record.
+    /// Model: verification/holder-idle (`IdleOut`; broken variant `DropLive`).
+    fn should_idle_out(&self, st: &State) -> bool {
+        if self.idle.is_zero() || st.core.is_some() {
+            return false;
         }
-        let (now, lost, keep) = ((self.clock)(), st.core_lost, self.exit_keep);
-        let before = st.procs.len();
-        st.procs.retain(|_, e| {
-            e.held.exit.is_none() || now.saturating_sub(e.exited_at.max(lost)) < keep
-        });
-        if st.procs.len() != before && st.procs.is_empty() {
-            st.idle_since = Some(Instant::now());
+        if st.procs.is_empty() {
+            return st.idle_since.is_some_and(|t| t.elapsed() >= self.idle);
         }
+        if self.exit_keep.is_zero() || st.procs.values().any(|e| e.held.exit.is_none()) {
+            return false;
+        }
+        let newest = st
+            .procs
+            .values()
+            .map(|e| e.exited_at)
+            .max()
+            .unwrap_or_default();
+        (self.clock)().saturating_sub(newest.max(st.core_lost)) >= self.exit_keep
     }
 
     /// Expiry and the kill are one step under the state lock: a later kill would be a window in which a cut-off
@@ -1484,9 +1485,10 @@ mod tests {
         let mut holder = Holder::new(
             b"0123456789abcdef".to_vec(),
             PathBuf::from("unused"),
-            Duration::ZERO,
+            Duration::from_secs(1000),
         );
         holder.clock = clock.clock();
+        holder.exit_keep = KEEP;
         let holder = Arc::new(holder);
         let client = connect_to(&holder, 1);
         (holder, client)
@@ -1784,7 +1786,7 @@ mod tests {
         let mut holder = Holder::new(
             b"0123456789abcdef".to_vec(),
             PathBuf::from("unused"),
-            Duration::ZERO,
+            Duration::from_secs(1000),
         );
         holder.clock = clock.clock();
         holder.exit_keep = KEEP;
@@ -1798,37 +1800,30 @@ mod tests {
         ids
     }
 
-    fn expire(holder: &Holder) {
-        holder.expire_exits(&mut holder.lock());
+    fn leaves(holder: &Holder) -> bool {
+        holder.should_idle_out(&holder.lock())
     }
 
     #[test]
-    fn an_unacked_exit_is_dropped_after_the_bound_with_no_core_and_the_holder_then_idles() {
-        // Model row idle-fix-live: Expire, then watch_idle's exit.
+    fn a_holder_with_only_unacked_exits_and_no_core_ends_after_the_bound_and_keeps_its_records() {
+        // Model row idle-exit-idle: IdleOut. Nothing is trimmed on the way.
         let clock = Fake::default();
         let holder = keeping(&clock);
         put_entry(&holder, 1, Some(Duration::ZERO));
-        holder.lock().idle_since = None;
         clock.advance(KEEP - Duration::from_secs(1));
-        expire(&holder);
-        assert_eq!(held_ids(&holder), [1], "kept inside the bound");
+        assert!(!leaves(&holder), "kept inside the bound");
         clock.advance(Duration::from_secs(1));
-        expire(&holder);
-        assert!(held_ids(&holder).is_empty(), "dropped at the bound");
-        assert!(
-            holder.lock().idle_since.is_some(),
-            "an empty holder with no core starts counting to its idle exit"
-        );
+        assert!(leaves(&holder), "ends at the bound");
+        assert_eq!(held_ids(&holder), [1], "the record is not dropped");
     }
 
     #[test]
-    fn a_connected_core_never_loses_an_exit_however_slow_its_ack() {
+    fn a_connected_core_never_makes_the_holder_end_however_slow_its_ack() {
         let clock = Fake::default();
         let (holder, _c) = leased(&clock);
         put_entry(&holder, 7, Some(Duration::ZERO));
         clock.advance(KEEP * 100);
-        expire(&holder);
-        assert_eq!(held_ids(&holder), [7]);
+        assert!(!leaves(&holder));
         drop(holder.close_down(holder.lock()));
     }
 
@@ -1844,8 +1839,7 @@ mod tests {
         }
         drop(c);
         clock.advance(KEEP - Duration::from_secs(1));
-        expire(&holder);
-        assert_eq!(held_ids(&holder), [7]);
+        assert!(!leaves(&holder));
         let mut back = connect_to(&holder, 1);
         let held = back
             .welcome
@@ -1857,14 +1851,14 @@ mod tests {
         assert!(held.exit.is_some(), "the exit is still in the welcome");
         // Connected again: no bound applies, however long.
         clock.advance(KEEP * 100);
-        expire(&holder);
+        assert!(!leaves(&holder));
         assert_eq!(back.ack(&held.held_id()).unwrap(), p::AckState::Acked);
         assert!(held_ids(&holder).is_empty());
         drop(holder.close_down(holder.lock()));
     }
 
     #[test]
-    fn the_bound_counts_from_the_later_of_the_exit_and_the_link_loss() {
+    fn the_bound_counts_from_the_later_of_the_newest_exit_and_the_link_loss() {
         let clock = Fake::default();
         let holder = keeping(&clock);
         let now = || (clock.clock())();
@@ -1872,45 +1866,54 @@ mod tests {
         clock.advance(Duration::from_secs(100));
         put_entry(&holder, 1, Some(now()));
         clock.advance(KEEP - Duration::from_secs(1));
-        expire(&holder);
-        assert_eq!(held_ids(&holder), [1]);
+        assert!(!leaves(&holder));
         clock.advance(Duration::from_secs(1));
-        expire(&holder);
-        assert!(held_ids(&holder).is_empty());
-        // An exit at 160, then the link lost again at 200: due at 260.
-        put_entry(&holder, 2, Some(Duration::from_secs(160)));
+        assert!(leaves(&holder));
+        // The link lost again at 200: due at 260, though the exit was at 100.
         clock.advance(Duration::from_secs(40));
         holder.lock().core_lost = now();
         clock.advance(KEEP - Duration::from_secs(1));
-        expire(&holder);
-        assert_eq!(held_ids(&holder), [2], "counted from the latest link loss");
+        assert!(!leaves(&holder), "counted from the latest link loss");
         clock.advance(Duration::from_secs(1));
-        expire(&holder);
-        assert!(held_ids(&holder).is_empty());
+        assert!(leaves(&holder));
+        // A newer exit at 260 pushes it to 320.
+        put_entry(&holder, 2, Some(now()));
+        clock.advance(KEEP - Duration::from_secs(1));
+        assert!(!leaves(&holder), "counted from the newest exit");
+        clock.advance(Duration::from_secs(1));
+        assert!(leaves(&holder));
     }
 
     #[test]
-    fn a_running_process_is_never_expired_and_keeps_the_holder_from_idling() {
+    fn a_running_process_keeps_the_holder_from_ending() {
         let clock = Fake::default();
         let holder = keeping(&clock);
         put_entry(&holder, 1, Some(Duration::ZERO));
         put_entry(&holder, 2, None);
-        holder.lock().idle_since = None;
         clock.advance(KEEP * 10);
-        expire(&holder);
-        assert_eq!(held_ids(&holder), [2]);
-        assert!(holder.lock().idle_since.is_none(), "procs is not empty");
+        assert!(!leaves(&holder));
+        assert_eq!(held_ids(&holder), [1, 2]);
         drop(holder.close_down(holder.lock()));
     }
 
     #[test]
-    fn a_zero_bound_never_drops_an_exit() {
+    fn a_zero_bound_never_ends_a_holder_that_holds_an_exit() {
         let clock = Fake::default();
         let mut holder = keeping(&clock);
         holder.exit_keep = Duration::ZERO;
         put_entry(&holder, 1, Some(Duration::ZERO));
         clock.advance(KEEP * 1000);
-        expire(&holder);
+        assert!(!leaves(&holder));
+    }
+
+    #[test]
+    fn supervise_never_ends_and_keeps_every_record() {
+        let clock = Fake::default();
+        let mut holder = keeping(&clock);
+        holder.idle = Duration::ZERO;
+        put_entry(&holder, 1, Some(Duration::ZERO));
+        clock.advance(KEEP * 1000);
+        assert!(!leaves(&holder));
         assert_eq!(held_ids(&holder), [1]);
     }
 

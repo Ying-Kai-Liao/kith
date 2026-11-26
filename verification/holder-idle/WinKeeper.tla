@@ -435,14 +435,17 @@ TermAck ==
   /\ tClaim' = "none" /\ texit' = "none"
   /\ UNCHANGED <<tSt, tLeak, holder, hcrash, opens, hinst, core, cdowns, TOther>>
 
-\* the core reconciles with the same holder instance: a claim the holder no longer lists is ended as unlisted
-\* (holder_link.rs:186-188). The holder lists a running leader or an exit record.
+\* ABSTRACTION, not the code: this ends an unlisted claim on every link-up. The core really ends one only at the first
+\* hello of a core generation (open_claims, claims::is_reconciled) or on a new holder instance (reconcile step 7); a plain
+\* reconnect to the same instance ends nothing (HolderIdleGen.tla models that, row gen-drop-live). Do not rely on this
+\* action for a claim's end; this model checks the writers and that the holder ends.
 TermUnlisted ==
   /\ holder = "up" /\ core = "up" /\ tClaim = "live" /\ texit = "none" /\ tSt # "alive"
   /\ tClaim' = "none"
   /\ UNCHANGED <<tSt, tLeak, holder, hcrash, opens, hinst, texit, core, cdowns, TOther>>
 
-\* the fix under question: an exit nobody acked is dropped after a bound
+\* the fix, abstracted: the holder with only unacked exits and no core ends after a bound. Here that is the record
+\* vanishing with the holder; the code keeps the records and exits (should_idle_out), a returning core meets a new instance.
 Expire ==
   /\ ExpireUnacked /\ holder = "up" /\ texit = "unacked"
   /\ texit' = "none"

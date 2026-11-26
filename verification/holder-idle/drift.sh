@@ -8,12 +8,12 @@
 # set SYNC below to the commit you checked (and in .claude/skills/holder-idle/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below (the fix: expire_exits, sweep before record).
+# The commit at which the model was confirmed to describe the files below (the fix: should_idle_out, sweep before record).
 SYNC=b6f166fcce93b7f7497118607434263e470863ca
 
 FILES=(
-  core/holder/src/holder.rs           # expire_exits, watch_idle, the ACK arm, drop_core, reap (sweep, then record)
-  core/runtime/src/holder_link.rs     # the core's reconcile: an unlisted claim is ended as unknown
+  core/holder/src/holder.rs           # should_idle_out, watch_idle, the ACK arm, drop_core, reap (sweep, then record)
+  core/runtime/src/holder_link.rs     # open_claims, step 7 of reconcile, claims::is_reconciled, end_gone: when an unlisted claim ends
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

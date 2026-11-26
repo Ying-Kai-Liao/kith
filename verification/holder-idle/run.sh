@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Model-checks "a holder drops an unacked exit record while no core is connected, then idles out" (WinKeeper.tla)
+# Model-checks "a holder holding only unacked exits ends once no core has been linked for a bound" (WinKeeper.tla for
+# the writers, HolderIdleGen.tla for the claim across reconnects)
 # with TLC, one command, no global install.
 #
 #   verification/holder-idle/run.sh                  every row of checks.tsv: cfg x expected pass/fail
@@ -78,8 +79,9 @@ run_tlc() {   # run_tlc CFG -> TLC's output on stdout (the cfgs are complete fil
   local work; work=$(mktemp -d "${TMPDIR:-/tmp}/kith-verify.XXXXXX")
   # TLC unpacks its standard modules into java.io.tmpdir; parallel runs must not share one.
   mkdir -p "$work/tmp"
+  local mod=WinKeeper.tla; [[ $1 == gen-* ]] && mod=HolderIdleGen.tla   # gen-* rows: the claim-across-reconnects model
   ( cd "$HERE" && "$JAVA" -Djava.io.tmpdir="$work/tmp" -XX:+UseParallelGC -Xmx1g -cp "$JAR" tlc2.TLC -workers 1 -deadlock \
-      -metadir "$work/states" -config "cfgs/$1.cfg" WinKeeper.tla 2>&1 ) || true
+      -metadir "$work/states" -config "cfgs/$1.cfg" "$mod" 2>&1 ) || true
   rm -rf "$work"
 }
 
