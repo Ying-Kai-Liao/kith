@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below (the fix: expire_exits, sweep before record).
-SYNC=PLACEHOLDER
+SYNC=b6f166fcce93b7f7497118607434263e470863ca
 
 FILES=(
   core/holder/src/holder.rs           # expire_exits, watch_idle, the ACK arm, drop_core, reap (sweep, then record)
