@@ -484,6 +484,13 @@ impl Core {
         };
         self.wake_started(task);
         let pid = child.id();
+        // Its start stamp, so a later Stop can tell this process from one that was handed its pid (Windows).
+        // W12-7: the spawn must go in a kill-on-close job, and the stamp must be read from the child's handle, not by pid
+        // after the spawn (unreachable today: chat runs return NotStarted on Windows above).
+        #[cfg(windows)]
+        if let Some(pid) = pid {
+            crate::terminal::winproc::remember(pid);
+        }
         seen.pid = pid;
         if let (Some(w), Some(hub)) = (wake, crate::runauth::hub()) {
             crate::cards::resume::channel_wake_started(&hub, w);

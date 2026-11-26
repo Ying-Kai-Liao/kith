@@ -1702,3 +1702,24 @@ async fn a_fork_the_scan_adopted_between_the_claim_and_step_7_is_still_a_fork() 
     // A turn that claimed the fork itself is not told it forked.
     assert_ne!(sync::sync_for_turn(&r.hub, &lane, "f1").await.unwrap(), sync::Synced::Forked { session: "f1".into() });
 }
+
+/// A holder `winproc::end` is not sure of (a claim with no start stamp) is left running with its claim: releasing it would
+/// let a second writer take the session.
+#[cfg(windows)]
+#[tokio::test]
+async fn the_sweep_keeps_the_claim_of_a_holder_it_could_not_end() {
+    let r = Rig::new();
+    let mut child = std::process::Command::new("ping").args(["-n", "300", "127.0.0.1"]).spawn().unwrap();
+    let pid = child.id();
+    let path = claim::path(&r.state(), "u1", false);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, json!({"pid": pid, "at": "t", "kind": "oneshot", "person": "sam"}).to_string()).unwrap();
+    let ended = claim::sweep(&r.state(), &["sam".into()], &|_| false, GRACE);
+    let alive = registry::pid_runs(pid);
+    let kept = claim::read(&path).is_some();
+    child.kill().ok();
+    child.wait().ok();
+    assert!(ended.is_empty(), "nothing was ended, so nothing is reported");
+    assert!(alive, "an unstamped claim is never killed");
+    assert!(kept, "the claim stays with the process still running");
+}
