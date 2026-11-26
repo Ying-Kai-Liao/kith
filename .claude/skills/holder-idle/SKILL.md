@@ -69,7 +69,7 @@ allows any time; the code's is a choice, longer than a core restart, minutes not
 3. `verification/holder-idle/run.sh`. A row that differs is drift or a bug.
 4. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `b6f166fcce93b7f7497118607434263e470863ca` (the fix).
+**Sync commit:** `5664661d92d536d250bab8231655ddf9f0379948` (the fix).
 
 ## Map of the folder
 

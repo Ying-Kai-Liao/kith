@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below (the fix: should_idle_out, sweep before record).
-SYNC=b6f166fcce93b7f7497118607434263e470863ca
+SYNC=5664661d92d536d250bab8231655ddf9f0379948
 
 FILES=(
   core/holder/src/holder.rs           # should_idle_out, watch_idle, the ACK arm, drop_core, reap (sweep, then record)
