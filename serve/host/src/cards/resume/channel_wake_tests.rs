@@ -262,6 +262,9 @@ fn a_card(r: &Rig) -> String {
         asked_by: None,
     };
     let Opened::New(card) = r.hub.store.card_open(&new, now_ms()).unwrap() else { panic!("a new card") };
+    // Answered and claimed by the door, as `handle` leaves a card it carries.
+    r.hub.store.card_saved(&card.id, "owner", now_ms(), now_ms() + 60_000).unwrap().expect("answered");
+    assert!(r.hub.store.card_resume_claim(&card.id, now_ms()).unwrap(), "the door claimed it");
     card.id
 }
 
