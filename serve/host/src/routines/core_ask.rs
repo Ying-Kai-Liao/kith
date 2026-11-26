@@ -250,8 +250,15 @@ impl Plan {
         set("KITH_LAUNCH_KIND", "ask");
         set("KITH_LAUNCH_LABEL", &self.asked_by);
         set("KITH_LAUNCH_ASK_ID", &self.ask);
-        // No host picks the account: the launch walks the candidates (`kith account pick`).
-        set("KITH_BACKUP_CHAIN", "on");
+        if self.claude {
+            // The callee's one run takes the turn's claim, and `bin/kith` refuses a claim for an account chain (each attempt of the
+            // walk is a run of its own). The launch is told it is the attempt: it then starts on the state's first usable account
+            // (`main-env --state`, as a terminal run does), and gives up only the walk to the next one after a usage limit.
+            set("KITH_CHAIN_CHILD", "1");
+        } else {
+            // No host picks the account: the launch walks the candidates (`kith account pick`).
+            set("KITH_BACKUP_CHAIN", "on");
+        }
         set("KITH_TURN_CLAIM", &self.claim.to_string());
         set("KITH_TURN_CONVERSATION", &self.conversation);
         if let Ok(mode) = std::env::var("KITH_ASK_PERMISSION_MODE") {
