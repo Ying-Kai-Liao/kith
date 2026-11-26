@@ -19,13 +19,14 @@
 
 use std::collections::HashMap;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
-use super::{machine, mcp, prompt};
+use super::{machine, mcp};
 use crate::secrets::pyjson;
 use crate::{paths, secrets};
 
@@ -297,9 +298,18 @@ trait CloneFd {
 }
 
 impl CloneFd for std::io::Stderr {
+    #[cfg(unix)]
     fn as_fd_clone(&self) -> Stdio {
         use std::os::fd::AsFd as _;
         self.as_fd()
+            .try_clone_to_owned()
+            .map_or_else(|_| Stdio::null(), Stdio::from)
+    }
+
+    #[cfg(windows)]
+    fn as_fd_clone(&self) -> Stdio {
+        use std::os::windows::io::AsHandle as _;
+        self.as_handle()
             .try_clone_to_owned()
             .map_or_else(|_| Stdio::null(), Stdio::from)
     }
@@ -353,8 +363,21 @@ pub(super) fn assignments(text: &str) -> HashMap<String, String> {
     out
 }
 
+/// A file that can be run: an execute bit on Unix; on Windows a file of a kind PATHEXT starts.
 fn is_exec(p: &Path) -> bool {
-    fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    #[cfg(unix)]
+    {
+        fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::metadata(p).is_ok_and(|m| m.is_file())
+            && p.extension().is_some_and(|e| {
+                ["exe", "com", "bat", "cmd"]
+                    .iter()
+                    .any(|x| e.eq_ignore_ascii_case(x))
+            })
+    }
 }
 
 pub(super) fn which_in(env: &Env, program: &str) -> Option<PathBuf> {
@@ -516,7 +539,9 @@ pub fn ledger_hook_bin(kernel: &Path, env: &Env, kith_bin: Option<&str>) -> Opti
 }
 
 /// `kith_paths.guest_tmp_ready`: the guest's Claude Code temp folder, made.
+#[cfg(unix)]
 pub(super) fn guest_tmp_ready(p: &paths::Paths, id: &str, uid: u32) -> Option<String> {
+    use super::prompt;
     use sha2::{Digest as _, Sha256};
     let hash = |x: &str| {
         use std::fmt::Write as _;
@@ -541,6 +566,12 @@ pub(super) fn guest_tmp_ready(p: &paths::Paths, id: &str, uid: u32) -> Option<St
     fs::create_dir_all(&d).ok()?;
     fs::set_permissions(&d, fs::Permissions::from_mode(0o700)).ok()?;
     Some(s(&d))
+}
+
+/// A guest's temp folder is made only for a guest's run, and a guest does not launch on Windows (the plan refuses it first).
+#[cfg(not(unix))]
+pub(super) fn guest_tmp_ready(_p: &paths::Paths, _id: &str, _uid: u32) -> Option<String> {
+    None
 }
 
 /// A frontmatter field the way the entry's `field` awk reads it: the first `key:` line, the rest after the colon.
@@ -590,6 +621,8 @@ pub(super) fn plain_number(t: &str) -> bool {
 
 /// `uuid4().hex`. An unreadable random source is an error: an all-zero id would be shared by every run, and a run's
 /// id and temp file names must not collide.
+// Off Unix the random source cannot fail, and the callers match on the Unix signature.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 pub(super) fn random_hex() -> Result<String, String> {
     let mut b = [0u8; 16];
     #[cfg(unix)]
@@ -619,6 +652,26 @@ pub(super) fn pj_indent1(v: &Value) -> String {
 /// `kith AGENT [args]` with `--launch-json`: the JSON text on success, or the exit code (what was said is already on stderr).
 pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<String, i32> {
     let plan = super::plan::plan(agent, argv, kernel, env0, &super::plan::Mode::LaunchJson)?;
+    Ok(super::json::emit_json(&plan))
+}
+
+/// [`launch`] for the folder `cwd` names, without moving this process there (the host launches in process, and the folder of
+/// the process is shared with everything else in it).
+pub fn launch_in(
+    agent: &str,
+    argv: &[String],
+    kernel: &Path,
+    env0: Env,
+    cwd: &Path,
+) -> Result<String, i32> {
+    let plan = super::plan::plan_in(
+        agent,
+        argv,
+        kernel,
+        env0,
+        &super::plan::Mode::LaunchJson,
+        Some(cwd),
+    )?;
     Ok(super::json::emit_json(&plan))
 }
 
@@ -738,6 +791,7 @@ mod tests {
         assert!(!home_closed(Some(std::env::temp_dir())));
     }
 
+    #[cfg(unix)]
     #[test]
     fn kith_bin_must_answer_memory_hook() {
         let dir = std::env::temp_dir().join(format!("kith-bin-test-{}", std::process::id()));
@@ -764,6 +818,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn readfence_verb_is_asked_for() {
         let dir = std::env::temp_dir().join(format!("kith-fence-test-{}", std::process::id()));

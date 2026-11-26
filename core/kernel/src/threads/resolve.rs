@@ -175,6 +175,17 @@ pub fn resolve_taking(
     };
 
     let mut r = host.resolve_thread(thread);
+    // The host may be running (an older one, one this account cannot vouch for): its turns cannot be checked, so nothing is claimed.
+    if let Some(v) = present(r.as_ref())
+        && v.get("unreachable").is_some_and(truthy)
+    {
+        return Err(format!(
+            "{} (a running host's turns cannot be checked, so nothing was resumed)",
+            v.get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("the Kith host cannot be asked")
+        ));
+    }
     // A host from before the claims cannot vouch for its threads either.
     if let Some(v) = present(r.as_ref())
         && !has_error(v)

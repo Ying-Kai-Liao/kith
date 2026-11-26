@@ -45,6 +45,7 @@ mod invite_rooms_tests;
 mod kith_info;
 mod kith_new;
 pub(crate) mod kith_tools;
+pub mod local;
 mod marketplace;
 pub(crate) mod native_export;
 // Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
