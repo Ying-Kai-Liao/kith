@@ -164,13 +164,6 @@ impl TestDaemon {
         self.0.stop();
     }
 
-    /// `module` switched as the step leaves it (no import), so the core answers its rows: `claims` for a launch's
-    /// `claim.external` and `claim.attach`.
-    #[cfg(unix)]
-    pub fn switched(&self, folders: &Paths, module: &str) {
-        self.0.switch_for_test(folders, module).expect("the switch");
-    }
-
     /// The `turns` rows of a conversation: (id, state).
     pub fn turns(&self, conversation: &str) -> Vec<(i64, String)> {
         self.0.turns_of_for_test(conversation).expect("the turns")
@@ -188,6 +181,14 @@ impl TestDaemon {
 #[cfg(unix)]
 pub fn step_authority_for_test(folders: &Paths, kernel: &std::path::Path) -> Result<Vec<String>, String> {
     kith_core::cutover(folders, kernel, &["step".to_owned(), "authority".to_owned()]).map_err(|e| e.to_string())
+}
+
+/// `kith migrate step claims` over `folders`, in this process: the claims are the core's, so `claim.attach` serves. Not while a
+/// daemon holds the core.
+#[cfg(test)]
+#[cfg(unix)]
+pub fn step_claims_for_test(folders: &Paths, kernel: &std::path::Path) -> Result<Vec<String>, String> {
+    kith_core::cutover(folders, kernel, &["step".to_owned(), "claims".to_owned()]).map_err(|e| e.to_string())
 }
 
 /// Starts a daemon on `folders`, ready before it returns.

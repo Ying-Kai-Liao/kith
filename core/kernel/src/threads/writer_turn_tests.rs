@@ -235,6 +235,7 @@ fn a_claim_for_another_conversation_is_attached_after_the_sessions_claim_and_nam
     let attach = core.calls.borrow()[1].1.clone();
     assert_eq!(attach["claimId"], 41);
     assert_eq!(attach["conversation"], "tg:7#house");
+    assert_eq!(attach["session"], "s-1", "the engine's own session is told");
     assert_eq!(attach["pid"], holder.pid());
 }
 

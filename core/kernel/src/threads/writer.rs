@@ -222,7 +222,13 @@ impl<'a> Taker<'a> {
         // `again`). One for another conversation is attached after the session's claim, so a session a writer holds never
         // redeems a turn that did not run: held or refused, the launch exits before the attach.
         if let (Some(claim), None) = (turn_claim, &turn_conversation) {
-            self.attach_turn(claim, sid, pid, started.as_deref().unwrap_or_default())?;
+            self.attach_turn(
+                claim,
+                sid,
+                None,
+                pid,
+                started.as_deref().unwrap_or_default(),
+            )?;
         }
         let ans = match self.ask("claim.external", &params) {
             Ok(a) => a,
@@ -295,8 +301,13 @@ impl<'a> Taker<'a> {
             return Err("the Kith core gave no claim for that session".to_owned());
         }
         if let (Some(claim), Some(wk)) = (turn_claim, &turn_conversation)
-            && let Err(why) =
-                self.attach_turn(claim, wk, pid, started.as_deref().unwrap_or_default())
+            && let Err(why) = self.attach_turn(
+                claim,
+                wk,
+                Some(sid),
+                pid,
+                started.as_deref().unwrap_or_default(),
+            )
         {
             // The session's claim has no turn to run: given back, so a refused launch leaves nothing held.
             self.core_release(pid, Some(sid));
@@ -345,8 +356,20 @@ impl<'a> Taker<'a> {
     /// `claim.attach`: the launch's own process takes the host's claim for this turn before anything starts. The core's
     /// check-and-set refuses a claim that was cancelled, adopted by a host restart, another conversation's, or already
     /// attached by another process; the same process asking again (once per claim step) is told `again`.
-    fn attach_turn(&self, claim: i64, sid: &str, pid: i64, started: &str) -> Result<(), String> {
-        let params = json!({"claimId": claim, "conversation": sid, "pid": pid, "started": started});
+    fn attach_turn(
+        &self,
+        claim: i64,
+        sid: &str,
+        session: Option<&str>,
+        pid: i64,
+        started: &str,
+    ) -> Result<(), String> {
+        let mut params =
+            json!({"claimId": claim, "conversation": sid, "pid": pid, "started": started});
+        // The engine's real session, when the turn is on another conversation (`ask:<id>`): the core keeps it for `-c`.
+        if let Some(s) = session {
+            params["session"] = json!(s);
+        }
         match self.ask("claim.attach", &params) {
             Ok(a) if a.get("attached").is_some_and(truthy) => Ok(()),
             Ok(a) => {

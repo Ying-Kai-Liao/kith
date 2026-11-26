@@ -115,6 +115,20 @@ pub(crate) fn attach(
     started: &str,
     now: i64,
 ) -> Result<Value> {
+    attach_in(core, claim_id, conversation, None, pid, started, now)
+}
+
+/// [`attach`] that also says the engine's own session when it is not the turn's conversation (a `--bg` ask's turn is on
+/// `ask:<id>`, its Claude run on a session of its own): a `--bg` ask's record keeps that session, so `-c` resumes it.
+pub(crate) fn attach_in(
+    core: &mut Core,
+    claim_id: i64,
+    conversation: Option<&str>,
+    session: Option<&str>,
+    pid: u32,
+    started: &str,
+    now: i64,
+) -> Result<Value> {
     if started.is_empty() {
         return Err(Error::BadParams(
             "kith-core: claim.attach needs the process's start stamp".into(),
@@ -145,9 +159,9 @@ pub(crate) fn attach(
         // A `--bg` ask's callee: its record learns the claim and the process (so `ask.end` finds the run exactly) and the
         // session it runs in (so `-c` resumes it), in the attach's own transaction (ask design R2, O2).
         tx.execute(
-            "UPDATE asks SET claim_id = ?1, pid = ?2, pid_at_ms = ?3, session = COALESCE(session, conversation)
+            "UPDATE asks SET claim_id = ?1, pid = ?2, pid_at_ms = ?3, session = COALESCE(session, ?4, conversation)
              WHERE turn = (SELECT id FROM turns WHERE claim_id = ?1 AND source = 'ask')",
-            params![claim_id, pid, now],
+            params![claim_id, pid, now, session],
         )?;
         tx.commit()?;
         return Ok(json!({ "attached": true }));

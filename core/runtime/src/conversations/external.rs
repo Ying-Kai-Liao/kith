@@ -157,10 +157,11 @@ pub(crate) fn call_at(
 ) -> Result<Value> {
     match method {
         "claim.external" => external(core, p, now, live),
-        "claim.attach" => super::sched_run::attach(
+        "claim.attach" => super::sched_run::attach_in(
             core,
             int(p, "claimId")?,
             p.get("conversation").and_then(Value::as_str),
+            p.get("session").and_then(Value::as_str),
             pid_of(p)?,
             need(p, "started")?,
             now,

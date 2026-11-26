@@ -1144,3 +1144,30 @@ fn a_bg_ask_on_a_named_conversation_has_its_lost_reports_cost_booked_once() {
     r.tick();
     assert!((cost_of(&r, "n1") - 0.25).abs() < 1e-9);
 }
+
+#[test]
+fn the_attach_records_the_engines_own_session_when_it_is_not_the_turns_conversation() {
+    // C3L: a Claude callee runs in a session of its own while its turn is on `ask:<id>`; `-c` must resume that session.
+    let r = Rig::new();
+    let turn = turn_of(&r.open_bg("a1"));
+    let claim = r.claim("a1", turn);
+    let pid = std::process::id();
+    let started = kith_kernel::procstart::start_stamp(pid).unwrap();
+    let said =
+        r.d.shared()
+            .with_core(|c| {
+                sched_run::attach_in(
+                    c,
+                    claim,
+                    Some("ask:a1"),
+                    Some("sess-real"),
+                    pid,
+                    &started,
+                    ms(),
+                )
+            })
+            .unwrap();
+    assert_eq!(said, json!({"attached": true}));
+    let session: String = r.sql("SELECT session FROM asks WHERE id = ?1", "a1");
+    assert_eq!(session, "sess-real");
+}

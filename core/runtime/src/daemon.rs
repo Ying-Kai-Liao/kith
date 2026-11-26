@@ -858,29 +858,6 @@ impl Daemon {
         })
     }
 
-    /// Switches `module` for a host test the way the step leaves it (the switch file, and the marker in core.db that makes the
-    /// file believed), with no import: a test home has nothing to import, and the step's own preflights (the stub program, the
-    /// host lock) are about a real Mac. The claims rows (`claim.external`, `claim.attach`) answer only a switched `claims`.
-    /// Behind `test-support`, never a production path.
-    #[cfg(all(feature = "test-support", unix))]
-    pub fn switch_for_test(&self, paths: &Paths, module: &str) -> Result<()> {
-        let at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(1, |d| i64::try_from(d.as_secs()).unwrap_or(1));
-        let layout = Layout::new(&paths.machine);
-        crate::cutover::state::write(
-            &layout,
-            module,
-            &crate::cutover::state::Switch {
-                phase: crate::cutover::state::Phase::Switched,
-                snapshot: None,
-                at,
-            },
-        )?;
-        self.shared
-            .with_core(|c| crate::cutover::marker::write(c, module, at, "", None))
-    }
-
     /// The `turns` rows of `conversation` as (id, state), for a host test that counts them: the core's file is only core/runtime's
     /// to read. Behind `test-support`, never a production path.
     #[cfg(feature = "test-support")]

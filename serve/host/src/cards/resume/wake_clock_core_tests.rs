@@ -16,6 +16,7 @@ use crate::terminal::core_writer::{CoreWriter, RunClaim};
 use crate::wake::{self, Request};
 use kith_kernel::paths::Paths;
 use serde_json::{Value, json};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,9 +37,18 @@ impl Real {
         let home = PathBuf::from("/tmp").join(format!("kwk-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
         std::fs::create_dir_all(home.join(".kith")).expect("home");
         let folders = crate::kernel::folders(&home);
+        // The launch's own rows (`claim.external`, `claim.attach`) answer only a switched `claims` module: the real step, as
+        // `routines::launch_turn_e2e_tests` runs it. It wants a start stub to exist (nothing here runs it).
+        let stub = PathBuf::from("/tmp").join(format!("kwk-stub-{}", std::process::id()));
+        std::fs::write(&stub, "#!/bin/sh\n").expect("stub");
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).expect("stub mode");
+        // SAFETY: every test of this file sets the same name before it starts a thread of its own (one process each under nextest).
+        unsafe { std::env::set_var("KITH_STUB_BIN", &stub) };
+        std::fs::create_dir_all(folders.machine.join("live/terminal")).expect("tombstone dir");
+        let kernel = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel");
+        let said = crate::core_front::step_claims_for_test(&folders, &kernel).expect("the claims step");
+        assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
         let daemon = serve_for_test(&folders);
-        // The launch's own rows (`claim.external`, `claim.attach`) answer only a switched `claims` module.
-        daemon.switched(&folders, "claims");
         crate::terminal::core_claims::enable(&folders.state, folders.clone());
         let dir = folders.machine.join("core/cutover");
         std::fs::create_dir_all(&dir).expect("cutover dir");
