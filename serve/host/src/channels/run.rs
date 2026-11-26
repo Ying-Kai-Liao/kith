@@ -866,7 +866,11 @@ mod tests {
         assert!(!lists_module("not json", "turn-conversation"), "a program that cannot say does not list it");
         let w = ChannelWake::for_test("run-1", 7, 41, "tg:7#house");
         let names: Vec<_> = wake_env(&w, lists_module(old, "turn-conversation")).into_iter().map(|(k, _)| k).collect();
-        assert_eq!(names, ["KITH_TURN_CLAIM"], "the skew case: the claim alone, the launch is refused and the wake requeued");
+        assert_eq!(
+            names,
+            ["KITH_TURN_CLAIM"],
+            "the skew case: the claim alone, the launch is refused and the wake requeued"
+        );
         let both: Vec<_> = wake_env(&w, true).into_iter().map(|(k, _)| k).collect();
         assert_eq!(both, ["KITH_TURN_CLAIM", "KITH_TURN_CONVERSATION"]);
     }
