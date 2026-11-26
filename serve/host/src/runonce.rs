@@ -14,6 +14,11 @@ use std::time::Duration;
 /// adapter Kith may start): the final answer, Kith runs non-Claude engines over ACP. Nothing was started. (BSD `EX_CONFIG`.)
 pub const NOT_AVAILABLE: i32 = 78;
 
+/// Exit code for a run [`cannot_hold`] refused (a Hermes run without bypass): permanent until the agent's mode changes, so a wake
+/// ends its requests as failed at once and does not retry. Nothing was started. Not 78 (that is "no ACP one-shot here", and the
+/// held client's "holder lost"), not 10 (a refused turn claim), not 1 (any other failure, retried).
+pub const CANNOT_HOLD: i32 = 79;
+
 pub struct Args {
     pub engine: String,
     pub model: Option<String>,
@@ -97,7 +102,7 @@ pub async fn run(a: Args) -> Result<i32> {
         } else {
             eprintln!("kith: {}: {why}", engine.id);
         }
-        return Ok(1);
+        return Ok(CANNOT_HOLD);
     }
     let Some(command) = acp_command(engine, a.acp_command.clone()).await? else {
         return Ok(NOT_AVAILABLE);
@@ -229,7 +234,7 @@ mod tests {
         let mark = dir.join("started");
         let mut a = args("hermes");
         a.acp_command = Some(format!("touch {}", crate::shell::quote(&mark.to_string_lossy())));
-        assert_eq!(run(a).await.unwrap(), 1);
+        assert_eq!(run(a).await.unwrap(), CANNOT_HOLD);
         assert!(!mark.exists(), "the engine was started");
         let _ = std::fs::remove_dir_all(&dir);
         let hermes = engines::find("hermes").unwrap();

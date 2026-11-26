@@ -1785,6 +1785,8 @@ fn joining_and_lineage_are_read_from_the_snapshot_the_write_runs_on() {
     assert!(a["people"].get("mia-b2").is_none());
 }
 
+// Unix only: the cutover record is the Unix cutover framework's (windows-owner WI13: a Windows core is born switched).
+#[cfg(unix)]
 #[test]
 fn a_switched_route_write_is_refused_in_the_core_unless_the_phase_is_switched_or_rolling_back() {
     use crate::cutover::state::{self, Phase, Switch};

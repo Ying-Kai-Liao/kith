@@ -75,11 +75,12 @@ class H(http.server.BaseHTTPRequestHandler):
         b = json.dumps(out).encode()
         self.send_response(st); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
     def log_message(self, *a): pass
-s = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
-open(T + '/port', 'w').write(str(s.server_port))
+import fakehost, os
+s = fakehost.ThreadingUnixHTTPServer(fakehost.sock_path(os.environ['KITH_SERVE_DIR']), H)
+open(T + '/port', 'w').write('1')
 s.serve_forever()
 PY
-python3 "$T/stub.py" "$T" & SRV=$!
+PYTHONPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)${PYTHONPATH:+:$PYTHONPATH}" python3 "$T/stub.py" "$T" & SRV=$!
 for _ in $(seq 50); do [[ -s $T/port ]] && break; sleep 0.1; done
 PORT=$(cat "$T/port")
 
@@ -132,7 +133,7 @@ check "kith-auth people --json: still a list, with the additive agents field" "[
 
 # ---- host down: nothing done, clear error ----
 rec
-export KITH_SERVE_PORT=1
+export KITH_SERVE_DIR=$T/nohost KITH_SERVE_PORT=1
 run invite add Pat --agent house --json
 check "invite add, host unreachable: ok false, error, exit 1" "[ $rc = 1 ] && [ \"\$(jv \"d['ok']\")\" = False ] && [[ \$(jv \"d['error']\") == *'not reachable'* ]]"
 check "  and nothing was written locally" "[ \"\$(A people --json | python3 -c 'import json,sys; print(sum(1 for p in json.load(sys.stdin) if p[\"id\"]==\"pat\"))')\" = 0 ]"
@@ -140,7 +141,7 @@ run invite add Pat --agent house
 check "invite add (text), host unreachable: error on stderr, exit 1, no stdout" "[ $rc = 1 ] && [ -z \"\$OUT\" ] && grep -q 'not reachable' $T/err"
 run bot ls --json
 check "bot ls, host unreachable: ok false, exit 1" "[ $rc = 1 ] && [ \"\$(jv \"d['ok']\")\" = False ]"
-export KITH_SERVE_PORT=$PORT
+export KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=$PORT
 
 # ---- invite ----
 rec
@@ -264,10 +265,10 @@ run people grant refuse house --json
 check "a core refusal is the error, exit 1, host not asked" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'not allowed'* ]] && nothing"
 run people revoke hostfail house --json
 check "core done but enforce failed: exit 1, says the rows changed and to run it again" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'rows were changed'* && \$(jv \"d['error']\") == *'again'* ]]"
-export KITH_SERVE_PORT=1
+export KITH_SERVE_DIR=$T/nohost KITH_SERVE_PORT=1
 run people revoke sam house --json
 check "revoke with the host down: exit 1, the rows changed, says so" "[ $rc = 1 ] && [[ \$(jv \"d['error']\") == *'rows were changed'* ]]"
-export KITH_SERVE_PORT=$PORT
+export KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=$PORT
 cp "$T/auth.live" "$KITH_AUTH"
 rec; : > "$T/core.jsonl"
 run people grant sam house --json

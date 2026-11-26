@@ -181,6 +181,8 @@ jobs:
               - 'serve/host/src/lifecycle_cmd.rs'
               - 'serve/host/src/terminal/**'
               - 'serve/host/src/cards/resume.rs'
+              - 'serve/host/src/cards/resume/wake_clock.rs'
+              - 'serve/host/src/routines/run_door.rs'
               - 'serve/host/src/api/threads.rs'
               - 'serve/host/src/api/bots.rs'
               - 'serve/host/src/api/botguests.rs'
@@ -198,6 +200,10 @@ jobs:
               - 'core/runtime/src/terminal.rs'
               - 'core/runtime/src/cutover/modules/claims.rs'
               - 'serve/host/src/routines/core_runs.rs'
+              - 'core/kernel/src/launch/**'
+              - 'serve/host/src/launch_cmd.rs'
+              - 'serve/host/src/core_front.rs'
+              - 'kernel/lib/core-switched.txt'
             # The TLA+ models of the writer lock and the holder's claim rules and the code they cover (the list in the writer-lock skill),
             # plus the thread-writers code (the writer lock is what makes one thread have one writer). A filter here runs the model's
             # job and its drift report; whether the job runs the full rows is the model's pass key (Model pass keys below), so no
@@ -232,6 +238,8 @@ jobs:
               - 'kernel/bin/kith'
               - 'serve/host/src/terminal/**'
               - 'serve/host/src/cards/resume.rs'
+              - 'serve/host/src/cards/resume/wake_clock.rs'
+              - 'serve/host/src/routines/run_door.rs'
               - 'serve/host/src/api/threads.rs'
               - 'serve/host/src/api/bots.rs'
               - 'serve/host/src/api/botguests.rs'
@@ -266,8 +274,20 @@ jobs:
               - 'core/runtime/src/revoke_order.rs'
               - 'core/runtime/src/import/authority.rs'
               - 'core/kernel/src/secrets/authority.rs'
+              - 'core/kernel/src/launch/plan.rs'
+              - 'core/kernel/src/launch/exec.rs'
+              - 'core/kernel/src/launch/start.rs'
+              - 'core/kernel/src/secrets.rs'
+              - 'core/kernel/src/threads/writer.rs'
+              - 'core/kernel/src/permit/helper.rs'
+              - 'core/kernel/src/permit/door.rs'
+              - 'kernel/lib/kith-core.sh'
+              - 'kernel/lib/kith_people_access.py'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
+              # the access rules (cut_off, held, may, take_once) the core and the Rust kith-auth both call
+              - 'core/kernel/src/access.rs'
+              - 'core/kernel/src/access/**'
             # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).
             secrets:
               - 'verification/secrets/**'
@@ -973,6 +993,8 @@ jobs:
       # checks owner-only access lists natively (core/winsys). Both only prove themselves here.
       - name: Kernel and core runtime tests
         run: |
+          cargo clippy --manifest-path host/Cargo.toml -p kith-winsys --all-targets --locked -- -D warnings
+          cargo test --manifest-path host/Cargo.toml -p kith-winsys --locked
           cargo clippy --manifest-path host/Cargo.toml -p kith-core --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-core --locked
           cargo clippy --manifest-path host/Cargo.toml -p kith-api --all-targets --locked -- -D warnings

@@ -342,7 +342,7 @@ check "summarise --json, host down: refused with the reason, no JSON" "! python3
 check "forget --json: a run-token caller is refused" "! env KITH_RUN_TOKEN=x KITH_RUN_SOCKET=/nope python3 \"$R\" forget --thread t1 --json >$T/o 2>$T/e"
 check "forget --json: a person's run is refused" "! env KITH_PERSON=sam python3 \"$R\" forget --thread t1 --json >$T/o 2>$T/e && grep -q 'only the owner' $T/e"
 check "forget --json: bad thread id is a usage error" "python3 \"$R\" forget --thread 'a b' --json 2>/dev/null; [ \$? = 2 ]"
-python3 - "$T/port" <<'PY' &
+PYTHONPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)${PYTHONPATH:+:$PYTHONPATH}" python3 - "$T/port" <<'PY' &
 import http.server, json, sys
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
@@ -350,8 +350,9 @@ class H(http.server.BaseHTTPRequestHandler):
         b = json.dumps({'written': True}).encode()
         self.send_response(200); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
     def log_message(self, *a): pass
-s = http.server.HTTPServer(('127.0.0.1', 0), H)
-open(sys.argv[1], 'w').write(str(s.server_address[1]))
+import fakehost, os
+s = fakehost.UnixHTTPServer(fakehost.sock_path(os.environ['KITH_SERVE_DIR']), H)
+open(sys.argv[1], 'w').write('1')
 s.serve_forever()
 PY
 STUB=$!

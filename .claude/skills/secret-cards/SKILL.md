@@ -190,3 +190,7 @@ Breaks that must fail: `switched-core-first` (`GrantHasItem`: a crash between le
 `switched-lost-as-fail` (`WrittenEndsSaved`: no read-back after a lost answer), `switched-claim-gap` (`AtMostOneWrite`: the
 claim let go between the two steps). The host's own save after the write (`Finish`) is not a place kith-auth's process
 dies, so `Crash` is only before the core commit in these rows.
+
+## The key store's add is create-if-absent (2026-11-25, windows-owner W22b)
+
+Premise, no model run. The model's one write of a secret assumes the master key exists once and is never replaced under records already sealed: **the key store's `add` is create-if-absent**. That holds on the macOS Keychain (`add-generic-password` without `-U`). On Windows it holds only with WI15's lock: Credential Manager has no add-only write, so `CredentialManager::add` runs get, write and read-back under one exclusive per-user lock file named from the Credential Manager target (`core/runtime/src/secrets/keystore.rs`), which two layouts of one user share. It is **open on Linux** (`secret-tool store` replaces: two cores minting their first key at once can still race there). No card step changed.

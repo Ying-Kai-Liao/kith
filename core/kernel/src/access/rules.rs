@@ -299,7 +299,7 @@ impl<'a> Rules<'a> {
         }
         let mut out: Vec<String> = Vec::new();
         for d in all {
-            if jobs::valid_domain(&d) && !out.contains(&d) {
+            if valid_domain(&d) && !out.contains(&d) {
                 out.push(d);
             }
         }

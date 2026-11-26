@@ -29,41 +29,34 @@ done
 [[ -n ${KITH_CALL_CHAT:-} && -n ${KITH_CALL_KEY:-} ]] || { echo "not-allowed"; echo "kith-call: only runs the Kith host started can call (no KITH_CALL_KEY here)" >&2; exit 7; }
 
 exec python3 -I - "$(dirname "$0")" "$wait" "$*" "$result" <<'PY'
-import json, os, subprocess, sys, urllib.error, urllib.request
+import json, os, sys
 from pathlib import Path
 
 here, wait, reason, result = Path(sys.argv[1]), sys.argv[2] == 'true', sys.argv[3], sys.argv[4]
 CODES = {'ringing': 0, 'accepted': 0, 'declined': 3, 'missed': 4, 'busy': 5, 'rate-limited': 6, 'not-allowed': 7}
 
-# The host's own rule for where it lives (kith-serve endpoint); the env overrides win.
-data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
-if not (data and port):
-    try:
-        d, p = subprocess.run([str(here / 'kith-serve'), 'endpoint'], capture_output=True, text=True, timeout=4,
-                              check=True).stdout.split()
-    except Exception:  # noqa: BLE001 — fall back to the dev defaults
-        d, p = str(Path.home() / '.kith' / 'serve'), '19224'
-    data, port = data or d, port or p
+sys.path.insert(0, str(here / '..' / 'lib'))
+import kith_hostlocal  # the host's local endpoint, never loopback TCP
 
 body = {'chat': os.environ['KITH_CALL_CHAT'], 'key': os.environ['KITH_CALL_KEY'], 'reason': reason, 'wait': wait,
         'from': os.environ.get('KITH_AGENT', '')}
 if result:
     body['result'] = result
 try:
-    token = (Path(data) / 'token').read_text().strip()
-    req = urllib.request.Request(f'http://127.0.0.1:{port}/api/callPerson', json.dumps(body).encode(),
-                                 {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req, timeout=60 if wait else 10) as r:
-        out = json.load(r)
-except urllib.error.HTTPError as e:
-    try:
-        msg = json.load(e).get('error', '')
-    except ValueError:
-        msg = ''
-    print(f'kith-call: the host refused: {msg or e.code}', file=sys.stderr)
+    code, payload = kith_hostlocal.request('/api/callPerson', body, 60 if wait else 10)
+    if not 200 <= code < 300:
+        try:
+            msg = json.loads(payload).get('error', '')
+        except (ValueError, AttributeError):
+            msg = ''
+        print(f'kith-call: the host refused: {msg or code}', file=sys.stderr)
+        sys.exit(1)
+    out = json.loads(payload)
+except kith_hostlocal.HostUnreachable as e:
+    print(f"kith-call: can't reach the Kith host ({e})", file=sys.stderr)
     sys.exit(1)
-except Exception as e:  # noqa: BLE001
-    print(f'kith-call: can\'t reach the Kith host ({e})', file=sys.stderr)
+except ValueError as e:
+    print(f"kith-call: can't reach the Kith host ({e})", file=sys.stderr)
     sys.exit(1)
 
 status = out.get('status', '')

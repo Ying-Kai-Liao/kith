@@ -180,8 +180,7 @@ fn issue_asks_the_host_and_prints_export_lines() {
     let root = world("issue");
     std::fs::create_dir_all(root.join("serve")).unwrap();
     std::fs::write(root.join("serve/token"), "serve-tok\n").unwrap();
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = l.local_addr().unwrap().port();
+    let l = crate::hostlocal::testkit::listen(&root.join("serve"));
     let server = std::thread::spawn(move || {
         let (mut s, _) = l.accept().unwrap();
         let mut seen = Vec::new();
@@ -197,7 +196,7 @@ fn issue_asks_the_host_and_prints_export_lines() {
     });
     let mut env = Env::with(&[("KITH_ASK_ID", "ask-1")]);
     env.set("KITH_SERVE_DIR", root.join("serve").to_str().unwrap());
-    env.set("KITH_SERVE_PORT", &port.to_string());
+    env.set("KITH_SERVE_PORT", "1");
     env.set("KITH_STATE", root.join(".kith").to_str().unwrap());
     env.home = root.clone();
     std::fs::create_dir_all(root.join(".kith/live/ask")).unwrap();
@@ -234,6 +233,39 @@ fn issue_without_a_host_and_without_a_restart_refuses() {
     );
 }
 
+/// A host with a port but no local endpoint is an older one: it is named, and never restarted (its turns would end).
+#[test]
+fn issue_names_an_older_host_and_does_not_restart_it() {
+    let root = world("older");
+    std::fs::create_dir_all(root.join("serve")).unwrap();
+    std::fs::write(root.join("serve/token"), "serve-tok\n").unwrap();
+    let old = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut env = Env::default();
+    env.set("KITH_SERVE_DIR", root.join("serve").to_str().unwrap());
+    env.set(
+        "KITH_SERVE_PORT",
+        &old.local_addr().unwrap().port().to_string(),
+    );
+    env.set("KITH_LAUNCHCTL", "/nonexistent/launchctl");
+    let out = go(&env, &["issue", "a", "s", "1"], "");
+    assert_eq!(out.code, 1);
+    assert!(
+        out.stderr.contains("older than this command"),
+        "{}",
+        out.stderr
+    );
+    // Nothing was sent to the old host over TCP.
+    // The port was only knocked on: whatever connected sent no byte (no token).
+    old.set_nonblocking(true).unwrap();
+    while let Ok((mut c, _)) = old.accept() {
+        let mut got = Vec::new();
+        c.set_nonblocking(true).unwrap();
+        let _ = c.read_to_end(&mut got);
+        assert!(got.is_empty(), "the old host was sent {got:?}");
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn restart_runs_launchctl_in_the_apps_order_and_waits_for_the_port() {
     let root = world("restart");
@@ -248,13 +280,10 @@ fn restart_runs_launchctl_in_the_apps_order_and_waits_for_the_port() {
     )
     .unwrap();
     std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let _l = crate::hostlocal::testkit::listen(&root.join("serve"));
     let mut env = Env::with(&[("KITH_LAUNCHCTL", script.to_str().unwrap())]);
-    env.set("KITH_SERVE_DIR", "/x");
-    env.set(
-        "KITH_SERVE_PORT",
-        &l.local_addr().unwrap().port().to_string(),
-    );
+    env.set("KITH_SERVE_DIR", root.join("serve").to_str().unwrap());
+    env.set("KITH_SERVE_PORT", "1");
     env.home = root.clone();
     // a script written a moment ago can be "text file busy" when another test forks at that instant: try again
     let mut up = false;
