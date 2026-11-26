@@ -271,3 +271,47 @@ fn a_mac_whose_claims_are_not_switched_keeps_run_turn_though_the_program_lists_t
     lab.until("the report", || !lab.calls("hostclaim.report").is_empty());
     assert_eq!(lab.read("argv").trim(), "run-turn house daily --turn 7 --claim 9");
 }
+
+#[test]
+fn the_launch_is_built_without_the_hosts_run_identity_and_claim() {
+    let lab = Lab::new();
+    let hub = hub();
+    let t = fired("sam", false);
+    let which = super::Which { agent: "house", job: "daily", person: Some("sam"), turn: 7, claim: 9 };
+    let built =
+        super::build(&hub, &lab.folders, std::path::Path::new("/p/kith"), std::path::Path::new("/k"), &t, &which)
+            .unwrap();
+    let removed: Vec<String> =
+        built.cmd.get_envs().filter(|(_, v)| v.is_none()).map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+    for var in ["KITH_RUN_TOKEN", "KITH_RUN_SOCKET", "KITH_CORE_RUN_SOCKET", "KITH_PERSON", "HQ_PERSON"] {
+        assert!(removed.iter().any(|r| r == var), "{var} is removed from the launch: {removed:?}");
+    }
+    let args: Vec<String> = built.cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+    assert_eq!(
+        args,
+        ["kernel", "launch", "house", "--exec", "--kernel", "/k", "--turn", "7", "--claim", "9"],
+        "the claim is on the line, not in the environment"
+    );
+    if let Some(outbox) = built.outbox {
+        super::remove_outbox(&outbox);
+    }
+}
+
+#[test]
+fn a_launch_that_lost_the_attach_cannot_overwrite_the_winners_header() {
+    use std::io::{Read as _, Seek as _, Write as _};
+    let lab = Lab::new();
+    let (mut winner, path) = super::open_log(&lab.folders, "house", "daily").unwrap();
+    // The winner's attach: truncate, head the file.
+    winner.set_len(0).unwrap();
+    winner.seek(std::io::SeekFrom::Start(0)).unwrap();
+    winner.write_all(b"# header of the winner\n").unwrap();
+    // A second launch (a host restart in the same minute) opens the same file; its refusal is written at its own offset.
+    let (mut loser, again) = super::open_log(&lab.folders, "house", "daily").unwrap();
+    assert_eq!(path, again, "the same minute, the same file");
+    loser.write_all(b"kith: sched turn: claim 9 is gone (ended); nothing ran\n").unwrap();
+    let mut text = String::new();
+    std::fs::File::open(&path).unwrap().read_to_string(&mut text).unwrap();
+    assert!(text.starts_with("# header of the winner\n"), "the winner's header is intact: {text}");
+    assert!(text.ends_with("nothing ran\n"), "{text}");
+}

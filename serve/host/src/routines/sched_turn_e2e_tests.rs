@@ -208,6 +208,7 @@ exit 0
     /// The engine's environment: what the launch and the walk gave it.
     fn set_child_env(&self, extra: &[(&str, &str)]) {
         let mut env = self.env.clone();
+        env.extend(STRAY.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())));
         env.extend(extra.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())));
         *TEST_ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(env);
     }
@@ -286,6 +287,18 @@ impl Drop for World {
     }
 }
 
+// What a host started by launchd or a run could carry in its own environment: none of it may reach the engine.
+const STRAY: [(&str, &str); 8] = [
+    ("KITH_RUN_TOKEN", "stray-token"),
+    ("KITH_RUN_SOCKET", "/nonexistent/run.sock"),
+    ("KITH_CORE_RUN_SOCKET", "/nonexistent/core-run.sock"),
+    ("KITH_PERSON", "mallory"),
+    ("HQ_PERSON", "mallory"),
+    ("KITH_TURN_CLAIM", "99999"),
+    ("HQ_TURN_CLAIM", "99999"),
+    ("KITH_SCHED_NOW", "2020-01-01T00:00"),
+];
+
 fn value_of(run: &str, name: &str) -> Option<String> {
     run.lines().find_map(|l| l.strip_prefix(&format!("{name}=")).map(str::to_owned))
 }
@@ -312,8 +325,8 @@ fn an_owners_job_walks_to_the_second_account_when_the_first_is_out_of_usage() {
     assert!(argv.contains("Scheduled job \"walk\" of house, cron `0 8 * * *`, core turn"), "{argv}");
     assert_eq!(w.show(&json!({"claimId": claim}))["pid"], World::launch_pid(), "turn {turn}");
     assert!(ancestors(run).contains(&World::launch_pid()), "the engine descends from the launch: {:?}", ancestors(run));
-    for gone in ["KITH_TURN_CLAIM", "HQ_TURN_CLAIM", "KITH_SCHED_NOW", "KITH_RUN_TOKEN"] {
-        assert_eq!(value_of(run, gone), None, "{gone} does not reach the engine");
+    for (gone, _) in STRAY {
+        assert_eq!(value_of(run, gone), None, "{gone} was in the host's environment and does not reach the engine");
     }
     assert!(argv.contains("do the walk"), "the job's task is the prompt: {argv}");
     let log = w.log_text();
@@ -338,9 +351,10 @@ fn a_guests_job_runs_directly_as_the_guest_with_its_own_outbox() {
     );
     assert_eq!(w.show(&json!({"claimId": claim}))["pid"], World::launch_pid());
     assert!(ancestors(run).contains(&World::launch_pid()), "the engine descends from the launch: {:?}", ancestors(run));
-    for gone in ["KITH_TURN_CLAIM", "HQ_TURN_CLAIM", "KITH_SCHED_NOW", "KITH_RUN_TOKEN"] {
-        assert_eq!(value_of(run, gone), None, "{gone} does not reach the engine");
+    for (gone, _) in STRAY.iter().filter(|(k, _)| !k.ends_with("PERSON")) {
+        assert_eq!(value_of(run, gone), None, "{gone} was in the host's environment and does not reach the engine");
     }
+    assert_eq!(value_of(run, "HQ_PERSON").as_deref(), Some("sam"), "the guest, not the host's stray person");
     assert!(!w.folders.machine.join("sched/state.json").exists(), "no kith-sched ran: its state file is never written");
     let _ = std::fs::remove_dir_all(&outbox);
     let _ = std::fs::remove_file(format!("{outbox}.json"));
@@ -383,7 +397,7 @@ fn a_host_restarted_mid_run_leaves_the_run_writing_its_log_and_the_core_ends_the
     let host2 = CoreWriter::with_instance(w.folders.clone(), "kith-serve-host/2-b".to_owned());
     host2.adopt().expect("adopt");
     let state = |w: &World| w.show(&json!({"claimId": claim}))["state"].as_str().unwrap_or_default().to_owned();
-    assert!(["claimed", "running", "ending"].contains(&state(&w).as_str()), "the run goes on: {}", state(&w));
+    assert_eq!(state(&w), "running", "the run goes on, and is the writer");
 
     // The run was started with a file for its output, so it still writes after the restart.
     std::fs::remove_file(w.dir.join("hold")).unwrap();
@@ -391,6 +405,8 @@ fn a_host_restarted_mid_run_leaves_the_run_writing_its_log_and_the_core_ends_the
     until("the run to end", 120, || !alive(pid));
     let log = std::fs::read_to_string(&built.log).unwrap();
     assert!(log.contains("engine-still-writing-after-the-host-restart"), "the log kept being written: {log}");
+    let ran = std::fs::read_dir(&w.rec).unwrap().count();
+    assert_eq!(ran, 1, "the engine ran exactly once");
 
     // Nothing reported it: the core ends the claim once the process is gone.
     until("the core to end the claim", 60, || {

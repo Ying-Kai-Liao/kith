@@ -55,8 +55,9 @@ impl Ops for Live {
         let spec = json!({"prompt": t["prompt"], "settings": t["settings"], "person": spec_person});
         // A program that lists `sched-turn` runs the turn as the launch; one that does not (an older one, a Mac whose program
         // list lacks it) keeps `kith-sched run-turn` (design 2026-11-24-sched-turn S-R3).
-        // And only on a Mac whose claims are the core's: the launch attaches the host's claim through `claim.attach`, which the core
-        // refuses until `kith migrate step claims`. The runner pulls in Writer mode only; this keeps the line true whoever calls.
+        // The gate is `Routines::pull`'s Writer check (`core_runs.rs`): turns are pulled only on a Mac whose claims are the core's, and
+        // `run-turn` attaches through the same `claim.attach`, so it is no fallback on an unswitched Mac. This read only covers a mode
+        // that flipped between the two reads; both paths fail closed.
         let program = sched_launch::program().filter(|_| self.0.mode() == Mode::Writer);
         let run = Run {
             turn,

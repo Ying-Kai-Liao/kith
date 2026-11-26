@@ -6,7 +6,13 @@
 //! with the person and the run outbox, `calls::run_origin`, as the host's `runEnv` answers it) goes to the launch in the spec on
 //! stdin, and the log (`<logs>/sched/runs/AGENT/JOB-YYYYMMDD-HHMM.log`) is opened here and handed over as stdout and stderr: a
 //! file, never a pipe, so a host restart does not cut the run's output. It is opened without truncating: the launch truncates and
-//! heads it once its attach has won, so a second launch for the same turn leaves the winner's log as it is.
+//! heads it once its attach has won, so a second launch for the same turn (a host restart in the same minute) never truncates the
+//! winner's log; it is opened for appending, so what the loser says goes after the winner's lines.
+//!
+//! Rollback: `KITH_SCHED_LAUNCH=off` in the host's environment keeps `kith-sched run-turn` whatever the program lists. On a launchd
+//! host it goes in `dev.kith.serve`'s `EnvironmentVariables` (the plist `kith serve install` writes), then the host is restarted.
+//! `schedules_cutover_e2e.rs` sets it for its cases, which prove the `run-turn` path; when S3 removes `run-turn` those cases move
+//! onto the launch (they are not deleted) and the lever goes.
 //!
 //! The process group (Windows: its own group and no console) is the run door's [`detach`](super::run_door::detach).
 
@@ -76,13 +82,15 @@ fn job_of(folders: &Paths, agent: &str, id: &str) -> Value {
     }
 }
 
-/// The run's log, `<logs>/sched/runs/AGENT/JOB-YYYYMMDD-HHMM.log`, opened for writing without truncating (made if needed).
+/// The run's log, `<logs>/sched/runs/AGENT/JOB-YYYYMMDD-HHMM.log`, opened for appending without truncating (made if needed). In
+/// append mode a launch that loses the attach (its claim is gone) writes its refusal after what the winner wrote, never over the
+/// winner's header at offset 0; the winner truncates and heads the file once its own attach has won.
 fn open_log(folders: &Paths, agent: &str, job: &str) -> std::io::Result<(std::fs::File, PathBuf)> {
     let dir = folders.logs.join("sched/runs").join(agent);
     std::fs::create_dir_all(&dir)?;
     let name = format!("{job}-{}.log", chrono::Local::now().format("%Y%m%d-%H%M"));
     let path = dir.join(name.replace(['/', '\\'], "_"));
-    Ok((std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?, path))
+    Ok((std::fs::OpenOptions::new().create(true).append(true).open(&path)?, path))
 }
 
 /// The run's origin as `kith-sched`'s `run_env` made it: the call key and chat of the person's app chat with the agent, and the
@@ -166,9 +174,9 @@ pub(super) fn build(
     let job = job_of(folders, w.agent, w.job);
     // The log first: the outbox is made only for a launch that can be started.
     let (log, log_path) = open_log(folders, w.agent, w.job).map_err(|e| format!("can't open the run's log: {e}"))?;
+    let err = log.try_clone().map_err(|e| format!("can't share the run's log: {e}"))?;
     let origin = origin_of(hub, w.agent, &job, w.person);
     let outbox = origin.get("KITH_RUN_OUTBOX").and_then(Value::as_str).map(PathBuf::from);
-    let err = log.try_clone().map_err(|e| format!("can't share the run's log: {e}"))?;
     let mut cmd = Command::new(program);
     #[cfg(test)]
     if let Some(env) = TEST_ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
