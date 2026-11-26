@@ -53,8 +53,15 @@ fn turns(v: &Value) -> i64 {
 pub(super) fn ls(host: &Host, as_json: bool, out: &mut dyn Write) -> i32 {
     let mut kept: Vec<(String, Value)> = load(host).into_iter().collect();
     let at = |v: &Value| v.get("at").and_then(Value::as_str).unwrap_or("").to_owned();
-    // Newest first; `at` has second resolution, so ties go by key (as kith-ask does) and never by the file's order.
-    kept.sort_by(|a, b| at(&b.1).cmp(&at(&a.1)).then_with(|| a.0.cmp(&b.0)));
+    // Newest first; `at` only has minute resolution, so a minute's rows go by `ts` (epoch ms; rows from before it lack it: 0),
+    // then by key (as kith-ask does), and never by the file's order.
+    let ts = |v: &Value| v.get("ts").and_then(Value::as_i64).unwrap_or(0);
+    kept.sort_by(|a, b| {
+        at(&b.1)
+            .cmp(&at(&a.1))
+            .then_with(|| ts(&b.1).cmp(&ts(&a.1)))
+            .then_with(|| a.0.cmp(&b.0))
+    });
     if as_json {
         let rows: Vec<Value> = kept
             .iter()
