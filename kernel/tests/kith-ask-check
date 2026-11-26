@@ -471,4 +471,16 @@ sys.exit(0 if not during and not marker.exists() else 1)
 PY
 [ $? = 0 ] || fails=$((fails + 1))
 
+# `ls`: `at` has minute resolution, so one minute's rows go newest first by `ts` (rows without one last), then by key; the
+# Rust port sorts the same (core/kernel/src/ask/tests.rs ls_orders_one_minute_by_ts_then_key), which difftest ask-fg-answer relies on
+MACHINE=$(dirname "$(dirname "$BOX")")
+python3 - "$MACHINE/ask.json" <<'PY'
+import json, sys
+row = lambda **k: dict({'agent': 'echo', 'at': '2026-01-01T00:05', 'turns': 1, 'cost': 0, 'last': ''}, **k)
+json.dump({'echo|/home/runner/h': row(ts=1000), 'echo|/home/runner/h/proj': row(ts=2000), 'echo|as:work': row(ts=3000),
+           'echo|/old': row(), 'echo|/same': row(ts=2000)}, open(sys.argv[1], 'w'))
+PY
+expect "ls orders one minute by ts, then key" "$(python3 "$ASK" ls --json | python3 -c 'import json,sys; print(" ".join(r["key"] for r in json.load(sys.stdin)["conversations"]))')" \
+  "echo|as:work echo|/home/runner/h/proj echo|/same echo|/home/runner/h echo|/old"
+
 [ "$fails" = 0 ] && echo "all kith-ask checks passed" || { echo "$fails check(s) failed"; exit 1; }

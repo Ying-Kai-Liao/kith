@@ -405,3 +405,49 @@ fn ls_orders_same_second_conversations_by_key_not_by_file() {
         .collect();
     assert_eq!(keys, ["echo|/b", "echo|/a", "echo|/z", "echo|/n"]);
 }
+
+/// The difftest flake: `at` only has minute resolution, so rows of one minute go by `ts` (newest first), then by key; rows
+/// from before `ts` existed sort after those with one. kith-ask's `ls` sorts the same way.
+#[test]
+fn ls_orders_one_minute_by_ts_then_key() {
+    let root = scratch("lsts");
+    let dir = root.join("machine");
+    std::fs::create_dir_all(&dir).expect("folder");
+    let row = |ts: Option<i64>| {
+        let mut r =
+            json!({"agent": "echo", "at": "2026-01-01T00:05", "turns": 1, "cost": 0, "last": ""});
+        if let Some(t) = ts {
+            r["ts"] = json!(t);
+        }
+        r
+    };
+    let kept = json!({
+        "echo|/home/runner/h": row(Some(1000)),
+        "echo|/home/runner/h/proj": row(Some(2000)),
+        "echo|as:work": row(Some(3000)),
+        "echo|/old": row(None),
+        "echo|/same": row(Some(2000)),
+    });
+    std::fs::write(dir.join("ask.json"), kept.to_string()).expect("file");
+    let none = Fake::new(vec![]);
+    let (code, out, _) = go_in(&none, &["ls", "--json"], &root);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(code, 0);
+    let got: Value = serde_json::from_str(out.trim()).expect("json");
+    let keys: Vec<&str> = got["conversations"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|r| r["key"].as_str().expect("key"))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "echo|as:work",
+            "echo|/home/runner/h/proj",
+            "echo|/same",
+            "echo|/home/runner/h",
+            "echo|/old"
+        ]
+    );
+}
