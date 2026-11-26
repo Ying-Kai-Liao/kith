@@ -30,7 +30,7 @@ verification/holder-idle/run.sh --show CFG      # TLC's full output (the counter
 verification/holder-idle/drift.sh               # which covered files changed since the sync commit
 ```
 
-CI runs `run.sh` (job `holder-idle`) when `verification/holder-idle/`, this skill, `holder.rs` or `holder_link.rs` change.
+CI runs `run.sh` (job `holder-idle`) when `verification/holder-idle/`, this skill, `holder.rs`, `holder_link.rs`, `conversations/claims.rs` or `conversations/reconcile.rs` change.
 Tools are the same pinned, sha256-checked `tla2tools.jar` v1.7.4 and Temurin JRE as the holder-lease skill (`run.sh` is a copy
 of its harness); each row of `checks.tsv` names a complete cfg in `cfgs/`.
 
