@@ -294,6 +294,15 @@ stand-in kernel, `tests/fixtures/kernel_agents.py`) instead of native bots; its 
 transaction, the stub's lock and the holder are untouched, and no row of `checks.tsv` reads the agent's name. Drift was read for
 `writer.rs`; SYNC not moved.
 
+## Sched-turn S2, a launch that attaches a claim (2026-11-26) - prose only, no model row
+The host's cron path (`routines/sched_launch.rs`) starts `kith kernel launch --exec --turn N --claim C`, whose process attaches
+the host's claim (`claim.attach`, kind `external`) with its own pid before the engine starts and whose engine descends from it
+(`launch/sched_turn.rs`). It is the path `run-turn` was, in Rust: the claim is `claimed` with no process until the attach, adopt
+requeues it, an attached one is ended by `end_gone` once the pid and its group are gone, and a report on it leaves `ending`
+(the detached-run rule above). No new way to start an engine without a claim, and nothing takes the lock. The host test
+`routines/sched_turn_e2e_tests.rs` checks claim pid = the pid the host started, and that a run outlives a host restart and is ended
+by `hostclaim.settle`. Drift read; SYNC not moved.
+
 ## A warm stub killed alone, the host up (2026-11-25) - prose only, no model row
 `Claims4`'s `StubDies` makes an orphan only with the holder down (`~hUp`): a live holder sweeps the group before it records the
 stub's exit, so a report never ends a claim under a live engine. The host plays the holder for its warm stubs and did not: a stub

@@ -159,6 +159,9 @@ impl Lab {
             ("KITH_SERVE_HOME", p(&self.serve)),
             ("KITH_KERNEL", p(&self.kernel)),
             ("KITH_BIN", KITH.to_owned()),
+            // These cases are about `kith-sched run-turn` (its stub engine, its attach): the host keeps that path for them, though the
+            // built program lists `sched-turn` (the launch has its own end to end test, `routines/sched_turn_e2e_tests.rs`).
+            ("KITH_SCHED_LAUNCH", "off".to_owned()),
             ("PATH", "/usr/bin:/bin".to_owned()),
             ("TZ", "UTC".to_owned()),
             ("PYTHONDONTWRITEBYTECODE", "1".to_owned()),

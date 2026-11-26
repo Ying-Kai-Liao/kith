@@ -45,6 +45,7 @@ src/api/room_secrets_props.rs	api::room_secrets_props::
 # (344 tests across 25 modules; these two were the ones the static check missed). Re-trace when wake gains a caller.
 src/cards/session_tests.rs	cards::session_tests::
 src/routines/schedule_golden.rs	routines::schedule_golden::
+src/routines/sched_turn_e2e_tests.rs	routines::sched_turn_e2e_tests::
 # Drive the writer lock the kernel's `kith --direct` shares (a real kith-stub on <machine>/core/locks): a kernel change to the lock or its
 # claim protocol must still pass the host's Writer-mode turns (P7b).
 src/agent/bot/writer_tests.rs	agent::bot::writer::tests::
