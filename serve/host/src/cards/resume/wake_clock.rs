@@ -151,7 +151,7 @@ pub(super) fn engine_gap(t: &Value, harness: Option<&str>) -> Option<&'static st
 fn harness_of_agent(agent: &str) -> Option<String> {
     let kernel = crate::kernel::current_kernel()?;
     let out = Command::new(kernel.join("bin/kith-pkg")).args(["resolve", agent]).stdin(Stdio::null()).output().ok()?;
-    let dir = out.status.success().then(|| std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))?;
+    let dir = out.status.success().then(|| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))?;
     let text = std::fs::read_to_string(dir.join("agent.md")).ok()?;
     let mut lines = text.lines();
     if lines.next() == Some("---") {
@@ -300,7 +300,7 @@ async fn show_holder(hub: &Hub, live: &[Card], session: &str) {
 struct Logs {
     out: std::fs::File,
     err: std::fs::File,
-    err_path: std::path::PathBuf,
+    err_path: PathBuf,
 }
 
 /// `<logs>/wake/<run>.log` and `.err`: where `kith-ask` reads what a follow-up's turn said (`follow_ups`). `None` when the folder
@@ -315,13 +315,13 @@ fn log_files(state: &Path, run: &str) -> Option<Logs> {
 
 /// What the wake kind gives the detached-run module.
 struct Plan {
-    bin: std::path::PathBuf,
+    bin: PathBuf,
     args: Vec<String>,
     env: Vec<(String, String)>,
     /// The ask a card's reply answers (its run token carries it).
     asked: Option<crate::runauth::AskReply>,
     agent: String,
-    state: std::path::PathBuf,
+    state: PathBuf,
     run: String,
     claim_person: String,
     conversation: String,
@@ -426,6 +426,26 @@ fn lifecycle_command_with(program: Option<PathBuf>, kernel: Option<PathBuf>) -> 
     Some(cmd)
 }
 
+// Unix-only until retire-python P1-12: the run door's stand-in `kith` is a shell script (no Windows kernel launcher before it).
+#[cfg(all(test, unix))]
+#[path = "wake_clock_tests.rs"]
+mod tests;
+
+/// `kith-ask --sweep`: answers nobody read whose asker's session ended become its wake, until asks are rows of the core. It is
+/// the kernel's Python, so a host with no Python (a Windows owner) has no hand-over until the ask item lands (design section 6).
+fn ask_command() -> Option<Command> {
+    let program = crate::kernel::current_kernel()?.join("bin/kith-ask");
+    (cfg!(unix) && program.is_file()).then(|| {
+        let mut cmd = Command::new(program);
+        cmd.arg("--sweep");
+        cmd
+    })
+}
+
+#[cfg(all(test, unix))]
+#[path = "wake_clock_core_tests.rs"]
+mod core_tests;
+
 #[cfg(test)]
 mod lifecycle_command_tests {
     use super::*;
@@ -454,23 +474,3 @@ mod lifecycle_command_tests {
         assert!(lifecycle_command_with(None, Some(PathBuf::from("/k"))).is_none());
     }
 }
-
-// Unix-only until retire-python P1-12: the run door's stand-in `kith` is a shell script (no Windows kernel launcher before it).
-#[cfg(all(test, unix))]
-#[path = "wake_clock_tests.rs"]
-mod tests;
-
-/// `kith-ask --sweep`: answers nobody read whose asker's session ended become its wake, until asks are rows of the core. It is
-/// the kernel's Python, so a host with no Python (a Windows owner) has no hand-over until the ask item lands (design section 6).
-fn ask_command() -> Option<Command> {
-    let program = crate::kernel::current_kernel()?.join("bin/kith-ask");
-    (cfg!(unix) && program.is_file()).then(|| {
-        let mut cmd = Command::new(program);
-        cmd.arg("--sweep");
-        cmd
-    })
-}
-
-#[cfg(all(test, unix))]
-#[path = "wake_clock_core_tests.rs"]
-mod core_tests;
