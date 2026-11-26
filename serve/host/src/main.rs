@@ -56,6 +56,7 @@ mod threads_cmd;
 mod tui;
 mod update;
 mod usage;
+mod usage_core;
 mod voice;
 mod voice_local;
 mod wake;
