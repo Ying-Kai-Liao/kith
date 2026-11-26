@@ -444,7 +444,13 @@ impl CoreWriter {
     /// `hostclaim.queued`: the turns the core queued that no host began (a schedule's fire), for the host's runner
     /// (`routines/core_runs.rs`). `Err(why)`: the core did not answer.
     pub fn queued(&self) -> Result<Vec<Value>, String> {
-        let v = self.data("hostclaim.queued", &json!({}))?;
+        self.queued_from(&["schedule"])
+    }
+
+    /// [`Self::queued`] for the detached sources it names (`schedule`, `wake`, `ask`): the wake clock lists the wake turns.
+    pub fn queued_from(&self, sources: &[&str]) -> Result<Vec<Value>, String> {
+        let params = if sources == ["schedule"] { json!({}) } else { json!({"sources": sources}) };
+        let v = self.data("hostclaim.queued", &params)?;
         Ok(v["turns"].as_array().cloned().unwrap_or_default())
     }
 
@@ -454,15 +460,15 @@ impl CoreWriter {
         self.cancel(turn, why)
     }
 
-    /// Claims a pulled schedule turn for a cron run that has no process yet (`hostclaim.claim`, kind `scheduleRun`): the run's
-    /// own process attaches itself with `claim.attach` before it starts the engine. The revoke epoch is read first, before the
-    /// host's may check of the turn's person.
-    pub fn claim_run(&self, conversation: &str, person: &str, turn: i64) -> RunClaim {
+    /// Claims a pulled detached turn for a run that has no process yet (`hostclaim.claim`, kind `scheduleRun`, `wakeRun` or
+    /// `askRun`): the run's own process attaches itself with `claim.attach` before it starts the engine. The revoke epoch is read
+    /// first, before the host's may check of the turn's person.
+    pub fn claim_run_as(&self, kind: &str, conversation: &str, person: &str, turn: i64) -> RunClaim {
         let epoch = match self.epoch(person) {
             Ok(e) => e,
             Err(e) => return RunClaim::Down(e.to_string()),
         };
-        let ask = json!({"conversation": conversation, "kind": "scheduleRun", "person": person, "turn": turn,
+        let ask = json!({"conversation": conversation, "kind": kind, "person": person, "turn": turn,
                          "revokeSeen": epoch, "holderInstance": self.instance});
         match self.call("hostclaim.claim", &ask) {
             Answer::Down { why, .. } | Answer::Refused(why) => RunClaim::Down(why),
@@ -493,8 +499,13 @@ impl CoreWriter {
         }
     }
 
-    fn report(&self, claim: i64, kind: &str, pid: u32, extra: &Value) -> Result<(), String> {
-        let mut body = json!({"out_of_usage": false, "pid": pid});
+    /// `pid: None` sends a report that names no process: the core keeps the claim `ending` and `end_gone` ends it once the
+    /// recorded process and its group are gone.
+    fn report(&self, claim: i64, kind: &str, pid: Option<u32>, extra: &Value) -> Result<(), String> {
+        let mut body = json!({"out_of_usage": false});
+        if let (Some(b), Some(pid)) = (body.as_object_mut(), pid) {
+            b.insert("pid".into(), pid.into());
+        }
         if let (Some(b), Some(e)) = (body.as_object_mut(), extra.as_object()) {
             b.extend(e.clone());
         }
@@ -709,7 +720,7 @@ impl CoreWriter {
     /// `take` got an error or no answer: the claim is reported `exit` (the core puts the turn back), the process restarted
     /// and the claim made again, once.
     fn stub_failed(&self, stub: &mut dyn WarmStub, claim: i64, pid: u32, retry: bool, turn: i64, why: &str) -> Step {
-        let _ = self.report(claim, "exit", pid, &json!({"why": why}));
+        let _ = self.report(claim, "exit", Some(pid), &json!({"why": why}));
         if !retry {
             return Step::Go(Begin::Failed { turn: Some(turn), why: format!("the stub failed again: {why}") });
         }
@@ -798,7 +809,7 @@ impl CoreWriter {
 
     /// The stub found the lock taken: the claim ends `busy` and the turn parks `lock_busy`.
     pub fn busy(&self, claim: i64, pid: u32) -> Result<(), String> {
-        self.report(claim, "busy", pid, &json!({}))
+        self.report(claim, "busy", Some(pid), &json!({}))
     }
 
     /// A lock that cannot be given back must not outlive a claim that is not running.
@@ -857,12 +868,24 @@ impl CoreWriter {
     /// Sends the end report of `run` again, after [`Finished::ReportLost`]: the lock is already released, so only the report
     /// goes (a report on a claim the core has ended is stored and changes nothing). The caller retries on its slow tick until
     /// it gets [`Finished::Reported`]; a begin of the conversation never ends the claim for it. A room end has no report.
+    ///
+    /// A stub that is gone while its group is not (on macOS nothing kills the engine with its stub) has that group killed first
+    /// ([`reap_orphan`]): the claim may end only once the group is gone, else a second writer could claim while the engine
+    /// still writes. A group still there after the kill makes the report name no process, so the core keeps the claim.
     pub fn retry_end(&self, run: &Running, end: End) -> Finished {
+        // An abandon kills and waits for the group itself.
+        let reaped = end == End::Abandoned || reap_orphan(run.pid, &run.started);
+        self.send_end(run, end, reaped)
+    }
+
+    /// [`Self::retry_end`] once the stub's group is known gone (`reaped`) or not.
+    fn send_end(&self, run: &Running, end: End, reaped: bool) -> Finished {
+        let pid = reaped.then_some(run.pid);
         let sent = match end {
-            End::Done => self.report(run.claim, "done", run.pid, &json!({})),
-            End::OutOfUsage => self.report(run.claim, "exit", run.pid, &json!({"out_of_usage": true})),
-            End::Killed | End::Died | End::Left => self.report(run.claim, "exit", run.pid, &json!({})),
-            End::Room => return Finished::RoomEnded { gone: !pid_runs(run.pid) },
+            End::Done => self.report(run.claim, "done", pid, &json!({})),
+            End::OutOfUsage => self.report(run.claim, "exit", pid, &json!({"out_of_usage": true})),
+            End::Killed | End::Died | End::Left => self.report(run.claim, "exit", pid, &json!({})),
+            End::Room => return Finished::RoomEnded { gone: reaped && !pid_runs(run.pid) },
             End::Abandoned => {
                 return match self.stop_abandoned(run.claim) {
                     Ok(()) => {
@@ -1001,6 +1024,27 @@ fn refusal(turn: Option<i64>, v: &Value) -> Begin {
         _ => Dropped::Refused,
     };
     Begin::Dropped { turn, why, said }
+}
+
+/// How long [`reap_orphan`] waits after each signal for the group to go.
+const ORPHAN_GRACE: Duration = Duration::from_secs(2);
+
+/// The group of a stub that died alone (its engine runs on in it: macOS has no parent-death signal), killed: SIGTERM, then
+/// SIGKILL after [`ORPHAN_GRACE`]. Each signal goes only while `orphan_group` still names the group (the stub gone, its
+/// start from this boot, the group id held), never to a bare pid that may have been reused. True when nothing of the group
+/// is left (or there was none: a live stub, or a group already empty); false when it outlived both signals.
+pub(crate) fn reap_orphan(pid: u32, started: &str) -> bool {
+    use kith_kernel::procstart::{Sig, orphan_group, signal_group};
+    for sig in [Sig::Term, Sig::Kill] {
+        let Some(group) = orphan_group(pid, started) else { return true };
+        tracing::warn!(pid, ?sig, "core writer: the stub is gone and its process group is not; signalling it");
+        signal_group(group, sig);
+        let until = std::time::Instant::now() + ORPHAN_GRACE;
+        while orphan_group(pid, started).is_some() && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+    orphan_group(pid, started).is_none()
 }
 
 /// Up to three releases (a repeated one is `not-held`, which is fine). False: the lock is still ours.

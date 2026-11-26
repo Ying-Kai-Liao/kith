@@ -467,6 +467,22 @@ pub fn run(
     cmd: &[String],
     say: Say,
 ) -> i32 {
+    run_in(c, host, core, kernel, agent, cmd, say, None)
+}
+
+/// [`run`] with the child's environment given (the launch that runs this in its own process builds it in memory); `None` is this
+/// process's own.
+#[allow(clippy::too_many_arguments)]
+pub fn run_in(
+    c: &Ctx,
+    host: &dyn Host,
+    core: Option<&dyn Core>,
+    kernel: &Path,
+    agent: &str,
+    cmd: &[String],
+    say: Say,
+    env: Option<&[(OsString, OsString)]>,
+) -> i32 {
     // The signal handlers and the pid they pass on are this process's: one run at a time.
     let _one = crate::lifecycle::proc::exclusive();
     let stub = Path::new(&cmd[0])
@@ -485,7 +501,7 @@ pub fn run(
         ));
     }
     let argv_os: Vec<OsString> = argv.iter().map(OsString::from).collect();
-    let spawned = match runproc::spawn(&argv_os, status) {
+    let spawned = match runproc::spawn(&argv_os, status, env) {
         Ok(s) => s,
         Err(e) => {
             if let Some((r, w)) = status {

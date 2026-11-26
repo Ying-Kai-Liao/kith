@@ -373,7 +373,7 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
     pub(crate) fn serving(m: &Path, cfg: Config) -> Daemon {
         let p = crate::tests::paths(m);
         let d = Daemon::spawn_with(&p, cfg);
-        d.ready(Duration::from_secs(10)).unwrap();
+        d.ready(crate::tests::DAEMON_UP).unwrap();
         d
     }
 

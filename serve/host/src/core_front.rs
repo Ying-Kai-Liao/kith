@@ -163,6 +163,11 @@ impl TestDaemon {
     pub fn stop(self) {
         self.0.stop();
     }
+
+    /// The holder's first hello, for a test core that has none: the claims wait for it.
+    pub fn reconciled(&self) {
+        self.0.mark_reconciled_without_holder().expect("the reconcile mark");
+    }
 }
 
 /// `kith migrate step authority` over `folders` (the file at `folders.secrets/auth.json`), in this process; the lines it
@@ -755,6 +760,15 @@ fn core_call_dispatch(method: &str, params: &Value) -> CallEnd {
         kith_core::Reached::Mismatch(note) => CallEnd::NoAnswer(note, 3),
         kith_core::Reached::Lost(note) => CallEnd::NoAnswer(note, 5),
     }
+}
+
+/// One call of a held-terminal method, in process, as `kith kernel core-call` makes it (the one-run-path launch of `kith AGENT --held`).
+/// No time limit: opening a terminal starts an engine. A method that is not one of the callable ones is no answer.
+pub fn core_call_open(method: &str, params: &Value) -> CallEnd {
+    if !CORE_CALL_METHODS.contains(&method) {
+        return CallEnd::NoAnswer(format!("core-call: {method} is not one of {}", CORE_CALL_METHODS.join(", ")), 2);
+    }
+    core_call_dispatch(method, params)
 }
 
 /// [`core_call_dispatch`] for the kernel takers of `kith kernel threads` (the writer claims, the registry's record): the

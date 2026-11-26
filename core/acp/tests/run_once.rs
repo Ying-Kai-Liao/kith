@@ -300,6 +300,61 @@ async fn an_agent_that_cannot_load_gets_a_new_session_and_the_fresh_task() {
 }
 
 #[tokio::test]
+async fn a_session_the_agent_answers_null_for_starts_a_new_one_with_the_fresh_task_and_modes() {
+    // Hermes answers session/load with null for a session it did not make over ACP, and lists no modes for it.
+    let log = log_of("load-null");
+    let mut s = spec(&[
+        ("FAKE_ACP_LOAD", "null"),
+        ("FAKE_ACP_MODES", "default,dont_ask"),
+        ("FAKE_ACP_LOG", log.to_str().unwrap()),
+    ]);
+    s.resume = Some("20261125_120215_302121".into());
+    s.modes = vec!["dont_ask".into()];
+    s.approve = true;
+    s.task = "note".into();
+    s.fresh_task = Some("instructions and note".into());
+    let out = run_once(s).await.unwrap();
+    let text = std::fs::read_to_string(&log).unwrap();
+    let _ = std::fs::remove_file(&log);
+    assert_eq!(out.text, "echo: instructions and note");
+    assert_eq!(out.session_id, "fake-session-1");
+    assert!(
+        text.contains("session/load") && text.contains("session/new") && text.contains("dont_ask"),
+        "{text}"
+    );
+    // The id goes out once, in the load: the new session does not carry it.
+    assert_eq!(text.matches("20261125_120215_302121").count(), 1, "{text}");
+}
+
+#[tokio::test]
+async fn a_session_the_agent_answers_an_empty_object_for_starts_a_new_one_with_the_fresh_task_and_modes()
+ {
+    // Hermes answers session/load with null (an empty object over the wire) for a session it did not make over ACP, and lists no modes for it.
+    let log = log_of("load-empty");
+    let mut s = spec(&[
+        ("FAKE_ACP_LOAD", "empty"),
+        ("FAKE_ACP_MODES", "default,dont_ask"),
+        ("FAKE_ACP_LOG", log.to_str().unwrap()),
+    ]);
+    s.resume = Some("20261125_120215_302121".into());
+    s.modes = vec!["dont_ask".into()];
+    s.approve = true;
+    s.task = "note".into();
+    s.fresh_task = Some("instructions and note".into());
+    let out = run_once(s).await.unwrap();
+    let text = std::fs::read_to_string(&log).unwrap();
+    let _ = std::fs::remove_file(&log);
+    assert_eq!(out.text, "echo: instructions and note");
+    assert_eq!(out.session_id, "fake-session-1");
+    assert!(
+        text.contains("session/load") && text.contains("session/new") && text.contains("dont_ask"),
+        "{text}"
+    );
+    // The id goes out once, in the load: the new session does not carry it.
+    assert_eq!(text.matches("20261125_120215_302121").count(), 1, "{text}");
+}
+
+#[tokio::test]
 async fn effort_goes_through_a_thought_level_option_when_the_agent_has_one() {
     let log = log_of("effort");
     let mut s = spec(&[
@@ -342,15 +397,12 @@ async fn a_stop_ends_the_run_and_the_engine_with_it() {
     );
 }
 
-/// Hermes (`hermes acp`) lists these three; Kith asks `accept_edits` for a run and `dont_ask` for an approved one.
+/// Hermes (`hermes acp`) lists these three: edit-approval policies only. Kith asks `dont_ask` for an approved run; a run
+/// without approval is refused before it gets here (engines::holds).
 const HERMES_MODES: &str = "default,accept_edits,dont_ask";
 
 #[tokio::test]
-async fn hermes_modes_are_set_without_and_with_approve() {
-    let (out, set, prompted) = mode_run("hermes-ws", HERMES_MODES, &["accept_edits"], false).await;
-    assert_eq!(out.unwrap(), "echo: say hi");
-    assert_eq!(set, ["accept_edits"]);
-    assert!(prompted);
+async fn hermes_dont_ask_is_set_for_an_approved_run() {
     let (out, set, prompted) = mode_run("hermes-full", HERMES_MODES, &["dont_ask"], true).await;
     assert_eq!(out.unwrap(), "echo: say hi");
     assert_eq!(set, ["dont_ask"]);
@@ -359,10 +411,10 @@ async fn hermes_modes_are_set_without_and_with_approve() {
 
 #[tokio::test]
 async fn a_hermes_that_lists_no_modes_stops_a_run_without_approve_before_the_task() {
-    let (out, set, prompted) = mode_run("hermes-none", "", &["accept_edits"], false).await;
+    let (out, set, prompted) = mode_run("hermes-none", "", &["dont_ask"], false).await;
     assert!(
         out.as_ref()
-            .is_err_and(|e| e.contains("none of the session modes accept_edits")),
+            .is_err_and(|e| e.contains("none of the session modes dont_ask")),
         "{out:?}"
     );
     assert!(set.is_empty() && !prompted);

@@ -146,15 +146,13 @@ pub(crate) fn folders_in(own: Option<&Paths>, params: &Value) -> Result<(Paths, 
 /// turn, so is every member of the basis. A room person (`room-<room>-<n>`, the host's id, never a human's) is no one the
 /// authority tables know, so it is the basis that counts: the id must be of the turn's own room and the basis must not be
 /// empty, a room person is always for somebody. Used at mint, at every run-socket call and in `run.resolve`, under the
-/// core lock a revoke commits under. Where the authority tables are not served (not Unix yet) nothing can be checked, so
-/// it refuses: a run token is never minted or honoured unchecked.
+/// core lock a revoke commits under. A run token is never minted or honoured unchecked.
 pub(crate) fn run_identity_allowed(
     conn: &rusqlite::Connection,
     who: &RunIdentity,
     switched: bool,
     method: &str,
 ) -> Result<()> {
-    #[cfg(unix)]
     {
         let refused = |id: &str| {
             Error::NotAllowed(format!(
@@ -186,19 +184,11 @@ pub(crate) fn run_identity_allowed(
         }
         Ok(())
     }
-    #[cfg(not(unix))]
-    {
-        let _ = (conn, who, switched);
-        Err(Error::NotAllowed(format!(
-            "kith-core: {method}: run tokens are not served on this platform yet"
-        )))
-    }
 }
 
 /// Whether `person` is a room person of `room`: `room-<slug>-<join gen>`, the id the host gives a room's people
 /// (`chat::room_turn::room_person_id`: the room lowercased with every character that is not a letter or digit as a dash,
 /// at most 32 of them, then the join gen). The parts are compared, not a prefix: room `a` is not room `a-b`.
-#[cfg(unix)]
 pub(crate) fn is_room_person_of(person: &str, room: &str) -> bool {
     let slug: String = room
         .chars()

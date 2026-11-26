@@ -176,8 +176,8 @@ json.dump(s, sys.stdout)'
 }
 S=$(settings KITH_PERMISSION_MODE=auto)
 has "an owner run in auto mode loads the saved rule" "$(js "d['permissions']['allow']" <<< "$S")" "Bash(git status)"
-is "...and the saved sentence, after the defaults and the kernel's own-code sentence" \
-  "$(js "d['autoMode']['allow'][0] == '\$defaults' and d['autoMode']['allow'][1].startswith('Running a script') and d['autoMode']['allow'][2].startswith('The owner approved the agent \"echo\"')" <<< "$S")" "True"
+is "...and the saved sentence, after the defaults and the kernel's own-code and public-web sentences" \
+  "$(js "d['autoMode']['allow'][0] == '\$defaults' and d['autoMode']['allow'][1].startswith('Running a script') and d['autoMode']['allow'][2].startswith('Reading a public web page') and d['autoMode']['allow'][3].startswith('The owner approved the agent \"echo\"')" <<< "$S")" "True"
 hasnt "...but not a rule of another agent" "$(js "d['permissions']['allow']" <<< "$S")" "Bash(ls)"
 is "it has a PermissionDenied hook" "$(js "'permit' in d['hooks']['PermissionDenied'][0]['hooks'][0]['command'] and d['hooks']['PermissionDenied'][0]['hooks'][0]['command'].split()[-2]" <<< "$S")" "--dir"
 is "...that waits as long as a card may" "$(js "d['hooks']['PermissionDenied'][0]['hooks'][0]['timeout']" <<< "$S")" "660"
@@ -209,13 +209,14 @@ for who in guest bot-3f9a1c2e; do
   is "$who: no hooks" "$(js "'PermissionDenied' in d['hooks']" <<< "$S")" "False"
   hasnt "$who: no saved rule" "$S" "git status"
   hasnt "$who: no saved sentence" "$S" "The owner approved"
+  hasnt "$who: no public-web sentence" "$S" "Reading a public web page"
   has "$who: the allow list is closed to the file tools" "$(js "d['permissions']['deny']" <<< "$S")" "agents/*/allowed.json)"
 done
 
 # no file, and a malformed one
 rm -f "$FILE"
 S=$(settings KITH_PERMISSION_MODE=auto)
-is "no allowed.json loads nothing past the defaults and the kernel's own-code sentence" "$(js "len(d['autoMode']['allow'])" <<< "$S")" "2"
+is "no allowed.json loads nothing past the defaults and the kernel's two sentences" "$(js "len(d['autoMode']['allow'])" <<< "$S")" "3"
 is "...and the hooks are there all the same" "$(js "'PermissionDenied' in d['hooks']" <<< "$S")" "True"
 printf '{ not json' > "$FILE"
 S=$(settings KITH_PERMISSION_MODE=auto)

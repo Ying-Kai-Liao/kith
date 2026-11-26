@@ -269,16 +269,11 @@ if mode == 'crash': sys.exit(3)
 time.sleep(60)
 PY
 chmod +x "$T/child.py"
+# The idle timer is an hour here: these cases are about the child's own exit, and a short one (0.01 min, floored to 1 s by
+# sleep_after) let the wrapper write "idle" when the fake claude took over a second to start and exit on a loaded runner.
 wrap() {   # wrap <sid> <mode> → runs the wrapper in the background; $wp is its pid
-  KITH_SLEEP_MINUTES=${3:-0.01} KITH_IDLE_POLL=0.2 python3 "$SK" run designer -- "$T/child.py" "$1" "$2" >"$T/wrap.out" 2>&1 &
+  KITH_SLEEP_MINUTES=${3:-60} KITH_IDLE_POLL=0.2 python3 "$SK" run designer -- "$T/child.py" "$1" "$2" >"$T/wrap.out" 2>&1 &
   wp=$!
-}
-waitfor() { for _ in $(seq 100); do eval "$1" && return 0; sleep 0.1; done; return 1; }
-stays() {   # stays <sid>: after a few seconds the wrapper's child is alive and nothing was written; then end it
-  sleep 3
-  is "$2" "$(intent "$1")/$(kill -0 $wp 2>/dev/null && echo alive)" "/alive"
-  kill -TERM $wp
-  wait $wp 2>/dev/null
 }
 
 fx w-quit 1 1000 "bye"

@@ -138,6 +138,8 @@ fn a_member_row_that_is_no_object_is_an_error_in_the_budgets_read() {
     assert!(e.msg.contains("not an object"), "{}", e.msg);
 }
 
+// Unix only: the cutover record is the Unix cutover framework's (windows-owner WI13: a Windows core is born switched).
+#[cfg(unix)]
 #[test]
 fn a_marked_ledger_handle_and_cap_write_is_refused_unless_the_phase_is_switched() {
     use crate::cutover::state::{self, Phase, Switch};

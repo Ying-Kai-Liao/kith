@@ -174,7 +174,7 @@ $inv = Api 'createInvite' @{ name = 'Sam'; agents = @{} }
 Log "createInvite -> $($inv.Status) $($inv.Body)"
 # FLIPS: needs a signed-in Kith cloud account. No test cloud without secrets exists, so this needs a person (or a later
 # package with a cloud test double); it then becomes a 200 with an invite link.
-Check 'createInvite refuses today: sign in to a Kith account first' ($inv.Status -eq 400 -and $inv.Body -match 'sign in to a Kith account')
+Check 'createInvite refuses: guests are not on Windows yet' ($inv.Status -eq 403 -and $inv.Body -match 'Guests aren.t on Windows')
 $people = Api 'people'
 Log "people -> $($people.Status) $($people.Body)"
 # FLIPS: W22b (core authority on Windows) plus retire-python P3-1 (kith-auth in Rust): people then answers 200 with a list.

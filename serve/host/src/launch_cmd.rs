@@ -237,6 +237,8 @@ pub fn print_settings(a: &Args) -> Result<()> {
         threads_bin: threads_bin.as_deref(),
         plugins_json: &plugins_json,
         owner_terminal: a.terminal,
+        owner_via_terminal: false,
+        typed_bypass: false,
         api_helper: a.api_helper.as_deref().unwrap_or_default(),
         once_id: &once_id,
         developer_dir: &developer_dir,
@@ -339,7 +341,7 @@ pub fn run_exec(args: &[String]) -> i32 {
         .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
         .collect();
     let door = crate::threads_cmd::Loopback { kernel: kernel_dir.clone(), home: kith_kernel::paths::process_home() };
-    let deps = kith_kernel::launch::exec::Deps { host: &door, core: Some(&door) };
+    let deps = kith_kernel::launch::exec::Deps { host: &door, core: Some(&door), held: Some(&HeldPort) };
     let mut line = vec![agent.clone()];
     line.extend(rest.iter().cloned());
     kith_kernel::launch::exec::run(&line, &kernel_dir, env, &deps)
@@ -429,5 +431,56 @@ fn print_exec_plan(agent: &str, flags: &[String], kernel_dir: &Path, env: kith_k
             0
         }
         Err(code) => code,
+    }
+}
+
+/// The held terminals' two clients for `kith AGENT --held` in this process: the core's owner socket (`kith kernel core-call`) and the
+/// attach client (`kith kernel attach`), without the two processes the script started.
+pub struct HeldPort;
+
+#[cfg(unix)]
+impl kith_kernel::launch::held::Port for HeldPort {
+    fn call(&self, method: &str, params: &Value) -> kith_kernel::launch::held::Call {
+        use crate::core_front::CallEnd;
+        use kith_kernel::launch::held::Call;
+        match crate::core_front::core_call_open(method, params) {
+            CallEnd::Answered(v) => Call::Answered(v),
+            CallEnd::Refused(why) => Call::Refused(why),
+            CallEnd::NoAnswer(why, code) => Call::NoAnswer(why, code),
+        }
+    }
+
+    fn attach(&self, endpoint: &Path, ticket: &str, observer: bool, takeover: bool) -> (i32, String) {
+        use std::sync::{Arc, Mutex};
+        /// What the client writes after raw mode is off, kept for the launcher to read.
+        struct Notes(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Notes {
+            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).extend_from_slice(b);
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let key =
+            std::env::var("KITH_DETACH_KEY").ok().filter(|k| !k.is_empty()).unwrap_or_else(|| "ctrl-\\".to_owned());
+        let detach_key = match kith_attach::parse_detach_key(&key) {
+            Ok(k) => k,
+            Err(e) => return (2, e),
+        };
+        let opts = kith_attach::Opts {
+            ticket: ticket.trim().to_owned(),
+            role: if observer { kith_attach::Role::Observer } else { kith_attach::Role::Owner },
+            takeover,
+            detach_key,
+            // The keys come from the controlling terminal: stdin is whatever the launcher had.
+            tty_input: true,
+        };
+        let notes = Arc::new(Mutex::new(Vec::new()));
+        let rc = kith_attach::run_with_notes(endpoint, &opts, Box::new(Notes(notes.clone())));
+        let text =
+            String::from_utf8_lossy(&notes.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).into_owned();
+        (rc, text)
     }
 }

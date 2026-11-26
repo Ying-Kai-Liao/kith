@@ -174,7 +174,14 @@ fn candidates(file: &OsStr, path: Option<&OsStr>) -> Vec<CString> {
 /// Forks the child that becomes `argv[0]` (found along this process's `PATH`), with this process's environment and
 /// stdio. `status`: the status pipe (read end, write end); the child gets the write end as [`STATUS_FD`], the parent's copy of
 /// it is closed here. From the return on, TERM and HUP reach the child and `^C` is ignored.
-pub fn spawn(argv: &[OsString], status: Option<(RawFd, RawFd)>) -> std::io::Result<Spawned> {
+///
+/// `env`: the child's whole environment, and the `PATH` it is found along, for a caller that builds the run's environment in
+/// memory (the one-run-path launch). `None`: this process's own.
+pub fn spawn(
+    argv: &[OsString],
+    status: Option<(RawFd, RawFd)>,
+    env: Option<&[(OsString, OsString)]>,
+) -> std::io::Result<Spawned> {
     // Above the status descriptor (9): the lowest free numbers could be 9 itself, and the child's `dup2` onto it would close the
     // pipe that tells us an exec failed.
     let (err_r, err_w) = crate::lifecycle::proc::pipe()?;
@@ -185,7 +192,15 @@ pub fn spawn(argv: &[OsString], status: Option<(RawFd, RawFd)>) -> std::io::Resu
     let cargs: Vec<CString> = argv.iter().map(|a| cstr(a)).collect();
     let mut argv_ptrs: Vec<*const libc::c_char> = cargs.iter().map(|a| a.as_ptr()).collect();
     argv_ptrs.push(std::ptr::null());
-    let cenv: Vec<CString> = std::env::vars_os()
+    let own: Vec<(OsString, OsString)>;
+    let vars: &[(OsString, OsString)] = if let Some(e) = env {
+        e
+    } else {
+        own = std::env::vars_os().collect();
+        &own
+    };
+    let cenv: Vec<CString> = vars
+        .iter()
         .map(|(k, v)| {
             let mut kv = k.as_bytes().to_vec();
             kv.push(b'=');
@@ -197,7 +212,9 @@ pub fn spawn(argv: &[OsString], status: Option<(RawFd, RawFd)>) -> std::io::Resu
     envp.push(std::ptr::null());
     let tries = candidates(
         argv.first().map_or(OsStr::new(""), OsString::as_os_str),
-        std::env::var_os("PATH").as_deref(),
+        vars.iter()
+            .find(|(k, _)| k == "PATH")
+            .map(|(_, v)| v.as_os_str()),
     );
     // SAFETY: getdtablesize has no arguments; the cap keeps the child's closing loop short.
     let maxfd = unsafe { libc::getdtablesize() }.clamp(16, 65_536);

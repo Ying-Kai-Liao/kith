@@ -48,6 +48,10 @@ pub mod threads;
 // Not Unix-only: `kith wake` on a Mac with no Python (a Windows owner) is this thin client of the core's wake rows.
 pub mod wake;
 
+/// What every guest and bot-guest entry point says on Windows (Kai 2026-11-27: the guest sandbox is parked). One text, so a
+/// refusal reads the same wherever it stops them; the refusals are `cfg(windows)` and the Mac never reads it.
+pub const GUESTS_NOT_ON_WINDOWS: &str = "Guests aren't on Windows yet (Kai 2026-11-27: the guest sandbox is parked). Run guests on a Mac.";
+
 /// The version of the `kith kernel` interface the router in `kernel/bin/kith` speaks to.
 pub const ABI: u32 = 1;
 
@@ -75,6 +79,9 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         // `kernel launch-exec`: a one-shot run in this process (the entry's one-shot branch). A token of its own: an older
         // program that lists `launch` must not be sent `--exec`.
         "launch-exec",
+        // `kernel launch-exec` also runs an interactive terminal session and `--held` (no task): the entry sends those only to a
+        // program that lists this one, so one that knows just the one-shots never receives one.
+        "launch-exec-term",
         "lifecycle",
         "paths",
         "permit",
@@ -143,7 +150,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","ask-ledger","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","ask-ledger","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","launch-exec-term","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","wake"]}"#
         );
     }
 }

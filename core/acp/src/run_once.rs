@@ -275,12 +275,16 @@ async fn session(
     if let Some(id) = spec.resume.as_deref().filter(|_| !loadable) {
         eprintln!("kith: this agent cannot resume session {id}; starting a new session");
     }
-    let (created, sid) = if let Some(id) = resumed {
+    let mut resumed = resumed;
+    let mut loaded = None;
+    if let Some(id) = resumed {
         new_session["sessionId"] = json!(id);
-        let loaded = acp.request("session/load", new_session).await?;
+        let answer = acp.request("session/load", new_session.clone()).await?;
         // The agent replays the session's history before it answers: none of it is this run's answer or cost.
         let (mut old_text, mut old_cost) = (String::new(), None);
+        let mut replayed = false;
         while let Ok(inc) = rx.try_recv() {
+            replayed = true;
             if matches!(inc, Incoming::Closed { .. }) {
                 break;
             }
@@ -288,6 +292,25 @@ async fn session(
         }
         // Only calls made in this run count towards an ask, not the ones the history replay reported.
         asks.servers.clear();
+        // Hermes's python ACP library sends `{}` for the null it means. An empty answer only counts as "unknown" when
+        // modes are wanted: with none to pick, an agent that loads a session and says nothing about it is fine.
+        // An agent that replayed history knew the session, whatever it answers.
+        let unknown = !replayed
+            && (answer.is_null()
+                || (!spec.modes.is_empty() && answer.as_object().is_some_and(|o| o.is_empty())));
+        if !unknown {
+            loaded = Some(answer);
+        } else {
+            // Null or `{}`: the agent does not know the session (Hermes only loads the ones it made over ACP, not a native
+            // `hermes chat` one; it replays nothing for one it does not know). It would list no modes either, so say so and start over instead of failing on that.
+            eprintln!("kith: this agent does not know session {id}; starting a new session");
+            if let Some(o) = new_session.as_object_mut() {
+                o.remove("sessionId");
+            }
+            resumed = None;
+        }
+    }
+    let (created, sid) = if let (Some(id), Some(loaded)) = (resumed, loaded) {
         (loaded, id.to_owned())
     } else {
         let created = acp.request("session/new", new_session).await?;

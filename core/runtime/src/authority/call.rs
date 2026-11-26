@@ -4,7 +4,6 @@
 //! Answers are `{"lines": [...]}`, the lines `kith-auth` prints, so a CLI that switches to this prints them as they were;
 //! `people.list` and `people.invites` answer `{"rows": [...]}` instead, and `people.invite` also names the `code`.
 
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use kith_kernel::secrets::{self, Ctx, Die, Rules, Sandbox, ServeDir};
@@ -229,6 +228,10 @@ pub(crate) const NOT_SWITCHED: &str = "not switched: authority is back on auth.j
 
 /// How the authority module's cutover record reads for a marked write.
 #[derive(PartialEq)]
+#[cfg_attr(
+    not(unix),
+    allow(dead_code, reason = "a Windows core has no record to damage")
+)]
 enum Record {
     /// Phase `switched` or `rollingBack`. A rollback that failed or is stuck leaves the tombstone in auth.json and the
     /// phase at `RollingBack` (a running one can not coexist with the daemon: the lifetime lock excludes it, so
@@ -240,6 +243,17 @@ enum Record {
     Other,
 }
 
+#[cfg(not(unix))]
+fn authority_record(_machine: &Path) -> Record {
+    // Born switched (WI13): no record, no tombstone, no rollback. The core is the only store.
+    if crate::switched::on_windows("authority") {
+        Record::Switched
+    } else {
+        Record::Other
+    }
+}
+
+#[cfg(unix)]
 fn authority_record(machine: &Path) -> Record {
     use crate::cutover::state::Phase;
     let layout = crate::layout::Layout::new(machine);
@@ -317,8 +331,7 @@ fn lines(said: Vec<String>) -> Value {
 fn new_code() -> Result<String> {
     const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut b = [0u8; 6];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut b))
+    getrandom::fill(&mut b)
         .map_err(|e| Error::Io(format!("kith-core: no randomness for an invite code: {e}")))?;
     Ok(b.iter()
         .map(|x| char::from(ALPHABET[usize::from(*x) % ALPHABET.len()]))

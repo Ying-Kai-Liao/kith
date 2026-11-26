@@ -221,6 +221,16 @@ async fn run_dispatch(hub: &Arc<Hub>, caller: &Caller, method: &str, mut b: Valu
         o.remove("asRoomPerson");
     }
     let permitted = devices::permit(caller, method);
+    // Guests are parked on Windows: a person's call (member_call, proveInvite too) and a bot guest's (bot_call) stop here,
+    // before the audit row, the guard or any method. A guest stored in a store copied from a Mac gets this, not a crash.
+    if cfg!(windows)
+        && matches!(
+            devices::principal(&hub.store, caller),
+            Principal::Member(_) | Principal::Unproven(_) | Principal::Bot { .. } | Principal::BotPending(_)
+        )
+    {
+        return Err(NotAllowed(kith_kernel::GUESTS_NOT_ON_WINDOWS.into()).into());
+    }
     match devices::principal(&hub.store, caller) {
         Principal::Owner => {
             permitted?;

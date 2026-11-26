@@ -4,21 +4,9 @@
 //! run-token checks) and not through kith-holder (opt-in); the run is the CLI path those checks already cover, and a guest's
 //! job runs as its person (`KITH_PERSON` is built by `kith-sched`, as it does for its own tick).
 //!
-//! Per pulled turn:
-//! 1. **Claim** it with no process yet (`CoreWriter::claim_run`, `conversations::sched_run` in the core). A host change before the
-//!    run attaches gives the turn back (adopt requeues it); a pause, a revoke or the rollback cancel it.
-//! 2. **Spawn** `kith-sched run-turn AGENT JOB --turn N --claim C` in its own process group, with the turn's prompt and its
-//!    fire-time settings as JSON on stdin. It outlives a host restart. The process records its own pid on the claim
-//!    (`claim.attach`, a check-and-set) before it starts the engine, and goes no further when that fails.
-//! 3. **Report**: a thread waits for the child and tells the core `done` (clean exit) or `exit` (anything else: the turn
-//!    is `failed`, never put back: its prompt may have gone out). A host that was restarted meanwhile has no such thread: the
-//!    core's `end_gone` ends the claim when the process is gone, with the turn `failed` (outcome unknown).
-//!
-//! A call that frees the claim (the cancel of a run that could not start, the cancel and the report of one that ended) is asked
-//! again until the core answers ([`until_told`]): a claim of kind `turn` with no process would otherwise hold the job's
-//! conversation for as long as this host lives (only an adopt at the next start ends it) and every later fire would park
-//! behind it. A refusal is an answer: the claim or turn is gone. The retry lives on the run's own thread, which ends with
-//! the host process (adopt handles what a stop leaves).
+//! The claim, the spawn in a group of its own and the report of the end are the detached-run module's (`run_door.rs`), shared
+//! with the wake turns; this file is what a cron job adds: the command `kith-sched run-turn AGENT JOB --turn N --claim C`, the
+//! turn and its fire-time settings as JSON on stdin, and the environment below.
 //!
 //! The child gets the host's environment minus the run token and `KITH_PERSON`/`HQ_PERSON` (`kith-sched` builds the person
 //! from the turn's, which the spec carries so `run-turn` can check it is the claim's). `KITH_HOME` is inherited as the host
@@ -28,14 +16,16 @@
 //! plist of `dev.kith.sched` either: it comes from the environment `kith-sched` runs in. The host passes its own environment's
 //! value through, so a host started with it set runs the cron jobs the way `kith-sched` did with it set.
 
-use super::core_runs::{Ops, Started};
-use crate::terminal::core_writer::{CoreWriter, RunClaim, Told};
+use super::core_runs::Ops;
+use super::run_door::{Launch, Run, Started, detach, start};
+use crate::terminal::core_writer::CoreWriter;
 use serde_json::{Value, json};
-use std::io::{Read, Write};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::time::Duration;
+
+#[cfg(test)]
+use super::run_door::{Pace, over, until_told};
 
 /// The environment variable `kith-sched` reads for the permission mode of a scheduled run; the host passes it on.
 pub(super) const PERMISSION_MODE: &str = "KITH_SCHED_PERMISSION_MODE";
@@ -59,31 +49,20 @@ impl Ops for Live {
         let Some(spec_person) = person_in_spec(t, person) else {
             return Started::Failed("the core can't say whose turn this is (no owner read)".to_owned());
         };
-        let claim = match self.0.claim_run(conversation, person, turn) {
-            RunClaim::Claimed(id) => id,
-            RunClaim::Later | RunClaim::Down(_) => return Started::Later,
-            RunClaim::Gone => return Started::Gone,
-            RunClaim::Refused(why) => return Started::Failed(why),
-        };
-        let Some(kernel) = kernel_here() else {
-            let why = "no kith kernel here to run the job".to_owned();
-            self.free(turn, &why);
-            return Started::Failed(why);
-        };
         let agent = t["agent"].as_str().unwrap_or_default();
         let spec = json!({"prompt": t["prompt"], "settings": t["settings"], "person": spec_person});
-        match spawn(&kernel, agent, job, turn, claim, &spec) {
-            Ok(child) => {
-                let writer = self.0.clone();
-                std::thread::spawn(move || over(&writer, child, claim, turn, &Pace::LIVE));
-                Started::Ran
-            }
-            Err(error) => {
-                let why = format!("couldn't start kith-sched run-turn: {error}");
-                self.free(turn, &why);
-                Started::Failed(why)
-            }
-        }
+        let run = Run {
+            turn,
+            conversation,
+            person,
+            kind: "scheduleRun",
+            what: "kith-sched run-turn",
+            ended: "the scheduled run",
+        };
+        start(&self.0, &run, |claim| {
+            let kernel = kernel_here().ok_or_else(|| "no kith kernel here to run the job".to_owned())?;
+            Ok(Launch { cmd: command(&kernel, agent, job, turn, claim), stdin: Some(spec), err_file: None, bind: None })
+        })
     }
 }
 
@@ -105,80 +84,10 @@ pub(super) fn person_in_spec(t: &Value, person: &str) -> Option<Value> {
     t["owner"].as_bool().map(|owner| if owner { Value::Null } else { json!(person) })
 }
 
-impl Live {
-    /// Gives a claimed turn back for good (cancelled): once now, then on a thread of its own until the core answers, so the
-    /// puller is never held and the claim never outlives a core that was briefly down.
-    fn free(&self, turn: i64, why: &str) {
-        if matches!(self.0.cancel_told(turn, why), Told::Down(_)) {
-            let (writer, why) = (self.0.clone(), why.to_owned());
-            std::thread::spawn(move || {
-                until_told("cancel", turn, &Pace::LIVE, || writer.cancel_told(turn, &why));
-            });
-        }
-    }
-}
-
-/// How long to wait between two asks of a core that does not answer: from `first`, doubling, at most `cap`.
-pub(super) struct Pace {
-    pub first: Duration,
-    pub cap: Duration,
-}
-
-impl Pace {
-    const LIVE: Pace = Pace { first: Duration::from_secs(2), cap: Duration::from_secs(60) };
-}
-
-/// Asks until the core answers (anything but [`Told::Down`]), pacing the asks by `pace`: never a tight loop, and unbounded
-/// while the host lives. Logs the first failure only (a core down for minutes would otherwise fill the log). A refusal ends it:
-/// the claim or turn it was about is gone. `what` names the call in the log.
-pub(super) fn until_told(what: &str, turn: i64, pace: &Pace, mut ask: impl FnMut() -> Told) -> Told {
-    let mut wait = pace.first;
-    let mut logged = false;
-    loop {
-        match ask() {
-            Told::Down(why) => {
-                if !std::mem::replace(&mut logged, true) {
-                    tracing::warn!(
-                        why,
-                        turn,
-                        what,
-                        "routines: the core did not answer a scheduled run's end; asking again"
-                    );
-                }
-                std::thread::sleep(wait);
-                wait = (wait * 2).min(pace.cap);
-            }
-            told => return told,
-        }
-    }
-}
-
-/// `kith-sched run-turn` for one turn, with the turn on stdin. The caller waits for the child.
-pub(super) fn spawn(
-    kernel: &Path,
-    agent: &str,
-    job: &str,
-    turn: i64,
-    claim: i64,
-    spec: &Value,
-) -> std::io::Result<Child> {
-    spawn_cmd(command(kernel, agent, job, turn, claim), spec)
-}
-
-/// Starts `cmd` and hands it the turn on stdin.
-pub(super) fn spawn_cmd(mut cmd: Command, spec: &Value) -> std::io::Result<Child> {
-    let mut child = cmd.spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        // A write failing means the child is already gone; its exit code says why.
-        let _ = stdin.write_all(spec.to_string().as_bytes());
-    }
-    Ok(child)
-}
-
 /// The command line: `<kernel>/bin/kith-sched run-turn AGENT JOB --turn N --claim C`, stdin the turn, stderr read for the reason it
-/// refused, stdout nowhere (the run's output goes to its log once it is the engine). Its own process group (it leads it, as a
-/// run of `start` leads its session), so a host stop or restart does not signal it and a kill by pid reaches the group; the
-/// environment is the host's own (`KITH_SCHED_PERMISSION_MODE` among it, see the module doc).
+/// refused, stdout nowhere (the run's output goes to its log once it is the engine). Its own process group (the module's
+/// [`detach`]), so a host stop or restart does not signal it; the environment is the host's own (`KITH_SCHED_PERMISSION_MODE`
+/// among it, see the module doc).
 pub(super) fn command(kernel: &Path, agent: &str, job: &str, turn: i64, claim: i64) -> Command {
     command_with(kernel, agent, job, turn, claim, std::env::var_os(PERMISSION_MODE))
 }
@@ -211,33 +120,8 @@ pub(super) fn command_with(
     if let Some(mode) = mode {
         cmd.env(PERMISSION_MODE, mode);
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
+    detach(&mut cmd);
     cmd
-}
-
-/// Waits for the run and tells the core how it ended. Runs on a thread of its own: the run may take hours.
-fn over(writer: &CoreWriter, mut child: Child, claim: i64, turn: i64, pace: &Pace) {
-    let pid = child.id();
-    // Until the run is the engine, stderr is its refusal; the engine's own output goes to its log, so this is EOF by then.
-    let mut said = String::new();
-    if let Some(mut err) = child.stderr.take() {
-        let _ = err.read_to_string(&mut said);
-    }
-    let status = child.wait();
-    let clean = status.as_ref().is_ok_and(std::process::ExitStatus::success);
-    let why = said.lines().last().filter(|l| !l.is_empty()).map_or_else(
-        || format!("the scheduled run ended with {}", status.map_or_else(|e| e.to_string(), |s| s.to_string())),
-        str::to_owned,
-    );
-    // A run that never attached has its turn cancelled first (a no-op for one that did); both are asked until the core answers.
-    if !clean {
-        until_told("cancel", turn, pace, || writer.cancel_told(turn, &why));
-    }
-    until_told("report", turn, pace, || writer.run_over(claim, pid, clean, &why));
 }
 
 // Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.

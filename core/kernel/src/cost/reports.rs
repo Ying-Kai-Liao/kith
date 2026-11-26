@@ -82,6 +82,16 @@ pub(super) fn since_at(now: &Now, period: &str) -> String {
     }
 }
 
+/// `label(period)`: how a report header names a period. `week` and `month` are rolling windows (7 and 30 days), not the
+/// calendar month the apps' `--json` views use, so the header says so; the words stay accepted on the command line.
+fn label(period: &str) -> &str {
+    match period {
+        "week" => "last 7 days",
+        "month" => "last 30 days",
+        other => other,
+    }
+}
+
 fn text(r: &rusqlite::Row<'_>, i: usize) -> R<String> {
     Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default())
 }
@@ -108,7 +118,8 @@ fn report_text(c: &Connection, p: &Paths, period: &str) -> R<String> {
     let mut o = String::new();
     let _ = write!(
         o,
-        "\n{period}: {} over {n} requests ({}M output tokens, {}M cache reads)\n\n",
+        "\n{}: {} over {n} requests ({}M output tokens, {}M cache reads)\n\n",
+        label(period),
         money(Some(cost.unwrap_or(0.0))),
         pyfmt::fixed(output.unwrap_or(0.0) / 1e6, 2),
         pyfmt::fixed(cache_read.unwrap_or(0.0) / 1e6, 0),
@@ -206,6 +217,7 @@ pub(super) fn agents(c: &Connection, period: &str) -> Out {
 
 fn agents_text(c: &Connection, period: &str) -> R<String> {
     let since = since_of(period);
+    let period = label(period);
     let mut st = c.prepare(
         "select hq_agent, sum(cost) s, count(distinct session), count(*), sum(output), group_concat(distinct model)
          from hq_req where hq_agent is not null and ts >= ? group by hq_agent order by s desc",
@@ -272,6 +284,7 @@ pub(super) fn agent(c: &Connection, name: &str, period: &str) -> Out {
 
 fn agent_text(c: &Connection, name: &str, period: &str) -> R<Result<String, String>> {
     let since = since_of(period);
+    let period = label(period);
     let (cost, runs, n, out): (Option<f64>, i64, i64, Option<f64>) = c.query_row(
         "select sum(cost), count(distinct session), count(*), sum(output) from hq_req where hq_agent = ? and ts >= ?",
         params![name, since],
@@ -409,6 +422,7 @@ struct Group {
 
 fn people_text(c: &Connection, p: &Paths, period: &str) -> R<String> {
     let since = since_of(period);
+    let period = label(period);
     let mut st = c.prepare(
         "select coalesce(person, 'owner'), hq_agent, sum(cost) s, count(distinct session)
          from hq_req where hq_agent is not null and ts >= ? group by 1, 2 order by 1, s desc",
