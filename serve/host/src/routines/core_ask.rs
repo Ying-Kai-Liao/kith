@@ -109,7 +109,15 @@ fn begin(writer: &Arc<CoreWriter>, t: &Value, harness: Option<&str>, world: &Wor
         return Started::Cancelled(why.to_owned());
     };
     let engine = engine_of(t, harness);
-    let run = Run { turn, conversation, person, kind: "askRun", what: "the callee", ended: "the background ask" };
+    let run = Run {
+        turn,
+        conversation,
+        person,
+        kind: "askRun",
+        what: "the callee",
+        ended: "the background ask",
+        on_fail: None,
+    };
     let (id, task) = (ask.to_owned(), t["prompt"].as_str().unwrap_or_default().to_owned());
     start_with(writer, &run, |claim| {
         let plan = Plan::of(t, &engine, &task, claim, world)?;

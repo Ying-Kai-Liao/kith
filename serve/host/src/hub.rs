@@ -698,6 +698,11 @@ impl Hub {
         landed
     }
 
+    /// This hub as an `Arc`, for a thread that outlives the call (`None` while the host shuts down).
+    pub(crate) fn shared(&self) -> Option<Arc<Self>> {
+        self.me.upgrade()
+    }
+
     /// Writes held entries again; the host calls it periodically, and every new entry does the same.
     pub fn retry_unsaved(&self) {
         if self.unsaved.locked().queue.is_empty() {

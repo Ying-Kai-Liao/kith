@@ -144,9 +144,19 @@ impl Actor {
             let entry = self
                 .add(EntryKind::Agent, turn, json!({"text": text, "final": true, "files": metas}))
                 .ok_or_else(|| anyhow!("couldn't save the file message"))?;
+            let entry_id = entry.id.clone();
             self.last_agent = Some(entry.id);
             // Only now, with the entry saved, do the copies become permanent.
             snapshots.iter_mut().for_each(Snapshot::commit);
+            let shared: Vec<_> = snapshots.iter().map(|s| &s.meta).collect();
+            crate::feed::host::page_posts(
+                &self.hub,
+                &self.cfg.id,
+                self.cfg.person.as_deref(),
+                None,
+                &entry_id,
+                &shared,
+            );
             self.files.summary = Some(text);
             self.set_activity("Working…");
             Ok(())
