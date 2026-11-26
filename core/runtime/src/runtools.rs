@@ -316,7 +316,7 @@ fn run_in_job(command: &Command) -> Result<Value> {
         .get_args()
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
-    let job = Job::create_kill_on_close().map_err(refuse)?;
+    let job = Job::create().map_err(refuse)?;
     let nul = std::fs::File::open("NUL").map_err(refuse)?;
     let (out_r, out_w) = std::io::pipe().map_err(refuse)?;
     let (err_r, err_w) = std::io::pipe().map_err(refuse)?;
