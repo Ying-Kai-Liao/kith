@@ -53,3 +53,4 @@ src/api/native_guard_tests.rs	api::native_guard_tests::
 src/chat/group.rs	chat::group::tests::
 src/market/requests.rs	market::requests::tests::
 src/routines/launch_turn_e2e_tests.rs	routines::launch_turn_e2e_tests::
+src/routines/core_ask_launch_tests.rs	routines::core_ask_launch_tests::
