@@ -45,6 +45,11 @@ pub(crate) fn inherited(name: &str) -> bool {
     // No bot tokens or keys, and this is no agent's helper.
     let kith =
         ["KITH_HOME", "KITH_STATE", "KITH_MACHINE", "KITH_MODEL", "KITH_KERNEL_BIN", "KITH_KERNEL"].contains(&name);
+    // Windows: the profile, the system folder, the shell and the extensions a program is found by (a process without
+    // `SystemRoot` cannot even load its sockets), by the names Windows keeps them under.
+    // Windows names variables without regard to case: it stores `Path`.
+    let basic = basic
+        || (cfg!(windows) && (name.eq_ignore_ascii_case("PATH") || kith_kernel::launch::winenv::windows_basics(name)));
     let hq = name.starts_with("HQ_")
         && !name.starts_with("HQ_DISCORD_")
         && !["HQ_AGENT", "HQ_PERSON", "HQ_RESUME", "HQ_BRIDGE_OUTBOX"].contains(&name);
@@ -436,6 +441,15 @@ impl Core {
             self.say(ad, conv, agent, &format!("⚠️ {agent} didn't start: {why}"), None).await;
             return Ok(Attempt::NotStarted);
         }
+        // The kernel's one-shot takes the session's claim in process, which Windows has not got yet (W12: claims, held terminals
+        // and host turns). It is said, not skipped: the person reads why nothing came back.
+        if cfg!(windows) {
+            let text = format!(
+                "⚠️ {agent} didn't start: runs from a chat are not on Windows yet (they wait the Windows claims package, W12)"
+            );
+            self.say(ad, conv, agent, &text, None).await;
+            return Ok(Attempt::NotStarted);
+        }
         if let Some(w) = wake {
             // Read together by the launch and removed from the engine's environment: it attaches the claim naming the work key.
             env.push(("KITH_TURN_CLAIM".into(), w.claim.to_string().into()));
@@ -784,6 +798,8 @@ mod tests {
             "KITH_DISCORD_BOT_TOKEN",
             "KITH_AGENT",
             "KITH_PERSON",
+            "KITH_TURN_CLAIM",
+            "KITH_TURN_CONVERSATION",
             "KITH_BRIDGE_OUTBOX",
             "HQ_AGENT",
             "HQ_PERSON",

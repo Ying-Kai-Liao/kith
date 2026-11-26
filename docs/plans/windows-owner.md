@@ -457,8 +457,11 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
        suspended in the job for ever (`extra-stranded`). Never assign after it runs: its engine starts outside the job.
     3. **The job forbids breakaway** (no `BREAKAWAY_OK` or `SILENT_BREAKAWAY_OK`), so no tool child leaves it.
     4. **`recorded_gone` on Windows asks the job:** the launcher's pid with its start time, and then the job's active process
-       count, opened by name, so it works after a host restart. "Gone" means the name is not found or 0 processes are
-       active. Any error answers "not gone" (S4: safe but stuck until the next probe).
+       count, opened by name. **A name lives only while a process holds a handle to the job** (W8's test: it was not found after the
+       creator's handle closed, with the run still going). So "name not found" is NOT "gone" by itself: a process that
+       outlives host restarts (the holder, per the architect's 2026-11-26 recommendation) must hold each run's job handle and
+       close it only when the job has no processes, and "not found" counts as gone only while that holder is alive. W12 needs the
+       model re-run for this before code. Any error answers "not gone" (S4: safe but stuck until the next probe).
     5. **R3a stays:** a report puts the claim to `ending`; only `end_gone` ends it.
     6. **Host-door engines run in a host-held job that kills on close.** On Windows a child does not die with its parent, so
        without the job a warm engine outlives a host restart while its claim is ended.

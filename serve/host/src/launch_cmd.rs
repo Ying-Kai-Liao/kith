@@ -245,6 +245,7 @@ pub fn print_settings(a: &Args) -> Result<()> {
         ctmp: &ctmp,
         claude_version: claude_version.as_deref(),
         guest_domains: guest_domains.as_deref().map_err(String::as_str),
+        windows: false,
         env: &kith_kernel::paths::process_env,
     };
     match settings::build(&input) {

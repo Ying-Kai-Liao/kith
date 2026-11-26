@@ -291,13 +291,16 @@ mod tests {
 
     #[test]
     fn the_stub_line_names_the_lock_folder_and_the_key() {
+        // The folder is joined with the OS's separator.
+        let locks = Path::new("/m").join("core/locks");
+        let locks = locks.to_string_lossy();
         assert_eq!(
             stub_argv(Path::new("/b/kith-stub"), "/m", "sid", true),
             v(&[
                 "/b/kith-stub",
                 "--lock-alone",
                 "--lock-dir",
-                "/m/core/locks",
+                &locks,
                 "--key",
                 "sid",
                 "--"
