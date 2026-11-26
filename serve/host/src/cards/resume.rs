@@ -524,6 +524,7 @@ fn reap_with(hub: &Hub, ttl: Duration, tracked: Duration) {
         lock(&TAKEN).remove(&run);
         lock(&ENTRIES).retain(|_, c| c.run != run);
         lock(&CHANNEL_RUNS).remove(&run);
+        let_go(&run);
         let st = state_of(hub);
         wake::spawn(move || wake::back(&st, &run, true));
     }
@@ -659,8 +660,18 @@ fn rebuilt(turn: &Turn, live: &[Card]) -> String {
 /// Nothing of this turn will run (every request is withdrawn, or the thread is gone): the queue is told, ids kept.
 fn give_up(hub: &Hub, run: &str) {
     settled(run);
+    let_go(run);
     let (state, run) = (state_of(hub), run.to_owned());
     wake::spawn(move || wake::done(&state, &run, "withdrawn"));
+}
+
+/// A turn handed to an actor by its id is no longer the actor's (the run was withdrawn or reaped): the clock may look at it
+/// again. The removal is its own statement so the PULLED guard is gone before HANDED is taken (the clock takes them the other way).
+fn let_go(run: &str) {
+    let pulled = lock(&PULLED).remove(run);
+    if pulled.is_some() {
+        wake_clock::released(run);
+    }
 }
 
 fn settled(run: &str) {
@@ -673,7 +684,8 @@ fn started(hub: &Hub, run: &str, cards: &[String]) {
     settled(run);
     applied(hub, cards);
     // A turn the core queued is answered by the core (R4), from its own turn.
-    if lock(&PULLED).remove(run).is_some() {
+    let pulled = lock(&PULLED).remove(run);
+    if pulled.is_some() {
         return wake_clock::released(run);
     }
     let (state, run) = (state_of(hub), run.to_owned());
@@ -687,7 +699,8 @@ fn unstarted(hub: &Hub, run: &str, again: bool, held: bool) {
     settled(run);
     // A turn the actor was to begin by its id is still queued (or the actor cancelled it): only the pause is the host's. A Stop
     // withdraws its requests, which cancels the turn (R5).
-    if let Some((session, ids)) = lock(&PULLED).remove(run) {
+    let pulled = lock(&PULLED).remove(run);
+    if let Some((session, ids)) = pulled {
         if again {
             return wake_clock::later(run);
         }

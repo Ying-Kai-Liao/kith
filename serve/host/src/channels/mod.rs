@@ -90,6 +90,19 @@ pub fn wake_claimed(wk: &str, text: &str, claimed: Arc<crate::cards::resume::Cha
     CORE.get().map_or(Wake::Offline, |core| core.wake_claimed(wk, text, claimed))
 }
 
+/// A claimed wake whose claim was given back: its note leaves the thread's inbox and its claim record (`WK4c`), so nothing of the
+/// host's can send it again while the core's turn is queued for the next pull.
+pub fn forget_wake(w: &crate::cards::resume::ChannelWake) {
+    if let Some(core) = CORE.get() {
+        core.forget_wake(w);
+    }
+}
+
+/// The session the thread last ran `wk`'s agent on (the primary account's), for the writer check before a wake is claimed.
+pub fn session_of(wk: &str) -> Option<String> {
+    CORE.get()?.session_of(wk)
+}
+
 /// Posts `text` from `agent` in `person`'s newest one-to-one chat-channel thread with it (`Core::tell`), in the
 /// background. A host without channels, or a person without such a thread, gets nothing.
 pub fn tell(person: Option<String>, agent: String, text: String) {

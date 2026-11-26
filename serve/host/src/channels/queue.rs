@@ -545,6 +545,39 @@ impl Core {
         }
     }
 
+    /// A claimed wake the host gave back (its claim requeued or freed): the note is taken out of every batch of the thread and out of
+    /// `claimed`. A batch a correction built around it keeps its other messages.
+    pub(super) fn forget_wake(&self, w: &crate::cards::resume::ChannelWake) {
+        self.with(|i| {
+            let notes: Vec<String> = i
+                .claimed
+                .iter()
+                .filter(|(_, c)| c.turn == w.turn && c.claim == w.claim)
+                .map(|(n, _)| n.clone())
+                .collect();
+            for note in &notes {
+                i.claimed.remove(note);
+                for q in i.st.inbox.values_mut() {
+                    for b in q.iter_mut() {
+                        b.retain(|m| m != note);
+                    }
+                    q.retain(|b| !b.is_empty());
+                }
+            }
+            i.st.inbox.retain(|_, q| !q.is_empty());
+            i.save();
+        });
+    }
+
+    /// The session `wk`'s thread last used for its agent (the primary account's): none before its first answer.
+    pub(super) fn session_of(&self, wk: &str) -> Option<String> {
+        let (key, agent) = wk.rsplit_once('#')?;
+        self.with(|i| {
+            let s = i.st.threads.get(key)?.get("sessions")?.get(agent)?.as_str()?.to_owned();
+            Some(s).filter(|s| !s.is_empty())
+        })
+    }
+
     /// The claimed wakes of `wk` still waiting in its inbox are dropped (a Stop, a revoke): their requests are withdrawn, which
     /// cancels the turns nobody ran. Call before the inbox is emptied.
     pub(super) fn drop_claimed(&self, wk: &str) {

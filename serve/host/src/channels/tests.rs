@@ -350,6 +350,30 @@ async fn a_claimed_wake_is_a_batch_of_its_own_that_is_never_saved_and_no_message
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_wake_whose_claim_was_given_back_leaves_the_inbox_even_inside_a_corrections_batch() {
+    use crate::cards::resume::ChannelWake;
+    let r = Rig::new();
+    r.send(&Rig::msg("1", "@house hello")).await;
+    until("the answer", || !r.fake.posts().is_empty()).await;
+    r.idle().await;
+    r.core.resume(&r.ad);
+    let wk = "fake/x:room:1#house";
+    let note = "[kith wake run-9] the staging box is ready";
+    let w = ChannelWake::for_test("run-9", 7, 41, wk);
+    // The worker's debounce keeps the batch in the inbox for a moment; a correction folds its message into the same batch.
+    r.core.with(|i| i.busy.insert(wk.to_owned(), core::Busy::default()));
+    assert_eq!(r.core.wake_claimed(wk, note, w.clone()), super::Wake::Queued);
+    r.core.with(|i| i.st.inbox.get_mut(wk).unwrap()[0].push("and the lights?".to_owned()));
+    // The launch never attached: the claim goes back, so the note must not run from the inbox as well.
+    r.core.forget_wake(&w);
+    r.core.with(|i| {
+        assert!(i.claimed.is_empty(), "the claim record is gone");
+        let left: Vec<&String> = i.st.inbox.values().flatten().flatten().collect();
+        assert_eq!(left, ["and the lights?"], "only the user's own message stays");
+    });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stop_drops_a_claimed_wake_waiting_in_the_inbox() {
     use crate::cards::resume::ChannelWake;
     let r = Rig::new();

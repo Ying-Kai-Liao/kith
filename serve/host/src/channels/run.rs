@@ -340,6 +340,11 @@ impl Core {
                 continue;
             }
             let res = serde_json::from_slice::<Value>(&attempt.out).ok();
+            // A claimed wake the launch never attached (a writer holds the session, an older launch): the claim is given back
+            // and the turn runs again later, so the thread hears nothing; the card shows the holder.
+            if res.is_none() && carry.is_some_and(|w| !w.settled()) {
+                return Ok(Ended::Done);
+            }
             // A card's wake rides in this task: no result means the turn never ran (held session, failed spawn).
             if res.is_some() {
                 self.settle_wake(task, true);

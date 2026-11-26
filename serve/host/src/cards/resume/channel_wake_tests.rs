@@ -240,3 +240,68 @@ async fn a_launch_too_old_to_name_the_work_key_is_refused_by_the_core_and_the_wa
     until("the requeue", || !calls(&log, "hostclaim.stop").is_empty()).await;
     assert!(calls(&log, "hostclaim.cancel").is_empty(), "never freed: that would count a failed try for ever");
 }
+
+/// A card of the wake's run, as the store keeps it: not applied until the attach is seen.
+fn a_card(r: &Rig) -> String {
+    use crate::store::{NewCard, Opened, now_ms};
+    let new = NewCard {
+        session: WK.to_owned(),
+        source: "acp",
+        bot_id: None,
+        run_id: None,
+        person: String::new(),
+        agent: "house".into(),
+        answerable_by: None,
+        in_grants: false,
+        tool: "Bash".into(),
+        input: "{}".into(),
+        resource: "Bash:x".into(),
+        shown: "ls".into(),
+        deadline: now_ms() + 60_000,
+        reply_to: None,
+        asked_by: None,
+    };
+    let Opened::New(card) = r.hub.store.card_open(&new, now_ms()).unwrap() else { panic!("a new card") };
+    card.id
+}
+
+#[tokio::test]
+async fn the_cards_are_applied_when_the_attach_is_seen_not_when_the_process_spawns() {
+    let r = rig().await;
+    let id = a_card(&r);
+    let (_core, _log) = scripted(&r, |m, _| {
+        (m == "hostclaim.show").then(|| {
+            Answer::Done(json!({"claim": {"claimId": 41, "state": "running", "kind": "external", "pid": 4242}}))
+        })
+    });
+    let mut w = claimed();
+    w.cards = vec![id.clone()];
+    super::started(&r.hub, &w);
+    assert!(
+        r.hub.store.card(&id).unwrap().applied_at.is_none(),
+        "a spawn is not a delivery: the next pull must find the card wanted"
+    );
+    assert!(attempt_over(&r.hub, &w, &Seen { pid: Some(4242), code: Some(0) }).await);
+    assert!(r.hub.store.card(&id).unwrap().applied_at.is_some(), "attached by this pid: delivered");
+}
+
+#[tokio::test]
+async fn a_core_that_does_not_answer_is_asked_again_until_it_does() {
+    let r = rig().await;
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = asked.clone();
+    let (_core, _log) = scripted(&r, move |m, _| {
+        (m == "hostclaim.show").then(|| {
+            if seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 7 {
+                Answer::Down { why: "no daemon".into(), lost: false }
+            } else {
+                Answer::Done(json!({"claim": {"claimId": 41, "state": "claimed", "kind": "turn", "pid": null}}))
+            }
+        })
+    });
+    let w = claimed();
+    // 7 silences (more than the old five-try limit), then the answer: still `claimed`, so the claim is not settled by a guess.
+    assert!(!attempt_over(&r.hub, &w, &Seen { pid: Some(4242), code: Some(1) }).await);
+    assert!(!w.settled());
+    assert!(asked.load(std::sync::atomic::Ordering::SeqCst) >= 8);
+}

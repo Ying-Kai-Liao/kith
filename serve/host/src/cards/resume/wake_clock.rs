@@ -65,6 +65,12 @@ pub(super) fn later(run: &str) {
     lock(&LATER).insert(run.to_owned(), Instant::now());
 }
 
+/// [`later`] with a longer pause: the turn waits `extra` more than [`LATER_FOR`] (a launch that keeps refusing the claim).
+pub(super) fn later_extra(run: &str, extra: Duration) {
+    lock(&HANDED).remove(run);
+    lock(&LATER).insert(run.to_owned(), Instant::now() + extra);
+}
+
 /// A door of the old kind said what became of the turn it was handed: it is not held back any more.
 pub(super) fn released(run: &str) {
     lock(&HANDED).remove(run);

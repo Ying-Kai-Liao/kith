@@ -26,6 +26,10 @@ pub(super) struct Pull<'a> {
     pub person: String,
 }
 
+/// How many times each run's launch refused the claim: the pause between its tries grows with it.
+static SKEW: std::sync::LazyLock<Mutex<std::collections::HashMap<String, u32>>> =
+    std::sync::LazyLock::new(Mutex::default);
+
 /// The claimed wake turn a channel thread's next run carries.
 pub struct ChannelWake {
     pub run: String,
@@ -85,6 +89,17 @@ pub struct Seen {
 /// thread's key is held by an earlier wake or the core cannot say.
 pub(super) async fn door(hub: &Arc<Hub>, pull: &Pull<'_>, turn: &wake::Turn, group: &[Card], wk: &str, note: &str) {
     let run = turn.run.as_str();
+    // A writer on the thread's session: nothing is claimed or spawned, the card shows the holder and the turn waits (as the run door).
+    if let Some(sid) = crate::channels::session_of(wk) {
+        let state = super::state_of(hub);
+        let held = wake::blocking(move || (Reader::new(&state).read(&sid), sid)).await;
+        if let Some((Reading::By(h, _), sid)) = held {
+            for card in group {
+                set_held(hub, card, Some((&sid, &h)));
+            }
+            return later(run);
+        }
+    }
     let (core, id, person, key) = (pull.core.clone(), pull.turn, pull.person.clone(), wk.to_owned());
     let claimed = wake::blocking(move || core.claim_run_as("wakeRun", &key, &person, id)).await;
     let claim = match claimed {
@@ -143,10 +158,10 @@ fn requeue(core: Arc<CoreWriter>, claim: i64, why: &'static str) {
     });
 }
 
-/// The run that carries the wake has its process up: what the cards carried is delivered.
+/// The run that carries the wake has its process up. The cards are not applied yet: that is the attach's (`attempt_over`), because a
+/// launch that never attaches gives the turn back and the next pull must still find its cards wanted.
 pub fn started(hub: &Hub, w: &ChannelWake) {
     clear_held(hub, &cards_of(hub, &w.cards));
-    applied(hub, &w.cards);
 }
 
 fn attached_by(row: &Value, pid: u32) -> bool {
@@ -158,21 +173,14 @@ fn attached_by(row: &Value, pid: u32) -> bool {
 pub async fn attempt_over(hub: &Arc<Hub>, w: &ChannelWake, seen: &Seen) -> bool {
     let Some(pid) = seen.pid else { return false };
     let Some(core) = writer(hub).await else { return w.settle() };
-    let mut row = None;
-    for _ in 0..5 {
+    // Asked until the core answers: a claim nobody settled stays the host's while it lives, so a guess here would hold the
+    // thread's next wake until a restart.
+    let row = loop {
         let (c, claim) = (core.clone(), w.claim);
         match wake::blocking(move || c.claim_row(claim)).await {
-            Some(Ok(r)) => {
-                row = Some(r);
-                break;
-            }
+            Some(Ok(r)) => break r,
             _ => tokio::time::sleep(Duration::from_secs(1)).await,
         }
-    }
-    let Some(row) = row else {
-        // Not told: nothing is guessed, the claim is left for the core's own end.
-        tracing::warn!(run = %w.run, "channel wake: the core did not say whether the launch attached");
-        return w.settle();
     };
     let state = row.as_ref().and_then(|r| r["state"].as_str()).unwrap_or("none");
     match (&row, state) {
@@ -181,6 +189,7 @@ pub async fn attempt_over(hub: &Arc<Hub>, w: &ChannelWake, seen: &Seen) -> bool 
             false
         }
         (Some(r), "running" | "ending") if attached_by(r, pid) => {
+            applied(hub, &w.cards);
             let clean = seen.code == Some(0);
             let why =
                 format!("the channel run ended with exit {}", seen.code.map_or("signal".into(), |c| c.to_string()));
@@ -220,6 +229,9 @@ pub async fn unattached(hub: &Arc<Hub>, w: &ChannelWake, stopped: bool) {
         });
         return;
     }
+    // The claim goes back (or is freed) and the core's turn is the one record of the wake: the note leaves the inbox too, or a
+    // correction's redo would send it with no claim and the turn would send it again.
+    crate::channels::forget_wake(w);
     let Some(core) = writer(hub).await else { return };
     let sid = w.sid();
     let st = state.clone();
@@ -236,7 +248,16 @@ pub async fn unattached(hub: &Arc<Hub>, w: &ChannelWake, stopped: bool) {
     // core refuses the mismatch. The wake is not dropped: the claim goes back and the turn waits for the program to be updated.
     if w.refused.load(Ordering::Acquire) {
         requeue(core, w.claim, "the launch refused the claim");
-        super::wake_clock::later(&w.run);
+        let tries = {
+            let mut skew = lock(&SKEW);
+            let n = skew.entry(w.run.clone()).or_insert(0);
+            *n += 1;
+            *n
+        };
+        if tries == 1 {
+            tracing::warn!(run = %w.run, "channel wake: the launch refused the claim (an older kith program?): the wake waits; update kith");
+        }
+        super::wake_clock::later_extra(&w.run, Duration::from_secs(15u64 << tries.min(5)));
         return;
     }
     let (turn, why) = (w.turn, "the channel run did not start the wake");
