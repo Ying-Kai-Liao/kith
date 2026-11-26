@@ -244,42 +244,62 @@ fn bg_to_another_computer_is_refused_for_now() {
 }
 
 #[test]
-fn bg_refuses_the_options_the_row_cannot_carry_by_name() {
-    let none = Fake::new(vec![]);
-    for (flag, arg) in [
-        ("-p", "kith"),
-        ("-m", "opus"),
-        ("-e", "high"),
-        ("-C", "/tmp"),
-    ] {
-        let (code, _, err) = go(&none, &["--bg", "coder", flag, arg, "task"]);
-        assert_eq!(code, 1);
-        assert_eq!(
-            err,
-            format!("kith ask: {flag} is not carried by a background ask yet\n")
-        );
-    }
-    assert!(none.calls.borrow().is_empty());
+fn bg_carries_model_effort_project_and_the_folder_on_the_row() {
+    let fake = Fake::new(vec![(
+        "ask.open",
+        Ok(json!({"decision": null, "record": {}})),
+    )]);
+    let (code, _, err) = go(
+        &fake,
+        &[
+            "--bg", "coder", "-m", "opus", "-e", "high", "-H", "codex", "task",
+        ],
+    );
+    assert_eq!((code, err.as_str()), (0, ""));
+    let calls = fake.calls.borrow();
+    let p = &calls[0].1;
+    assert_eq!(
+        (
+            p["model"].as_str(),
+            p["effort"].as_str(),
+            p["engine"].as_str(),
+            p["project"].as_str()
+        ),
+        (Some("opus"), Some("high"), Some("codex"), None)
+    );
+    // The folder the call works in, as an absolute path: the host's run has none of its own.
+    let here = std::env::current_dir().expect("cwd");
+    assert_eq!(p["folder"].as_str(), here.to_str());
 }
 
 #[test]
-fn bg_continuing_a_conversation_that_kept_a_project_is_refused() {
+fn bg_continuing_a_conversation_keeps_its_project_model_and_effort() {
     let root = scratch("kept");
     let dir = root.join("machine");
     std::fs::create_dir_all(&dir).expect("folder");
     let key = format!("coder|{}", std::env::current_dir().expect("cwd").display());
-    let kept =
-        json!({ key: {"agent": "coder", "session_id": "s1", "opts": {"-p": "kith"}, "dir": "/"} });
+    let kept = json!({ key: {"agent": "coder", "session_id": "s1",
+                             "opts": {"-p": "kith", "-m": "opus"}, "dir": "/"} });
     std::fs::write(dir.join("ask.json"), kept.to_string()).expect("file");
-    let none = Fake::new(vec![]);
-    let (code, _, err) = go_in(&none, &["--bg", "coder", "-c", "next"], &root);
+    let fake = Fake::new(vec![(
+        "ask.open",
+        Ok(json!({"decision": null, "record": {}})),
+    )]);
+    // This call names a new effort; the kept project and model stay, and a new model would win over the kept one.
+    let (code, _, err) = go_in(&fake, &["--bg", "coder", "-c", "-e", "low", "next"], &root);
     let _ = std::fs::remove_dir_all(&root);
-    assert_eq!(code, 1);
+    assert_eq!((code, err.as_str()), (0, ""));
+    let calls = fake.calls.borrow();
+    let p = &calls[0].1;
     assert_eq!(
-        err,
-        "kith ask: this conversation keeps -p, which a background ask does not carry yet\n"
+        (
+            p["project"].as_str(),
+            p["model"].as_str(),
+            p["effort"].as_str(),
+            p["conversation"].as_str()
+        ),
+        (Some("kith"), Some("opus"), Some("low"), Some("s1"))
     );
-    assert!(none.calls.borrow().is_empty());
 }
 
 fn claims(answer: Result<Value, String>) -> Fake {
@@ -357,4 +377,31 @@ fn a_core_that_cannot_answer_is_a_writer_but_unswitched_claims_read_the_files() 
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ls_orders_same_second_conversations_by_key_not_by_file() {
+    let root = scratch("lsties");
+    let dir = root.join("machine");
+    std::fs::create_dir_all(&dir).expect("folder");
+    let row = |at: &str| json!({"agent": "echo", "at": at, "turns": 1, "cost": 0, "last": ""});
+    let kept = json!({
+        "echo|/z": row("2026-01-01 00:00:01"),
+        "echo|/b": row("2026-01-01 00:00:02"),
+        "echo|/a": row("2026-01-01 00:00:01"),
+        "echo|/n": {"agent": "echo"},
+    });
+    std::fs::write(dir.join("ask.json"), kept.to_string()).expect("file");
+    let none = Fake::new(vec![]);
+    let (code, out, _) = go_in(&none, &["ls", "--json"], &root);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(code, 0);
+    let got: Value = serde_json::from_str(out.trim()).expect("json");
+    let keys: Vec<&str> = got["conversations"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|r| r["key"].as_str().expect("key"))
+        .collect();
+    assert_eq!(keys, ["echo|/b", "echo|/a", "echo|/z", "echo|/n"]);
 }
