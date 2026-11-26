@@ -34,6 +34,7 @@ pub mod devices;
 #[cfg(test)]
 mod error_tests;
 mod events;
+mod feed;
 mod files;
 mod folders;
 // Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
@@ -286,6 +287,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
     }
     // Each method group answers its own methods and hands the body back otherwise.
     let b = match host::call(hub, caller, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match feed::call(hub, method, b)? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

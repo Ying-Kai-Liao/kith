@@ -67,7 +67,7 @@ pub struct Hub {
     pub port: u16,
     pub events: broadcast::Sender<Value>,
     /// Held across "mutate store + broadcast" so events leave in rev order.
-    emit_lock: Mutex<()>,
+    pub(crate) emit_lock: Mutex<()>,
     /// Bot id -> its actors, one per place it talks (see `actors`).
     bots: Mutex<HashMap<String, actors::BotActors>>,
     /// Actor key (see `agent::bot::actor_key`) -> what that actor is doing.

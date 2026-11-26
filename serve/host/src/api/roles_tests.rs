@@ -114,6 +114,7 @@ pub(super) fn router_methods() -> BTreeSet<String> {
         include_str!("delegations.rs"),
         include_str!("kith_tools.rs"),
         include_str!("scratch.rs"),
+        include_str!("feed.rs"),
     ];
     let mut out = BTreeSet::new();
     for src in sources {
