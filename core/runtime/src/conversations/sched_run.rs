@@ -135,6 +135,8 @@ pub(crate) fn attach_in(
         ));
     }
     let tx = core.claim_tx()?;
+    // A run that names its own session (the engine's, apart from the turn's conversation) holds the writer claim on it, as this
+    // process: the core refuses an attach that came before the writer claim.
     // A run names its own conversation: a claim whose turn is another conversation's is refused, not attached. Only a
     // schedule's turn may omit it (the Python `kith-sched run-turn` still does).
     let n = tx.execute(
@@ -144,12 +146,14 @@ pub(crate) fn attach_in(
                AND EXISTS (SELECT 1 FROM turns t WHERE t.claim_id = ?1 AND t.source IN {} AND t.state = 'claimed'
                            AND (?5 IS NULL OR t.conversation = ?5)
                            AND (?5 IS NOT NULL OR t.source = 'schedule')
+                           AND (?6 IS NULL OR EXISTS (SELECT 1 FROM claims w WHERE w.conversation = ?6 AND w.kind = 'external'
+                                                      AND w.state = 'running' AND w.pid = ?3 AND w.pid_started = ?4))
                            AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.turn = t.id AND a.origin_computer IS NOT NULL
                                            AND NOT EXISTS (SELECT 1 FROM ask_peers p WHERE p.computer = a.origin_computer
                                                            AND p.dir = 'in' AND p.epoch = a.origin_epoch AND p.live = 1)))",
             super::detached::sources_sql()
         ),
-        params![claim_id, now, pid, started, conversation],
+        params![claim_id, now, pid, started, conversation, session],
     )?;
     if n == 1 {
         tx.execute(

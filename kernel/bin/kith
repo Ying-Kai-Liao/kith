@@ -205,7 +205,7 @@ case $1 in
   ask)                shift
                       # The host's claim goes on only to a `--reply` resume (kith-ask hands it to the inner launch, which attaches it); any other
                       # form of ask is not a run to attach.
-                      if [[ ${1:-} == --reply ]]; then exec env ${turn_claim:+KITH_TURN_CLAIM=$turn_claim} "$KITH/bin/kith-ask" "$@"; fi
+                      if [[ ${1:-} == --reply ]]; then exec env ${turn_claim:+KITH_TURN_CLAIM=$turn_claim} ${turn_conv:+KITH_TURN_CONVERSATION=$turn_conv} "$KITH/bin/kith-ask" "$@"; fi
                       no_turn_claim "kith ask"; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
   allow)              shift; exec "$KITH/bin/kith-allow" "${@:---help}" ;;
   cards)              shift; exec "$KITH/bin/kith-cards" "${@:---help}" ;;
@@ -444,6 +444,7 @@ claim_seen=""
 [[ -n ${_kith_core_primed:-} ]] || kith_core_prime
 kthreads=""; kthreads=$(kith_core_bin threads) || kthreads=""
 [[ -z $turn_claim || ${_kith_core_ver:-} == *'"turn-claim"'* ]] || kthreads=""   # a program with no `turn-claim` cannot attach
+[[ -z $turn_conv || ${_kith_core_ver:-} == *'"turn-conversation"'* ]] || kthreads=""   # nor name the conversation of one
 # Writer mode is either source (kernel/lib/kith_claims.py switched): the marker, or the module's switch file once it says more than
 # `stepping`, so a marker lost while the core serves does not send a taker back to the files.
 claims_core() {
