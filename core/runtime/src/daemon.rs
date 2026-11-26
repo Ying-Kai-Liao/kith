@@ -883,6 +883,19 @@ impl Daemon {
             .with_core(|c| crate::cutover::marker::write(c, module, at, "", None))
     }
 
+    /// The `turns` rows of `conversation` as (id, state), for a host test that counts them: the core's file is only core/runtime's
+    /// to read. Behind `test-support`, never a production path.
+    #[cfg(feature = "test-support")]
+    pub fn turns_of_for_test(&self, conversation: &str) -> Result<Vec<(i64, String)>> {
+        self.shared.with_core(|c| {
+            let mut st = c
+                .conn()
+                .prepare("SELECT id, state FROM turns WHERE conversation = ?1 ORDER BY id")?;
+            let rows = st.query_map([conversation], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        })
+    }
+
     /// Waits until the daemon serves, or says why it will not.
     pub fn ready(&self, timeout: Duration) -> Result<()> {
         let end = Instant::now() + timeout;

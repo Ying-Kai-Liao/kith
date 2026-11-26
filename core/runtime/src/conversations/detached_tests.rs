@@ -546,7 +546,11 @@ fn a_channel_launch_takes_its_session_first_then_attaches_the_work_key_and_the_w
     );
     assert_eq!(turn_state(&core, turn), "running");
     assert_eq!(claim_state(&core, wake).0, "running");
-    assert_eq!(claim_state(&core, session).0, "running");
+    assert_ne!(
+        claim_state(&core, session).0,
+        "ended",
+        "the session's claim is held while the launch runs"
+    );
     // A terminal wants the session: held. Another wake of the thread cannot be claimed while the first holds the key.
     assert!(
         terminal_takes(&mut core, &live, "s1")

@@ -57,11 +57,7 @@ impl Real {
 
     /// Rows of `turns` on `conversation`: (id, state).
     fn turns(&self, conversation: &str) -> Vec<(i64, String)> {
-        let db = self.folders.machine.join("core/core.db");
-        let conn =
-            rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).expect("core.db");
-        let mut stmt = conn.prepare("SELECT id, state FROM turns WHERE conversation = ?1 ORDER BY id").unwrap();
-        stmt.query_map([conversation], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+        self.daemon.as_ref().expect("the daemon").turns(conversation)
     }
 }
 
@@ -305,7 +301,7 @@ async fn a_bot_turn_redeemed_and_cut_by_a_restart_is_cancelled_and_never_begun_a
         .data(
             "hostclaim.turn",
             &json!({"conversation": session, "turn": turn, "person": "owner", "revokeSeen": 0, "cwd": "/tmp",
-                    "sessionId": session, "holderInstance": FIRST}),
+                    "sessionId": session, "holderInstance": FIRST, "account": "main"}),
         )
         .expect("claimed");
     let claim = claimed["claimId"].as_i64().unwrap_or_else(|| panic!("{claimed}"));

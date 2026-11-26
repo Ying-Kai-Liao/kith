@@ -335,7 +335,13 @@ async fn a_claimed_wake_is_a_batch_of_its_own_that_is_never_saved_and_no_message
     );
     // A message sent while the wake batch waits starts a batch of its own.
     r.send(&Rig::in_thread(Rig::msg("2", "and the lights?"), "fake/x:room:1")).await;
-    until("both turns", || r.fake.posts().len() == 3).await;
+    let end = Instant::now() + Duration::from_secs(20);
+    while r.fake.posts().len() < 3 {
+        let (posts, inbox) = (r.fake.posts(), r.core.with(|i| i.st.inbox.clone()));
+        assert!(Instant::now() < end, "both turns never ran: posts {posts:?}, inbox {inbox:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(r.fake.posts().len(), 3, "exactly the first answer, the wake and the message: {:?}", r.fake.posts());
     assert_eq!(r.fake.posts()[1].1, echo(note), "the wake alone");
     assert!(r.fake.posts()[2].1.contains("and the lights?") && !r.fake.posts()[2].1.contains("staging box"));
     r.idle().await;
