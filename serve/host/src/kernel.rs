@@ -252,6 +252,19 @@ pub fn find_holder(exe: &Path) -> Option<PathBuf> {
     kith_kernel::helpers::beside(exe, if cfg!(windows) { "kith-holder.exe" } else { "kith-holder" })
 }
 
+/// The program the Rust launch (`<program> kernel launch AGENT --exec ...`) is started from: `$KITH_BIN`, else this very binary (the host
+/// and the kernel crate are one program). Not [`crate::agent::hq::bin`]: that is the bash entry when `KITH_KERNEL_BIN` is unset, and the
+/// bash entry has no `kernel` verb. The same choice as the schedule's launch (`routines/sched_launch.rs`, S2, #1220), which keeps its
+/// own copy until that lands; whichever lands second switches to this one.
+pub fn launch_program() -> Option<PathBuf> {
+    launch_program_of(std::env::var_os("KITH_BIN"), std::env::current_exe().ok())
+}
+
+/// [`launch_program`] over its two inputs, so a test makes the choice production makes, with the built `kith` as `KITH_BIN`.
+pub fn launch_program_of(kith_bin: Option<OsString>, current: Option<PathBuf>) -> Option<PathBuf> {
+    kith_bin.map(PathBuf::from).filter(|p| p.is_file()).or(current)
+}
+
 /// `(KITH_STUB_BIN, program)` for a process the host starts, resolved once: an explicit `KITH_STUB_BIN` that runs wins.
 /// None when there is no stub (the kernel then warns and runs unlocked, or refuses under `KITH_REQUIRE_STUB=1`).
 pub fn stub_env() -> Option<(String, String)> {

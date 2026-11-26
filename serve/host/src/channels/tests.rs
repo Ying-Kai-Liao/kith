@@ -335,16 +335,25 @@ async fn a_claimed_wake_is_a_batch_of_its_own_that_is_never_saved_and_no_message
     );
     // A message sent while the wake batch waits starts a batch of its own.
     r.send(&Rig::in_thread(Rig::msg("1", "and the lights?"), "fake/x:room:1")).await;
+    // Each turn is looked for by what it posted, not by where: the wake's own text, and the message's.
+    let (wake_post, message_post) = (echo(note), |t: &str| t.contains("and the lights?"));
     let end = Instant::now() + Duration::from_secs(20);
-    while r.fake.posts().len() < 3 {
-        let (posts, inbox) = (r.fake.posts(), r.core.with(|i| i.st.inbox.clone()));
+    loop {
+        let posts = r.fake.posts();
+        if posts.iter().any(|p| p.1 == wake_post) && posts.iter().any(|p| message_post(&p.1)) {
+            break;
+        }
+        let inbox = r.core.with(|i| i.st.inbox.clone());
         let calls = std::fs::read_to_string(r.dir.join("stub/calls.jsonl")).unwrap_or_default();
         assert!(Instant::now() < end, "both turns never ran: posts {posts:?}, inbox {inbox:?}, stub calls {calls}");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert_eq!(r.fake.posts().len(), 3, "exactly the first answer, the wake and the message: {:?}", r.fake.posts());
-    assert_eq!(r.fake.posts()[1].1, echo(note), "the wake alone");
-    assert!(r.fake.posts()[2].1.contains("and the lights?") && !r.fake.posts()[2].1.contains("staging box"));
+    r.idle().await;
+    let posts = r.fake.posts();
+    assert_eq!(posts.iter().filter(|p| p.1 == wake_post).count(), 1, "the wake ran once, alone: {posts:?}");
+    let with_message: Vec<_> = posts.iter().filter(|p| message_post(&p.1)).collect();
+    assert_eq!(with_message.len(), 1, "the message ran once: {posts:?}");
+    assert!(!with_message[0].1.contains("staging box"), "no message joined the wake batch: {posts:?}");
     r.idle().await;
     assert!(r.core.with(|i| i.claimed.is_empty()), "the claim is spent with its run");
 }

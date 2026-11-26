@@ -55,3 +55,4 @@ src/market/requests.rs	market::requests::tests::
 src/cards/resume/channel_wake_tests.rs	cards::resume::channel_wake::tests::
 src/cards/resume/wake_clock_core_tests.rs	cards::resume::wake_clock::core_tests::
 src/routines/launch_turn_e2e_tests.rs	routines::launch_turn_e2e_tests::
+src/routines/core_ask_launch_tests.rs	routines::core_ask_launch_tests::
