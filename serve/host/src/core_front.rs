@@ -71,7 +71,11 @@ pub fn caller_env() -> serde_json::Map<String, Value> {
 pub fn ask(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
     match kith_core::reach(folders, method, params, true) {
         kith_core::Reached::Answered(answer) => Some(answer),
-        _ => None,
+        other => {
+            // A test that expected an answer shows why it got none.
+            eprintln!("core_front::ask {method}: {other:?}");
+            None
+        }
     }
 }
 

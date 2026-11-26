@@ -30,6 +30,10 @@ const CANT_READ: &str = "A shell command Kith can't read in full";
 
 // ---- the three calls on cards.png
 
+#[cfg_attr(
+    windows,
+    ignore = "fixtures spell POSIX absolute paths (/home/kai); Windows path spelling for cards is W10 (WI7)"
+)]
 #[test]
 fn card_a_a_python_script_and_a_package() {
     let r = bash(
@@ -50,6 +54,10 @@ fn card_a_a_python_script_and_a_package() {
     assert!(!r.open_details);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "fixtures spell POSIX absolute paths (/home/kai); Windows path spelling for cards is W10 (WI7)"
+)]
 #[test]
 fn card_b_a_loop_of_downloads() {
     let r = bash(
@@ -70,6 +78,10 @@ fn card_b_a_loop_of_downloads() {
     assert_eq!(r.facts[1].strong, ["freemusicarchive.org"]);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "fixtures spell POSIX absolute paths (/home/kai); Windows path spelling for cards is W10 (WI7)"
+)]
 #[test]
 fn card_c_a_read_only_grep() {
     let r = bash("grep -n 'tick-lock' /home/kai/.kith/cli/0.1.4/share/kith/kernel/bin/kith-sched");
@@ -240,6 +252,10 @@ fn a_piped_in_shell_is_named_for_what_it_is() {
 
 // ---- the other rows
 
+#[cfg_attr(
+    windows,
+    ignore = "fixtures spell POSIX absolute paths (/home/kai); Windows path spelling for cards is W10 (WI7)"
+)]
 #[test]
 fn deletes_and_stops_come_first() {
     let r = bash("cd /home/kai/kith/agents/video/files && python3 run.py; rm -rf build; pkill -f tlc2.TLC");
@@ -250,6 +266,10 @@ fn deletes_and_stops_come_first() {
     assert_eq!(r.facts[3].muted.as_deref(), Some("its folder"));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "fixtures spell POSIX absolute paths (/home/kai); Windows path spelling for cards is W10 (WI7)"
+)]
 #[test]
 fn a_non_recursive_delete_names_the_folder() {
     let r = bash("cd /home/kai/x/proj && rm notes.txt old.txt");
@@ -272,6 +292,10 @@ fn an_echo_does_not_reach_the_site_it_mentions() {
     assert!(texts(&r).iter().all(|t| !t.starts_with("Reaches")));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "fixtures spell POSIX absolute paths (/home/kai); Windows path spelling for cards is W10 (WI7)"
+)]
 #[test]
 fn saves_come_from_redirects_tee_sed_and_curl() {
     let r = bash("cd /home/kai/a/b && echo hi > out.txt");
@@ -284,6 +308,10 @@ fn saves_come_from_redirects_tee_sed_and_curl() {
     assert!(texts(&r).iter().all(|t| !t.starts_with("Saves")));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "fixtures spell POSIX absolute paths (/home/kai); Windows path spelling for cards is W10 (WI7)"
+)]
 #[test]
 fn the_folder_is_labelled_for_this_agent() {
     let r = bash("cd /home/kai/.kith/cli/0.1/share && ls");

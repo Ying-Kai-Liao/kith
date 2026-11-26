@@ -1008,7 +1008,7 @@ pub fn is_pass(text: &str) -> bool {
     t.is_empty() || t == PASS || t == "pass"
 }
 
-// Fake `kith` shell scripts and chmod: Unix-only until windows-owner W2b.
+// Fake `kith` shell scripts and chmod: Unix-only until retire-python P1-12 (no Windows kernel launcher before it).
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {

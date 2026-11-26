@@ -76,6 +76,7 @@ pub(super) async fn joined(r: &Rig, preset: &str) -> Caller {
     r.device("sam-phone", Some("sam"))
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_owner_run_gets_a_card_and_a_yes_in_the_window_continues_the_same_run_once() {
     let r = Rig::new().await;
@@ -104,6 +105,7 @@ async fn an_owner_run_gets_a_card_and_a_yes_in_the_window_continues_the_same_run
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Used);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn no_answer_in_the_window_tells_the_run_to_end_its_turn_and_a_later_yes_is_kept_for_its_session() {
     let r = Rig::new().await;
@@ -136,6 +138,7 @@ async fn no_answer_in_the_window_tells_the_run_to_end_its_turn_and_a_later_yes_i
     assert!(!request_permission(&r.hub, &owner_run("s1"), "Bash", &ls()).await.allow, "the grant was spent");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_repeat_joins_the_open_card_and_one_yes_is_one_use() {
     let r = Rig::new().await;
@@ -162,6 +165,7 @@ async fn a_repeat_joins_the_open_card_and_one_yes_is_one_use() {
     assert_eq!([a.allow, b.allow].iter().filter(|x| **x).count(), 1, "a: {a:?} b: {b:?}");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_no_and_an_expiry_and_a_withdrawal_never_give_access() {
     let r = Rig::new().await;
@@ -193,6 +197,7 @@ async fn a_no_and_an_expiry_and_a_withdrawal_never_give_access() {
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Expired, "expired never gives access");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn secrets_and_logins_are_denied_with_no_card() {
     let r = Rig::new().await;
@@ -215,6 +220,7 @@ async fn secrets_and_logins_are_denied_with_no_card() {
 
 /// A `kith ask` that ended (Stop, a revoke, a timeout, a chain end) leaves no open card behind: the card its run parked on
 /// is withdrawn, a card of another ask is left alone.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_ended_asks_open_card_is_withdrawn_and_another_asks_is_not() {
     let r = Rig::new().await;
@@ -233,6 +239,7 @@ async fn an_ended_asks_open_card_is_withdrawn_and_another_asks_is_not() {
     assert!(r.hub.store.cards_open(None).is_empty(), "no open card is left");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_guests_card_goes_to_the_owner_a_members_to_themself_and_a_revoke_applies_at_answer_time() {
     let r = Rig::new().await;
@@ -290,6 +297,7 @@ async fn a_guests_card_goes_to_the_owner_a_members_to_themself_and_a_revoke_appl
 
 /// Who answers follows kith-auth while the card is open: a member made a guest hands it to the owner and back again, the
 /// apps are told (`canAnswer`, per viewer), and only losing the agent withdraws it.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_open_cards_approver_follows_kith_auth_and_only_losing_the_agent_withdraws_it() {
     let r = Rig::new().await;
@@ -335,6 +343,7 @@ async fn an_open_cards_approver_follows_kith_auth_and_only_losing_the_agent_with
 
 /// Rule 5: with no chat with the agent on this computer, a card goes to the agent's card lane, which reaches the
 /// approver's Needs-you list and nobody else's; a new approver gets it and the old one sees it can't answer any more.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_card_with_no_chat_goes_to_the_approvers_needs_you_list() {
     let r = Rig::new().await;
@@ -381,6 +390,7 @@ async fn a_card_with_no_chat_goes_to_the_approvers_needs_you_list() {
 
 /// F11: an invited person's run executes as the owner's macOS user, so a card for a tool that runs code is the
 /// owner's even in a member's own run, and the member's answer is refused by the approver stored on the card.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_members_own_card_for_code_goes_to_the_owner() {
     let r = Rig::new().await;
@@ -455,6 +465,7 @@ async fn a_members_own_card_for_code_goes_to_the_owner() {
 
 /// P5: a member answers their bot's run cards under the member rule, with the bot's own folders as the bounds: a file
 /// outside them stays the owner's.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_bots_owner_answers_its_run_cards_only_inside_the_bots_folders() {
     let r = Rig::new().await;
@@ -513,6 +524,7 @@ async fn a_bots_owner_answers_its_run_cards_only_inside_the_bots_folders() {
     }
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_restart_parks_live_cards_and_keeps_their_entries_answerable() {
     let r = Rig::new().await;
@@ -543,6 +555,7 @@ async fn a_restart_parks_live_cards_and_keeps_their_entries_answerable() {
     assert_eq!(answer(&r.hub, "no-such-entry", Some("allow"), None).unwrap(), Outcome::Closed);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_bot_chat_card_answered_after_its_process_is_gone_is_recorded() {
     let r = Rig::new().await;
@@ -585,6 +598,7 @@ async fn a_bot_chat_card_answered_after_its_process_is_gone_is_recorded() {
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Approved);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn settings_default_to_a_minute_and_a_half_and_a_day_and_the_resume_is_on_with_a_kill_switch() {
     let r = Rig::new().await;
@@ -598,6 +612,7 @@ async fn settings_default_to_a_minute_and_a_half_and_a_day_and_the_resume_is_on_
     assert_eq!((s.window, s.expiry_ms, s.resume), (Duration::from_secs(30), 48 * 3_600_000, false));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_yes_after_the_window_but_before_the_process_exits_is_not_lost() {
     let r = Rig::new().await;
@@ -620,6 +635,7 @@ async fn a_yes_after_the_window_but_before_the_process_exits_is_not_lost() {
     assert!(request_permission(&r.hub, &owner_run("s1"), "Bash", &ls()).await.allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_parallel_ask_cannot_take_the_grant_a_live_asker_is_given() {
     let r = Rig::new().await;
@@ -651,6 +667,7 @@ async fn a_parallel_ask_cannot_take_the_grant_a_live_asker_is_given() {
     assert!(call.await.unwrap().allow);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_turn_that_ends_with_a_question_open_parks_it() {
     let r = Rig::new().await;
@@ -691,6 +708,7 @@ async fn a_turn_that_ends_with_a_question_open_parks_it() {
 
 /// An owner run of the Kith app's 1:1 chat (its ask token is keyed to the chat's `acp:<chat>:<thread>`): the card is in
 /// the owner's chat with the agent, not the `cards:` lane, and the answer reaches the run.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_owner_app_chat_run_raises_a_card_in_the_owners_chat() {
     let r = Rig::new().await;
