@@ -447,7 +447,7 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     host and leaves only after its idle time (120 s, `holder_link.rs` `idle`), so it still holds `target\debug\kith-holder.exe`
     right after a stop. The tests' `end_holders_of` stays for that reason. Rule (architect, 2026-11-27): `stop` ends the host and
     the core inside it, never the core's holder or its runs; the holder idles out by itself, as on the Mac. The e2e checks both.
-- [ ] **W12. Claims, held terminals and host turns on Windows.** Owner: unowned. Status: not started. L. **Model passed 2026-11-24** (`model-w12/`, below). Ready for
+- [ ] **W12. Claims, held terminals and host turns on Windows.** Owner: unowned. Status: in progress (W12-1, the job held by its recorded process, H1 H2 H5 H7 and the P-W12c probe, is built: windows-owner-build-2-w12-1). L. **Model passed 2026-11-24** (`model-w12/`, below). Ready for
   workers once its WAITS are met, and only with the W1 premise answers in hand (P-W12a and P-W12b).
   - **WAITS P1-19** (no Python claim path left) and P1-12 R5. Depends: W2b, W5a, W8.
   - Files: `core/runtime/src/terminal.rs:701-705` and `open_held`; `hostclaim.rs:462-537`; `serve/host/src/terminal/warm_stub.rs`
@@ -458,10 +458,13 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
   - The core-fired schedule turn runs here as a normal host turn, once P2-4 lands.
   - **Rules the model needs** (each one's broken run fails; `model-w12/results.md`). The model is `WinClaims.tla`, which
     extends S4's model with processes and job objects. Workers build these:
-    1. **One named job per detached run,** named by the claim id. It is created without kill-on-close, so the run outlives a
-       host restart.
-    2. **The launcher is created inside the job in one call** (`PROC_THREAD_ATTRIBUTE_JOB_LIST`, as the holder's
-       `create_in_job` does). Never suspend-assign-resume: a host restart between create and resume leaves a launcher
+    1. **H1: the recorded process makes the run's job itself.** For a CLI or detached run that is the launcher; the job is
+       unnamed, has `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and neither `BREAKAWAY_OK` nor `SILENT_BREAKAWAY_OK`, and the launcher
+       keeps the only handle (not inheritable, never duplicated, never handed on). When the recorded process ends, the run's
+       processes end with it, so "the recorded process is gone" means "the writer is gone" (architect, 2026-11-27,
+       `w12-split.md`).
+    2. **The launcher is created inside the job in one call** (`PROC_THREAD_ATTRIBUTE_JOB_LIST`,
+       `winsys::job::spawn_in_job`; the holder's `create_in_job` is suspend-assign-resume and moves to it in W12-6). Never suspend-assign-resume: a host restart between create and resume leaves a launcher
        suspended in the job for ever (`extra-stranded`). Never assign after it runs: its engine starts outside the job.
     3. **The job forbids breakaway** (no `BREAKAWAY_OK` or `SILENT_BREAKAWAY_OK`), so no tool child leaves it.
     4. **`recorded_gone` on Windows asks the job:** the launcher's pid with its start time, and then the job's active process
@@ -476,7 +479,9 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     7. **Holder jobs kill on close,** and only the holder holds them. That is today's code, and it is why the empty
        `end_groups` is right.
     8. **Every job handle is non-inheritable.** An inherited handle keeps a kill-on-close job open, so its engine survives.
-    9. **D6 Stop:** cancel, then `TerminateJobObject` on the job, found by name after a restart.
+    9. **H4: no other process holds the job, and Stop goes through the recorded process.** A probe never opens the job. A Stop
+       from outside kills the recorded process (`TerminateProcess` after a start-stamp check) and the kill on close does the rest;
+       the recorded process may call `TerminateJobObject` on its own handle after a graceful cancel (D6). Never by name.
     10. **The transcript reader counts a torn last line that holds the marker token** as the marker (S4 R4). A strict
         reader delivers twice after a hard kill. On the Mac the same rule closes the same gap after SIGKILL.
   - **Premises W1 must confirm before W12 code lands:**
