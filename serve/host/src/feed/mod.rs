@@ -3,7 +3,10 @@
 //! itself is written by `Store::put_post`, in one transaction that also takes the shared rev. Owner only: no post
 //! names an invitee's chat, and no post event reaches a member or a bot (`api::roles`).
 
+mod agent;
 pub mod fold;
+
+pub use agent::agent_post;
 
 use crate::LockExt;
 use crate::hub::Hub;
@@ -13,9 +16,9 @@ use serde_json::{Value, json};
 
 /// Who wrote the post: an agent through its tool, or the host from a fact it already knows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code, reason = "the tool (F2) and the host writers (F3) are the callers")]
 pub enum By {
     Agent,
+    #[allow(dead_code, reason = "the host writers (F3) are the callers")]
     Host,
 }
 
@@ -31,11 +34,11 @@ impl By {
 /// How a fact folds into what is already shown (section 3 of the design). The key of the row comes from this and the
 /// agent, never from a caller, so an agent can't fold into another agent's card.
 #[derive(Clone, Debug)]
-#[allow(dead_code, reason = "the tool (F2) and the host writers (F3) are the callers")]
 pub enum Fold {
     /// A merged PR (`repo#n`), set into the day's card of the merging agent.
     Merges { pr: String, title: String },
     /// A run of a routine: `key` is its id, or `job:<job>`. `ok` is whether the run worked.
+    #[allow(dead_code, reason = "the host writers (F3) are the callers")]
     Routine { key: String, ok: bool },
     /// A page an agent shared: `name` is the file name, `version` the sha256 of the html.
     Page { name: String, version: String },
@@ -75,7 +78,6 @@ pub fn event(p: &Post) -> Value {
 
 /// Folds one fact into the Feed and tells the owner's apps when a card changed. `None` is a repeat or a late fact the
 /// rules keep out: no rev, no event. Under `emit_lock`, so events leave in rev order.
-#[allow(dead_code, reason = "the tool (F2) and the host writers (F3) are the callers")]
 pub fn put_post(hub: &Hub, w: &PostWrite) -> Result<Option<Post>> {
     let _g = hub.emit_lock.locked();
     let post = hub.store.put_post(w)?;

@@ -11,7 +11,7 @@ use std::time::Duration;
 const CALL_S: u64 = 30;
 
 /// `msg = reply.get('message') or reply.get('error')`, then the text if it is a non-empty string, else `fallback`.
-fn said(reply: &Map<String, Value>, fallback: &str) -> String {
+pub(super) fn said(reply: &Map<String, Value>, fallback: &str) -> String {
     let msg = match reply.get("message") {
         Some(m) if truthy(m) => Some(m),
         _ => reply.get("error"),

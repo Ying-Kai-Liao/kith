@@ -9,9 +9,10 @@ use super::bug::report_bug;
 use super::decide::{decide, deny};
 #[cfg(unix)]
 use super::door::run_door;
+use super::feed::feed_post;
 #[cfg(unix)]
 use super::helper::ask_helper;
-use super::host::credentials;
+use super::host::{ask_credentials, credentials};
 use super::pyval::{truthy, type_name};
 #[cfg(windows)]
 use super::refused::{ask_helper, report_bug, run_door};
@@ -84,6 +85,27 @@ fn secret_def() -> Value {
     )
 }
 
+fn feed_def() -> Value {
+    tool(
+        "feed_post",
+        "Put one card on the owner's Feed: something they would want to look at (a result, a number that moved, a page or video you \
+         made, a link). One line of what and why, not a log. Give at most one of file, url or number. `fold` names a card of yours \
+         that this replaces (a later post with the same fold updates it instead of adding another); you may start a few new cards a \
+         day. Use kind `merges` with `pr` for a PR you merged.",
+        json!({"kind": {"type": "string", "description": "a short word: file, number, page, video, link, failing, ..."},
+               "title": {"type": "string", "description": "one line, at most 80 characters"},
+               "line": {"type": "string", "description": "one more line, at most 200 characters"},
+               "file": {"type": "string", "description": "path of a file to show (.html makes a page, .mp4/.mov a video), up to 100 MiB"},
+               "url": {"type": "string", "description": "an https link"},
+               "number": {"type": "object", "description": "a figure: value, unit?, delta? (the change)",
+                          "properties": {"value": {"type": "number"}, "unit": {"type": "string"}, "delta": {"type": "number"}},
+                          "required": ["value"]},
+               "fold": {"type": "string", "description": "a-z, 0-9 and -, at most 40: posts with the same fold are one card"},
+               "pr": {"type": "string", "description": "owner/repo#number, with kind merges"}}),
+        &["kind", "title"],
+    )
+}
+
 fn bug_def() -> Value {
     tool(
         "report_bug",
@@ -149,6 +171,11 @@ pub fn handle(msg: &Map<String, Value>, env: &Env, kernel: &Path) -> Result<Opti
             if credentials(env).is_some() {
                 tools.push(secret_def());
             }
+            // the Feed is the owner's: only a run with an owner token (and no person) is offered the tool. A convenience;
+            // the host refuses any other token whatever the listing says
+            if ask_credentials(env).is_some() && env.get("KITH_PERSON").is_none() {
+                tools.push(feed_def());
+            }
             // a guest's tools: guests are refused on Windows, so no run there is offered them
             #[cfg(unix)]
             if let Some(person) = env.get("KITH_PERSON") {
@@ -187,6 +214,7 @@ fn call(msg: &Map<String, Value>, env: &Env, kernel: &Path) -> Result<Value, Cra
     match name {
         Some("request_access") => args(|m, e, _| request_access(m, e)),
         Some("request_secret") => args(|m, e, _| request_secret(m, e)),
+        Some("feed_post") => args(|m, e, _| feed_post(m, e)),
         Some("ask_helper") => args(ask_helper),
         Some("run_door") => args(run_door),
         Some("report_bug") => args(report_bug),
