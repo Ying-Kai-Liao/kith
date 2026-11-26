@@ -40,7 +40,7 @@ bg ask and a schedule), host chat (the app's thread, one ACP process per chat), 
 | Choose the path by name | `kernel/bin/kith:1530` (`harness != claude` hands over to `kernel engine-run`), `core/kernel/src/launch/exec.rs:497` (`!plan.claude`) and `:588` `other_engine`, `plan.rs:1100` (`claude = harness == "claude"`) | native argv | `engine-run` | `engine-run` | `engine-run` |
 | One-shot argv | Claude: `bin/kith:1582-1713`, Rust `launch/start.rs:59` `claude()`. Others: `engine_run.rs:278` `run()` builds an ACP `RunSpec` | yes | yes (ACP) | yes if `oneshot: Acp` and an adapter is found; exit 78 `NOT_AVAILABLE` for registry-only engines with no Kith-set modes (`runonce.rs:43-55`) | yes, bypass only |
 | Terminal session | Claude: `launch/terminal.rs:223`. Others: `terminal.rs:278` `adapter()` then `engine_run.rs:226` `interactive()` then `engines/tui.rs:32` | yes | yes (`tui.rs:73`) | no ("no terminal session for X; give a task", `engine_run.rs:237`) | yes (`tui.rs:146`) |
-| Host chat start | `launch_cmd.rs:145` and `plan.rs:1079`: `--launch-json covers claude and codex only for now`; other engines only when the table row has an ACP mode (`plan.rs:1079-1087`) | yes | yes | partial (ACP row needed) | yes, bypass only |
+| Host chat start | `plan.rs:1079` (and the diagnostic verb `launch_cmd.rs:145`, which is not a chat start): `--launch-json covers claude and codex only for now`; other engines only when the table row has an ACP mode (`plan.rs:1079-1087`) | yes | yes | partial (ACP row needed) | yes, bypass only |
 | Host's own adapter switch | `agent/bot/launch.rs:169` `adapter()` = Claude / Codex / Other by `initialize` fields; `bot/mod.rs:335` instructions; `hqmem/oneshot.rs:101` | `_meta` | by agent name suffix | generic | generic |
 | The wire's own harness enum | `agent/hq.rs:97,235` (`Harness::Claude`/`Codex`/`Unknown`), `other_engine()` `:240` | yes | yes | via `engine` string | via `engine` string |
 | Resume, terminal | `plan.rs:994`, `bin/kith:842`: `--resume continues Claude sessions` | yes | no, refused by name | no | no |
@@ -75,7 +75,7 @@ bg ask and a schedule), host chat (the app's thread, one ACP process per chat), 
 | Usage-limit detection | Claude chat: `updates.rs:199` `_claude/rateLimit`; ACP one-shot: `core/acp/src/client.rs:132` `depleted()` on RPC error kinds; CLI chain: `accounts/chain.rs:14` text regex on a failed run's output | yes | via RPC kind | via RPC kind, if the adapter sets it | no known signal |
 | Account walk (`KITH_BACKUP_CHAIN`) | `bin/kith:671-677`, Rust `accounts/chain.rs:105`; the chain is only claude and codex: `agent/backups.rs:70` `runnable()`, `accounts/logins.rs:48`, `listing.rs:48` | yes | yes (`CODEX_HOME`) | no | no |
 | Session is resumed only under the account that made it | `bin/kith:785-820`, `plan.rs` equivalent; default account name `claude`/`codex` in `agent/hq.rs:248` | yes | yes | no ledger account | no |
-| Backup of a Claude agent on Codex | `bin/kith:896-898`, `plan.rs:958`: model dropped, harness switched | n/a | yes | no | no |
+| Backup of a Claude agent on Codex | `plan.rs:865-913`, `958`: model dropped, harness switched | n/a | yes | no | no |
 
 ### 1.4 Claims, wake, schedules, asks, channels, lifecycle
 
@@ -282,7 +282,7 @@ unchanged (rule: behaviour change = changed test); the Rust and Python launches 
 Python (P1-12).
 
 Open PRs, at their heads: #1220 S2 `4f0488257` (`core_cron.rs`, `sched_turn.rs`, `sched_launch.rs`), #1221 WK4c `644d38e0f`
-(`wake_clock.rs`, `channels/*`, `bot/*`, `exec.rs`), #1229 `1de0b1de2` (`tui.rs`, `exec.rs:604`, `engine_run.rs:232`).
+(`wake_clock.rs`, `channels/*`, `bot/*`, `exec.rs`), #1229 `1de0b1de2` (`tui.rs`, `exec.rs:604`, `engine_run.rs:232`), #1227 R4 (switches the Rust launch on; `bin/kith` is its rollback target).
 Merged: #1222 A2, #1228 C3L, #1210 (Hermes refusal), #1219 (prer4: `other_engine` how, Hermes exit 79).
 
 ### Phase 1: the table says it, one function reads the agent's engine (S)
@@ -300,11 +300,11 @@ Merged: #1222 A2, #1228 C3L, #1210 (Hermes refusal), #1219 (prer4: `other_engine
 - **Changes.** The two `harness_of_agent` copies and `is_claude` (`core_ask.rs:89,318`, `wake_clock.rs:126,132`) call
   `engines::for_run` (the wake and ask doors' differing rules become one, so `wake_clock_tests.rs:132` and `core_ask_tests` change on purpose); S2's copy of `launch_program` moves to the shared `kernel::launch_program` (a #1222/#1220 loose end); `backups.rs:70`, `plan.rs:1079`, `launch_cmd.rs:145` ask `can(...)`. `ENGINE_GAP`
   stays (same answer, now `can(DetachedTurn)`), so no behaviour moves.
-- **Files.** `serve/host/src/routines/core_ask.rs`, `cards/resume/wake_clock.rs`, `routines/sched_launch.rs` (S2),
+- **Files.** `serve/host/src/routines/core_ask.rs`, `cards/resume/wake_clock.rs`, `routines/core_runs.rs:167`, `routines/sched_launch.rs` (S2),
   `agent/backups.rs`, `core/kernel/src/launch/plan.rs`, `serve/host/src/launch_cmd.rs`.
 - **Waits for.** #1221 and #1220 (they edit `wake_clock.rs` and `core_cron.rs` and #1222 left a `TODO(WK4c, #1221)` in
   `core_ask.rs` for this exact dedupe). **Done when** the existing host tests (`wake_clock_tests`, `core_ask_tests`,
-  `sched_launch_tests`) pass unchanged and `git grep 'eq_ignore_ascii_case("claude' serve core` is empty.
+  `sched_launch_tests`) pass, with the two pinned disagreements updated, and no `== "claude"` or `eq_ignore_ascii_case("claude` is left outside `engines/` (checked by a test that greps, not by hand).
 
 ### Phase 3: refusals in one place (M)
 
@@ -313,22 +313,31 @@ Merged: #1222 A2, #1228 C3L, #1210 (Hermes refusal), #1219 (prer4: `other_engine
   it. The new text for the one silent case, "other ACP engine runs in the adapter's own mode" (`engines.rs:149`), is added as
   a `Partial` note. Rust only: `bin/kith` is R4's rollback target (#1227, open) and is not edited; R5 deletes it. Difftest
   `intended.json` entries are planned for each behaviour change. `model_for` moves the Claude-name guard out of `plan.rs:958` and `bin/kith:831`.
-- **Files.** `engines/caps.rs`, `runonce.rs`, `engine_run.rs`, `agent/bot/hq.rs`, `plan.rs`, `launch_cmd.rs`, `kernel/bin/kith`
-  (two sites, through the binary).
+- **Files.** `engines/caps.rs`, `runonce.rs`, `engine_run.rs`, `agent/bot/hq.rs`, `plan.rs`, `launch_cmd.rs`, nothing in `kernel/bin/kith`
+  (rollback target, see above).
 - **Waits for.** #1229 (it changes `engine_run.rs` and `tui.rs`; phase 3 then moves its owner-network into `RunShape` and
   `Network`). **Done when** every refusal sentence is byte-identical (golden tests) and `git grep HERMES_REFUSES` shows the
   one constant read in `engines/` only.
 
 ### Phase 4: claims and detached turns for every engine (M)
 
-- **Changes.** The claim row records `engine.id` (`core_claims.rs:235,330` and `external.rs:336`); `SessionRef` parses the
+- **Changes.** **Model first**: the architect writes the thread-writers model with an engine-run writer (session id known only after
+  `session/new`, run under `kith-stub` keyed by the turn's conversation). Then: every non-Claude start takes the claim and
+  runs under `kith-stub`; the permit token is issued on the non-Claude path too (`start.rs:134` is Claude-only, so a Codex
+  command-line run makes no cards today); the session registry (`transcripts/mod.rs:139,171`, `rows.rs:145,156`, `held = engine == "claude"`)
+  records non-Claude sessions; `--resume THREAD` is allowed for them (`plan.rs:994`, `bin/kith:842`; `plan.rs` is split first,
+  1,460 lines); a wake on a non-Claude run is cancelled before the claim when the run is not bypass, using
+  `refuses_unbypassed` (the prer4 rule of 2026-11-26), never by reading exit 79 in a report. The conversation's `engine`
+  column is routing data, not a label: it is written only on first insert (`external.rs:206-210`) and becomes the bg ask
+  turn's engine (`asks/ledger.rs:119-123`), so it means "the engine that made the session", readers prefer the parsed
+  session id, and old rows (all `claude`) keep their meaning. The claim row records `engine.id` (`core_claims.rs:235,330`, `external.rs:336`); `SessionRef` parses the
   three stored shapes; the wake turn for a non-Claude agent goes through `kernel launch --exec` like the bg ask already does
   (`core_ask.rs`), so `ENGINE_GAP` answers `Yes` for a row whose `DetachedTurn` is `Yes` and the cancel goes away.
 - **Files.** `terminal/core_claims.rs`, `core/runtime/src/conversations/external.rs`, `core/kernel/src/threads/`,
-  `cards/resume/wake_clock.rs`, `routines/core_runs.rs`.
-- **Waits for.** #1221 (the wake door by turn id, which is what this extends), #1220 (the launch route), C3L #1228 (merged).
-  Needs the `thread-writers` and `writer-lock` models re-run: a new engine value on the claim, and a non-Claude run reached
-  by a wake (the architect says whether the models change). **Done when** a wake turn on a Codex agent starts, runs once,
+  `cards/resume/wake_clock.rs`, `routines/core_runs.rs`, `launch/plan.rs`, `core/runtime/src/transcripts/`, `launch/start.rs`.
+- **Waits for.** The architect's model, #1221 (the wake door by turn id, which is what this extends), #1220 (the launch route), C3L #1228 (merged).
+  The `thread-writers` model changes (above), then both models are re-run. Note `ENGINE_GAP` only cancels run-door wakes; bot
+  and channel wakes already take the old door on any engine (`wake_clock.rs:179`). **Done when** a wake turn on a Codex agent starts, runs once,
   and ends its claim in the e2e (`launch_turn_e2e_tests.rs` has fake claude/codex engines already).
 
 ### Phase 5: usage signal, cost row, account chain (M)
@@ -336,11 +345,13 @@ Merged: #1222 A2, #1228 C3L, #1210 (Hermes refusal), #1219 (prer4: `other_engine
 - **Changes.** `Driver::limit` as the one `Depleted` producer (`updates.rs:199`, `client.rs:132`, `chain.rs:14`);
   `Driver::cost` and the chat turn's `record()` for non-Claude engines; `usage.rs:108` becomes `Driver::usage`; the bg ask's
   account walk returns (the A2 follow-up in #1222: one session per attempt, parent mints and records it) as an engine-blind
-  walk.
+  walk. Design first (architect point 6): a Claude attempt gets `--session-id` up front, an ACP attempt only after `session/new`;
+  a non-Claude attempt records its session after `session/new` and before the prompt is sent, and a resume never crosses engines
+  (a walk from a Claude account to a Codex backup starts a new session, with a note).
 - **Files.** `core/acp/src/client.rs`, `accounts/chain.rs`, `bot/{updates,failover}.rs`, `usage.rs`, `engine_run.rs`,
   `routines/core_ask.rs`.
 - **Waits for.** The A2 follow-up (not started; the architect's corrected design is in #1222's body), and phase 2.
-  **Done when** a Codex one-shot and a Codex chat turn both leave a ledger row, and a usage failure on a Codex callee of a bg
+  **Done when** a Codex one-shot, terminal session and chat turn all leave a ledger row, and a usage failure on a Codex callee of a bg
   ask marks the account out and walks.
 
 ### Phase 6: the host drops its own copy (M)
@@ -354,7 +365,30 @@ Merged: #1222 A2, #1228 C3L, #1210 (Hermes refusal), #1219 (prer4: `other_engine
 
 ## 5. Architect review
 
-To be filled after the draft is asked of the architect (see the commit following this one).
+Asked once (`kith architect`, answer only), on the draft before this section. Verdict: **approve with changes**; the shape
+(capability table plus a few drivers, not a trait per engine) is right. Points condensed, each adopted (A, where) or
+answered (R). Where the architect corrected my facts, the doc now says the corrected thing.
+
+| # | Point | Ruling |
+|---|---|---|
+| 1 MUST | No single rule for which engine runs a turn: the wake door lets the agent's harness win (`wake_clock.rs:125`), the bg ask door lets a non-Claude turn engine win (`core_ask.rs:81-87`), tests pin both; more copies (`launch_cmd.rs:108`, `plan.rs:798`, `bin/kith:294,767`, `core_runs.rs:167`); the backup walk changes the engine after the door checks | A: `engines::for_run` and `check` inside the plan on every attempt (2.3); phase 2 updates the two pinned tests on purpose and lists `core_runs.rs` |
+| 2 MUST | A driver depends on engine and kind of run (a Claude chat is ACP; Hermes' MCP and role prompt differ by kind); keyed answers from phase 1 | A: `RunShape` has `kind`, answers keyed by kind (2.2) |
+| 3 MUST | Claim and lock facts wrong: a non-Claude command-line run takes no claim without a door's env; host chat has claim and lock under `kith-stub --resident` for any engine; "claim-only is covered by the writer-lock model" is false (`core-term-no-lock` fails `OneWriter`); engine-run counts as no writer | A: matrix and 2.4 corrected; claim plus lock on every start; the architect writes the model before phase 4. My earlier "claim-only is a harness limit" was wrong |
+| 4 MUST | Phase 4 misses the `--resume` refusal, the Claude-only session registry, the permit token, the prer4 pre-claim cancel, and that bot/channel wakes already use the old door | A: all in phase 4 |
+| 5 MUST | The conversation `engine` column is routing data (first insert only; becomes the ask turn's engine) | A: phase 4 defines it as "the engine that made the session"; readers prefer the parsed session id |
+| 6 MUST | Phase 5's walk: Claude has `--session-id` up front, ACP only after `session/new`; #1222's ruling: a fresh non-Claude run records no session | A: phase 5 designs session recording first; a resume never crosses engines |
+| 7 SHOULD | `Driver` an enum; pure parts in the kernel, async usage and ACP updates stay in the host | A: 2.2 |
+| 8 SHOULD | One table of which features each kind of run checks; static check, then a run-time check after `initialize` | A: 2.2 |
+| 9 SHOULD | `Refusal` needs exit-code context (3 vs 4 under a backup walk, 1 vs 4) | A: 2.2 |
+| 10 SHOULD | #1227 (R4) is open and `bin/kith` is its rollback target; "difftest unchanged" contradicts phases 4-5 | A: phase 3 edits Rust only and plans `intended.json` entries; #1227 listed in section 4 |
+| 11 SHOULD | `RunShape` crosses into engine-run as env; every path sets every field (the bash path does not set `KITH_RUN_OWNER`) | A: 2.2 |
+| 12 SHOULD | Windows: the launch is Unix-only | A: `can` takes the platform |
+| 13-17 NIT | 28 rows (25 other); `launch_cmd.rs` is a diagnostic verb, not the chat start; the launch-json check is `plan.rs:1079`, the walk `plan.rs:865-913`; a Codex terminal leaves no cost row either; phase 2's grep covers two sites; drop `is_claude_id` | A: counts and citations fixed; `is_claude_id` dropped; the grep test covers `== "claude"` |
+| extra | No file conflicts with #1220, #1221, #1229, #1222, #1228 beyond the above | noted |
+| extra | A bug found: two owner runs resuming the same Codex or Hermes session both write it (no claim) | A: closed by the claim on every start (2.5); the architect recorded it in decisions.md |
+
+Still open after review: Kai has not yet seen `for_run`; the phase 4 model is the architect's to write; phase 5's session
+recording is designed before its brief.
 
 ## 6. Open questions for Kai
 
