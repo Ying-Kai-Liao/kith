@@ -223,7 +223,7 @@ elif [[ -n $KB ]]; then
   # pty.spawn does not return on macOS while stdin is /dev/null). The master is drained and the run is waited for.
   ptyrun() { python3 -c 'import os, subprocess, sys, threading
 m, s = os.openpty()
-log = open(os.environ['PTY_LOG'], 'ab') if os.environ.get('PTY_LOG') else None
+log = open(os.environ["PTY_LOG"], "ab") if os.environ.get("PTY_LOG") else None
 def drain():
     try:
         while True:
