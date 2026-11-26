@@ -328,9 +328,15 @@ fn a_core_that_cannot_answer_is_a_writer_but_unswitched_claims_read_the_files() 
         assert!(with_host(&fake, &dir, |h| super::fg::writer_live(h, "s1")));
     }
     // claims not switched: the kernel's files are the record (as kith-wake reads them): none, no writer
-    let unswitched = claims(Err(
+    let unswitched = claims(Err(format!(
+        "kith-core: claim.list: [{}] the claims are not switched to the core on this Mac",
+        crate::wake::CLAIMS_NOT_SWITCHED
+    )));
+    // The same words with no code are another refusal: a writer, as any refusal the client does not know.
+    let by_words = claims(Err(
         "kith-core: claim.list: the claims are not switched to the core on this Mac".into(),
     ));
+    assert!(with_host(&by_words, &dir, |h| super::fg::writer_live(h, "s1")));
     assert!(!with_host(&unswitched, &dir, |h| super::fg::writer_live(
         h, "s1"
     )));

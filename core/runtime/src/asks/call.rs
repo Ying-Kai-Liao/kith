@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 use super::ledger::{self, Callee, Finish};
 use super::peer::{self, Apply, InRow};
+use super::peer_b;
 use super::rows::Kind;
 use super::{
     EndReq, LedgerOpen, Open, Origin, cap_told, check_to, delegations, end_tree, limits, open,
@@ -36,6 +37,8 @@ pub(crate) fn serves(method: &str) -> bool {
             | "ask.endPeer"
             | "ask.peerApply"
             | "ask.peerOwed"
+            | "ask.peerThread"
+            | "ask.peerStop"
     )
 }
 
@@ -321,15 +324,37 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                     rows,
                     state: word(params, "state"),
                     cost: params.get("cost").and_then(Value::as_f64),
+                    to_sent: strings(params, "toSent"),
                 },
                 now,
             )
         }
         "ask.peerOwed" => peer::owed(core),
+        "ask.peerThread" => peer_b::thread(
+            core,
+            need(params, "computer")?,
+            need(params, "key")?,
+            need(params, "epoch")?,
+            params.get("after").and_then(Value::as_i64).unwrap_or(0),
+        ),
+        "ask.peerStop" => peer_b::stop(
+            core,
+            need(params, "id")?,
+            need(params, "computer")?,
+            need(params, "key")?,
+            need(params, "epoch")?,
+            now,
+        ),
         "ask.to" => {
             let id = need(params, "id")?;
-            check_to(core.conn(), id)?;
-            Ok(json!({ "id": id, "ok": true }))
+            match word(params, "text").filter(|t| !t.is_empty()) {
+                // A message for a peer ask is kept to be sent (`ask.peerOwed`); any other ask only says it may be sent to.
+                Some(text) => peer_b::to_owed(core, id, text),
+                None => {
+                    check_to(core.conn(), id)?;
+                    Ok(json!({ "id": id, "ok": true }))
+                }
+            }
         }
         "ask.revokeEverywhere" => {
             let out = crate::revoke_order::revoke_everywhere(

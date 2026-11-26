@@ -131,6 +131,8 @@ fn refusal(e: Error) -> Result<Value> {
     let (kind, why) = match &e {
         Error::Stopped(w) => ("stopped", w.clone()),
         Error::Refused(w) if w.contains("has a writer") => ("held", w.clone()),
+        // Mac link limits: the computer's other asks hold all its places; the turn stays queued.
+        Error::Refused(w) if w.contains("waits for a free place") => ("held", w.clone()),
         Error::Refused(w) if w.contains("turn budget of the chain") => ("budget", w.clone()),
         Error::Refused(w) if w.contains("was revoked") => ("revoked", w.clone()),
         Error::Refused(w) if w.contains("is paused") => ("paused", w.clone()),

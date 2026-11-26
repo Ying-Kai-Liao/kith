@@ -105,6 +105,9 @@ fn every_row_is_well_formed() {
                 "ask.endPeer",
                 "ask.peerApply",
                 "ask.peerOwed",
+                // A5b: the host answers what the computers it is paired with send.
+                "ask.peerThread",
+                "ask.peerStop",
             ]
             .contains(&m.name)
         {

@@ -158,15 +158,47 @@ pub(super) fn refused_origin_in(
     if get(tx, o.id)?.is_some() {
         return Err(Error::Refused(why.to_owned()));
     }
+    let task = o.ledger.as_ref().and_then(|l| l.task);
+    let ask = closed_origin_in(
+        tx,
+        o.id,
+        Some(o.asked),
+        task,
+        og,
+        "refused",
+        &format!("refused: {why}"),
+        now,
+    )?;
+    let mut said = replayed(&ask);
+    said["replayed"] = json!(false);
+    said["refused"] = json!(true);
+    said["reason"] = json!(why);
+    Ok(said)
+}
+
+/// The row of an ask from another computer that was closed before it began: `state` (`refused`, or `stopped` for a stop that
+/// came first, MacLink2 C1) and one `lost` row with `text`. The origin key is unique, so a later send of the same key finds this
+/// row and starts nothing.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn closed_origin_in(
+    tx: &Connection,
+    id: &str,
+    asked: Option<&str>,
+    task: Option<&str>,
+    og: super::Origin<'_>,
+    state: &str,
+    text: &str,
+    now: i64,
+) -> Result<Ask> {
     let ask = Ask {
-        id: o.id.to_owned(),
-        chain: o.id.to_owned(),
+        id: id.to_owned(),
+        chain: id.to_owned(),
         parent: None,
         reply_session: None,
         hop: 0,
         cross_hops: 0,
         crossed: true,
-        asked: Some(o.asked.to_owned()),
+        asked: asked.map(str::to_owned),
         caller_agent: None,
         caller_person: None,
         caller_via: None,
@@ -174,7 +206,7 @@ pub(super) fn refused_origin_in(
         cost: Some(0.0),
         cost_base: None,
         cap_usd: None,
-        state: "refused".to_owned(),
+        state: state.to_owned(),
         at_ms: Some(now),
         answered_ms: Some(now),
         capped_ms: None,
@@ -189,7 +221,7 @@ pub(super) fn refused_origin_in(
         extra: None,
         claim_id: None,
         mode: Some("bg".to_owned()),
-        task: o.ledger.as_ref().and_then(|l| l.task.map(str::to_owned)),
+        task: task.map(str::to_owned),
         out_path: None,
         parked_card: None,
         parked_ms: None,
@@ -208,19 +240,8 @@ pub(super) fn refused_origin_in(
         origin_epoch: Some(og.epoch.to_owned()),
     };
     ask.put(tx)?;
-    rows::add_in(
-        tx,
-        o.id,
-        Some(o.asked),
-        Kind::Lost,
-        &format!("refused: {why}"),
-        now,
-    )?;
-    let mut said = replayed(&ask);
-    said["replayed"] = json!(false);
-    said["refused"] = json!(true);
-    said["reason"] = json!(why);
-    Ok(said)
+    rows::add_in(tx, id, asked, Kind::Lost, text, now)?;
+    Ok(ask)
 }
 
 /// Closes a peer ask here as `cut_off`: its asker gets one `lost` row with `text` and the wake for it, and `stop_owed` says
@@ -243,7 +264,7 @@ fn cut_off_ask_in(
     a.put(tx)
 }
 
-fn is_live(a: &Ask) -> bool {
+pub(super) fn is_live(a: &Ask) -> bool {
     a.state == "open" && a.ended_ms.is_none()
 }
 
@@ -456,6 +477,8 @@ pub(crate) struct Apply<'a> {
     pub state: Option<&'a str>,
     /// What the run and its descendants cost there, in total (read once, at the end).
     pub cost: Option<f64>,
+    /// The `--to` messages (`ask.to`'s `k`) the computer took.
+    pub to_sent: Vec<String>,
 }
 
 /// `ask.peerApply` (D3 following): copies what the computer's row of this ask says, in one transaction.
@@ -550,6 +573,7 @@ pub(crate) fn apply(core: &mut Core, machine: &Path, f: &Apply<'_>, now: i64) ->
         if end.is_some() {
             a.stop_owed = false;
         }
+        super::peer_b::clear_to(&mut a, &f.to_sent);
         a.put(tx)?;
         Ok(
             json!({"id": f.id, "applied": live, "rows": copied, "state": a.state, "fetched": a.fetched}),
@@ -574,7 +598,7 @@ pub(crate) fn owed(core: &Core) -> Result<Value> {
         st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<std::result::Result<_, _>>()?
     };
-    let (mut send, mut follow, mut stop) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut send, mut follow, mut stop, mut to) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for a in asks.iter().filter(|a| a.mode.as_deref() == Some("peer")) {
         let (Some(computer), Some(epoch)) = (&a.peer, &a.peer_epoch) else {
             continue;
@@ -582,11 +606,12 @@ pub(crate) fn owed(core: &Core) -> Result<Value> {
         if linked.get(computer) != Some(epoch) {
             continue;
         }
+        let kept = |k: &str| a.extra.as_ref().and_then(|e| e.get(k)).cloned();
         if is_live(a) && !a.sent {
             send.push(json!({
                 "id": a.id, "key": a.id, "computer": computer, "epoch": epoch,
                 "agent": a.asked, "task": a.task,
-                "cont": a.extra.as_ref().and_then(|e| e.get("cont")).cloned(),
+                "cont": kept("cont"), "opts": kept("opts"),
                 "lineage": {"chain": a.chain, "hop": a.hop, "cross": a.cross_hops, "from": a.id,
                             "cost": costs.get(&a.chain).copied().unwrap_or(0.0)},
             }));
@@ -596,6 +621,12 @@ pub(crate) fn owed(core: &Core) -> Result<Value> {
         if a.stop_owed {
             stop.push(json!({"id": a.id, "key": a.id, "computer": computer, "epoch": epoch}));
         }
+        // A message for an ask that was sent (and not stopped or ended) goes after it.
+        if a.sent && a.ended_ms.is_none() && matches!(a.state.as_str(), "open" | "answered" | "capped") {
+            for (k, text) in super::peer_b::owed_to(a) {
+                to.push(json!({"id": a.id, "key": a.id, "computer": computer, "epoch": epoch, "k": k, "text": text}));
+            }
+        }
     }
-    Ok(json!({"send": send, "follow": follow, "stop": stop}))
+    Ok(json!({"send": send, "follow": follow, "stop": stop, "to": to}))
 }
