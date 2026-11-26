@@ -161,13 +161,13 @@ pub fn parked_main(args: &[String]) -> i32 {
         .iter()
         .position(|a| a == "--cwd")
         .and_then(|i| args.get(i + 1));
-    let argv = &args[at + 1..];
+    let prog = &args[at + 1..];
     let mut byte = [0u8; 1];
-    if argv.is_empty() || !matches!(std::io::stdin().read(&mut byte), Ok(1)) || byte[0] != b'1' {
+    if prog.is_empty() || !matches!(std::io::stdin().read(&mut byte), Ok(1)) || byte[0] != b'1' {
         return 127;
     }
-    let mut cmd = Command::new(&argv[0]);
-    cmd.args(&argv[1..])
+    let mut cmd = Command::new(&prog[0]);
+    cmd.args(&prog[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -183,7 +183,7 @@ pub fn parked_main(args: &[String]) -> i32 {
             child.wait().ok().and_then(|s| s.code()).unwrap_or(1)
         }
         Err(e) => {
-            let _ = writeln!(said, "err {e}: '{}'", argv[0]);
+            let _ = writeln!(said, "err {e}: '{}'", prog[0]);
             let _ = said.flush();
             127
         }

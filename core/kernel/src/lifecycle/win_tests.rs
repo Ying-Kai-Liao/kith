@@ -101,7 +101,7 @@ fn a_program_that_will_not_start_says_why_and_the_code_is_127() {
     assert_eq!(rc, Some(127));
     // a folder that is gone
     let (said, rc) = run(&cmd("exit 0"), &t.0.join("gone"));
-    assert!(!said.is_empty());
+    assert_ne!(said.len(), 0);
     assert_eq!(rc, Some(127));
 }
 

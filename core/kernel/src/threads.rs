@@ -144,6 +144,7 @@ pub(crate) fn private_file(opts: &mut std::fs::OpenOptions) -> &mut std::fs::Ope
 }
 
 /// `chmod 0700` of a folder that exists; nothing on Windows (see [`private_file`]).
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 pub(crate) fn chmod_private_dir(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -202,7 +203,7 @@ pub(crate) fn write_json(path: &Path, value: &Value, chmod_dir: bool) -> std::io
     std::fs::rename(&tmp, path)
 }
 
-/// An exclusive lock on a lock file (made 0600 when missing), held until dropped: flock on Unix, LockFileEx on Windows
+/// An exclusive lock on a lock file (made 0600 when missing), held until dropped: flock on Unix, `LockFileEx` on Windows
 /// (`fs2` makes the one call both ways, and Windows frees it when the handle closes or the process dies, as flock does).
 struct Lock(#[allow(dead_code)] File);
 
@@ -656,7 +657,6 @@ pub fn claim_start(
 /// `proc`: a run that has a person's profile is findable by the revoke sweep for its whole life. `proc-<pid>.claim`
 /// names no session, so it keeps no writer out. Claims of processes that are gone are cleaned up here.
 pub fn proc_claim(c: &Ctx, pid: i64, person: &str, agent: &str) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
     let Some(dir) = c.reg_dir() else {
         return Ok(());
     };
@@ -680,8 +680,14 @@ pub fn proc_claim(c: &Ctx, pid: i64, person: &str, agent: &str) -> std::io::Resu
         takeover: false,
     };
     let tmp = dir.join(tmp_name(&format!("proc-{pid}.claim")));
-    std::fs::write(&tmp, pyjson::dumps(&mine.to_value()))?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    private_file(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true),
+    )
+    .open(&tmp)?
+    .write_all(pyjson::dumps(&mine.to_value()).as_bytes())?;
     std::fs::rename(&tmp, dir.join(format!("proc-{pid}.claim")))
 }
 

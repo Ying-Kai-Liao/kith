@@ -1,8 +1,8 @@
-//! Windows tests of the claims and their locks (W12-4): LockFileEx through `fs2`, liveness through procstart, and the sweep that
+//! Windows tests of the claims and their locks (W12-4): `LockFileEx` through `fs2`, liveness through procstart, and the sweep that
 //! ends a holder. The Unix suites (`tests.rs` and the writer ones) start `sh` and read file modes, so they stay Unix only.
 #![allow(clippy::unwrap_used)]
 
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -88,7 +88,7 @@ fn me() -> i64 {
     i64::from(std::process::id())
 }
 
-fn open(path: &Path) -> fs::File {
+fn open(path: &Path) -> File {
     fs::OpenOptions::new()
         .write(true)
         .create(true)
