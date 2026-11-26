@@ -18,7 +18,7 @@
 //!   unparks it when the terminal lets go): nothing starts beside the terminal.
 //! - **Any engine runs**: a Claude agent's turn is `kith AGENT --resume SESSION NOTE`; another engine's is the kernel's launch,
 //!   `<launch program> kernel launch AGENT --exec --kernel K -- NOTE` (the door of a background ask), the session handed on as
-//!   `KITH_RESUME` (the launch's `--resume` takes Claude sessions only). Both attach to the claim from `KITH_TURN_CLAIM`. With no
+//!   `KITH_RESUME` (`<engine>:<id>` sessions only; a bare Claude id stays on `kith AGENT --resume`). Both attach to the claim from `KITH_TURN_CLAIM`. With no
 //!   launch program or no kernel the turn is unstarted (owed again), never cancelled ([`command_with`]).
 //!
 //! The run's output goes where `kith-ask` reads a follow-up's words: `<logs>/wake/<run>.log` and `.err`.
@@ -39,6 +39,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+/// What a turn on a session of another engine says when it is given back (the core counts it as a failed try).
+const WRONG_ENGINE: &str = "the session belongs to another engine than the agent's";
 /// What a cancelled interrupted run says: a restart cut off a run whose prompt may have gone out.
 const INTERRUPTED: &str = "interrupted: a restart cut this run off";
 /// How long a run handed to a door of the old kind (a bot's actor, a channel run) is not handed again: its turn stays listed
@@ -134,14 +136,29 @@ fn old_door(session: &str) -> bool {
     session.starts_with("acp:") || session.contains('#')
 }
 
-/// Whether the turn's agent runs on Claude (its own one-shot, `kith AGENT --resume`); any other engine goes through the kernel's launch.
-///
-/// The agent's harness decides (the rule the launch uses: `harness:` of agent.md, unset is claude); the conversation's engine
-/// column is only the answer for an agent whose file cannot be read, since the core defaults a session it has not seen to claude.
-/// An engine neither names is not assumed to be Claude: the launch reads the agent's file itself and says why when it cannot.
-pub(super) fn is_claude(t: &Value, harness: Option<&str>) -> bool {
+/// Which way a wake turn runs: it continues the session it is owed on, or it does not run.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Way {
+    /// `kith AGENT --resume SESSION`: a Claude session (a bare id), on the account it was made under, whatever the agent runs on now.
+    Claude,
+    /// The kernel's launch, for a session of the agent's own engine (`<engine>:<id>`).
+    Launch,
+    /// The session belongs to another engine than the agent's: nothing starts, the turn is given back.
+    Refused,
+}
+
+/// The session decides, not the agent's harness: an agent that moved off Claude still owes its Claude sessions. The agent's
+/// harness (`harness:` of agent.md, unset is claude) is the engine a prefixed session must be of; the conversation's engine column
+/// answers only for an agent whose file cannot be read.
+pub(super) fn way_of(t: &Value, harness: Option<&str>, session: &str) -> Way {
+    let is_claude = |e: &str| e.eq_ignore_ascii_case("claude") || e.eq_ignore_ascii_case("claude-code");
     let engine = harness.or_else(|| t["engine"].as_str());
-    engine.is_some_and(|e| e.eq_ignore_ascii_case("claude") || e.eq_ignore_ascii_case("claude-code"))
+    match session.split_once(':') {
+        None => Way::Claude,
+        Some(_) if engine.is_some_and(is_claude) => Way::Claude,
+        Some((prefix, _)) if engine.is_some_and(|e| e.eq_ignore_ascii_case(prefix)) => Way::Launch,
+        Some(_) => Way::Refused,
+    }
 }
 
 /// The program, arguments and environment of a turn's run (before its claim joins the environment).
@@ -154,11 +171,11 @@ pub(super) struct RunCommand {
 /// What a wake turn runs. Claude: `kith AGENT --resume SESSION NOTE` through `bin` (as `spawn_with` builds it). Another engine:
 /// `<launch> kernel launch AGENT --exec --kernel K -- NOTE`, the door of a background ask: the session rides in `KITH_RESUME` (a
 /// handed-on session: the launch starts a new one when it was made under another account), the conversation in
-/// `KITH_TURN_CONVERSATION`, a card's ask in `KITH_LAUNCH_ASK_ID` (what `kith ask --reply` sets), and no host picks the account.
+/// `KITH_TURN_CONVERSATION`, a card's ask in `KITH_LAUNCH_ASK_ID` (what `kith ask --reply` sets). The run stays on the session's own account: no account walk.
 /// `None`: the program the turn needs is not here, and the turn stays owed.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn command_with(
-    claude: bool,
+    way: &Way,
     bin: Option<std::path::PathBuf>,
     launch: Option<std::path::PathBuf>,
     kernel: Option<&Path>,
@@ -169,7 +186,7 @@ pub(super) fn command_with(
     note: &str,
 ) -> Option<RunCommand> {
     let spawn = spawn_with(agent, person, reply_to, session, note);
-    if claude {
+    if *way != Way::Launch {
         return Some(RunCommand { program: bin?, args: spawn.args, env: spawn.env });
     }
     let (program, kernel) = (launch?, kernel?);
@@ -183,7 +200,6 @@ pub(super) fn command_with(
         env.retain(|(k, _)| k != name);
         env.push((name.to_owned(), v.to_owned()));
     };
-    set("KITH_BACKUP_CHAIN", "on");
     set("KITH_TURN_CONVERSATION", session);
     set("KITH_RESUME", session);
     if let Some(id) = reply_to {
@@ -285,8 +301,13 @@ async fn door(hub: &Arc<Hub>, core: &Arc<CoreWriter>, t: &Value, core_turn: i64,
         wake::blocking(move || harness_of_agent(&agent)).await.flatten()
     };
     let reply = live.iter().find(|c| c.reply_to.is_some());
+    let way = way_of(t, harness.as_deref(), session);
+    if way == Way::Refused {
+        tracing::warn!(run = %turn.run, session, "wake: the session is of another engine than the agent's; the turn is given back");
+        return cancel(core, core_turn, WRONG_ENGINE).await;
+    }
     let Some(spawn) = command_with(
-        is_claude(t, harness.as_deref()),
+        &way,
         crate::agent::hq::bin(),
         crate::kernel::launch_program(),
         crate::kernel::current_kernel().as_deref(),
