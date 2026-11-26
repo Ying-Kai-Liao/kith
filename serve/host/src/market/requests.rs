@@ -343,6 +343,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "runs the Python fixtures/kernel_agents.py as the kernel (WI2); returns with retire-python P1-12"
+    )]
     #[tokio::test]
     async fn signing_in_completes_the_card_and_sends_its_messages_again() {
         // This one runs turns, so the bot is a kith agent (stand-in kernel); its folder is `<dir>/bot`.

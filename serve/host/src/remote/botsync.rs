@@ -397,6 +397,10 @@ mod tests {
         hub.store.end_bot_guest("b1", BotState::Revoked, "test", 1).unwrap();
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "guest path parked: Windows applies no guest or bot-guest sync (Kai 2026-11-27, guests not on Windows yet); returns when the guest packages W22b/W24b land"
+    )]
     #[tokio::test]
     async fn a_device_on_an_invite_closed_here_is_queued_for_revoke_not_posted() {
         let calls = Arc::default();
@@ -412,6 +416,10 @@ mod tests {
         assert_eq!(list(&hub.store, PENDING_REVOKES), Vec::<String>::new());
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "guest path parked: Windows applies no guest or bot-guest sync (Kai 2026-11-27, guests not on Windows yet); returns when the guest packages W22b/W24b land"
+    )]
     #[tokio::test]
     async fn a_device_on_an_invite_whose_bot_ended_is_queued() {
         let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
@@ -421,6 +429,10 @@ mod tests {
         assert_eq!(list(&hub.store, PENDING_REVOKES), ["bd_1"]);
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "guest path parked: Windows applies no guest or bot-guest sync (Kai 2026-11-27, guests not on Windows yet); returns when the guest packages W22b/W24b land"
+    )]
     #[tokio::test]
     async fn a_device_on_an_unknown_invite_is_queued_for_revoke() {
         let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
@@ -429,6 +441,10 @@ mod tests {
         assert_eq!(list(&hub.store, PENDING_REVOKES), ["bd_1"]);
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "guest path parked: Windows applies no guest or bot-guest sync (Kai 2026-11-27, guests not on Windows yet); returns when the guest packages W22b/W24b land"
+    )]
     #[tokio::test]
     async fn a_bound_device_of_an_ended_bot_is_queued_again() {
         let hub = hub_with_cloud(&recording_cloud(Arc::default()).await);
@@ -446,6 +462,10 @@ mod tests {
         assert_eq!(list(&hub.store, PENDING_REVOKES), Vec::<String>::new());
     }
 
+    #[cfg_attr(
+        windows,
+        ignore = "guest path parked: Windows applies no guest or bot-guest sync (Kai 2026-11-27, guests not on Windows yet); returns when the guest packages W22b/W24b land"
+    )]
     #[tokio::test]
     async fn a_device_on_an_open_invite_is_admitted_not_revoked() {
         let calls = Arc::default();

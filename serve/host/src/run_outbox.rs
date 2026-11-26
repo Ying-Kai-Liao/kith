@@ -369,7 +369,7 @@ pub fn set_schedule_messages(store: &crate::store::Store, person: Option<&str>, 
     if on { store.kv_delete(&key) } else { store.kv_set(&key, "off") }
 }
 
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 mod tests;

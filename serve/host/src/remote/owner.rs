@@ -205,6 +205,7 @@ mod tests {
         assert!(!from_cloud(&s), "no owner taken from anyone");
     }
 
+    #[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
     #[tokio::test]
     async fn what_the_mac_knows_is_the_bound_handle_then_kith_auths_owner() {
         let _g = crate::remote::account::ONE_AT_A_TIME.lock().await;

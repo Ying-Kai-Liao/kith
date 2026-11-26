@@ -208,6 +208,10 @@ fn events(rig: &Rig) -> impl Strategy<Value = Ev> + use<> {
     })
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+)]
 /// For generated worlds and events: the owner's events are the same either way; an invitee who is not suspended is
 /// sent exactly the same; a suspended invitee is sent nothing by the core (the host's mirror still stands for them
 /// until its next sync, so it may send more: the core never sends more than the host does).
@@ -260,6 +264,10 @@ fn the_core_and_the_host_filter_events_alike() {
     assert!(by_star.get() > 0, "no event ever reached an invitee through the `*` row");
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+)]
 /// A person who holds an agent only through the `*` row is sent their chat of it, and loses it with the row.
 #[test]
 fn the_everyone_row_grants_and_its_removal_stops_events() {
@@ -273,6 +281,10 @@ fn the_everyone_row_grants_and_its_removal_stops_events() {
     assert!(roles::event_for_with(&rig.core, &rig.store, Some("sam"), v).is_none());
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+)]
 /// The catch-up memo asks once per pair and the live path never remembers.
 #[test]
 fn a_catch_up_batch_asks_once_and_a_live_event_asks_afresh() {
@@ -286,6 +298,10 @@ fn a_catch_up_batch_asks_once_and_a_live_event_asks_afresh() {
     assert!(!rig.core.granted("sam", "house"), "a live question does not");
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+)]
 /// A revoke is seen on the next event: nothing is remembered between them.
 #[test]
 fn a_revoke_stops_the_next_event() {
@@ -299,6 +315,10 @@ fn a_revoke_stops_the_next_event() {
     assert!(roles::event_for_with(&rig.core, &rig.store, Some("sam"), v).is_none());
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "core authority not built on Windows until W22b (kith_kernel::secrets split, W22a); people.* is refused NotServed"
+)]
 /// No core answering: an invitee gets nothing of their own chat; the owner is unchanged. An empty core database (people
 /// written before the import) is the same answer.
 #[test]

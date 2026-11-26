@@ -62,6 +62,7 @@ fn paths_and_engines_pass_through_an_embedded_core() {
 }
 
 /// A launch names a fresh 32-hex-digit once-folder each time; everything else in its answer must match.
+#[cfg(unix)]
 fn without_run_ids(raw: &[u8]) -> String {
     let mut out = Vec::new();
     let mut i = 0;
@@ -83,6 +84,9 @@ fn without_run_ids(raw: &[u8]) -> String {
 /// execs while `launch` is switched in lib/core-switched.txt) must answer the same with a core as bare, and must not
 /// take the core's lock: the launch asks the core itself, which it could not do while its own process held the lock.
 /// (Tested through the Rust verb directly: the router script is bash and finds the program through the host install.)
+// Unix-only: the fake `claude` is a sh script made executable with a mode, and `kernel launch` refuses on Windows (W2a);
+// the Windows launch comes with the retire-python launch port.
+#[cfg(unix)]
 #[test]
 fn launch_json_runs_outside_the_core_and_answers_the_same() {
     use std::os::unix::fs::PermissionsExt as _;

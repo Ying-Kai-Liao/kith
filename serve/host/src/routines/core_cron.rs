@@ -149,12 +149,14 @@ pub(super) fn command_with(
     cmd
 }
 
-// Unix-only until windows-owner W2b: uses std::os::unix / UnixListener / libc.
+// Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
 #[cfg(test)]
 #[cfg(unix)]
 #[path = "core_cron_tests.rs"]
 mod tests;
 
+// Unix-only until W12: built on the Unix-only core_claims fixture (claims and live-process checks).
 #[cfg(test)]
+#[cfg(unix)]
 #[path = "core_cron_retry_tests.rs"]
 mod retry_tests;
