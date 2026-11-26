@@ -17,7 +17,7 @@ mod rules;
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub use jobs::{Job, PIECES, effective};
+pub use jobs::{Job, PIECES, effective, valid_domain};
 pub use packages::{
     AgentFacts, Found, PackageSource, Packages, note_disk_read, on_disk_read, read_names,
 };

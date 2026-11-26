@@ -95,12 +95,20 @@ fn stamp(path: &Path) -> Option<Stamp> {
             .ok()
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map_or(0, |d| i128::try_from(d.as_nanos()).unwrap_or(0));
+        // No inode here: a file swapped in by rename shows as a new creation time instead (100 ns ticks since 1601).
+        #[cfg(windows)]
+        let ctime = {
+            use std::os::windows::fs::MetadataExt as _;
+            i128::from(m.creation_time()) * 100
+        };
+        #[cfg(not(windows))]
+        let ctime = t;
         Some(Stamp {
             dev: 0,
             ino: 0,
             size: m.len(),
             mtime: t,
-            ctime: t,
+            ctime,
         })
     }
 }
@@ -149,6 +157,10 @@ struct MoveJob {
 }
 
 /// What the mover thread is asked, in the order it was asked.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one message at a time on a channel; boxing it buys nothing"
+)]
 enum MoveMsg {
     Move(MoveJob),
     Repair(Vec<LifeMove>),

@@ -229,7 +229,7 @@ fn core_digest(db: &Connection) -> Result<String> {
 /// The digest of authority tables already read as one value: what the step marker and the gate fingerprint hold, and what
 /// `people.revision` gives the host's cards (a counter a writer forgot to bump would leave a hole; a hash of the rows can't).
 pub(crate) fn tables_digest(tables: &Value) -> String {
-    hex16(tables.to_string().as_bytes())
+    crate::authority::store::tables_digest(tables)
 }
 
 /// What a real auth.json (sha `now`) means against the marker the switch left. The same sha as the seed's `auth_sha` is the
@@ -459,17 +459,6 @@ fn serve_db(ctx: &Ctx) -> PathBuf {
         // The endpoint would run a program; the default place is enough for a fingerprint.
         kith_kernel::secrets::ServeDir::Endpoint { home, .. } => home.join(".kith/serve/serve.db"),
     }
-}
-
-fn hex16(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .take(8)
-        .fold(String::new(), |mut s, b| {
-            use std::fmt::Write as _;
-            let _ = write!(s, "{b:02x}");
-            s
-        })
 }
 
 /// The newest `<auth.json>.pre-cutover-<time>` beside the file, parsed. `Ok(None)`: there is none.

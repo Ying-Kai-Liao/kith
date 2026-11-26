@@ -137,6 +137,8 @@ core/runtime/src/revoke_order.rs
 core/runtime/src/runs_props.rs
 core/runtime/src/runs.rs
 core/runtime/src/schedules/fire.rs
+core/runtime/src/secrets/keystore.rs
+core/runtime/src/switched.rs
 core/runtime/src/terminal.rs
 core/runtime/src/transcripts/record.rs
 core/runtime/src/wake/queue.rs

@@ -112,6 +112,8 @@ fn the_cache_gives_the_answers_the_disk_gives() {
     assert!(!pass_missed());
 }
 
+// Unix only: the stamp has an inode and a change time there, and a Windows build has neither to tell the swap by.
+#[cfg(unix)]
 #[test]
 fn a_changed_file_is_read_again_and_so_is_one_replaced_by_rename_with_the_same_mtime() {
     let (t, disk) = machine();

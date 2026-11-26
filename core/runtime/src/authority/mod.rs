@@ -28,7 +28,7 @@ mod people_json;
 mod requests;
 pub(crate) mod revoke;
 mod secret_writes;
-mod store;
+pub(crate) mod store;
 #[cfg(test)]
 mod tests;
 mod write;
