@@ -190,7 +190,7 @@ Each row gives the gap, its evidence, and the package (W) or retire-python item 
 |---|---|---|
 | Run key service exists but is never compiled | `service/windows.rs`, `bin/kith-servew.rs`; `one-bot-model.md:387` | W2 |
 | `kith serve start/stop/restart/status` are bash verbs | `kernel.rs:22` | W11 (P4-8 on Mac) |
-| Stop is `taskkill /F /T /IM` plus a PowerShell CIM search | `service/windows.rs:37-74` | W11 (named stop event, D5) |
+| Stop is `taskkill /F /T /IM` plus a PowerShell CIM search | `service/windows.rs:37-74` | W11 (named stop event, D5); the event half is done (windows-owner-build-2-stopevent): the host waits on `kith-serve-stop-<hash of its data folder>`, `stop` signals it first and keeps taskkill as the fallback; the holder-by-folder half stays |
 | Host only takes SIGTERM on Unix | `serve/host/src/main.rs:1859-1872` | W2 (Ctrl-C plus the stop event) |
 | `--supervise` refused off Unix | `serve/host/src/supervise.rs:45-49` | not needed: `kith-servew` is the supervisor on Windows |
 | launchd jobs serve, cost, sched, backup, monitor | retire-python section 2; `kith-sched:705-720`, `kith-state:251-258` | W11 host timers (D3); sched and wake after P2 |
@@ -439,6 +439,14 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     `service/windows.rs:37-150` (stop through the named event, holder found by folder, no `/IM`); a host timer module (cost
     sync, backup, the daemon's wake drain once it exists).
   - The same timers can later replace the Mac plists (P1-10, P4-14).
+  - **Stop through the named event: done (windows-owner-build-2-stopevent).** `shutdown_signal` also resolves on the event
+    `kith-serve-stop-<hash of the data folder>` (`core/winsys` `stop_event_name`; the host clears it at start); `service::stop`
+    signals it, waits up to 10 s for `host.lock`, then falls back to taskkill; the e2e helper `stop` signals it too. Left for
+    W11: `serve stop` routing, and finding the supervising holder without the CIM search.
+  - **Finding for W12.** A graceful host stop drops the core, but the core's holder (kith-holder.exe) is built to outlive its
+    host and leaves only after its idle time (120 s, `holder_link.rs` `idle`), so it still holds `target\debug\kith-holder.exe`
+    right after a stop. The tests' `end_holders_of` stays for that reason. Rule (architect, 2026-11-27): `stop` ends the host and
+    the core inside it, never the core's holder or its runs; the holder idles out by itself, as on the Mac. The e2e checks both.
 - [ ] **W12. Claims, held terminals and host turns on Windows.** Owner: unowned. Status: in progress (W12-1, the job held by its recorded process, H1 H2 H5 H7 and the P-W12c probe, is built: windows-owner-build-2-w12-1). L. **Model passed 2026-11-24** (`model-w12/`, below). Ready for
   workers once its WAITS are met, and only with the W1 premise answers in hand (P-W12a and P-W12b).
   - **WAITS P1-19** (no Python claim path left) and P1-12 R5. Depends: W2b, W5a, W8.
@@ -448,6 +456,9 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
     `agent/bot/lifecycle.rs` (liveness via procstart); `core/kernel/src/threads/*` and `lifecycle/*` (LockFileEx, spawn
     instead of fork); D6 graceful stop; the transcript reader accepts a torn last line.
   - The core-fired schedule turn runs here as a normal host turn, once P2-4 lands.
+  - **W12-2 (core probe and kernel tools): done.** P1 rows, `end_groups` empty on Windows (P2) and a torn last line (P4) are tests;
+    the kernel tools (`runtools.rs`) run in a core-held, unnamed kill-on-close job (`Job::create_kill_on_close`, started with
+    `spawn_in_job`) that the core ends through its own handle on a timeout or when the tool is done.
   - **Rules the model needs** (each one's broken run fails; `model-w12/results.md`). The model is `WinClaims.tla`, which
     extends S4's model with processes and job objects. Workers build these:
     1. **H1: the recorded process makes the run's job itself.** For a CLI or detached run that is the launcher; the job is
@@ -459,12 +470,12 @@ Every package adds or extends one scenario in the Windows e2e (W18), and its PR 
        `winsys::job::spawn_in_job`; the holder's `create_in_job` is suspend-assign-resume and moves to it in W12-6). Never suspend-assign-resume: a host restart between create and resume leaves a launcher
        suspended in the job for ever (`extra-stranded`). Never assign after it runs: its engine starts outside the job.
     3. **The job forbids breakaway** (no `BREAKAWAY_OK` or `SILENT_BREAKAWAY_OK`), so no tool child leaves it.
-    4. **`recorded_gone` on Windows asks the job:** the launcher's pid with its start time, and then the job's active process
-       count, opened by name. **A name lives only while a process holds a handle to the job** (W8's test: it was not found after the
-       creator's handle closed, with the run still going). So "name not found" is NOT "gone" by itself: a process that
-       outlives host restarts (the holder, per the architect's 2026-11-26 recommendation) must hold each run's job handle and
-       close it only when the job has no processes, and "not found" counts as gone only while that holder is alive. W12 needs the
-       model re-run for this before code. Any error answers "not gone" (S4: safe but stuck until the next probe).
+    4. **P1: `recorded_gone` on Windows is the recorded pid's procstart stamp alone** (architect re-run 2026-11-27, the
+       launcher-held job, `w12-split.md`). The recorded process holds the run's only kill-on-close job and everything it
+       started is in it, so "the recorded process is gone" means "the writer is gone": no job query, no name, no other
+       holder. The same stamp means alive, another stamp means gone, an unreadable stamp means gone only when procstart says
+       Gone, and any error is not gone (S4: safe but stuck until the next probe). `Liveness::orphan_group` stays false.
+       This is today's code. **Done in W12-2** (Windows test rows, `conversations/tests.rs`).
     5. **R3a stays:** a report puts the claim to `ending`; only `end_gone` ends it.
     6. **Host-door engines run in a host-held job that kills on close.** On Windows a child does not die with its parent, so
        without the job a warm engine outlives a host restart while its claim is ended.

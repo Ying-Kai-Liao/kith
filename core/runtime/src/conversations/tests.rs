@@ -1545,3 +1545,82 @@ fn a_turn_claim_is_not_made_by_the_plain_claim_calls_in_production() {
     assert!(refuse_direct_turn(Kind::External, false).is_ok());
     assert!(refuse_direct_turn(Kind::Turn, true).is_ok());
 }
+
+/// W12 rule P1: on Windows the recorded pid's stamp is the whole probe. The same stamp is alive, another is gone, an
+/// unreadable stamp is gone only when procstart says so, any error is not gone, and there is never a group stand-in.
+mod recorded_gone_by_stamp {
+    use super::super::claims::recorded_gone;
+    use crate::gate::Liveness;
+
+    /// `start` is what the stamp read gives, `gone` what procstart says about the pid.
+    struct Probe {
+        start: Option<&'static str>,
+        gone: bool,
+    }
+    impl Liveness for Probe {
+        fn start(&self, _: u32) -> Option<String> {
+            self.start.map(Into::into)
+        }
+        fn gone(&self, _: u32) -> bool {
+            self.gone
+        }
+    }
+
+    #[test]
+    fn the_same_stamp_is_alive_and_another_is_gone() {
+        let same = Probe {
+            start: Some("e100"),
+            gone: false,
+        };
+        assert!(!recorded_gone(&same, 7, "e100"));
+        // The pid was reused.
+        let reused = Probe {
+            start: Some("e200"),
+            gone: false,
+        };
+        assert!(recorded_gone(&reused, 7, "e100"));
+    }
+
+    #[test]
+    fn an_unreadable_stamp_is_gone_only_when_procstart_says_gone() {
+        let denied = Probe {
+            start: None,
+            gone: false,
+        };
+        assert!(!recorded_gone(&denied, 7, "e100"));
+        let exited = Probe {
+            start: None,
+            gone: true,
+        };
+        assert!(recorded_gone(&exited, 7, "e100"));
+    }
+
+    #[test]
+    fn a_default_liveness_has_no_group_stand_in() {
+        let p = Probe {
+            start: None,
+            gone: true,
+        };
+        assert!(!p.orphan_group(7, "e100"));
+    }
+
+    /// The real system: this process is alive on its own stamp, and a process that has exited is gone.
+    #[cfg(windows)]
+    #[test]
+    fn on_the_real_system_an_exited_process_is_gone_and_this_one_is_not() {
+        let system = crate::gate::System;
+        let own = kith_kernel::procstart::start_stamp(std::process::id()).expect("own start");
+        assert!(!recorded_gone(&system, std::process::id(), &own));
+        assert!(!system.orphan_group(std::process::id(), &own));
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping -n 30 127.0.0.1 > nul"])
+            .spawn()
+            .expect("spawn");
+        let stamp = kith_kernel::procstart::start_stamp(child.id()).expect("child start");
+        assert!(!recorded_gone(&system, child.id(), &stamp));
+        child.kill().expect("kill");
+        child.wait().expect("reaped");
+        assert!(recorded_gone(&system, child.id(), &stamp));
+        assert!(!system.orphan_group(child.id(), &stamp));
+    }
+}
