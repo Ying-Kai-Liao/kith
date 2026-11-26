@@ -88,6 +88,17 @@ impl World {
             std::fs::write(&engine, ENGINE).unwrap();
             std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
+        let acp = bin.join("acp-engine");
+        let echo = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/echo_agent.py");
+        std::fs::write(
+            &acp,
+            format!(
+                "#!/bin/sh\nwhile [ -e \"$HOLD\" ]; do sleep 0.1; done\nenv | sort > \"$REC/run.$$\"\ntee \"$ACPIN\" | python3 {}\n",
+                echo.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&acp, std::fs::Permissions::from_mode(0o755)).unwrap();
         // The claims step wants a start stub to exist (it is the writer lock's; nothing here runs it).
         let stub = dir.join("kith-stub");
         std::fs::write(&stub, "#!/bin/sh\n").unwrap();
@@ -109,6 +120,7 @@ impl World {
             ("HOME".to_owned(), p(&home)),
             ("PATH".to_owned(), format!("{}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", bin.display())),
             ("REC".to_owned(), p(&rec)),
+            ("ACPIN".to_owned(), p(&dir.join("acp-in"))),
             ("HOLD".to_owned(), p(&dir.join("hold"))),
             ("KITH_AUTH".to_owned(), p(&folders.secrets.join("auth.json"))),
             ("KITH_KERNEL".to_owned(), p(&kernel)),
@@ -117,6 +129,9 @@ impl World {
             ("KITH_SERVE_DIR".to_owned(), p(&dir.join("serve"))),
             ("KITH_SERVE_PORT".to_owned(), "1".to_owned()),
             ("TZ".to_owned(), "UTC".to_owned()),
+            // A non-Claude engine runs over ACP; the runner has no adapter, so the run gets this one (an echo agent behind a
+            // wrapper that records the environment and what the launch sent it).
+            ("KITH_RUN_ONCE_ACP_COMMAND".to_owned(), p(&acp)),
         ]);
         let mut world = Self { dir, folders, env, daemon: None, _held: held };
         let out = world
@@ -268,8 +283,9 @@ fn the_rust_launch_of_another_engine_attaches_naming_the_turns_conversation() {
     let (_, conversation, claim) = w.claimed_turn();
     let kernel = repo_kernel().to_string_lossy().into_owned();
     let args = kernel_args(&kernel, &["-H", "codex", "do the job"]);
-    let runs = w.launch(&built_kith(), &args, claim, &conversation);
-    assert!(runs[0].contains("do the job"), "{}", runs[0]);
+    w.launch(&built_kith(), &args, claim, &conversation);
+    let sent = std::fs::read_to_string(w.dir.join("acp-in")).unwrap();
+    assert!(sent.contains("do the job"), "the task reached the engine: {sent}");
 }
 
 #[test]
