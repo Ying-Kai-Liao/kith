@@ -28,6 +28,11 @@
       "values": ["member", "guest"],
       "unknown": "guest"
     },
+    "HostPressure": {
+      "doc": "How hard this computer's memory is pressed: the OS's own word. One this version doesn't know reads as normal.",
+      "values": ["normal", "warn", "critical"],
+      "unknown": "normal"
+    },
     "Device": {
       "doc": "What kind of computer the host runs on (the apps' computer icon). One this version doesn't know is a desktop.",
       "values": ["laptop", "macmini", "macstudio", "imac", "macpro", "desktop", "linux"],
@@ -419,6 +424,18 @@
     "RoomPeople": {
       "doc": "The people of a group room, every stay oldest first, and the room's gen (its newest join or leave, 0 for none). enabled says whether people in rooms are turned on at this host.",
       "fields": { "enabled": "bool", "gen": "int", "people": "[RoomPerson]" }
+    },
+    "HostMemory": {
+      "doc": "Memory and swap in bytes; each field is null where this computer's OS gives no reading.",
+      "fields": { "pressure": "HostPressure?", "usedBytes": "int?", "totalBytes": "int?", "swapUsedBytes": "int?", "swapTotalBytes": "int?" }
+    },
+    "HostDisk": {
+      "doc": "One mounted volume of this computer.",
+      "fields": { "mount": "string", "name": "string", "totalBytes": "int", "freeBytes": "int" }
+    },
+    "HostHealth": {
+      "doc": "This computer's load now: cpu is {percent: number, cores: int} (json: the contract has no number type), null where unread.",
+      "fields": { "at": "int", "cpu": "json?", "memory": "HostMemory", "disks": "[HostDisk]" }
     },
     "CreatedInvite": {
       "doc": "What making an invite answers: its id and links, when it lapses, and the person it is for.",
@@ -920,6 +937,12 @@
       "who": ["owner"],
       "params": { "room": "string" },
       "result": "RoomPeople"
+    },
+    "hostHealth": {
+      "doc": "This computer's health: cpu load, memory pressure and swap, and free space per mounted volume. Fields the OS gives no reading for are null; cached for a few seconds.",
+      "who": ["owner"],
+      "params": {},
+      "result": "HostHealth"
     },
     "myRooms": {
       "doc": "Rooms with people: the group rooms they are in right now (an open stay and every agent of the room still granted). Open them with history, thread, send and react, with the room's id as botId.",

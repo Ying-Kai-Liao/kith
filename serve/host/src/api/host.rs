@@ -29,6 +29,8 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             tokio::task::spawn_blocking(move || crate::update::spawn_worker(port, force, skip_app_check)).await??;
             json!({"scheduled": true})
         }
+        // The owner's app reads this computer's load. Invited people and bot guests are refused by the role lists.
+        "hostHealth" => crate::health::answer().await?,
         "routerStatus" => crate::chat::router::status(hub).await?,
         "setRouterKey" => crate::chat::router::set_key(hub, b["key"].as_str().unwrap_or_default()).await?,
         // Jev sorting a finished reply into a Result card: the owner's switch, off until turned on.

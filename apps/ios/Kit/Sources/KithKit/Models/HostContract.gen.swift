@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "16cc6e9c5a14412e680d8dff24305932f4deece079eb9b5f77a9b4f0ec20d1f7"
+    public static let sha256 = "0fbea85615536649949a4d3ff1d3bcaf4b59075ec4dd778cbd9034330083941e"
 }
 
 extension HostContract {
@@ -75,6 +75,18 @@ extension HostContract {
         /// A value this version doesn't know is `.guest`.
         public init(from decoder: Decoder) throws {
             self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .guest
+        }
+    }
+
+    /// How hard this computer's memory is pressed: the OS's own word. One this version doesn't know reads as normal.
+    public enum HostPressure: String, Codable, Hashable, Sendable {
+        case normal
+        case warn
+        case critical
+
+        /// A value this version doesn't know is `.normal`.
+        public init(from decoder: Decoder) throws {
+            self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .normal
         }
     }
 
@@ -1058,6 +1070,53 @@ extension HostContract {
         }
     }
 
+    /// Memory and swap in bytes; each field is null where this computer's OS gives no reading.
+    public struct HostMemory: Codable, Hashable, Sendable {
+        public var pressure: HostPressure?
+        public var usedBytes: Int64?
+        public var totalBytes: Int64?
+        public var swapUsedBytes: Int64?
+        public var swapTotalBytes: Int64?
+
+        public init(pressure: HostPressure? = nil, usedBytes: Int64? = nil, totalBytes: Int64? = nil, swapUsedBytes: Int64? = nil, swapTotalBytes: Int64? = nil) {
+            self.pressure = pressure
+            self.usedBytes = usedBytes
+            self.totalBytes = totalBytes
+            self.swapUsedBytes = swapUsedBytes
+            self.swapTotalBytes = swapTotalBytes
+        }
+    }
+
+    /// One mounted volume of this computer.
+    public struct HostDisk: Codable, Hashable, Sendable {
+        public var mount: String
+        public var name: String
+        public var totalBytes: Int64
+        public var freeBytes: Int64
+
+        public init(mount: String, name: String, totalBytes: Int64, freeBytes: Int64) {
+            self.mount = mount
+            self.name = name
+            self.totalBytes = totalBytes
+            self.freeBytes = freeBytes
+        }
+    }
+
+    /// This computer's load now: cpu is {percent: number, cores: int} (json: the contract has no number type), null where unread.
+    public struct HostHealth: Codable, Hashable, Sendable {
+        public var at: Int64
+        public var cpu: JSONValue?
+        public var memory: HostMemory
+        public var disks: [HostDisk]
+
+        public init(at: Int64, cpu: JSONValue? = nil, memory: HostMemory, disks: [HostDisk]) {
+            self.at = at
+            self.cpu = cpu
+            self.memory = memory
+            self.disks = disks
+        }
+    }
+
     /// What making an invite answers: its id and links, when it lapses, and the person it is for.
     public struct CreatedInvite: Codable, Hashable, Sendable {
         public var inviteId: String
@@ -1960,6 +2019,12 @@ extension HostContract {
         }
     }
 
+    /// What `hostHealth` takes.
+    public struct HostHealthParams: Codable, Hashable, Sendable {
+        public init() {
+        }
+    }
+
     /// What `myRooms` takes.
     public struct MyRoomsParams: Codable, Hashable, Sendable {
         public init() {
@@ -2030,12 +2095,13 @@ extension HostContract {
         case addRoomPerson
         case removeRoomPerson
         case roomPeople
+        case hostHealth
         case myRooms
         case leaveRoom
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople]
+    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople, .hostHealth]
 
     /// What an invited person may call.
     public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation, .myRooms, .leaveRoom]
@@ -2102,6 +2168,9 @@ extension HostContract {
         case "HandleRevokes": _ = try d.decode(HandleRevokes.self, from: data)
         case "RoomPerson": _ = try d.decode(RoomPerson.self, from: data)
         case "RoomPeople": _ = try d.decode(RoomPeople.self, from: data)
+        case "HostMemory": _ = try d.decode(HostMemory.self, from: data)
+        case "HostDisk": _ = try d.decode(HostDisk.self, from: data)
+        case "HostHealth": _ = try d.decode(HostHealth.self, from: data)
         case "CreatedInvite": _ = try d.decode(CreatedInvite.self, from: data)
         case "RoomPersonChange": _ = try d.decode(RoomPersonChange.self, from: data)
         case "MyRoomAgent": _ = try d.decode(MyRoomAgent.self, from: data)
@@ -2172,6 +2241,7 @@ extension HostContract {
         case "AddRoomPersonParams": _ = try d.decode(AddRoomPersonParams.self, from: data)
         case "RemoveRoomPersonParams": _ = try d.decode(RemoveRoomPersonParams.self, from: data)
         case "RoomPeopleParams": _ = try d.decode(RoomPeopleParams.self, from: data)
+        case "HostHealthParams": _ = try d.decode(HostHealthParams.self, from: data)
         case "MyRoomsParams": _ = try d.decode(MyRoomsParams.self, from: data)
         case "LeaveRoomParams": _ = try d.decode(LeaveRoomParams.self, from: data)
         default: return false
