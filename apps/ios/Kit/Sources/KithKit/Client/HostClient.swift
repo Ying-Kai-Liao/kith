@@ -18,6 +18,8 @@ public enum HostEvent: Sendable {
     case accessRequests([MemberAccessRequest])
     /// A group room's conversation opened, spent a turn, changed speaker or ended (owner's apps only).
     case conversation(RoomConversation)
+    /// A Feed post changed (owner only): the whole post, replaced by id when its rev is newer.
+    case post(HostContract.Post)
     /// An event this app version couldn't decode (host newer/older than the app).
     case undecodable(type: String)
 }
@@ -189,6 +191,9 @@ public struct HostClient: Sendable {
             return (try? d.decode(UsageWrap.self, from: data)).map { .usage($0.usage) }
         case "screen":
             return (try? d.decode(ScreenWrap.self, from: data)).map { .screen($0.screen) }
+        case "post":
+            struct PostWrap: Decodable { var post: HostContract.Post }
+            return (try? d.decode(PostWrap.self, from: data)).map { .post($0.post) } ?? .undecodable(type: "post")
         case "resync":
             return .resync
         case "call":
