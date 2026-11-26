@@ -8,7 +8,6 @@
 
 use std::cell::RefCell;
 use std::ffi::OsString;
-use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -544,20 +543,17 @@ impl Sweep<'_> {
             return Vec::new();
         };
         let dir = s.join("sessions");
-        let _ = std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&dir);
-        let Ok(lock) = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(dir.join("lifecycle.lock"))
-        else {
+        let _ = crate::threads::create_private_dir(&dir);
+        let Ok(lock) = crate::threads::private_file(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false),
+        )
+        .open(dir.join("lifecycle.lock")) else {
             return Vec::new();
         };
-        // flock, as the Python's: a Python sweep and a Rust one keep each other out
+        // flock, as the Python's: a Python sweep and a Rust one keep each other out (LockFileEx on Windows, through fs2)
         if lock.try_lock_exclusive().is_err() {
             return Vec::new();
         }
