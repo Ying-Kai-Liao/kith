@@ -378,3 +378,30 @@ fn a_core_that_cannot_answer_is_a_writer_but_unswitched_claims_read_the_files() 
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn ls_orders_same_second_conversations_by_key_not_by_file() {
+    let root = scratch("lsties");
+    let dir = root.join("machine");
+    std::fs::create_dir_all(&dir).expect("folder");
+    let row = |at: &str| json!({"agent": "echo", "at": at, "turns": 1, "cost": 0, "last": ""});
+    let kept = json!({
+        "echo|/z": row("2026-01-01 00:00:01"),
+        "echo|/b": row("2026-01-01 00:00:02"),
+        "echo|/a": row("2026-01-01 00:00:01"),
+        "echo|/n": {"agent": "echo"},
+    });
+    std::fs::write(dir.join("ask.json"), kept.to_string()).expect("file");
+    let none = Fake::new(vec![]);
+    let (code, out, _) = go_in(&none, &["ls", "--json"], &root);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(code, 0);
+    let got: Value = serde_json::from_str(out.trim()).expect("json");
+    let keys: Vec<&str> = got["conversations"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|r| r["key"].as_str().expect("key"))
+        .collect();
+    assert_eq!(keys, ["echo|/b", "echo|/a", "echo|/z", "echo|/n"]);
+}
