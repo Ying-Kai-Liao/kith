@@ -89,8 +89,8 @@ fn end_holders_of(home: &Path) {
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("KITH_TEST_HOME", home)
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status();
 }
 
