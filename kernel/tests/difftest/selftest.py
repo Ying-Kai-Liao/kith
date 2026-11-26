@@ -4,6 +4,7 @@ Run by kernel/tests/kith-difftest-check."""
 import io
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -189,6 +190,29 @@ class SelfTest(unittest.TestCase):
                          {'pid': '<MASKED>', 'last_started': '<EPOCH>', 'other': 1762160000})
         self.assertEqual(n.data({'pid': None})['pid'], '<MASKED>')
         self.assertEqual(n.data({'pid': {'a': 1}}), {'pid': {'a': 1}})
+
+    def test_old_side_of_a_launch_exec_case_never_routes_to_launch_exec(self):
+        # R4: the shipped switch file has the `launch-exec` line on, so OLD (the bash body) must run a kernel copy without it, or every
+        # launch-exec-run/term comparison would be the program against itself. The router sends a one-shot to `kith kernel launch-exec`
+        # exactly when `kith_switched launch-exec` holds (kernel/lib/kith-core.sh), so that is what is asked of each side's kernel folder.
+        def routed(kernel):
+            r = subprocess.run(['bash', '-c', '. "$KITH/lib/kith-core.sh"; kith_switched launch-exec'], env={**os.environ, 'KITH': str(kernel)})
+            return r.returncode == 0
+        case = {'name': 'launch-exec-run-selftest', 'bin_both': True}
+        pre = prefixes(None)
+        old = Path(D.default_prefix(case, 'old', pre)[0]).parent.parent
+        new = Path(D.default_prefix(case, 'new', pre)[0]).parent.parent
+        self.assertEqual(new, D.KERNEL, 'NEW keeps the real kernel folder')
+        self.assertTrue(routed(D.KERNEL), 'the shipped file has the launch-exec line on (R4)')
+        self.assertNotEqual(old, D.KERNEL)
+        self.assertFalse(routed(old), "OLD's kernel folder still routes a one-shot to `kernel launch-exec`")
+        # a case that is not a launch-exec comparison keeps the real kernel on both sides
+        other = {'name': 'ls-one', 'bin_both': True}
+        self.assertEqual(D.default_prefix(other, 'old', pre), KITH)
+        # and the copy's path is `<KERNEL>` in what a facet records, however it is quoted
+        with tempfile.TemporaryDirectory() as t:
+            n = D.Normalizer(Path(t))
+        self.assertEqual(n.text(f"'{old}/bin/kith' {os.path.realpath(old)}/lib/x"), "<KERNEL>/bin/kith <KERNEL>/lib/x")
 
     def test_kernel_path_is_unquoted_whatever_the_checkout_path_is(self):
         # A checkout path with a space is shlex-quoted into a command line; the record must read the same without one.

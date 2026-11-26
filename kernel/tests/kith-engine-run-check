@@ -89,8 +89,8 @@ KITH_OUTPUT=json run -- hi
 check "the engine's environment has no KITH_RUN_*" "[ -s '$T/engine-env' ] && ! grep -q '^KITH_RUN_' '$T/engine-env'"
 printf '#!/bin/sh\nexec python3 "%s/fakes/fake-acp-agent"\n' "$T" > "$T/bin/opencode"
 
-# A TERM to the run stops the engine (positive control: without it the hung engine is still there). Twice: through the script's
-# trap, and with `launch-exec` switched on in a copy of the kernel folder, where the program passes the TERM on itself.
+# A TERM to the run stops the engine (positive control: without it the hung engine is still there). Twice: with the shipped
+# line on, where the program passes the TERM on itself, and through the script's trap in a copy of the kernel folder without the line.
 term_rows() {   # term_rows LABEL KITH_PROGRAM
   local P=$1 K=$2 run_pid engine_pid
   rm -f "$T/pid"
@@ -105,10 +105,11 @@ term_rows() {   # term_rows LABEL KITH_PROGRAM
   check "${P}TERM: the engine is gone" "! kill -0 $engine_pid 2>/dev/null"
   [ "$engine_pid" = 0 ] || kill -KILL "$engine_pid" 2>/dev/null || true
 }
-term_rows "" "$KITH"
-cp -R "$KERNEL" "$T/kernel-on"
-printf 'launch-exec\tlaunch-exec\n' >> "$T/kernel-on/lib/core-switched.txt"
-term_rows "launch-exec on: " "$T/kernel-on/bin/kith"
+term_rows "launch-exec on: " "$KITH"
+# The rollback proof until R5: a copy of the kernel folder without the `launch-exec` line (it is on in the shipped file since R4).
+cp -R "$KERNEL" "$T/kernel-off"
+grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/kernel-off/lib/core-switched.txt"
+term_rows "launch-exec off: " "$T/kernel-off/bin/kith"
 
 # pi has no ACP path: engine-run exits 78 before it starts anything, and that is the final answer (no native run).
 printf -- '---\nname: echo\ndescription: test agent, pi\nharness: pi\n---\nYou echo.\n' > "$A/agent.md"

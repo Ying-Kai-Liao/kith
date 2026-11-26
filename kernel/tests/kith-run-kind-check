@@ -38,7 +38,10 @@ if [[ -z $BIN ]]; then
   done
 fi
 
-K=$KERNEL P=""
+# The first suite is the script's own body: a copy of the kernel folder without the `launch-exec` line (it is on in the shipped file since R4).
+cp -R "$KERNEL" "$T/kernel-off"
+grep -v '^launch-exec[[:space:]]' "$KERNEL/lib/core-switched.txt" > "$T/kernel-off/lib/core-switched.txt"
+K=$T/kernel-off P=""
 run() {   # run VAR=value ... — one `kith echo hi`, prints what claude saw
   : > "$ENV_LOG"
   (cd "$KITH_HOME/agents/echo" && env "$@" "$K/bin/kith" echo hi >/dev/null 2>"$T/err")
