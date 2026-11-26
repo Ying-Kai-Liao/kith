@@ -75,6 +75,7 @@ fn denied(e: &anyhow::Error) -> bool {
     e.is::<NotAllowed>()
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_person_is_shown_the_room_from_their_stay_on_and_never_an_unstamped_line() {
     let (r, room, phone) = rig().await;
@@ -100,6 +101,7 @@ async fn a_person_is_shown_the_room_from_their_stay_on_and_never_an_unstamped_li
     assert!(v["folder"].is_null() && v["conversation"].is_null(), "{v}");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn kai_sees_everything_and_each_line_a_person_cannot_see_says_so() {
     let (r, room, _phone) = rig().await;
@@ -116,6 +118,7 @@ async fn kai_sees_everything_and_each_line_a_person_cannot_see_says_so() {
     );
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_post_is_stamped_with_the_gen_at_its_append_and_a_repeat_writes_one_line() {
     let (r, room, phone) = rig().await;
@@ -137,6 +140,7 @@ async fn a_post_is_stamped_with_the_gen_at_its_append_and_a_repeat_writes_one_li
 }
 
 /// Architect's SHOULD on #998: what a person may spend is the owner's to give, so a `budget` sent with a post changes nothing.
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_budget_sent_with_a_post_is_ignored() {
     let (r, room, phone) = rig().await;
@@ -147,6 +151,7 @@ async fn a_budget_sent_with_a_post_is_ignored() {
     assert_eq!(conv.left, crate::chat::group::budget_of(None), "the default budget, not 500");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_post_that_asks_for_more_than_text_is_refused_and_writes_nothing() {
     let (r, room, phone) = rig().await;
@@ -169,6 +174,7 @@ async fn a_post_that_asks_for_more_than_text_is_refused_and_writes_nothing() {
     assert_eq!(texts(&r, &phone, &room).await, Vec::<String>::new());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn nobody_outside_the_stay_reads_posts_or_reacts_and_a_leave_cuts_the_next_call() {
     let (r, room, phone) = rig().await;
@@ -203,6 +209,7 @@ async fn nobody_outside_the_stay_reads_posts_or_reacts_and_a_leave_cuts_the_next
     assert_eq!(call(&r, &phone, "myRooms", json!({})).await.unwrap(), json!({"rooms": []}));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_room_is_that_room_alone_another_room_with_the_same_agent_is_not_theirs() {
     let (r, room, phone) = rig().await;
@@ -216,6 +223,7 @@ async fn a_room_is_that_room_alone_another_room_with_the_same_agent_is_not_their
     assert!(denied(&call(&r, &phone, "history", json!({"botId": bot})).await.unwrap_err()));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_removed_person_who_is_added_again_sees_only_what_came_after_the_re_add() {
     let (r, room, phone) = rig().await;
@@ -232,6 +240,7 @@ async fn a_removed_person_who_is_added_again_sees_only_what_came_after_the_re_ad
     assert_eq!(texts(&r, &phone, &room).await, ["after the re-add"]);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_revoke_and_its_undo_cut_and_give_back_the_room_without_touching_a_row() {
     let (r, room, phone) = rig().await;
@@ -246,6 +255,7 @@ async fn a_revoke_and_its_undo_cut_and_give_back_the_room_without_touching_a_row
     assert_eq!(texts(&r, &phone, &room).await, ["seen"]);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_agent_taken_from_a_person_closes_the_room_for_them_but_they_can_still_leave() {
     let r = Rig::new().await;
@@ -265,6 +275,7 @@ async fn an_agent_taken_from_a_person_closes_the_room_for_them_but_they_can_stil
     assert_eq!(call(&r, &phone, "leaveRoom", json!({"room": room})).await.unwrap(), json!({"left": true}));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_post_checked_before_a_removal_or_a_re_add_does_not_land_after_it() {
     let (r, room, _phone) = rig().await;
@@ -291,6 +302,7 @@ async fn a_post_checked_before_a_removal_or_a_re_add_does_not_land_after_it() {
     assert_eq!(e.downcast_ref::<crate::hub::PostRefused>(), Some(&crate::hub::PostRefused::RoomChanged));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_client_cannot_name_itself_a_room_person() {
     let (r, room, _phone) = rig().await;
@@ -303,6 +315,7 @@ async fn a_client_cannot_name_itself_a_room_person() {
     assert!(v.get("folder").is_some(), "the owner's answer, with its folder: {v}");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn events_and_the_catch_up_show_a_person_the_same_lines_history_does() {
     let (r, room, phone) = rig().await;
@@ -340,6 +353,7 @@ async fn events_and_the_catch_up_show_a_person_the_same_lines_history_does() {
     assert!(super::roles::event_for(store, Some("sam"), ev(&mine)).is_none());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_owner_calls_a_person_only_method_and_gets_nothing() {
     let (r, room, _phone) = rig().await;
@@ -347,6 +361,7 @@ async fn the_owner_calls_a_person_only_method_and_gets_nothing() {
     assert!(call(&r, &Caller::Local, "leaveRoom", json!({"room": room})).await.is_err());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_post_from_an_earlier_stay_is_refused_after_a_re_add() {
     let (r, room, phone) = rig().await;
@@ -361,6 +376,7 @@ async fn a_post_from_an_earlier_stay_is_refused_after_a_re_add() {
     assert_eq!(rooms["rooms"][0]["stay"], second);
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_revoke_recorded_between_the_check_and_the_append_refuses_the_post() {
     let (r, room, _phone) = rig().await;
@@ -372,6 +388,7 @@ async fn a_revoke_recorded_between_the_check_and_the_append_refuses_the_post() {
     assert_eq!(e.downcast_ref::<crate::hub::PostRefused>(), Some(&crate::hub::PostRefused::NotInRoom));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_message_id_is_shown_only_to_its_sender() {
     let (r, room, phone) = rig().await;
@@ -388,6 +405,7 @@ async fn a_message_id_is_shown_only_to_its_sender() {
     assert!(kai["data"]["clientNonce"].is_null(), "{kai}");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn my_rooms_names_the_granted_agents_by_id_and_shows_nothing_else_of_a_bot() {
     let (r, room, phone) = rig().await;
@@ -416,6 +434,7 @@ async fn my_rooms_names_the_granted_agents_by_id_and_shows_nothing_else_of_a_bot
 
 /// The owner's name is asked through the room's agents in turn (the first answer stops the loop), and a missing
 /// answer is not kept (the next call asks again).
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn the_owners_name_asks_the_room_agents_and_a_missing_answer_is_not_kept() {
     let r = Rig::new().await;

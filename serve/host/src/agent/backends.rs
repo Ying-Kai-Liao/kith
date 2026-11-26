@@ -428,6 +428,10 @@ mod tests {
 
     /// What the app sees, pinned: the table moved into the `kith-kernel` crate and this JSON must not change.
     /// `UPDATE_GOLDEN=1` rewrites the fixtures (only ever from a base whose behaviour is the intended one).
+    #[cfg_attr(
+        windows,
+        ignore = "fakes Unix executables on PATH and compares a LF fixture; Windows engine discovery is W6"
+    )]
     #[test]
     fn wire_shape_is_pinned() {
         let _one = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

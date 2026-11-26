@@ -577,7 +577,9 @@ mod tests {
         assert_eq!(all["dirs"].as_array().unwrap().len(), 3);
         let app = list(&dir.join("app"), false, &projects).unwrap();
         assert_eq!((app["parent"].as_str(), app["project"].as_str()), (dir.to_str(), Some("app")));
-        assert!(list(Path::new("/etc"), false, &[]).unwrap_err().to_string().contains("outside"));
+        let elsewhere = temp("elsewhere");
+        assert!(list(&elsewhere, false, &[]).unwrap_err().to_string().contains("outside"));
+        std::fs::remove_dir_all(elsewhere).unwrap();
         assert!(list(Path::new("/"), false, &[]).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }

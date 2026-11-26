@@ -180,6 +180,10 @@ fn the_importer_keeps_the_conversation_and_leaves_the_rest() {
     assert_eq!(later.items.len(), 3, "after the reply: the tool, its result and the thought");
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[test]
 fn a_registry_file_is_only_read_when_it_is_a_listable_sessions() {
     let ok = json!({
@@ -201,6 +205,10 @@ fn a_registry_file_is_only_read_when_it_is_a_listable_sessions() {
     assert!(registry::parse(&with("cwd", json!("relative"))).is_none());
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn live_needs_the_process_and_a_session_file_that_names_the_session() {
     let r = Rig::new();
@@ -279,6 +287,10 @@ async fn a_session_of_an_agent_without_an_owner_bot_is_skipped() {
     assert!(r.roots().is_empty());
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn new_lines_are_imported_once_and_the_terminal_writes_while_it_lives() {
     let r = Rig::new();
@@ -355,6 +367,10 @@ async fn a_huge_first_import_keeps_the_newest_entries_and_says_so() {
     assert!(replies.len() <= 400 && replies.last().unwrap().data["text"] == "reply 449");
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_thread_resumed_in_the_terminal_is_that_thread_not_a_new_one() {
     let r = Rig::new();
@@ -419,6 +435,10 @@ async fn a_forked_resume_maps_to_the_thread_it_came_from() {
     );
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn nothing_is_sent_while_the_terminal_lives() {
     let r = Rig::new();
@@ -444,6 +464,10 @@ async fn nothing_is_sent_while_the_terminal_lives() {
     assert!(r.texts(&root).contains(&"last words".to_owned()));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn take_over_is_refused_while_busy_and_a_no_op_once_closed() {
     let r = Rig::new();
@@ -462,6 +486,10 @@ async fn take_over_is_refused_while_busy_and_a_no_op_once_closed() {
     assert!(sync::take_over(&r.hub, &r.bot, "missing").await.is_err());
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn take_over_ends_an_idle_terminal_and_the_host_writes_next() {
     let r = Rig::new();
@@ -509,6 +537,10 @@ impl Drop for Rig {
     }
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_pid_started_at_another_time_is_not_the_session() {
     let r = Rig::new();
@@ -541,6 +573,10 @@ fn reused_start() -> String {
 
 /// A claim written before stamps holds `ps -o lstart=` text. It is compared the old way: text that positively differs from
 /// the live pid's start is a reused pid and the claim is free (as before stamps); text that matches holds.
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_claim_with_old_lstart_text_holds_only_while_the_text_matches_the_process() {
     let r = Rig::new();
@@ -557,6 +593,10 @@ async fn a_claim_with_old_lstart_text_holds_only_while_the_text_matches_the_proc
 
 /// An owner's Stop on a claim whose old text says another start (the pid was reused by a process the claim never named):
 /// nothing is signalled, the claim is given back, and the thread is free. A matching old text is stopped as before.
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn stopping_an_old_text_claim_on_a_reused_pid_frees_it_without_a_signal() {
     let r = Rig::new();
@@ -580,6 +620,10 @@ async fn stopping_an_old_text_claim_on_a_reused_pid_frees_it_without_a_signal() 
 }
 
 /// A start that cannot be compared (a stamp of the other form) is not "different": the claim holds, and Stop refuses.
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn stopping_a_claim_whose_start_cannot_be_compared_signals_nothing() {
     let r = Rig::new();
@@ -598,6 +642,10 @@ async fn stopping_a_claim_whose_start_cannot_be_compared_signals_nothing() {
 
 /// Claude Code writes its session file's `procStart` in UTC; `ps` prints the Mac's local time. Away from UTC the two
 /// differ by hours, and every live terminal read as closed. (A host running in UTC, as CI does, passes either way.)
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_session_file_with_the_start_in_utc_is_live() {
     let r = Rig::new();
@@ -620,6 +668,10 @@ async fn a_session_file_with_the_start_in_utc_is_live() {
 /// The owner's Mac runs in Chinese (zh-Hant): `ps` there prints `二 10月/27 22:19:44 2026`, which never equals the
 /// C-locale start Claude and the kernel write, and every live one-shot read as closed. The start is read in the C
 /// locale whatever the caller's is, local time and UTC alike.
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[test]
 fn the_start_time_is_read_in_the_c_locale_under_any_caller_locale() {
     let me = std::process::id();
@@ -638,6 +690,10 @@ fn the_start_time_is_read_in_the_c_locale_under_any_caller_locale() {
     assert_eq!(registry::lstart_via(zh(), me, false), registry::lstart(me, false));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[test]
 fn pids_that_cannot_be_a_terminal_are_refused() {
     let base = |pid: u32| {
@@ -653,6 +709,10 @@ fn pids_that_cannot_be_a_terminal_are_refused() {
     assert!(registry::parse(&base(std::process::id())).is_none(), "never the host itself");
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn racing_passes_import_once_and_say_a_close_once() {
     let r = Rig::new();
@@ -701,6 +761,10 @@ async fn a_replaced_or_shortened_transcript_does_not_repeat_what_was_imported() 
     assert_eq!(r.texts(&root).iter().filter(|t| *t == "new after").count(), 1);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_terminal_that_wrote_makes_the_actor_load_the_session_again_once() {
     let r = Rig::new();
@@ -753,6 +817,10 @@ impl Rig {
     }
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_second_claim_on_a_session_is_refused_and_the_first_is_kept() {
     let r = Rig::new();
@@ -798,6 +866,10 @@ async fn a_claim_of_a_dead_or_reused_pid_is_taken_over() {
     assert_eq!(left, ["s1.claim"]);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn racing_takers_of_a_stale_claim_leave_exactly_one_owner() {
     let r = Rig::new();
@@ -820,6 +892,10 @@ async fn racing_takers_of_a_stale_claim_leave_exactly_one_owner() {
     assert_eq!(pids.iter().zip(&wins).find(|(_, w)| **w).map(|(p, _)| *p), Some(owner));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_host_turns_own_claim_does_not_stop_the_hosts_sends() {
     let r = Rig::new();
@@ -857,6 +933,10 @@ async fn a_take_over_under_way_makes_the_host_busy_for_a_resume() {
     assert_eq!(sync::resolve(&r.hub, &root).await["hostBusy"], true);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_send_is_refused_for_a_live_registry_or_claim_the_host_has_not_scanned_yet() {
     let r = Rig::new();
@@ -879,6 +959,10 @@ async fn a_send_is_refused_for_a_live_registry_or_claim_the_host_has_not_scanned
     sync::before_send(&r.hub, &r.bot, &root).await.unwrap();
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_queued_turn_does_not_start_while_a_claim_holds_the_thread() {
     use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
@@ -922,6 +1006,10 @@ async fn lines_a_closed_terminal_wrote_make_the_actor_forget_the_session() {
     assert_eq!(r.forgets(), again, "nothing new: nothing forgotten");
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_second_take_over_while_one_holds_its_claim_does_nothing() {
     let r = Rig::new();
@@ -938,6 +1026,10 @@ async fn a_second_take_over_while_one_holds_its_claim_does_nothing() {
     assert!(registry::pid_runs(me));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_bot_holding_the_thread_refuses_an_app_send_as_another_writer() {
     let r = Rig::new();
@@ -952,6 +1044,10 @@ async fn a_bot_holding_the_thread_refuses_an_app_send_as_another_writer() {
     sync::before_send(&r.hub, &r.bot, &root).await.unwrap();
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_bots_own_claim_does_not_stop_the_next_turn_of_its_lane_but_a_terminal_does() {
     use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
@@ -975,6 +1071,10 @@ async fn a_bots_own_claim_does_not_stop_the_next_turn_of_its_lane_but_a_terminal
     assert!(!began.load(SeqCst));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_bot_ask_is_refused_while_another_writer_holds_and_waits_behind_its_own_turn() {
     let r = Rig::new();
@@ -1079,6 +1179,10 @@ async fn a_dropped_take_over_does_not_jam_the_thread() {
     let _ = child.wait();
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn releasing_a_claim_leaves_a_foreign_claim_alone() {
     let r = Rig::new();
@@ -1090,6 +1194,10 @@ async fn releasing_a_claim_leaves_a_foreign_claim_alone() {
     assert!(claim::holder(&r.state(), "s1").is_none());
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_oneshot_claim_written_by_the_kernel_is_parsed_and_holds_the_session() {
     let r = Rig::new();
@@ -1109,6 +1217,10 @@ async fn a_oneshot_claim_written_by_the_kernel_is_parsed_and_holds_the_session()
     assert!(claim::take(&r.state(), "s1", Kind::App, std::process::id(), false).unwrap().is_err());
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_claim_of_an_unknown_kind_is_a_live_holder_and_take_as_never_removes_it() {
     let r = Rig::new();
@@ -1159,6 +1271,10 @@ fn gone(pid: u32) -> bool {
 
 const GRACE: std::time::Duration = std::time::Duration::from_millis(300);
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn the_sweep_ends_a_left_over_guest_holder_and_its_child_and_keeps_the_owners() {
     let r = Rig::new();
@@ -1185,6 +1301,10 @@ async fn the_sweep_ends_a_left_over_guest_holder_and_its_child_and_keeps_the_own
     assert_eq!(claim::sweep(&r.state(), &["bot-sam".into()], &|_| false, GRACE).len(), 0);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn stopping_a_session_the_core_is_still_starting_signals_nothing() {
     let r = Rig::new();
@@ -1198,6 +1318,10 @@ async fn stopping_a_session_the_core_is_still_starting_signals_nothing() {
     shell.wait().unwrap();
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn stopping_a_claim_that_names_the_core_pid_signals_nothing_whatever_its_kind() {
     let r = Rig::new();
@@ -1211,6 +1335,10 @@ async fn stopping_a_claim_that_names_the_core_pid_signals_nothing_whatever_its_k
     shell.wait().unwrap();
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn stopping_a_claim_that_names_this_process_signals_nothing_even_when_the_core_pid_is_unknown() {
     let r = Rig::new();
@@ -1220,6 +1348,10 @@ async fn stopping_a_claim_that_names_this_process_signals_nothing_even_when_the_
     assert!(matches!(got, claim::Stopped::Busy(_)), "{got:?}");
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn stopping_a_holder_writes_its_intent_first() {
     let r = Rig::new();
@@ -1231,6 +1363,10 @@ async fn stopping_a_holder_writes_its_intent_first() {
     assert_eq!(super::intent::read(&r.state(), "h1").as_deref(), Some("stopped from the app"));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn stopping_a_holder_that_ignores_term_ends_it_and_its_child_before_the_claim_goes() {
     // outer sh -> claimer (ignores TERM) -> child (ignores TERM): the claimer is a one-shot's stub, the child its claude.
@@ -1269,6 +1405,10 @@ fn parent_pid(pid: u32) -> u32 {
     String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0)
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn the_sweep_leaves_a_reused_pid_alone() {
     let r = Rig::new();
@@ -1288,6 +1428,10 @@ async fn the_sweep_leaves_a_reused_pid_alone() {
     assert_eq!(claim::sweep(&r.state(), &["sam".into()], &|_| false, GRACE).len(), 0);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn claim_files_from_before_the_person_field_parse_as_the_owners() {
     let r = Rig::new();
@@ -1311,6 +1455,10 @@ async fn claim_files_from_before_the_person_field_parse_as_the_owners() {
     assert!(!std::fs::read_to_string(&path).unwrap().contains("person"));
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_persons_warm_process_stays_findable_between_turns() {
     let r = Rig::new();
@@ -1325,6 +1473,10 @@ async fn a_persons_warm_process_stays_findable_between_turns() {
     warm.wait().unwrap();
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_narrowing_sweep_ends_only_the_holders_on_agents_the_person_lost() {
     let r = Rig::new();
@@ -1380,6 +1532,10 @@ async fn an_ask_run_that_already_ended_is_a_card_labelled_with_who_asked() {
     assert_eq!(r.texts(&root), ["Yes."]);
 }
 
+#[cfg_attr(
+    windows,
+    ignore = "claims and live-process checks use ps/pid liveness, Unix-only until W12 (claims, held terminals, host turns)"
+)]
 #[tokio::test]
 async fn a_running_ask_is_working_until_its_process_ends() {
     let r = Rig::new();
@@ -1485,6 +1641,8 @@ async fn a_mirrored_ask_card_reaches_the_owner_and_no_invited_person_or_bot_gues
     }
 }
 
+// Unix-only until W12: built on the Unix-only core_claims fixture (claims and live-process checks).
+#[cfg(unix)]
 #[path = "core_claims_flow_tests.rs"]
 mod core_claims;
 

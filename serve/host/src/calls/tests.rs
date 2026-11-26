@@ -49,6 +49,7 @@ fn notices(r: &Rig, bot: &str) -> Vec<Value> {
     r.hub.store.history(bot, i64::MAX, 50).unwrap().into_iter().filter(|e| e.kind == "notice").map(|e| e.data).collect()
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_call_rings_once_and_the_first_answer_wins() {
     let r = Rig::new().await;
@@ -83,6 +84,7 @@ async fn a_call_rings_once_and_the_first_answer_wins() {
     assert_eq!(ring_for(&r, &r.owner_bot("money"), "x")["status"], "ringing");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn declining_and_ringing_out_leave_a_line_in_the_chat() {
     let r = Rig::new().await;
@@ -106,6 +108,7 @@ async fn declining_and_ringing_out_leave_a_line_in_the_chat() {
     assert!(rpc(&r, &Caller::Local, "callAccept", json!({"id": out["id"]})).await.is_err(), "accept after the timeout");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_person_is_on_one_call_and_an_agent_rings_rarely() {
     let r = Rig::new().await;
@@ -161,6 +164,7 @@ async fn the_ring_history_survives_a_restart() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_call_reaches_only_the_person_whose_chat_it_is() {
     let r = Rig::new().await;
@@ -205,6 +209,7 @@ async fn cli(r: &Rig, env: &[(String, String)], reason: &str) -> Value {
     rpc(r, &Caller::Local, "callPerson", json!({"chat": chat, "key": key, "reason": reason})).await.unwrap()
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn every_kind_of_run_rings_only_the_person_it_serves() {
     let r = Rig::new().await;
@@ -245,6 +250,7 @@ async fn every_kind_of_run_rings_only_the_person_it_serves() {
     assert_eq!(run_env(&r.hub, "money", None), Vec::<(String, String)>::new());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_forged_or_mismatched_key_rings_nobody() {
     let r = Rig::new().await;
@@ -275,6 +281,7 @@ async fn a_forged_or_mismatched_key_rings_nobody() {
     assert!(empty.is_err());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_run_naming_another_agent_is_shown_but_not_counted_separately() {
     let r = Rig::new().await;
@@ -293,6 +300,7 @@ async fn a_run_naming_another_agent_is_shown_but_not_counted_separately() {
     }
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn run_env_is_the_owners_and_mints_only_for_the_person_asked() {
     let r = Rig::new().await;
@@ -319,6 +327,7 @@ async fn run_env_is_the_owners_and_mints_only_for_the_person_asked() {
     assert!(rpc(&r, &r.device("owner-phone", None), "runEnv", ask(Value::Null)).await.is_err());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn an_accepted_call_that_never_starts_frees_the_person() {
     let r = Rig::new().await;
@@ -330,6 +339,7 @@ async fn an_accepted_call_that_never_starts_frees_the_person() {
     assert_eq!(ring_for(&r, &money, "y")["status"], "ringing", "no callGreet came");
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_voice_call_line_is_written_at_the_start_and_filled_in_at_the_end() {
     let r = Rig::new().await;
@@ -359,6 +369,7 @@ async fn a_voice_call_line_is_written_at_the_start_and_filled_in_at_the_end() {
     assert!(r.hub.store.entry(&plain.id).unwrap().data["callSeconds"].is_null());
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_call_that_carried_a_result_leaves_it_in_the_chat_when_declined_or_missed() {
     let r = Rig::new().await;
@@ -395,6 +406,7 @@ fn rung_for(id: &str) -> Vec<(String, bool)> {
     rings.iter().filter(|(call, _, _)| call == id).map(|(_, device, voip)| (device.clone(), *voip)).collect()
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn a_ringing_call_is_pushed_to_its_persons_devices_only_and_not_while_the_phone_is_open() {
     let r = Rig::new().await;
@@ -435,6 +447,7 @@ async fn a_ringing_call_is_pushed_to_its_persons_devices_only_and_not_while_the_
     assert!(r.hub.store.push_tickets().iter().all(|t| t.device_key != "owner-phone"));
 }
 
+#[cfg_attr(windows, ignore = "needs the Python kith-auth (WI2); returns with retire-python P3-4")]
 #[tokio::test]
 async fn another_persons_open_app_does_not_hold_back_a_call() {
     let r = Rig::new().await;
