@@ -289,12 +289,24 @@ fn a_holder_whose_pid_is_alive_with_another_stamp_is_not_ended() {
     let pid = i64::from(other.id());
     // A claim from an earlier process that had this pid, an unreadable stamp and no stamp at all.
     for claimed in [Some("e1000".to_owned()), Some("garbage".to_owned()), None] {
-        assert_eq!(end_holders(vec![(pid, claimed)], Duration::ZERO), Vec::<i64>::new());
-        assert!(other.try_wait().unwrap().is_none(), "the stranger is still running");
+        assert_eq!(
+            end_holders(vec![(pid, claimed)], Duration::ZERO),
+            Vec::<i64>::new()
+        );
+        assert!(
+            other.try_wait().unwrap().is_none(),
+            "the stranger is still running"
+        );
     }
     // The second sweep finds the right one and ends it; a third finds nothing.
     let mine = os::proc_start(pid);
-    assert_eq!(end_holders(vec![(pid, mine.clone())], Duration::ZERO), vec![pid]);
+    assert_eq!(
+        end_holders(vec![(pid, mine.clone())], Duration::ZERO),
+        vec![pid]
+    );
     other.wait().unwrap();
-    assert_eq!(end_holders(vec![(pid, mine)], Duration::ZERO), Vec::<i64>::new());
+    assert_eq!(
+        end_holders(vec![(pid, mine)], Duration::ZERO),
+        Vec::<i64>::new()
+    );
 }

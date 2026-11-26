@@ -257,7 +257,11 @@ pub fn signal_started(pid: i64, stamp: Option<&str>, _sig: i32) {
 /// are reused fast, so a row whose parent began after the child (or either start cannot be read) is dropped.
 #[cfg(windows)]
 pub fn child_table() -> Vec<(i64, i64)> {
-    let began = |pid: i64| u32::try_from(pid).ok().and_then(kith_winsys::tree::creation_time);
+    let began = |pid: i64| {
+        u32::try_from(pid)
+            .ok()
+            .and_then(kith_winsys::tree::creation_time)
+    };
     ps_table()
         .into_iter()
         .filter(|(pid, ppid)| matches!((began(*pid), began(*ppid)), (Some(c), Some(p)) if p <= c))

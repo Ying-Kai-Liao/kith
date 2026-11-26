@@ -748,14 +748,15 @@ pub(crate) fn end_holders(holders: Vec<(i64, Option<String>)>, grace: Duration) 
     while let Some((pid, claimed)) = todo.pop() {
         if !victims.iter().any(|(p, _)| *p == pid) && pid != me {
             // The start a descendant has now is the one it is ended by.
-            let stamp = claimed.or_else(|| if cfg!(windows) { os::proc_start(pid) } else { None });
+            let stamp = claimed.or_else(|| {
+                if cfg!(windows) {
+                    os::proc_start(pid)
+                } else {
+                    None
+                }
+            });
             victims.push((pid, stamp));
-            todo.extend(
-                kids.get(&pid)
-                    .into_iter()
-                    .flatten()
-                    .map(|k| (*k, None)),
-            );
+            todo.extend(kids.get(&pid).into_iter().flatten().map(|k| (*k, None)));
         }
     }
     for (sig, wait) in [(os::SIGTERM, grace), (os::SIGKILL, Duration::ZERO)] {
