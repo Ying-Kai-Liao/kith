@@ -32,8 +32,8 @@ on:
 
 # Label events don't start this workflow (ci-label.yml dispatches it for ci:full), so a label never
 # creates a run, and never a skipped `ci` check.
-# A PR gets one group per ref, so a re-push cancels the older run. Every other run (push to main,
-# workflow_dispatch, including the reviewer's batch run) gets its own group keyed by sha, so merges never cancel each other. GitHub keeps
+# A PR gets one group per ref, so a re-push cancels the older run (a batch branch force-pushed to a new sha cancels its old batch run, which is wanted). Every other run (push to main,
+# workflow_dispatch) gets its own group keyed by sha, so merges never cancel each other. GitHub keeps
 # only one pending run per group, so sharing a group for main would drop the older queued run.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.workflow, github.ref) || format('{0}-{1}-{2}', github.workflow, github.sha, github.run_id) }}
@@ -66,9 +66,10 @@ jobs:
     outputs:
       # The heavy tier (macOS builds, all e2e, guest-linux) runs on everything but a pull request. A pull request
       # runs it when it is ready (non-draft) and carries the ci:full label. Ordinary drafts stay cheap-only.
-      # The flow reviewer's batch is checked by a workflow_dispatch run on its flow/batch-<sha> branch, which is heavy.
+      # The flow reviewer's batch PR (head ref flow/batch-<sha>) is heavy on its own `ci` run, whatever its label or draft
+      # state, so the batch is checked by that one run and needs no workflow_dispatch beside it. Other flow/ branches stay light.
       # pull_request is empty on other events, so it is only read for pull requests.
-      heavy: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ci:full')) }}
+      heavy: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'flow/batch-') || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ci:full')) }}
       kernel: ${{ steps.f.outputs.kernel }}
       kernel_host: ${{ steps.f.outputs.kernel_host }}
       host: ${{ steps.h.outputs.host }}
