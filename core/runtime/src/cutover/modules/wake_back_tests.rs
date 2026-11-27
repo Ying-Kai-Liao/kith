@@ -200,17 +200,13 @@ fn a_refused_rollback_writes_nothing_and_leaves_the_queue_the_cores() {
     let kid = Proc::new();
     {
         let mut c = core(&r);
-        let (_, turn) = taken(&mut c, "sd", "d:1", "run");
+        // A host-door run that is running (the db's own rules do not let a claim lose its start stamp, so (d) is the unit row's).
+        let (_, turn) = taken(&mut c, "sd", "d:1", "host");
         running(&mut c, "sd", turn, &kid);
-        c.conn()
-            .execute_batch(
-                "PRAGMA ignore_check_constraints = ON; UPDATE claims SET pid_started = NULL WHERE conversation = 'sd'; PRAGMA ignore_check_constraints = OFF;",
-            )
-            .unwrap();
     }
     let e = err(r.rollback(r.wake(), opts()));
     assert!(
-        e.contains("(d)") && e.contains("--force does not override"),
+        e.contains("(b)") && e.contains("--force does not override"),
         "{e}"
     );
     // Not even the rolling-back record: the core still serves, the tombstone stays, no file was written.
@@ -226,7 +222,7 @@ fn a_refused_rollback_writes_nothing_and_leaves_the_queue_the_cores() {
             ..opts()
         },
     );
-    assert!(err(forced).contains("(d)"));
+    assert!(err(forced).contains("(b)"));
 }
 
 #[test]
