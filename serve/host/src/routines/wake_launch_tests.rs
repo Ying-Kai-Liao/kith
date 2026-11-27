@@ -9,6 +9,8 @@
 use super::launch_turn_e2e_tests::{World, built_kith, repo_kernel};
 use crate::terminal::core_writer::{CoreWriter, RunClaim};
 use crate::wake::{self, Request};
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::process::{Output, Stdio};
 
 const NOTE: &str = "[kith wake run-1] go on";
@@ -22,7 +24,6 @@ fn owed(w: &World, session: &str) -> i64 {
     let dir = w.folders.machine.join("core/cutover");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("wake.switch"), "state=switched\nat=1\n").unwrap();
-    w.reconciled();
     let req = Request {
         session,
         id: "card:c1",
@@ -56,11 +57,48 @@ fn made_under(w: &World, session: &str, account: &str) {
     .unwrap();
 }
 
-/// The host's launch of a codex wake: `kith kernel launch-exec house --kernel K -- NOTE`, with the claim when there is one.
+/// The account `house` runs on when nothing is out, as the world sets it up (`main-env`, the program `bin/kith` asks): not a name
+/// this file assumes.
+fn main_account(w: &World) -> String {
+    let md = w.dir.join("home/agents/house/role/agent.md");
+    let out = w
+        .command(Path::new("python3"))
+        .arg(repo_kernel().join("lib/kith_accounts.py"))
+        .args(["main-env", "house"])
+        .arg(md)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "main-env: {}", said(&out));
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .find_map(|t| t.strip_prefix("main_id="))
+        .map(|v| v.trim_matches('\'').to_owned())
+        .unwrap_or_else(|| panic!("main-env named no main_id: {}", said(&out)))
+}
+
+/// The lines the kernel's `engine-run` was started with, one per run (see [`launch`]).
+fn engine_argv(w: &World) -> Vec<String> {
+    std::fs::read_to_string(w.dir.join("engine-argv")).unwrap_or_default().lines().map(str::to_owned).collect()
+}
+
+/// The host's launch of a codex wake: `kith kernel launch-exec house --kernel K -- NOTE`, with the claim when there is one. The
+/// script finds the kith program through `KITH_BIN`: a stand-in that notes the `engine-run` argv and runs the built one.
 fn launch(w: &World, session: &str, claim: Option<i64>) -> Output {
     let kernel = repo_kernel().to_string_lossy().into_owned();
+    let tap = w.dir.join("kith-tap");
+    std::fs::write(
+        &tap,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *engine-run*) echo \"$*\" >> \"{}\" ;; esac\nexec \"{}\" \"$@\"\n",
+            w.dir.join("engine-argv").display(),
+            built_kith().display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&tap, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut cmd = w.command(&built_kith());
     cmd.args(["kernel", "launch-exec", "house", "--kernel", &kernel, "--", NOTE])
+        .env("KITH_BIN", &tap)
         .env("KITH_RESUME", session)
         .current_dir(w.dir.join("home"))
         .stdin(Stdio::null());
@@ -74,31 +112,88 @@ fn said(out: &Output) -> String {
     format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
 }
 
+/// Polls `done` for up to 20 s.
+fn until(what: &str, mut done: impl FnMut() -> bool) {
+    for _ in 0..200 {
+        if done() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("timed out: {what}");
+}
+
+/// The wake is still owed: its turn is claimed and not over, and the wake is not answered.
+fn still_owed(w: &World, session: &str, claim: i64) {
+    assert_eq!(w.show(claim)["state"], "claimed", "nothing attached the claim: the turn goes back as a failed try");
+    let turns = w.turns(session);
+    assert_eq!(turns.len(), 1, "one turn row: {turns:?}");
+    assert_eq!(turns[0].1, "claimed", "{turns:?}");
+    assert_ne!(wake::status(&w.folders.state, "card:c1").as_deref(), Some("answered"), "never answered");
+}
+
+#[test]
+fn a_codex_agents_wake_on_a_bare_claude_id_is_refused_and_starts_no_codex_session() {
+    let w = World::start();
+    let claim = owed(&w, "bare-claude-id");
+    // The host's Claude path for a bare id: `kith AGENT --resume SID NOTE` (the script's entry), with the claim. The world has no
+    // transcript of that id (and no host to name one), so the Claude resume is refused where it looks the session up.
+    let script = repo_kernel().join("bin/kith");
+    let mut cmd = w.command(&script);
+    cmd.args(["house", "--resume", "bare-claude-id", NOTE])
+        .env("KITH_TURN_CLAIM", claim.to_string())
+        .current_dir(w.dir.join("home"))
+        .stdin(Stdio::null());
+    let out = cmd.output().unwrap();
+    assert!(!out.status.success(), "{}", said(&out));
+    assert!(said(&out).contains("unknown thread \"bare-claude-id\""), "{}", said(&out));
+    assert!(!w.dir.join("acp-in").exists(), "no codex session was started: {}", said(&out));
+    assert!(w.runs().is_empty(), "no engine ran: {:?}", w.runs());
+    assert!(engine_argv(&w).is_empty(), "engine-run never started: {:?}", engine_argv(&w));
+    still_owed(&w, "bare-claude-id", claim);
+}
+
 #[test]
 fn a_claimed_wake_on_a_session_made_under_another_account_is_refused_before_the_attach_not_run_fresh() {
     let w = World::start();
     let claim = owed(&w, "codex:abc");
-    made_under(&w, "codex:abc", "codex:other");
+    let other = format!("{}-elsewhere", main_account(&w));
+    made_under(&w, "codex:abc", &other);
     let out = launch(&w, "codex:abc", Some(claim));
     assert_eq!(out.status.code(), Some(1), "{}", said(&out));
     assert!(said(&out).contains("does not run on another session"), "{}", said(&out));
     assert!(w.runs().is_empty(), "no engine ran: {:?}", w.runs());
+    assert!(engine_argv(&w).is_empty(), "engine-run never started: {:?}", engine_argv(&w));
     assert!(!w.dir.join("acp-in").exists(), "no codex session was started");
-    assert_eq!(w.show(claim)["state"], "claimed", "nothing attached the claim: the turn goes back as a failed try");
+    still_owed(&w, "codex:abc", claim);
 }
 
 #[test]
-fn a_wake_on_its_own_session_on_its_own_account_resumes_it_through_engine_run_and_attaches_once() {
+fn a_wake_on_its_own_session_on_its_own_account_resumes_it_through_engine_run_and_is_answered_once() {
     let w = World::start();
     let claim = owed(&w, "codex:abc");
-    made_under(&w, "codex:abc", "codex");
+    made_under(&w, "codex:abc", &main_account(&w));
     let out = launch(&w, "codex:abc", Some(claim));
     assert!(out.status.success(), "{}", said(&out));
     assert_eq!(w.runs().len(), 1, "the engine ran once: {:?}", w.runs());
+    let argv = engine_argv(&w);
+    assert_eq!(argv.len(), 1, "engine-run started once: {argv:?}");
+    assert!(argv[0].contains("--resume codex:abc"), "engine-run was told to resume the session: {argv:?}");
     let sent = std::fs::read_to_string(w.dir.join("acp-in")).unwrap();
-    assert!(sent.contains("go on"), "the note reached the engine: {sent}");
+    assert_eq!(sent.matches(NOTE).count(), 1, "the note reached the engine once: {sent}");
     assert!(!said(&out).contains("starting a new one"), "{}", said(&out));
-    assert_ne!(w.show(claim)["state"], "claimed", "the launch attached the claim");
+    // The launch attached the claim to its own process; the host then reports the run's end, as the run door does.
+    let shown = w.show(claim);
+    assert_ne!(shown["state"], "claimed", "the launch attached the claim");
+    let pid = u32::try_from(shown["pid"].as_u64().expect("the attached pid")).unwrap();
+    let host = CoreWriter::with_instance(w.folders.clone(), "host-1".to_owned());
+    assert!(matches!(host.run_over(claim, pid, true, ""), crate::terminal::core_writer::Told::Done));
+    until("the claim ends", || w.show(claim)["state"] == "ended");
+    until("the wake is answered", || {
+        let _ = wake::tick(&w.folders.state);
+        wake::status(&w.folders.state, "card:c1").as_deref() == Some("answered")
+    });
+    assert_eq!(w.turns("codex:abc").len(), 1, "one turn row for the whole story: {:?}", w.turns("codex:abc"));
 }
 
 #[test]
@@ -108,25 +203,11 @@ fn an_engine_that_cannot_resume_the_session_refuses_a_claimed_turn_on_it_but_a_h
     let claim = owed(&w, "bare-claude-id");
     let out = launch(&w, "bare-claude-id", Some(claim));
     assert_eq!(out.status.code(), Some(1), "{}", said(&out));
+    assert!(said(&out).contains("does not run on a new one"), "{}", said(&out));
     assert!(!w.dir.join("acp-in").exists(), "no codex session was started for the wake: {}", said(&out));
     // The same variable by hand, with no turn: a new session, as before.
     let out = launch(&w, "bare-claude-id", None);
     assert!(out.status.success(), "{}", said(&out));
     assert!(said(&out).contains("starting a new one"), "{}", said(&out));
     assert!(w.dir.join("acp-in").exists(), "a hand run starts a new session");
-}
-
-#[test]
-fn a_codex_agents_wake_on_a_bare_claude_id_never_starts_a_codex_session() {
-    let w = World::start();
-    let claim = owed(&w, "bare-claude-id");
-    // The host's Claude path for a bare id: `kith AGENT --resume SID NOTE` (the script's entry).
-    let script = repo_kernel().join("bin/kith");
-    let mut cmd = w.command(&script);
-    cmd.args(["house", "--resume", "bare-claude-id", NOTE])
-        .env("KITH_TURN_CLAIM", claim.to_string())
-        .current_dir(w.dir.join("home"))
-        .stdin(Stdio::null());
-    let out = cmd.output().unwrap();
-    assert!(!w.dir.join("acp-in").exists(), "no codex session was started: {}", said(&out));
 }

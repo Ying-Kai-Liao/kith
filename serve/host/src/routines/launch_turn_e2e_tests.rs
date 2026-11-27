@@ -170,6 +170,11 @@ impl World {
         self.daemon.as_ref().expect("the daemon").reconciled();
     }
 
+    /// The `turns` rows of a conversation: (id, state).
+    pub(super) fn turns(&self, conversation: &str) -> Vec<(i64, String)> {
+        self.daemon.as_ref().expect("the daemon").turns(conversation)
+    }
+
     pub(super) fn command(&self, program: &Path) -> Command {
         let mut c = Command::new(program);
         c.env_clear().envs(self.env.iter().map(|(k, v)| (k, v)));
