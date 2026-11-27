@@ -24,6 +24,8 @@ mod schedule_golden;
 pub mod switch;
 #[cfg(test)]
 mod switch_tests;
+#[cfg(all(test, unix))]
+mod wake_launch_tests;
 pub use runner::start;
 pub use schedule::Trigger;
 

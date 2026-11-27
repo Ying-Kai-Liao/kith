@@ -130,6 +130,18 @@ fn instructions_first(prompt: &str, task: &str) -> String {
     )
 }
 
+/// [`resume_id`], or the refusal when the run may only continue the session it was given (`KITH_RESUME_ONLY`: a claimed turn on it).
+fn resume_checked(engine: &str, resume: Option<&str>, only: bool) -> Result<Option<String>, String> {
+    let named = resume.filter(|r| !r.is_empty());
+    if only && let Some(r) = named {
+        let (h, id) = r.split_once(':').unwrap_or((r, ""));
+        if h != engine || id.is_empty() {
+            return Err(format!("session {r} is not a {engine} session; the turn on it does not run on a new one"));
+        }
+    }
+    Ok(resume_id(engine, resume))
+}
+
 /// The session to continue: the id when `resume` is this engine's (`<engine>:<id>`), else a note and a new session.
 fn resume_id(engine: &str, resume: Option<&str>) -> Option<String> {
     let resume = resume.filter(|r| !r.is_empty())?;
@@ -300,7 +312,14 @@ pub async fn run(a: Args) -> Result<i32> {
     let mcp = merge_mcp(&std::env::var("KITH_RUN_MCP").unwrap_or_default());
     let model = std::env::var("KITH_MODEL").unwrap_or_default();
     let effort = std::env::var("KITH_EFFORT").unwrap_or_default();
-    let resume = resume_id(&a.engine, a.resume.as_deref());
+    let only = std::env::var("KITH_RESUME_ONLY").is_ok_and(|v| v == "1");
+    let resume = match resume_checked(&a.engine, a.resume.as_deref(), only) {
+        Ok(r) => r,
+        Err(why) => {
+            show(&Done::of(&a.engine, Err(anyhow!(why)), None), &a.engine, a.json);
+            return Ok(1);
+        }
+    };
     let cwd = std::env::current_dir()?.to_string_lossy().into_owned();
     let spec = RunSpec {
         command,

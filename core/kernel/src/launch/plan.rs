@@ -924,6 +924,12 @@ pub fn plan_in(
                 a.backup
             ));
             return Err(4);
+        } else if get(&env, "KITH_TURN_CONVERSATION") == resume {
+            // A claimed turn on this very session (a wake) runs on it or not at all: a new session would answer it unread.
+            say(&format!(
+                "kith: session {resume} was made under {made}, not {account_id}; the turn on it does not run on another session"
+            ));
+            return Err(1);
         } else {
             say(&format!(
                 "kith: session {resume} was made under {made}, not {account_id}; starting a new one"
