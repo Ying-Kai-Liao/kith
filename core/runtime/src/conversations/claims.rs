@@ -323,6 +323,9 @@ pub(crate) enum Fence {
     Paused,
     /// The turn is an ask from another computer whose pairing epoch has ended (`ask.endPeer`): nothing of it starts.
     Cut(String),
+    /// The turn is an ask from another computer that already has its places running here (Mac link limits): the turn stays
+    /// queued and a later claim, once a run ends, gets through.
+    Busy(String),
     /// The person's revoke epoch moved after the caller's may check. The turn stays as it is for a fresh claim.
     Revoked,
 }
@@ -334,6 +337,7 @@ impl Fence {
             Self::Stopped(_) => "stopped",
             Self::Paused => "paused",
             Self::Cut(_) => "cut",
+            Self::Busy(_) => "busy",
             Self::Revoked => "revoked",
         }
     }
@@ -357,6 +361,9 @@ impl Fence {
             )),
             Self::Cut(computer) => Error::Refused(format!(
                 "kith-core: the link to {computer} ended; the turn of its ask is cancelled"
+            )),
+            Self::Busy(computer) => Error::Refused(format!(
+                "kith-core: {computer} has all its places running here; the turn of its ask waits for a free place"
             )),
             Self::Revoked => Error::Refused(format!(
                 "kith-core: {} was revoked after the may check",
@@ -410,6 +417,9 @@ fn held_in(tx: &rusqlite::Connection, turn: i64) -> Result<Option<Fence>> {
     if let Some(computer) = crate::asks::cut_origin_in(tx, turn)? {
         return Ok(Some(Fence::Cut(computer)));
     }
+    if let Some(computer) = crate::asks::busy_origin_in(tx, turn)? {
+        return Ok(Some(Fence::Busy(computer)));
+    }
     Ok(super::sched_run::paused_in(tx, turn)?.then_some(Fence::Paused))
 }
 
@@ -431,7 +441,7 @@ pub(crate) fn cancel_fenced(
         let tx = core.claim_tx()?;
         // The fence only moves one way, but the write re-checks it: a stale view cancels nothing.
         let held = match req.turn {
-            Some(turn) => held_in(&tx, turn)?,
+            Some(turn) => held_in(&tx, turn)?.filter(Fence::cancels),
             None => None,
         };
         if let (Some(_), Some(turn)) = (&held, req.turn) {

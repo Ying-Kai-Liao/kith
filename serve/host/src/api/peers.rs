@@ -29,7 +29,7 @@ pub(super) async fn peer_call(
     };
     let target = roles::target_of(b);
     let outcome = match verdict {
-        Ok(()) => peer_method(hub, method, b).await,
+        Ok(()) => peer_method(hub, computer_id, method, b).await,
         Err(e) => Err(e),
     };
     hub.store.audit_add(
@@ -45,9 +45,13 @@ pub(super) async fn peer_call(
     Ok(answer)
 }
 
-async fn peer_method(hub: &Arc<Hub>, method: &str, b: &Value) -> Result<Value> {
+async fn peer_method(hub: &Arc<Hub>, computer_id: &str, method: &str, b: &Value) -> Result<Value> {
     match method {
         "peerAgents" => Ok(json!({ "agents": owner_agents(hub) })),
+        "peerAsk" => ask_method(hub, computer_id, "peerAsk", b).await,
+        "peerThread" => ask_method(hub, computer_id, "peerThread", b).await,
+        "peerStop" => ask_method(hub, computer_id, "peerStop", b).await,
+        "peerTo" => ask_method(hub, computer_id, "peerTo", b).await,
         "peerRevokes" => {
             let sent: kith_wire::rpc::HandleRevokes = serde_json::from_value(b.clone())
                 .map_err(|_| UserError("`handles` is a list of {handle, revoked, at}".into()))?;
@@ -56,6 +60,34 @@ async fn peer_method(hub: &Arc<Hub>, method: &str, b: &Value) -> Result<Value> {
         }
         _ => Err(NotAllowed("This isn't available to a paired computer.".into()).into()),
     }
+}
+
+/// An ask method of the Mac link (design 2026-11-24-ask-ledger, A5b): answered from this computer's core, for the epoch the
+/// caller names. A caller that is no longer paired at that epoch gets `paired: false` and nothing else.
+async fn ask_method(hub: &Arc<Hub>, computer_id: &str, method: &'static str, b: &Value) -> Result<Value> {
+    let epoch = str_arg(b, "epoch")?;
+    let Some(pairing) = hub.store.peer_in(computer_id).filter(|p| p.epoch == epoch) else {
+        return Ok(crate::remote::peer_asks::unpaired(method));
+    };
+    let folders = crate::remote::peer_asks::folders_of(hub)
+        .ok_or_else(|| UserError("This computer can't hold asks for another computer yet.".into()))?;
+    // Nothing is answered for a pairing until the reconcile has agreed it with the core (an unlink while the core was away).
+    if !crate::remote::peer_asks::fence::settled(hub).await {
+        return Err(UserError("This computer is still settling its pairings; try again shortly.".into()).into());
+    }
+    let agents: std::collections::BTreeSet<String> =
+        owner_agents(hub).iter().filter_map(|a| a["agent"].as_str().map(str::to_owned)).collect();
+    let caller = crate::remote::peer_asks::callee::Caller { computer: computer_id, name: &pairing.name, epoch };
+    crate::remote::peer_asks::callee::handle(
+        &folders,
+        &caller,
+        method,
+        b,
+        &|a| agents.contains(a),
+        crate::store::now_ms(),
+    )
+    .await
+    .map_err(|why| UserError(why).into())
 }
 
 /// The owner's own agents with a chat here: what a paired computer can ask.

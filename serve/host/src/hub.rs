@@ -234,6 +234,8 @@ impl Hub {
         // Who owns the schedules (the core's gate), known before the runner's first second.
         self.routines.refresh_gate();
         crate::routines::start(self);
+        // The asks the core owes other computers, carried over the Mac link (design 2026-11-24-ask-ledger, A5b).
+        crate::remote::peer_asks::start(self);
         crate::run_outbox::start(self);
         crate::analytics::start(self);
         hq::start(self);

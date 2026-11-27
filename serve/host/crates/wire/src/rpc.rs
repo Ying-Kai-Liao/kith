@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "16cc6e9c5a14412e680d8dff24305932f4deece079eb9b5f77a9b4f0ec20d1f7";
+pub const CONTRACT_SHA256: &str = "b7ed4215534d8e1257ec4a9cd6d8624daba9c590351de9f1d21f7417c93bff58";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -1042,6 +1042,55 @@ pub struct PeerAgents {
     pub agents: Vec<PeerAgent>,
 }
 
+/// One row of an ask's answer on the computer it was sent to: its number there, who said it, what kind (answer, progress or lost), the words and when (ms).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerRow {
+    pub n: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#as: Option<String>,
+    pub kind: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+}
+
+/// What the callee's computer says of an ask another computer sent (`peerAsk`, `peerThread`): `paired` false when that computer is not paired at the epoch it named (nothing else is then said), `found` false for a key never seen. Else its state (open, answered, capped, stopped, lost or refused), the rows after the one asked for, what the run and what it asked cost there in US$ (`cost`), what it waits on (`waiting`) and whether it takes a follow-up (`takesTo`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerThread {
+    pub paired: bool,
+    pub found: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    pub rows: Vec<PeerRow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub takes_to: Option<bool>,
+}
+
+/// What a stop of an ask comes to on the callee's computer: its state after (stopped, or the final state it had already), or `paired` false when that computer is not paired at the epoch named.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerStopped {
+    pub paired: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+}
+
+/// What a `--to` message comes to on the callee's computer: `taken` true when it was queued for the ask's session, or will never be (the ask is over: `note` says so); false when it should be sent again later (the ask has no session yet). `paired` false when that computer is not paired at the epoch named.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerTold {
+    pub paired: bool,
+    pub taken: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 /// One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1739,6 +1788,49 @@ pub struct PeerRevokesParams {
     pub handles: Vec<HandleRevoke>,
 }
 
+/// What `peerAsk` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerAskParams {
+    pub key: String,
+    pub epoch: String,
+    pub agent: String,
+    pub task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opts: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cont: Option<String>,
+}
+
+/// What `peerThread` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerThreadParams {
+    pub key: String,
+    pub epoch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<i64>,
+}
+
+/// What `peerStop` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerStopParams {
+    pub key: String,
+    pub epoch: String,
+}
+
+/// What `peerTo` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerToParams {
+    pub key: String,
+    pub epoch: String,
+    pub text: String,
+}
+
 /// What `createInvite` takes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1886,6 +1978,14 @@ pub mod method {
     pub const PEER_AGENTS: &str = "peerAgents";
     /// Mac link: the handle-only revokes and undos the caller knows. Each newer than this computer's own is applied here (the person is revoked or restored); the answer is this computer's list, so a computer that was off catches up.
     pub const PEER_REVOKES: &str = "peerRevokes";
+    /// Mac link: an ask for one of this computer's agents, from the paired computer that sends it (its owner's own run; this computer's owner runs the agent). `key` is the asking computer's id for the ask, `epoch` its pairing, `lineage` the chain (`{chain, hop, cross, from, cost}`) the caps are checked from again, `opts` `{model, effort, project}`, `cont` the key of the earlier ask whose session this one continues. The same key again is the same ask, however often it is sent; every refusal is a row the next `peerThread` reads. Answers what `peerThread` would.
+    pub const PEER_ASK: &str = "peerAsk";
+    /// Mac link: the ask the paired computer sent under `key`, as that computer follows it: the rows after `after`, its state and cost. Read only.
+    pub const PEER_THREAD: &str = "peerThread";
+    /// Mac link: stops the ask the paired computer sent under `key` (its run ended, a queued one never starts). A stop that comes before the ask leaves a stopped row, so the ask never starts if it arrives later. Sent again until answered.
+    pub const PEER_STOP: &str = "peerStop";
+    /// Mac link: a `--to` follow-up to the ask the paired computer sent under `key`, as a turn of its session. The same words are one message.
+    pub const PEER_TO: &str = "peerTo";
     /// Makes an invite for a new person (`name`) or one kith already knows (`personId`), with the agents offered (agent -> member|guest). `rooms` (rooms with people) names group rooms the person is put in once a device of theirs has proved the invite, or at the next host start if the host stopped between; a room the person left or Kai took them out of is never joined again by the invite. The cloud's invite is the same with or without rooms. Refused with rooms while the host setting is off, for a room that takes no people, for an agent in the room the person is not granted, and for a person who has already joined here.
     pub const CREATE_INVITE: &str = "createInvite";
     /// Rooms with people: lets a person into a group room, one step with one new gen. Refused while the host setting is off, for the owner, for a room with no Kith agent or with an outside bot, and for a person not granted every agent in it (asked live).
@@ -1916,7 +2016,7 @@ pub const BOT_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PR
 pub const BOT_PENDING_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PROVE_BOT_INVITE];
 
 /// What another computer of the owner's, paired here (Mac link) may call.
-pub const PEER_METHODS: &[&str] = &[method::PEER_AGENTS, method::PEER_REVOKES];
+pub const PEER_METHODS: &[&str] = &[method::PEER_AGENTS, method::PEER_REVOKES, method::PEER_ASK, method::PEER_THREAD, method::PEER_STOP, method::PEER_TO];
 
 /// The contract as data, for `crate::check` (the producer's strict check and the consumer's).
 pub static SCHEMA: crate::check::Schema = crate::check::Schema {
@@ -1982,6 +2082,10 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotSelf", fields: &[("botId", "string"), ("name", "string"), ("state", "BotGuestState"), ("owner", "BotOwner"), ("agents", "[GrantedAgent]"), ("limits", "BotLimits"), ("version", "string"), ("minClient", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "PeerAgent", fields: &[("agent", "string"), ("name", "string?")], may_omit: &["name"] },
         crate::check::TypeSchema { name: "PeerAgents", fields: &[("agents", "[PeerAgent]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerRow", fields: &[("n", "int"), ("as", "string?"), ("kind", "string"), ("text", "string"), ("at", "int?")], may_omit: &["as", "at"] },
+        crate::check::TypeSchema { name: "PeerThread", fields: &[("paired", "bool"), ("found", "bool"), ("state", "string?"), ("rows", "[PeerRow]"), ("cost", "json?"), ("waiting", "json?"), ("takesTo", "bool?")], may_omit: &["state", "cost", "waiting", "takesTo"] },
+        crate::check::TypeSchema { name: "PeerStopped", fields: &[("paired", "bool"), ("state", "string?")], may_omit: &["state"] },
+        crate::check::TypeSchema { name: "PeerTold", fields: &[("paired", "bool"), ("taken", "bool"), ("note", "string?")], may_omit: &["note"] },
         crate::check::TypeSchema { name: "HandleRevoke", fields: &[("handle", "string"), ("revoked", "bool"), ("at", "int")], may_omit: &[] },
         crate::check::TypeSchema { name: "HandleRevokes", fields: &[("handles", "[HandleRevoke]")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomPerson", fields: &[("person", "string"), ("joinedGen", "int"), ("leftGen", "int?")], may_omit: &[] },
@@ -2052,6 +2156,10 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotLeaveParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "PeerAgentsParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "PeerRevokesParams", fields: &[("handles", "[HandleRevoke]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerAskParams", fields: &[("key", "string"), ("epoch", "string"), ("agent", "string"), ("task", "string"), ("lineage", "json?"), ("opts", "json?"), ("cont", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerThreadParams", fields: &[("key", "string"), ("epoch", "string"), ("after", "int?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerStopParams", fields: &[("key", "string"), ("epoch", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerToParams", fields: &[("key", "string"), ("epoch", "string"), ("text", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "CreateInviteParams", fields: &[("agents", "{string}"), ("name", "string?"), ("personId", "string?"), ("rooms", "[string]?")], may_omit: &[] },
         crate::check::TypeSchema { name: "AddRoomPersonParams", fields: &[("room", "string"), ("person", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "RemoveRoomPersonParams", fields: &[("room", "string"), ("person", "string")], may_omit: &[] },
@@ -2109,6 +2217,10 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "botLeave", who: &["bot"], params: "BotLeaveParams", result: "Empty" },
         crate::check::MethodSchema { name: "peerAgents", who: &["peer"], params: "PeerAgentsParams", result: "PeerAgents" },
         crate::check::MethodSchema { name: "peerRevokes", who: &["peer"], params: "PeerRevokesParams", result: "HandleRevokes" },
+        crate::check::MethodSchema { name: "peerAsk", who: &["peer"], params: "PeerAskParams", result: "PeerThread" },
+        crate::check::MethodSchema { name: "peerThread", who: &["peer"], params: "PeerThreadParams", result: "PeerThread" },
+        crate::check::MethodSchema { name: "peerStop", who: &["peer"], params: "PeerStopParams", result: "PeerStopped" },
+        crate::check::MethodSchema { name: "peerTo", who: &["peer"], params: "PeerToParams", result: "PeerTold" },
         crate::check::MethodSchema { name: "createInvite", who: &["owner"], params: "CreateInviteParams", result: "CreatedInvite" },
         crate::check::MethodSchema { name: "addRoomPerson", who: &["owner"], params: "AddRoomPersonParams", result: "RoomPersonChange" },
         crate::check::MethodSchema { name: "removeRoomPerson", who: &["owner"], params: "RemoveRoomPersonParams", result: "RoomPersonChange" },
@@ -2163,6 +2275,10 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotSelf" => serde_json::from_value::<BotSelf>(value).map(drop),
         "PeerAgent" => serde_json::from_value::<PeerAgent>(value).map(drop),
         "PeerAgents" => serde_json::from_value::<PeerAgents>(value).map(drop),
+        "PeerRow" => serde_json::from_value::<PeerRow>(value).map(drop),
+        "PeerThread" => serde_json::from_value::<PeerThread>(value).map(drop),
+        "PeerStopped" => serde_json::from_value::<PeerStopped>(value).map(drop),
+        "PeerTold" => serde_json::from_value::<PeerTold>(value).map(drop),
         "HandleRevoke" => serde_json::from_value::<HandleRevoke>(value).map(drop),
         "HandleRevokes" => serde_json::from_value::<HandleRevokes>(value).map(drop),
         "RoomPerson" => serde_json::from_value::<RoomPerson>(value).map(drop),
@@ -2233,6 +2349,10 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotLeaveParams" => serde_json::from_value::<BotLeaveParams>(value).map(drop),
         "PeerAgentsParams" => serde_json::from_value::<PeerAgentsParams>(value).map(drop),
         "PeerRevokesParams" => serde_json::from_value::<PeerRevokesParams>(value).map(drop),
+        "PeerAskParams" => serde_json::from_value::<PeerAskParams>(value).map(drop),
+        "PeerThreadParams" => serde_json::from_value::<PeerThreadParams>(value).map(drop),
+        "PeerStopParams" => serde_json::from_value::<PeerStopParams>(value).map(drop),
+        "PeerToParams" => serde_json::from_value::<PeerToParams>(value).map(drop),
         "CreateInviteParams" => serde_json::from_value::<CreateInviteParams>(value).map(drop),
         "AddRoomPersonParams" => serde_json::from_value::<AddRoomPersonParams>(value).map(drop),
         "RemoveRoomPersonParams" => serde_json::from_value::<RemoveRoomPersonParams>(value).map(drop),

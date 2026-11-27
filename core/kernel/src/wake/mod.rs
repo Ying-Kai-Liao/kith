@@ -24,6 +24,17 @@ pub enum Fail {
     NoAnswer(String),
 }
 
+/// The code of a refusal that says the claims are not the core's yet on this Mac. A refusal of the core is text; one a client must
+/// tell from the rest carries its code in brackets after the method's name (`kith-core: claim.list: [code] words`), so a client
+/// matches the code and the words stay free to change.
+pub const CLAIMS_NOT_SWITCHED: &str = "claims_not_switched";
+
+/// Whether the core's refusal `why` carries `code` (see [`CLAIMS_NOT_SWITCHED`]).
+#[must_use]
+pub fn has_code(why: &str, code: &str) -> bool {
+    why.contains(&format!("[{code}]"))
+}
+
 /// One owner call of the core: the answer object.
 pub type Call<'a> = dyn Fn(&str, &Value) -> Result<Value, Fail> + 'a;
 

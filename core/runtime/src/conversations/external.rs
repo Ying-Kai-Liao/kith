@@ -141,7 +141,8 @@ fn waiting(why: &str) -> Value {
 pub(crate) fn call(core: &mut Core, method: &str, params: &Value) -> Result<Value> {
     if !switched(core) {
         return Err(Error::Refused(format!(
-            "kith-core: {method}: the claims are not switched to the core on this Mac (kith migrate step claims)"
+            "kith-core: {method}: [{}] the claims are not switched to the core on this Mac (kith migrate step claims)",
+            kith_kernel::wake::CLAIMS_NOT_SWITCHED
         )));
     }
     call_at(core, method, params, now_ms(), &crate::gate::System)
