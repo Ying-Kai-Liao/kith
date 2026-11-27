@@ -4,6 +4,7 @@
 //! names an invitee's chat, and no post event reaches a member or a bot (`api::roles`).
 
 pub mod fold;
+pub mod host;
 pub mod like;
 pub mod route;
 
@@ -77,7 +78,6 @@ pub fn event(p: &Post) -> Value {
 
 /// Folds one fact into the Feed and tells the owner's apps when a card changed. `None` is a repeat or a late fact the
 /// rules keep out: no rev, no event. Under `emit_lock`, so events leave in rev order.
-#[allow(dead_code, reason = "the tool (F2) and the host writers (F3) are the callers")]
 pub fn put_post(hub: &Hub, w: &PostWrite) -> Result<Option<Post>> {
     let _g = hub.emit_lock.locked();
     let post = hub.store.put_post(w)?;
