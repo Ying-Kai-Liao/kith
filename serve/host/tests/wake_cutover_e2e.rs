@@ -166,6 +166,11 @@ impl Lab {
         std::os::unix::fs::symlink(&kernel, machine.join("cli/current")).unwrap();
         for (name, text) in [("claude", ENGINE), ("python3", PY_SHIM), ("kith-stub", "#!/bin/sh\n")] {
             let f = dir.join("bin").join(name);
+            // The host's launch hands its children their own environment, not this test's: the paths go into the scripts.
+            let text = text
+                .replace("$REC", &dir.join("rec").to_string_lossy())
+                .replace("$HOLD", &dir.join("hold").to_string_lossy())
+                .replace("$WAKELOG", &dir.join("wake.log").to_string_lossy());
             std::fs::write(&f, text).unwrap();
             executable(&f);
         }
