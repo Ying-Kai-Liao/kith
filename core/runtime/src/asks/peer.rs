@@ -53,6 +53,17 @@ pub(crate) fn live_in(tx: &Connection, computer: &str, dir: &str, epoch: &str) -
     )?)
 }
 
+/// Names this core process: a pairing the host confirmed under another name was not confirmed since this core started.
+pub(crate) fn boot() -> &'static str {
+    static BOOT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BOOT.get_or_init(|| {
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        format!("{}-{at}", std::process::id())
+    })
+}
+
 /// The live `out` pairing epoch with `computer`, if any.
 fn epoch_in(tx: &Connection, computer: &str) -> Result<Option<String>> {
     Ok(tx
@@ -62,6 +73,56 @@ fn epoch_in(tx: &Connection, computer: &str) -> Result<Option<String>> {
             |r| r.get(0),
         )
         .optional()?)
+}
+
+/// The id of the computer `named` is: its id, or the name the host wrote with the pairing (`ask.peerLink`'s `name`, compared
+/// without regard to case) of a computer this one may ask. A name that is no live `out` pairing's stays as it was (the open then
+/// refuses it as not paired); one that two computers answer to is refused, with both ids.
+pub(crate) fn resolve_computer_in(tx: &Connection, named: &str) -> Result<String> {
+    let mut stmt = tx.prepare(
+        "SELECT computer FROM ask_peers WHERE dir = 'out' AND live = 1
+           AND (computer = ?1 OR lower(name) = lower(?1)) ORDER BY computer",
+    )?;
+    let found: Vec<String> = stmt
+        .query_map([named], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    match found.as_slice() {
+        [] => Ok(named.to_owned()),
+        [one] => Ok(one.clone()),
+        many if many.iter().any(|c| c == named) => Ok(named.to_owned()),
+        many => Err(Error::Refused(format!(
+            "kith-core: asks: more than one paired computer is called {named}: {}",
+            many.join(", ")
+        ))),
+    }
+}
+
+/// `ask.peerList`: the live pairings this core knows, `{in: [{computer, epoch, name}], out: [...], ended: [{computer, dir, epoch}]}`.
+/// The host's reconcile reads it (D5): a pairing here with no host row at its epoch is ended, and a host row whose epoch ended
+/// here is removed.
+pub(crate) fn list(core: &Core) -> Result<Value> {
+    let mut stmt = core.conn().prepare(
+        "SELECT computer, dir, epoch, name FROM ask_peers WHERE live = 1 ORDER BY computer, dir",
+    )?;
+    let rows: Vec<(String, String, String, Option<String>)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+    let pick = |dir: &str| -> Vec<Value> {
+        rows.iter()
+            .filter(|r| r.1 == dir)
+            .map(|r| json!({"computer": r.0, "epoch": r.2, "name": r.3}))
+            .collect()
+    };
+    // The pairings that ended keep their row: a host row at one of these epochs is a crash between its write and the core's.
+    let mut stmt = core.conn().prepare(
+        "SELECT computer, dir, epoch FROM ask_peers WHERE live = 0 ORDER BY computer, dir, epoch",
+    )?;
+    let ended: Vec<Value> = stmt
+        .query_map([], |r| {
+            Ok(json!({"computer": r.get::<_, String>(0)?, "dir": r.get::<_, String>(1)?, "epoch": r.get::<_, String>(2)?}))
+        })?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(json!({"in": pick("in"), "out": pick("out"), "ended": ended}))
 }
 
 /// The fence of a claim and an attach: the computer whose pairing `turn`'s ask came under, when that epoch is no longer the
@@ -158,15 +219,47 @@ pub(super) fn refused_origin_in(
     if get(tx, o.id)?.is_some() {
         return Err(Error::Refused(why.to_owned()));
     }
+    let task = o.ledger.as_ref().and_then(|l| l.task);
+    let ask = closed_origin_in(
+        tx,
+        o.id,
+        Some(o.asked),
+        task,
+        og,
+        "refused",
+        &format!("refused: {why}"),
+        now,
+    )?;
+    let mut said = replayed(&ask);
+    said["replayed"] = json!(false);
+    said["refused"] = json!(true);
+    said["reason"] = json!(why);
+    Ok(said)
+}
+
+/// The row of an ask from another computer that was closed before it began: `state` (`refused`, or `stopped` for a stop that
+/// came first, `MacLink2` C1) and one `lost` row with `text`. The origin key is unique, so a later send of the same key finds this
+/// row and starts nothing.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn closed_origin_in(
+    tx: &Connection,
+    id: &str,
+    asked: Option<&str>,
+    task: Option<&str>,
+    og: super::Origin<'_>,
+    state: &str,
+    text: &str,
+    now: i64,
+) -> Result<Ask> {
     let ask = Ask {
-        id: o.id.to_owned(),
-        chain: o.id.to_owned(),
+        id: id.to_owned(),
+        chain: id.to_owned(),
         parent: None,
         reply_session: None,
         hop: 0,
         cross_hops: 0,
         crossed: true,
-        asked: Some(o.asked.to_owned()),
+        asked: asked.map(str::to_owned),
         caller_agent: None,
         caller_person: None,
         caller_via: None,
@@ -174,7 +267,7 @@ pub(super) fn refused_origin_in(
         cost: Some(0.0),
         cost_base: None,
         cap_usd: None,
-        state: "refused".to_owned(),
+        state: state.to_owned(),
         at_ms: Some(now),
         answered_ms: Some(now),
         capped_ms: None,
@@ -189,7 +282,7 @@ pub(super) fn refused_origin_in(
         extra: None,
         claim_id: None,
         mode: Some("bg".to_owned()),
-        task: o.ledger.as_ref().and_then(|l| l.task.map(str::to_owned)),
+        task: task.map(str::to_owned),
         out_path: None,
         parked_card: None,
         parked_ms: None,
@@ -208,19 +301,8 @@ pub(super) fn refused_origin_in(
         origin_epoch: Some(og.epoch.to_owned()),
     };
     ask.put(tx)?;
-    rows::add_in(
-        tx,
-        o.id,
-        Some(o.asked),
-        Kind::Lost,
-        &format!("refused: {why}"),
-        now,
-    )?;
-    let mut said = replayed(&ask);
-    said["replayed"] = json!(false);
-    said["refused"] = json!(true);
-    said["reason"] = json!(why);
-    Ok(said)
+    rows::add_in(tx, id, asked, Kind::Lost, text, now)?;
+    Ok(ask)
 }
 
 /// Closes a peer ask here as `cut_off`: its asker gets one `lost` row with `text` and the wake for it, and `stop_owed` says
@@ -243,7 +325,7 @@ fn cut_off_ask_in(
     a.put(tx)
 }
 
-fn is_live(a: &Ask) -> bool {
+pub(super) fn is_live(a: &Ask) -> bool {
     a.state == "open" && a.ended_ms.is_none()
 }
 
@@ -395,9 +477,22 @@ fn end_in_asks(
     Ok(())
 }
 
-/// `ask.endPeer`: [`end_epoch_in`] in one transaction.
-pub(crate) fn end(core: &mut Core, computer: &str, dir: &str, now: i64) -> Result<EndedPeer> {
+/// `ask.endPeer`: [`end_epoch_in`] in one transaction. With an `epoch`, only that pairing ends: a caller that read an epoch and
+/// acts on what it read (the pass's cut-off, the reconcile) never ends a newer one that was linked since (nothing happens when
+/// the live epoch is another).
+pub(crate) fn end(
+    core: &mut Core,
+    computer: &str,
+    dir: &str,
+    epoch: Option<&str>,
+    now: i64,
+) -> Result<EndedPeer> {
     wake::write_tx(core, secs(now), |tx, st| {
+        if let Some(e) = epoch
+            && !live_in(tx, computer, dir, e)?
+        {
+            return Ok(EndedPeer::default());
+        }
         end_epoch_in(tx, st, computer, dir, now)
     })
 }
@@ -411,6 +506,7 @@ pub(crate) fn link(
     computer: &str,
     dir: &str,
     epoch: &str,
+    name: Option<&str>,
     now: i64,
 ) -> Result<EndedPeer> {
     wake::write_tx(core, secs(now), |tx, st| {
@@ -422,15 +518,29 @@ pub(crate) fn link(
             )
             .optional()?;
         match kept {
-            Some(true) => Ok(EndedPeer::default()),
+            Some(true) => {
+                // The host telling the pairing again (its reconcile does, after a start) confirms it for this process.
+                tx.execute(
+                    "UPDATE ask_peers SET boot = ?4 WHERE computer = ?1 AND dir = ?2 AND epoch = ?3",
+                    params![computer, dir, epoch, boot()],
+                )?;
+                // The same pairing again may tell its name (a computer renamed since).
+                if let Some(n) = name {
+                    tx.execute(
+                        "UPDATE ask_peers SET name = ?4 WHERE computer = ?1 AND dir = ?2 AND epoch = ?3",
+                        params![computer, dir, epoch, n],
+                    )?;
+                }
+                Ok(EndedPeer::default())
+            }
             Some(false) => Err(Error::Refused(format!(
                 "kith-core: asks: that pairing with {computer} ({dir}) has ended; a new pairing has a new epoch"
             ))),
             None => {
                 let ended = end_epoch_in(tx, st, computer, dir, now)?;
                 tx.execute(
-                    "INSERT INTO ask_peers (computer, dir, epoch, live) VALUES (?1, ?2, ?3, 1)",
-                    params![computer, dir, epoch],
+                    "INSERT INTO ask_peers (computer, dir, epoch, live, name, boot) VALUES (?1, ?2, ?3, 1, ?4, ?5)",
+                    params![computer, dir, epoch, name, boot()],
                 )?;
                 Ok(ended)
             }
@@ -456,6 +566,19 @@ pub(crate) struct Apply<'a> {
     pub state: Option<&'a str>,
     /// What the run and its descendants cost there, in total (read once, at the end).
     pub cost: Option<f64>,
+    /// The `--to` messages (`ask.to`'s `k`) the computer took.
+    pub to_sent: Vec<String>,
+    /// The host's try did not reach the computer (D4): the ask shows "waiting on computer" from now, and nothing else is written.
+    pub away: bool,
+}
+
+/// When the host's first failed try of this ask's computer was (the `away` mark in the ask's own fields); it stays until a call
+/// that carried the computer's answer clears it.
+pub(super) fn away_since(a: &Ask) -> Option<i64> {
+    a.extra
+        .as_ref()
+        .and_then(|e| e.get("away"))
+        .and_then(Value::as_i64)
 }
 
 /// `ask.peerApply` (D3 following): copies what the computer's row of this ask says, in one transaction.
@@ -487,6 +610,17 @@ pub(crate) fn apply(core: &mut Core, machine: &Path, f: &Apply<'_>, now: i64) ->
             return Ok(json!({"id": f.id, "applied": false, "stale": true}));
         }
         let live = is_live(&a);
+        if f.away {
+            // One failed try is enough to say so; nothing is settled, no row is written (D4). An ask that is over waits on nothing.
+            if live && away_since(&a).is_none() {
+                let mut a = a;
+                a.extra
+                    .get_or_insert_with(Default::default)
+                    .insert("away".to_owned(), json!(now));
+                a.put(tx)?;
+            }
+            return Ok(json!({"id": f.id, "applied": false, "away": live}));
+        }
         // The computer's cost joins the chain once, whatever became of the ask here.
         // A live ask takes its final state here, so a cost that tips the chain's cap makes it `capped` and stays so.
         if let (Some(_), Some(cost)) = (end, f.cost)
@@ -500,6 +634,10 @@ pub(crate) fn apply(core: &mut Core, machine: &Path, f: &Apply<'_>, now: i64) ->
         };
         a.sent = true;
         a.peer_seen_ms = Some(now);
+        // It answered: it is not away any more.
+        if let Some(extra) = a.extra.as_mut() {
+            extra.remove("away");
+        }
         let mut copied = Vec::new();
         if live {
             let mut sorted: Vec<&InRow> = f.rows.iter().collect();
@@ -550,6 +688,7 @@ pub(crate) fn apply(core: &mut Core, machine: &Path, f: &Apply<'_>, now: i64) ->
         if end.is_some() {
             a.stop_owed = false;
         }
+        super::peer_b::clear_to(&mut a, &f.to_sent);
         a.put(tx)?;
         Ok(
             json!({"id": f.id, "applied": live, "rows": copied, "state": a.state, "fetched": a.fetched}),
@@ -574,7 +713,19 @@ pub(crate) fn owed(core: &Core) -> Result<Value> {
         st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<std::result::Result<_, _>>()?
     };
-    let (mut send, mut follow, mut stop) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut send, mut follow, mut stop, mut to) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    // The places left on each computer's side (`peer_b::MAX_QUEUED`): its callee refuses an ask past ten waiting, and a refusal is a
+    // final `refused` for the user, who only asked while it was busy. So the sends stop at ten asks open there, and the rest stay
+    // owed (listed as soon as one of the ten ends); the callee's refusal stays as the backstop.
+    let mut open_there: BTreeMap<&str, i64> = BTreeMap::new();
+    for a in asks
+        .iter()
+        .filter(|a| a.mode.as_deref() == Some("peer") && is_live(a) && a.sent)
+    {
+        if let Some(c) = a.peer.as_deref() {
+            *open_there.entry(c).or_insert(0) += 1;
+        }
+    }
     for a in asks.iter().filter(|a| a.mode.as_deref() == Some("peer")) {
         let (Some(computer), Some(epoch)) = (&a.peer, &a.peer_epoch) else {
             continue;
@@ -582,20 +733,31 @@ pub(crate) fn owed(core: &Core) -> Result<Value> {
         if linked.get(computer) != Some(epoch) {
             continue;
         }
+        let kept = |k: &str| a.extra.as_ref().and_then(|e| e.get(k)).cloned();
         if is_live(a) && !a.sent {
-            send.push(json!({
-                "id": a.id, "key": a.id, "computer": computer, "epoch": epoch,
-                "agent": a.asked, "task": a.task,
-                "cont": a.extra.as_ref().and_then(|e| e.get("cont")).cloned(),
-                "lineage": {"chain": a.chain, "hop": a.hop, "cross": a.cross_hops, "from": a.id,
-                            "cost": costs.get(&a.chain).copied().unwrap_or(0.0)},
-            }));
+            let held = open_there.entry(computer.as_str()).or_insert(0);
+            if *held < super::peer_b::MAX_QUEUED {
+                *held += 1;
+                send.push(json!({
+                    "id": a.id, "key": a.id, "computer": computer, "epoch": epoch,
+                    "agent": a.asked, "task": a.task,
+                    "cont": kept("cont"), "opts": kept("opts"),
+                    "lineage": {"chain": a.chain, "hop": a.hop, "cross": a.cross_hops, "from": a.id,
+                                "cost": costs.get(&a.chain).copied().unwrap_or(0.0)},
+                }));
+            }
         } else if is_live(a) {
             follow.push(json!({"id": a.id, "key": a.id, "computer": computer, "epoch": epoch, "after": a.fetched}));
         }
         if a.stop_owed {
             stop.push(json!({"id": a.id, "key": a.id, "computer": computer, "epoch": epoch}));
         }
+        // A message for an ask that was sent and is still open goes after it (an answered one takes none: `to_owed` refuses it).
+        if a.sent && is_live(a) {
+            for (k, text) in super::peer_b::owed_to(a) {
+                to.push(json!({"id": a.id, "key": a.id, "computer": computer, "epoch": epoch, "k": k, "text": text}));
+            }
+        }
     }
-    Ok(json!({"send": send, "follow": follow, "stop": stop}))
+    Ok(json!({"send": send, "follow": follow, "stop": stop, "to": to}))
 }

@@ -545,10 +545,10 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     if held {
         revoke_ungranted(hub, &state.grants)?;
         // Pairings are the pinned owner's: none outlives a change of owner, and none is made until it is confirmed.
-        super::peers::drop_all(hub)?;
+        super::peers::drop_all(hub).await?;
     } else {
         apply_grants(hub, &state.grants, owner_uid.as_deref())?;
-        super::peers::apply(hub, state.peers.as_deref())?;
+        super::peers::apply(hub, state.peers.as_deref()).await?;
     }
     update_status(hub, |s| {
         s.owner = owner;

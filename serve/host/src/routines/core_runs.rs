@@ -144,14 +144,18 @@ impl Routines {
         };
         self.take(hub, &turns, &super::core_cron::Live(core.clone()));
         self.dispatch_pulled(hub);
-        Self::pull_asks(&core);
+        Self::pull_asks(&core, crate::remote::peer_asks::fence::is_settled());
     }
 
     /// The `--bg` asks' callee turns (source `ask`): each through the run door (`core_ask.rs`), not through a bot. Listed apart from the
     /// schedule's turns so a core that does not know the source costs the cron jobs nothing.
-    fn pull_asks(core: &Arc<crate::terminal::core_writer::CoreWriter>) {
+    ///
+    /// An ask that came from another computer starts only once the pairings are settled (`settled`: the reconcile has agreed the
+    /// host's rows with the core's since the host last failed to tell the core of one): a core that did not hear an unlink is
+    /// alive and still holds the epoch, and the claim in the core cannot know the host removed the pairing.
+    fn pull_asks(core: &Arc<crate::terminal::core_writer::CoreWriter>, settled: bool) {
         let turns = match core.queued_from(&["ask"]) {
-            Ok(t) => t,
+            Ok(t) => super::core_ask::unsettled_held_back(t, settled),
             Err(why) => {
                 tracing::debug!(why, "routines: the core's queued asks can't be read");
                 return;

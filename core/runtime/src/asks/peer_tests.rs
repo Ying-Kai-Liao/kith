@@ -10,10 +10,10 @@ use super::ledger_tests::{Rig, ms, turn_of};
 use crate::conversations::sched_run;
 use crate::error::Error;
 
-const MAC: &str = "macB";
-const DAY: i64 = 24 * 3600 * 1000;
+pub(super) const MAC: &str = "macB";
+pub(super) const DAY: i64 = 24 * 3600 * 1000;
 
-fn exec(r: &Rig, sql: &'static str, arg: i64) {
+pub(super) fn exec(r: &Rig, sql: &'static str, arg: i64) {
     r.d.shared()
         .with_core(|c| {
             c.conn().execute(sql, [arg])?;
@@ -23,11 +23,11 @@ fn exec(r: &Rig, sql: &'static str, arg: i64) {
 }
 
 /// The host's pairing epoch is a hash with no order: the tests use names.
-fn ep(n: i64) -> String {
+pub(super) fn ep(n: i64) -> String {
     format!("epoch-{n}")
 }
 
-fn link_dir(r: &Rig, dir: &str, epoch: i64) -> Value {
+pub(super) fn link_dir(r: &Rig, dir: &str, epoch: i64) -> Value {
     r.host(
         "ask.peerLink",
         &json!({"computer": MAC, "dir": dir, "epoch": ep(epoch)}),
@@ -35,20 +35,20 @@ fn link_dir(r: &Rig, dir: &str, epoch: i64) -> Value {
 }
 
 /// The pairing the computer's asks to this one come under.
-fn link_in(r: &Rig, epoch: i64) -> Value {
+pub(super) fn link_in(r: &Rig, epoch: i64) -> Value {
     link_dir(r, "in", epoch)
 }
 
 /// The pairing this one's asks to the computer go under.
-fn link_out(r: &Rig, epoch: i64) -> Value {
+pub(super) fn link_out(r: &Rig, epoch: i64) -> Value {
     link_dir(r, "out", epoch)
 }
 
-fn end_in(r: &Rig) -> Value {
+pub(super) fn end_in(r: &Rig) -> Value {
     r.host("ask.endPeer", &json!({"computer": MAC, "dir": "in"}))
 }
 
-fn end_out(r: &Rig) -> Value {
+pub(super) fn end_out(r: &Rig) -> Value {
     r.host("ask.endPeer", &json!({"computer": MAC, "dir": "out"}))
 }
 
@@ -64,7 +64,7 @@ fn drop_fence(r: &Rig, dir: &str) {
 }
 
 /// A peer ask of `boss`, in `sess-1`, for `echo` on `computer`.
-fn peer(r: &Rig, id: &str, computer: &str) -> Value {
+pub(super) fn peer(r: &Rig, id: &str, computer: &str) -> Value {
     r.open(
         id,
         "peer",
@@ -73,11 +73,17 @@ fn peer(r: &Rig, id: &str, computer: &str) -> Value {
     )
 }
 
-fn origin(r: &Rig, id: &str, key: &str, epoch: i64) -> Value {
+pub(super) fn origin(r: &Rig, id: &str, key: &str, epoch: i64) -> Value {
     r.host("ask.open", &origin_params(r, id, key, epoch, &[]))
 }
 
-fn origin_params(r: &Rig, id: &str, key: &str, epoch: i64, env: &[(&str, &str)]) -> Value {
+pub(super) fn origin_params(
+    r: &Rig,
+    id: &str,
+    key: &str,
+    epoch: i64,
+    env: &[(&str, &str)],
+) -> Value {
     let mut p = r.env(env);
     p["id"] = json!(id);
     p["asked"] = json!("echo");
@@ -89,7 +95,7 @@ fn origin_params(r: &Rig, id: &str, key: &str, epoch: i64, env: &[(&str, &str)])
     p
 }
 
-fn apply(
+pub(super) fn apply(
     r: &Rig,
     id: &str,
     epoch: i64,
@@ -111,14 +117,14 @@ fn apply(
 }
 
 /// The host's claim says no as an answer (`{refused}`) or as an error.
-fn was_refused(said: &Result<Value, Error>) -> bool {
+pub(super) fn was_refused(said: &Result<Value, Error>) -> bool {
     match said {
         Err(_) => true,
         Ok(v) => v.get("refused").is_some(),
     }
 }
 
-fn try_claim(r: &Rig, id: &str, turn: i64) -> Result<Value, Error> {
+pub(super) fn try_claim(r: &Rig, id: &str, turn: i64) -> Result<Value, Error> {
     r.call(
         Principal::Host,
         "hostclaim.claim",
@@ -127,7 +133,7 @@ fn try_claim(r: &Rig, id: &str, turn: i64) -> Result<Value, Error> {
     )
 }
 
-fn attach(r: &Rig, id: &str, claim: i64) -> Value {
+pub(super) fn attach(r: &Rig, id: &str, claim: i64) -> Value {
     let pid = std::process::id();
     let started = kith_kernel::procstart::start_stamp(pid).expect("a start stamp");
     r.d.shared()
@@ -135,11 +141,11 @@ fn attach(r: &Rig, id: &str, claim: i64) -> Value {
         .unwrap()
 }
 
-fn count(r: &Rig, sql: &str, arg: &str) -> i64 {
+pub(super) fn count(r: &Rig, sql: &str, arg: &str) -> i64 {
     r.sql(sql, arg)
 }
 
-fn wakes(r: &Rig) -> usize {
+pub(super) fn wakes(r: &Rig) -> usize {
     r.owner("wake.queueList", &json!({}))["items"]
         .as_array()
         .map_or(0, |items| {
@@ -281,13 +287,9 @@ fn an_origin_open_at_an_old_or_ended_epoch_is_a_refused_row_it_can_read() {
 fn a_cap_refusal_of_an_origin_open_is_a_row_too() {
     let r = Rig::new();
     link_out(&r, 1);
-    let p = origin_params(
-        &r,
-        "o1",
-        "k1",
-        1,
-        &[("KITH_ASK_CHAIN", "c1"), ("KITH_ASK_CROSS", "99")],
-    );
+    // The chain the other computer sent comes in `lineage`; the host's own environment is nobody's here.
+    let mut p = origin_params(&r, "o1", "k1", 1, &[]);
+    p["lineage"] = json!({"chain": "c1", "hop": 0, "cross": 99, "from": "x", "cost": 0.0});
     let said = r.host("ask.open", &p);
     assert_eq!(said["refused"], json!(true), "{said}");
     assert_eq!(r.ask_state("o1"), "refused");
@@ -439,6 +441,34 @@ fn a_new_epoch_replaces_the_old_and_ends_what_came_under_it_in_that_direction_on
 }
 
 #[test]
+fn end_peer_with_an_epoch_ends_only_that_pairing_never_a_newer_one() {
+    let r = Rig::new();
+    link_out(&r, 1);
+    peer(&r, "p", MAC);
+    // The owner re-linked since the caller read epoch 1: its end of epoch 1 changes nothing of epoch 2's.
+    let said = link_out(&r, 2);
+    assert_eq!(said["ended"], json!(["p"]), "{said}");
+    peer(&r, "q", MAC);
+    let stale = r.host(
+        "ask.endPeer",
+        &json!({"computer": MAC, "dir": "out", "epoch": ep(1)}),
+    );
+    assert_eq!(stale["ended"], json!([]), "{stale}");
+    assert_eq!(r.ask_state("q"), "open");
+    assert_eq!(
+        r.sql::<i64>("SELECT live FROM ask_peers WHERE epoch = ?1", &ep(2)),
+        1
+    );
+    // The live epoch named ends it.
+    let live = r.host(
+        "ask.endPeer",
+        &json!({"computer": MAC, "dir": "out", "epoch": ep(2)}),
+    );
+    assert_eq!(live["ended"], json!(["q"]), "{live}");
+    assert_eq!(r.ask_state("q"), "cut_off");
+}
+
+#[test]
 fn two_computers_paired_both_ways_end_one_direction_and_the_other_goes_on() {
     let r = Rig::new();
     link_in(&r, 1);
@@ -527,7 +557,97 @@ fn peer_owed_lists_the_send_then_the_follow_and_the_stop() {
     peer(&r, "p2", MAC);
     end_out(&r);
     let owed = r.host("ask.peerOwed", &json!({}));
-    assert_eq!(owed, json!({"send": [], "follow": [], "stop": []}));
+    assert_eq!(
+        owed,
+        json!({"send": [], "follow": [], "stop": [], "to": []})
+    );
+}
+
+#[test]
+fn an_eleventh_ask_is_held_back_here_and_goes_when_one_of_the_ten_ends() {
+    let r = Rig::new();
+    link_out(&r, 1);
+    for n in 0..11 {
+        peer(&r, &format!("q{n:02}"), MAC);
+    }
+    let listed = |r: &Rig| -> Vec<String> {
+        r.host("ask.peerOwed", &json!({}))["send"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let first = listed(&r);
+    assert_eq!(first.len(), 10, "{first:?}");
+    let held_back = (0..11)
+        .map(|n| format!("q{n:02}"))
+        .find(|id| !first.contains(id))
+        .unwrap();
+    // Ten of them open there: still ten, the same ones are owed.
+    apply(&r, &first[0], 1, &json!([]), Some("open"), None);
+    let second = listed(&r);
+    assert_eq!(second.len(), 9, "{second:?}");
+    assert!(!second.contains(&held_back), "{second:?}");
+    // One ends: the held-back ask is owed now.
+    apply(&r, &first[0], 1, &json!([]), Some("answered"), None);
+    let third = listed(&r);
+    assert!(third.contains(&held_back), "{third:?}");
+    assert_eq!(
+        r.ask_state(&held_back),
+        "open",
+        "never refused or cut off for waiting"
+    );
+}
+
+#[test]
+fn a_failed_try_shows_waiting_on_the_computer_and_a_call_it_answered_clears_it() {
+    let r = Rig::new();
+    link_out(&r, 1);
+    peer(&r, "p1", MAC);
+    let waiting = |r: &Rig| -> Value {
+        r.owner("ask.delegations", &json!({}))["delegations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["id"] == json!("p1"))
+            .unwrap()["waiting"]
+            .clone()
+    };
+    assert_eq!(waiting(&r), Value::Null);
+    let wakes_before = wakes(&r);
+    let mut p = r.env(&[]);
+    p["id"] = json!("p1");
+    p["epoch"] = json!(ep(1));
+    p["away"] = json!(true);
+    let said = r.host("ask.peerApply", &p);
+    assert_eq!(said["applied"], json!(false), "{said}");
+    let w = waiting(&r);
+    assert_eq!(
+        (&w["on"], &w["computer"]),
+        (&json!("computer"), &json!(MAC)),
+        "{w}"
+    );
+    let since = w["since"].clone();
+    assert!(since.is_i64(), "{w}");
+    // Nothing was settled and nothing was written: the ask is open, still owed its send, with no row and no wake.
+    assert_eq!(r.ask_state("p1"), "open");
+    assert_eq!(r.rows("p1"), Vec::<(String, bool)>::new());
+    assert_eq!(wakes(&r), wakes_before);
+    assert_eq!(
+        r.host("ask.peerOwed", &json!({}))["send"][0]["id"],
+        json!("p1")
+    );
+    // A second failed try keeps the first one's time.
+    r.host("ask.peerApply", &p);
+    assert_eq!(waiting(&r)["since"], since);
+    // The computer answered: the mark is gone.
+    apply(&r, "p1", 1, &json!([]), Some("open"), None);
+    assert_eq!(waiting(&r), Value::Null);
+    // An ask that is over waits on nothing, and a failed try does not mark it.
+    apply(&r, "p1", 1, &json!([]), Some("stopped"), None);
+    r.host("ask.peerApply", &p);
+    assert_eq!(waiting(&r), Value::Null);
 }
 
 #[test]
@@ -779,6 +899,8 @@ fn every_peer_row_checks_its_params_and_stays_off_the_run_socket() {
         ("ask.endPeer", Principal::Host),
         ("ask.peerApply", Principal::Host),
         ("ask.peerApply", Principal::Owner),
+        ("ask.peerThread", Principal::Host),
+        ("ask.peerStop", Principal::Host),
     ] {
         let unknown = r.call(
             who,
@@ -795,8 +917,10 @@ fn every_peer_row_checks_its_params_and_stays_off_the_run_socket() {
             "{method}: {none:?}"
         );
     }
-    let unknown = r.call(Principal::Host, "ask.peerOwed", &json!({"zzz": 1}));
-    assert!(matches!(unknown, Err(Error::BadParams(_))), "{unknown:?}");
+    for method in ["ask.peerOwed", "ask.peerList"] {
+        let unknown = r.call(Principal::Host, method, &json!({"zzz": 1}));
+        assert!(matches!(unknown, Err(Error::BadParams(_))), "{unknown:?}");
+    }
     // No guest reaches them.
     for (method, params) in [
         (
@@ -806,6 +930,15 @@ fn every_peer_row_checks_its_params_and_stays_off_the_run_socket() {
         ("ask.endPeer", json!({"computer": "x", "dir": "out"})),
         ("ask.peerApply", json!({"id": "x", "epoch": "e"})),
         ("ask.peerOwed", json!({})),
+        ("ask.peerList", json!({})),
+        (
+            "ask.peerThread",
+            json!({"computer": "x", "key": "k", "epoch": "e"}),
+        ),
+        (
+            "ask.peerStop",
+            json!({"id": "i", "computer": "x", "key": "k", "epoch": "e"}),
+        ),
     ] {
         let denied = r.call(Principal::RunToken, method, &params);
         assert!(

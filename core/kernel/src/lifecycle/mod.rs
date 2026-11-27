@@ -19,12 +19,20 @@ use serde_json::{Map, Value};
 use crate::threads::{Ctx, intent};
 
 pub mod cli;
+// The process that will be claude, parked until the claim names it: a fork on Unix, a spawn of this program on Windows (the
+// same functions, so `sweep.rs` is one text for both).
+#[cfg(unix)]
+pub mod proc;
+#[cfg(windows)]
+#[path = "proc_win.rs"]
 pub mod proc;
 pub mod sweep;
 pub mod transcript;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;
+#[cfg(all(test, windows))]
+mod win_tests;
 
 /// `$KITH_STATE` when it is set and not empty (`lc.state_dir()`).
 pub fn state_dir(c: &Ctx) -> Option<PathBuf> {

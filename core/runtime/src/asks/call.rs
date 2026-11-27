@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 use super::ledger::{self, Callee, Finish};
 use super::peer::{self, Apply, InRow};
+use super::peer_b;
 use super::rows::Kind;
 use super::{
     EndReq, LedgerOpen, Open, Origin, cap_told, check_to, delegations, end_tree, limits, open,
@@ -36,6 +37,9 @@ pub(crate) fn serves(method: &str) -> bool {
             | "ask.endPeer"
             | "ask.peerApply"
             | "ask.peerOwed"
+            | "ask.peerThread"
+            | "ask.peerStop"
+            | "ask.peerList"
     )
 }
 
@@ -99,7 +103,26 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
     match method {
         "ask.open" => {
             let (folders, _) = core.folders_for(params)?;
+            let from_origin = word(params, "originComputer").is_some();
             let env = |k: &str| {
+                if from_origin {
+                    // An ask another computer sent: the chain comes in `lineage` (its numbers are checked by the caps), and nobody
+                    // here is its caller, so nothing of this process's view (a person, an agent, an ask) is read as theirs.
+                    let l = params.get("lineage")?;
+                    let key = match k {
+                        "KITH_ASK_CHAIN" => "chain",
+                        "KITH_ASK_HOP" => "hop",
+                        "KITH_ASK_CROSS" => "cross",
+                        "KITH_ASK_FROM" => "from",
+                        "KITH_ASK_COST" => "cost",
+                        _ => return None,
+                    };
+                    return match l.get(key)? {
+                        Value::String(s) => Some(s.clone()),
+                        n @ Value::Number(_) => Some(n.to_string()),
+                        _ => None,
+                    };
+                }
                 params
                     .get("env")
                     .and_then(|e| e.get(k))
@@ -123,6 +146,11 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                 (None, None, None) => None,
                 _ => return Err(bad("originComputer, originKey and originEpoch go together")),
             };
+            // `kith ask AGENT@MINI` names the computer as its owner does: the id of a paired computer of that name stands for it.
+            let peer_id = match word(params, "peer").filter(|p| !p.is_empty()) {
+                Some(named) => Some(peer::resolve_computer_in(core.conn(), named)?),
+                None => None,
+            };
             let o = Open {
                 id: need(params, "id")?,
                 asked: word(params, "asked").unwrap_or_default(),
@@ -137,7 +165,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                     cli_pid: params.get("cliPid").and_then(Value::as_i64),
                     cli_start: word(params, "cliStart"),
                     engine: word(params, "engine"),
-                    peer: word(params, "peer"),
+                    peer: peer_id.as_deref(),
                     cont: word(params, "cont"),
                     origin,
                     opts: {
@@ -264,6 +292,7 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                 need(params, "computer")?,
                 need_dir(params)?,
                 need(params, "epoch")?,
+                word(params, "name").filter(|n| !n.is_empty()),
                 now,
             )?;
             Ok(json!({
@@ -278,7 +307,13 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
         }
         "ask.endPeer" => {
             let (computer, dir) = (need(params, "computer")?, need_dir(params)?);
-            let ended = peer::end(core, computer, dir, now)?;
+            let ended = peer::end(
+                core,
+                computer,
+                dir,
+                word(params, "epoch").filter(|e| !e.is_empty()),
+                now,
+            )?;
             Ok(json!({
                 "computer": computer,
                 "dir": dir,
@@ -321,15 +356,38 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
                     rows,
                     state: word(params, "state"),
                     cost: params.get("cost").and_then(Value::as_f64),
+                    to_sent: strings(params, "toSent"),
+                    away: flag(params, "away"),
                 },
                 now,
             )
         }
         "ask.peerOwed" => peer::owed(core),
+        "ask.peerList" => peer::list(core),
+        "ask.peerThread" => peer_b::thread(
+            core,
+            need(params, "computer")?,
+            need(params, "key")?,
+            need(params, "epoch")?,
+            params.get("after").and_then(Value::as_i64).unwrap_or(0),
+        ),
+        "ask.peerStop" => peer_b::stop(
+            core,
+            need(params, "id")?,
+            need(params, "computer")?,
+            need(params, "key")?,
+            need(params, "epoch")?,
+            now,
+        ),
         "ask.to" => {
             let id = need(params, "id")?;
-            check_to(core.conn(), id)?;
-            Ok(json!({ "id": id, "ok": true }))
+            // A message for a peer ask is kept to be sent (`ask.peerOwed`); any other ask only says it may be sent to.
+            if let Some(text) = word(params, "text").filter(|t| !t.is_empty()) {
+                peer_b::to_owed(core, id, text)
+            } else {
+                check_to(core.conn(), id)?;
+                Ok(json!({ "id": id, "ok": true }))
+            }
         }
         "ask.revokeEverywhere" => {
             let out = crate::revoke_order::revoke_everywhere(
