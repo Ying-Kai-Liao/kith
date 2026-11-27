@@ -130,6 +130,10 @@ async fn a_post_is_stamped_with_the_gen_at_its_append_and_a_repeat_writes_one_li
     let id = first["entry"]["id"].as_str().unwrap();
     assert_eq!(r.hub.store.origin_gen(id), Some(joined), "the room's gen at the append");
     assert_eq!(first["entry"]["data"]["sender"], json!({"person": "sam", "name": "Sam"}));
+    // Who prompted is the owner's to see: the person's own copy has none, the owner's says `person`.
+    assert!(first["entry"]["data"]["prompter"].is_null(), "{first}");
+    let stored = r.hub.store.entry(first["entry"]["id"].as_str().unwrap()).unwrap();
+    assert_eq!(stored.data["prompter"], json!({"kind": "person", "name": "sam"}));
     assert_eq!(texts(&r, &phone, &room).await, ["hello"]);
     // It opened one conversation, the person's own (PR C), and with no @-mention it starts no agent.
     let conv = r.hub.store.newest_conversation(&Lane::main(&room)).expect("the post opens a conversation");

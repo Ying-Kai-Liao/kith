@@ -57,7 +57,12 @@ pub(crate) struct Run<'a> {
     pub what: &'static str,
     /// What the run's end is called in a reason ("the scheduled run"): "<ended> ended with <status>".
     pub ended: &'static str,
+    /// Told why when the run did not end well, once the end is reported (the Feed's failing card for a cron job).
+    pub on_fail: Option<FailHook>,
 }
+
+/// What a kind does with the reason of a run that ended badly. Runs on the waiter's thread.
+pub(crate) type FailHook = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// What a kind starts once its turn is claimed.
 pub(crate) struct Launch {
@@ -121,13 +126,13 @@ pub(crate) fn start_with(
     match spawn_with(cmd, stdin.as_ref()) {
         Ok(child) => {
             let keep = bind.map(|bind| bind(child.id()));
-            let (writer, turn, ended) = (writer.clone(), run.turn, run.ended);
+            let (writer, turn, ended, on_fail) = (writer.clone(), run.turn, run.ended, run.on_fail.clone());
             std::thread::spawn(move || {
-                match watch {
+                let failed = match watch {
                     None => over_with(&writer, child, claim, turn, &Pace::LIVE, err_file.as_deref(), ended),
                     Some(Watch { every, ended: gone, after }) => {
                         let pace = &Pace::LIVE;
-                        over_watching(
+                        let failed = over_watching(
                             &writer,
                             child,
                             claim,
@@ -138,7 +143,11 @@ pub(crate) fn start_with(
                             Some((every, &*gone)),
                         );
                         after();
+                        failed
                     }
+                };
+                if let (Some(why), Some(on_fail)) = (failed, on_fail) {
+                    on_fail(&why);
                 }
                 drop(keep);
             });
@@ -247,8 +256,8 @@ pub(crate) fn over_with(
     pace: &Pace,
     err_file: Option<&Path>,
     ended: &str,
-) {
-    over_watching(writer, child, claim, turn, pace, err_file, ended, None);
+) -> Option<String> {
+    over_watching(writer, child, claim, turn, pace, err_file, ended, None)
 }
 
 /// [`over_with`] for a run whose claim the core may end under it: with `watch` (how often to look, and the question) the child is
@@ -263,7 +272,7 @@ pub(crate) fn over_watching(
     err_file: Option<&Path>,
     ended: &str,
     watch: Option<(Duration, &(dyn Fn() -> bool + Send))>,
-) {
+) -> Option<String> {
     let pid = child.id();
     // Until the run is the engine, stderr is its refusal; the engine's own output goes to its log, so this is EOF by then.
     let mut said = String::new();
@@ -289,6 +298,7 @@ pub(crate) fn over_watching(
         until_told("cancel", turn, pace, || writer.cancel_told(turn, &why));
     }
     until_told("report", turn, pace, || writer.run_over(claim, pid, clean, &why));
+    (!clean).then_some(why)
 }
 
 /// Waits for the child, asking `gone` every `every`: when the core ended the run's claim, the child is stopped (its group first, so

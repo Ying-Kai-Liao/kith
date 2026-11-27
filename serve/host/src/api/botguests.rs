@@ -1186,7 +1186,8 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
         "owner": bot.owner_person, "speaker": speaker,
     });
     // `pasted`: memory never takes a bot's text as its owner's own words.
-    let data = json!({"text": text, "clientNonce": nonce, "status": "queued", "attachments": [], "pasted": [text], "sender": sender});
+    let data = json!({"text": text, "clientNonce": nonce, "status": "queued", "attachments": [], "pasted": [text], "sender": sender,
+        "prompter": crate::prompter::value(crate::prompter::Kind::Person, Some(&bot.bot_id))});
     let entry =
         hub.add_entry(&lane, EntryKind::User, turn, &data).ok_or_else(|| anyhow!("couldn't save the message"))?;
     hub.store.touch_bot_conversation(&conv.conversation_id, speaker.as_deref())?;
@@ -1282,7 +1283,8 @@ async fn ask_room(
         "botId": bot.bot_id, "name": bot.name, "provider": bot.provider,
         "owner": bot.owner_person, "speaker": speaker,
     });
-    let data = json!({"text": text, "clientNonce": nonce, "attachments": [], "pasted": [text], "sender": sender});
+    let data = json!({"text": text, "clientNonce": nonce, "attachments": [], "pasted": [text], "sender": sender,
+        "prompter": crate::prompter::value(crate::prompter::Kind::Person, Some(&bot.bot_id))});
     let turn = hub.store.max_turn(room);
     let entry =
         hub.add_entry(&lane, EntryKind::User, turn, &data).ok_or_else(|| anyhow!("couldn't save the message"))?;
@@ -1391,6 +1393,7 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
     let mut data = json!({
         "text": text, "clientNonce": nonce, "attachments": [], "pasted": [text], "sender": sender,
         "conversation": conv.id, "epoch": epoch, "replied": replies,
+        "prompter": crate::prompter::value(crate::prompter::Kind::Person, Some(&bot.bot_id)),
     });
     if let Some(k) = turn_key {
         data["turnKey"] = k.into();

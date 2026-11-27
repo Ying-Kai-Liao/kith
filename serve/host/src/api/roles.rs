@@ -373,6 +373,8 @@ pub fn may_see_summary(person: Option<&str>, audience: &str) -> bool {
 /// Drops the thread summary from the row of entry `e` (an entry as JSON) unless `person` may see it; the audience
 /// itself is never sent to an invited person.
 fn hide_foreign_summary(person: &str, e: &mut Value) {
+    // Who prompted an entry is the owner's to see (`prompter`): every entry an invitee is shown comes through here.
+    crate::prompter::strip(e);
     let Some(thread) = e["data"]["thread"].as_object_mut() else { return };
     let audience = thread.remove("summaryAudience");
     if !audience.as_ref().and_then(Value::as_str).is_some_and(|a| may_see_summary(Some(person), a)) {

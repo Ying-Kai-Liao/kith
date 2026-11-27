@@ -205,6 +205,9 @@ pub enum Who<'a> {
     Agent(&'a str),
     /// The agent's tidying.
     Tidy(&'a str),
+    /// The host noting a Feed post the user liked in the agent's memory: the user's act, but the text (the post's
+    /// title) is the agent's own, so it is checked like an agent's.
+    Liked(&'a str),
     /// The user, by hand or from their own terminal: never checked.
     Kai,
 }
@@ -214,6 +217,7 @@ impl Who<'_> {
         match self {
             Who::Agent(name) => (Author::Bot, Some(name.to_owned()), Cause::Edit),
             Who::Tidy(name) => (Author::Tidy, Some(name.to_owned()), Cause::Tidy),
+            Who::Liked(name) => (Author::User, Some(name.to_owned()), Cause::Feedback),
             Who::Kai => (Author::User, None, Cause::Edit),
         }
     }

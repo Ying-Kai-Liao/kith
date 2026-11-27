@@ -25,6 +25,7 @@ mod delegation;
 mod doors;
 mod engine_run;
 mod environment;
+mod feed;
 mod health;
 mod hqmem;
 mod hub;
@@ -39,6 +40,7 @@ mod market;
 mod mcp;
 #[cfg(unix)]
 mod pkg_cmd;
+mod prompter;
 mod remote;
 mod rich_card;
 mod routines;

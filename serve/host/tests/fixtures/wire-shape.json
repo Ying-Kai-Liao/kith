@@ -192,6 +192,8 @@
     "event:entry(user).entry.data.attachments": "array",
     "event:entry(user).entry.data.clientNonce": "string",
     "event:entry(user).entry.data.projects": "array",
+    "event:entry(user).entry.data.prompter": "object",
+    "event:entry(user).entry.data.prompter.kind": "string",
     "event:entry(user).entry.data.status": "string",
     "event:entry(user).entry.data.text": "string",
     "event:entry(user).entry.id": "string",

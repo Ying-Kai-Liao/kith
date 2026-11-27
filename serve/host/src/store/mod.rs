@@ -17,6 +17,7 @@ mod memory;
 mod model;
 mod peers;
 mod people;
+mod posts;
 mod room_bots;
 mod room_people;
 mod room_secrets;
@@ -37,6 +38,7 @@ pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, i
 pub use model::{native_ids, native_refusal};
 pub use peers::{PeerIn, PeerOut};
 pub use people::{Invite, Membership, PersonRow};
+pub use posts::Post;
 pub use room_bots::RoomPoint;
 pub use room_people::Stay;
 pub use room_secrets::{RoomSecret, SecretTo};
