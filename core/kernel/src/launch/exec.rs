@@ -423,8 +423,15 @@ fn run_one(
     };
     let mut env = plan.env.clone();
     // The host's claim is this launch's to attach; the engine and a nested `kith` never see it.
+    // A claimed turn on the very session it resumes (a wake) continues it or does not run: the engine is told, as it never sees the
+    // turn's conversation.
+    let resume_only = !plan.resume.is_empty() && get(&env, "KITH_TURN_CONVERSATION") == plan.resume;
     for k in TURN_VARS {
         env.remove(k);
+    }
+    env.remove("KITH_RESUME_ONLY");
+    if resume_only {
+        env.insert("KITH_RESUME_ONLY".to_owned(), "1".to_owned());
     }
     if let Some(s) = sched
         && let Err(code) = s.attach(&taker, pid)

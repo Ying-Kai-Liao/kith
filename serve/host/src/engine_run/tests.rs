@@ -157,3 +157,19 @@ async fn an_agent_stored_on_the_dropped_dsh_engine_gets_a_clear_refusal() {
     };
     assert!(run(args).await.is_err_and(|e| format!("{e:#}").contains("no engine called dsh")));
 }
+
+#[test]
+fn a_run_that_may_only_continue_refuses_what_it_cannot_resume_and_a_hand_run_starts_a_new_session() {
+    // KITH_RESUME_ONLY: a claimed turn on that session (a wake).
+    assert_eq!(
+        resume_checked("codex", Some("codex:abc"), true),
+        Ok(Some("abc".to_owned())),
+        "its own session continues"
+    );
+    assert!(resume_checked("codex", Some("abc"), true).is_err(), "a bare Claude id is not codex's");
+    assert!(resume_checked("codex", Some("opencode:abc"), true).is_err());
+    assert!(resume_checked("codex", Some("codex:"), true).is_err());
+    assert_eq!(resume_checked("codex", None, true), Ok(None), "nothing to continue: a fresh run");
+    // A hand run keeps "starting a new one".
+    assert_eq!(resume_checked("codex", Some("abc"), false), Ok(None));
+}

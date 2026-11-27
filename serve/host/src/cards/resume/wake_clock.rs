@@ -16,9 +16,10 @@
 //!   by its turn (R4), so the host only reports how the process ended.
 //! - **A terminal holds the session**: the claim is refused as held and the turn stays where it is (the tick parks it, and
 //!   unparks it when the terminal lets go): nothing starts beside the terminal.
-//! - **Until sched-turn S1** a detached turn runs only a Claude session: any other engine's turn is cancelled up front (the
-//!   core gives its requests back as a failed try; after five they end `failed`) and never started without its claim, because a
-//!   host restart would requeue it and its prompt would go out twice ([`engine_gap`]).
+//! - **Any engine runs**: a Claude agent's turn is `kith AGENT --resume SESSION NOTE`; another engine's is the kernel's launch,
+//!   `<launch program> kernel launch AGENT --exec --kernel K -- NOTE` (the door of a background ask), the session handed on as
+//!   `KITH_RESUME` (`<engine>:<id>` sessions only; a bare Claude id stays on `kith AGENT --resume`). Both attach to the claim from `KITH_TURN_CLAIM`. With no
+//!   launch program or no kernel the turn is unstarted (owed again), never cancelled ([`command_with`]).
 //!
 //! The run's output goes where `kith-ask` reads a follow-up's words: `<logs>/wake/<run>.log` and `.err`.
 
@@ -38,8 +39,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-/// Said when a turn cannot run detached yet; the reason a cancelled turn carries.
-pub(super) const ENGINE_GAP: &str = "this agent's engine cannot run detached turns yet";
+/// What a turn on a session of another engine says when it is given back (the core counts it as a failed try).
+const WRONG_ENGINE: &str = "the session belongs to another engine than the agent's";
 /// What a cancelled interrupted run says: a restart cut off a run whose prompt may have gone out.
 const INTERRUPTED: &str = "interrupted: a restart cut this run off";
 /// How long a run handed to a door of the old kind (a bot's actor, a channel run) is not handed again: its turn stays listed
@@ -135,15 +136,76 @@ fn old_door(session: &str) -> bool {
     session.starts_with("acp:") || session.contains('#')
 }
 
-/// Whether a turn may be started detached today. Until sched-turn S1 (`kernel launch AGENT --exec --kernel K --turn N --claim C`)
-/// lands, the host's launch is `kith AGENT --resume SESSION`: a Claude session. One place, so S1's follow-up switches it.
-///
-/// The agent's harness decides (the rule the launch uses: `harness:` of agent.md, unset is claude); the conversation's engine
-/// column is only the answer for an agent whose file cannot be read, since the core defaults a session it has not seen to claude.
-pub(super) fn engine_gap(t: &Value, harness: Option<&str>) -> Option<&'static str> {
+/// Which way a wake turn runs: it continues the session it is owed on, or it does not run.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Way {
+    /// `kith AGENT --resume SESSION`: a Claude session (a bare id), on the account it was made under, whatever the agent runs on now.
+    Claude,
+    /// The kernel's launch, for a session of the agent's own engine (`<engine>:<id>`).
+    Launch,
+    /// The session belongs to another engine than the agent's: nothing starts, the turn is given back.
+    Refused,
+}
+
+/// The session decides, not the agent's harness: an agent that moved off Claude still owes its Claude sessions. The agent's
+/// harness (`harness:` of agent.md, unset is claude) is the engine a prefixed session must be of; the conversation's engine column
+/// answers only for an agent whose file cannot be read.
+pub(super) fn way_of(t: &Value, harness: Option<&str>, session: &str) -> Way {
+    let is_claude = |e: &str| e.eq_ignore_ascii_case("claude") || e.eq_ignore_ascii_case("claude-code");
     let engine = harness.or_else(|| t["engine"].as_str());
-    (!engine.is_some_and(|e| e.eq_ignore_ascii_case("claude") || e.eq_ignore_ascii_case("claude-code")))
-        .then_some(ENGINE_GAP)
+    match session.split_once(':') {
+        None => Way::Claude,
+        Some(_) if engine.is_some_and(is_claude) => Way::Claude,
+        Some((prefix, _)) if engine.is_some_and(|e| e.eq_ignore_ascii_case(prefix)) => Way::Launch,
+        Some(_) => Way::Refused,
+    }
+}
+
+/// The program, arguments and environment of a turn's run (before its claim joins the environment).
+pub(super) struct RunCommand {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+/// What a wake turn runs. Claude: `kith AGENT --resume SESSION NOTE` through `bin` (as `spawn_with` builds it). Another engine:
+/// `<launch> kernel launch AGENT --exec --kernel K -- NOTE`, the door of a background ask: the session rides in `KITH_RESUME` (a
+/// handed-on session: the launch starts a new one when it was made under another account), the conversation in
+/// `KITH_TURN_CONVERSATION`, a card's ask in `KITH_LAUNCH_ASK_ID` (what `kith ask --reply` sets). The run stays on the session's own account: no account walk.
+/// `None`: the program the turn needs is not here, and the turn stays owed.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn command_with(
+    way: &Way,
+    bin: Option<PathBuf>,
+    launch: Option<PathBuf>,
+    kernel: Option<&Path>,
+    agent: &str,
+    person: &str,
+    reply_to: Option<&str>,
+    session: &str,
+    note: &str,
+) -> Option<RunCommand> {
+    let spawn = spawn_with(agent, person, reply_to, session, note);
+    if *way != Way::Launch {
+        return Some(RunCommand { program: bin?, args: spawn.args, env: spawn.env });
+    }
+    let (program, kernel) = (launch?, kernel?);
+    let args = ["kernel", "launch", agent, "--exec", "--kernel"]
+        .into_iter()
+        .map(str::to_owned)
+        .chain([kernel.to_string_lossy().into_owned(), "--".to_owned(), note.to_owned()])
+        .collect();
+    let mut env = spawn.env;
+    let mut set = |name: &str, v: &str| {
+        env.retain(|(k, _)| k != name);
+        env.push((name.to_owned(), v.to_owned()));
+    };
+    set("KITH_TURN_CONVERSATION", session);
+    set("KITH_RESUME", session);
+    if let Some(id) = reply_to {
+        set("KITH_LAUNCH_ASK_ID", id);
+    }
+    Some(RunCommand { program, args, env })
 }
 
 /// The `harness:` of the agent's pinned snapshot (`kith-pkg resolve`, what the launch reads: `$pkg/agent.md`), `claude` when it
@@ -238,22 +300,28 @@ async fn door(hub: &Arc<Hub>, core: &Arc<CoreWriter>, t: &Value, core_turn: i64,
         let agent = turn.agent.clone();
         wake::blocking(move || harness_of_agent(&agent)).await.flatten()
     };
-    if let Some(why) = engine_gap(t, harness.as_deref()) {
-        tracing::warn!(run = %turn.run, why, "wake: a detached turn that cannot run is cancelled before its claim");
-        return cancel(core, core_turn, why).await;
-    }
-    let Some(bin) = crate::agent::hq::bin() else { return unstarted(hub, &turn.run, true, false) };
     let reply = live.iter().find(|c| c.reply_to.is_some());
-    let spawn = spawn_with(
+    let way = way_of(t, harness.as_deref(), session);
+    if way == Way::Refused {
+        tracing::warn!(run = %turn.run, session, "wake: the session is of another engine than the agent's; the turn is given back");
+        return cancel(core, core_turn, WRONG_ENGINE).await;
+    }
+    let Some(spawn) = command_with(
+        &way,
+        crate::agent::hq::bin(),
+        crate::kernel::launch_program(),
+        crate::kernel::current_kernel().as_deref(),
         &turn.agent,
         person.as_deref().unwrap_or_default(),
         reply.and_then(|c| c.reply_to.as_deref()),
         session,
         &note,
-    );
+    ) else {
+        return unstarted(hub, &turn.run, true, false);
+    };
     let asked = reply.and_then(|c| crate::runauth::AskReply::parse(c.reply_to.as_deref()?, c.asked_by.as_deref()));
     let plan = Plan {
-        bin,
+        bin: spawn.program,
         args: spawn.args,
         env: spawn.env,
         asked,
@@ -425,6 +493,10 @@ fn lifecycle_command_with(program: Option<PathBuf>, kernel: Option<PathBuf>) -> 
     cmd.arg("sweep");
     Some(cmd)
 }
+
+#[cfg(test)]
+#[path = "wake_clock_command_tests.rs"]
+mod command_tests;
 
 // Unix-only until retire-python P1-12: the run door's stand-in `kith` is a shell script (no Windows kernel launcher before it).
 #[cfg(all(test, unix))]
