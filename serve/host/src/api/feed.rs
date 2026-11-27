@@ -1,11 +1,11 @@
 //! The owner's Feed: `feed`, `hidePost` and `stories` (designs/2026-11-24-app-to-design/phase2-feed, sections 6 and 9).
 //! All of them are the owner's alone: none is on the member or bot lists, so `guard` and `bot_call` never reach this
-//! file. `likePost` and `feedRoute` are in the contract and answer "not yet" until their packages fill them in.
+//! file. `likePost` and `feedRoute` are too.
 
 use super::str_arg;
 use crate::hub::Hub;
 use crate::store::{ReadScope, now_ms};
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::ops::ControlFlow;
 
@@ -20,8 +20,9 @@ pub(super) fn call(hub: &Hub, method: &str, b: Value) -> Result<ControlFlow<Valu
         "feed" => feed(hub, &b)?,
         "hidePost" => hide(hub, &b)?,
         "stories" => stories(hub)?,
-        // Their packages fill these in; an app asks and gets this until then.
-        "likePost" | "feedRoute" => bail!("this host doesn't answer {method} yet"),
+        "likePost" => like(hub, &b)?,
+        // Async, so api/mod.rs awaits `route` first; the arm keeps the method in this file for the router walk.
+        "feedRoute" => return Err(anyhow!("feedRoute is answered by the async router")),
         _ => return Ok(ControlFlow::Continue(b)),
     }))
 }
@@ -38,6 +39,18 @@ fn feed(hub: &Hub, b: &Value) -> Result<Value> {
         out["next"] = next.into();
     }
     Ok(out)
+}
+
+fn like(hub: &Hub, b: &Value) -> Result<Value> {
+    let liked = b["liked"].as_bool().ok_or_else(|| anyhow!("`liked` is required"))?;
+    let post = crate::feed::like::like_post(hub, str_arg(b, "id")?, liked)?;
+    Ok(json!({"post": post.json()}))
+}
+
+/// The agent the bottom box sends a text to (async: it asks `kith who`). Read-only; `feedRoute` is taken before
+/// `call`, which is sync.
+pub(super) async fn route(b: &Value) -> Result<Value> {
+    Ok(crate::feed::route::route(str_arg(b, "text")?).await)
 }
 
 fn hide(hub: &Hub, b: &Value) -> Result<Value> {

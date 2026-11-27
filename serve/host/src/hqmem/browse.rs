@@ -122,6 +122,7 @@ fn cause(v: &Version) -> &'static str {
         Cause::Undo => "undo",
         Cause::Tidy => "tidy",
         Cause::Baseline => "baseline",
+        Cause::Feedback => "feedback",
     }
 }
 
