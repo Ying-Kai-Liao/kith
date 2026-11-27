@@ -457,6 +457,14 @@
       "doc": "This computer's load now: cpu is {percent: number, cores: int} (json: the contract has no number type), null where unread.",
       "fields": { "at": "int", "cpu": "json?", "memory": "HostMemory", "disks": "[HostDisk]" }
     },
+    "AgentRule": {
+      "doc": "One permission rule of an agent, raw (placeholders such as {{HOME_REAL}} unexpanded). list is allow, ask or deny; source is role/settings.json or allowed.json; id and kind come only from allowed.json entries.",
+      "fields": { "list": "string", "rule": "string", "source": "string", "id": "string?", "kind": "string?" }
+    },
+    "AgentRules": {
+      "doc": "An agent's permission rules, as the launcher merges them at launch: role/settings.json allow, ask and deny, then allowed.json (as allow).",
+      "fields": { "agent": "string", "rules": "[AgentRule]" }
+    },
     "CreatedInvite": {
       "doc": "What making an invite answers: its id and links, when it lapses, and the person it is for.",
       "fields": {
@@ -987,6 +995,12 @@
       "who": ["owner"],
       "params": {},
       "result": "HostHealth"
+    },
+    "agentRules": {
+      "doc": "An agent's permission rules as data, read-only: role/settings.json allow, ask and deny, then allowed.json (as allow), each tagged with its source. Placeholders stay as written. An unknown agent, or a malformed settings.json or allowed.json, is an error; a missing file is an empty list.",
+      "who": ["owner"],
+      "params": { "agent": "string" },
+      "result": "AgentRules"
     },
     "myRooms": {
       "doc": "Rooms with people: the group rooms they are in right now (an open stay and every agent of the room still granted). Open them with history, thread, send and react, with the room's id as botId.",
