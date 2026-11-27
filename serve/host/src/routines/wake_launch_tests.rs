@@ -130,6 +130,14 @@ fn still_owed(w: &World, session: &str, claim: i64) {
     assert_eq!(turns.len(), 1, "one turn row: {turns:?}");
     assert_eq!(turns[0].1, "claimed", "{turns:?}");
     assert_ne!(wake::status(&w.folders.state, "card:c1").as_deref(), Some("answered"), "never answered");
+    // The host then sees a launch that never attached and gives the claim back (`unattached` in the channel wake, `free` here):
+    // the turn ends as a failed try, never claimed for ever, and the wake stays unanswered for the clock to try again.
+    let host = std::sync::Arc::new(CoreWriter::with_instance(w.folders.clone(), "host-1".to_owned()));
+    crate::routines::run_door::free(&host, turns[0].0, "the launch refused the wake");
+    until("the refused turn is given back", || w.turns(session)[0].1 != "claimed");
+    assert_eq!(w.turns(session)[0].1, "cancelled", "{:?}", w.turns(session));
+    assert_eq!(w.show(claim)["state"], "ended", "the claim is freed with it");
+    assert_ne!(wake::status(&w.folders.state, "card:c1").as_deref(), Some("answered"), "still not answered");
 }
 
 #[test]
