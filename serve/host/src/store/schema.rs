@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version (kv `schema`).
-const SCHEMA: i64 = 20;
+const SCHEMA: i64 = 21;
 
 /// 3: authorized devices (keys, not push tickets) with their push and Live Activity
 /// tickets. The old ticket-only `devices` table is dropped; phones re-register on connect.
@@ -40,6 +40,8 @@ const SCHEMA: i64 = 20;
 /// 19: people in a group room (`room_people`, designs/2026-11-12-rooms-with-people) and the gen each entry came from
 /// (`entries.origin_gen`; NULL is unstamped, which a person in a room never sees).
 /// 20: the rooms an invite names (`invite_rooms`, with a done mark per room), so the cloud's invite format stays as it was.
+/// 21: the owner's Feed (`posts`, designs/2026-11-24-app-to-design/phase2-feed): one row per fold key, written only by
+/// `Store::put_post`; and `entries_kind_at`, for the stories row.
 fn migrate(c: &Connection) -> Result<()> {
     let version: i64 =
         c.query_row("SELECT CAST(v AS INTEGER) FROM kv WHERE k = 'schema'", [], |r| r.get(0)).optional()?.unwrap_or(0);
@@ -83,7 +85,27 @@ fn migrate(c: &Connection) -> Result<()> {
     migrate_17(c)?;
     migrate_18(c)?;
     migrate_19(c)?;
-    migrate_20(c)
+    migrate_20(c)?;
+    migrate_21(c)
+}
+
+fn migrate_21(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "BEGIN;
+         CREATE TABLE IF NOT EXISTS posts(
+            id TEXT PRIMARY KEY, rev INTEGER NOT NULL, fold_key TEXT NOT NULL UNIQUE, agent TEXT NOT NULL,
+            kind TEXT NOT NULL, title TEXT NOT NULL, line TEXT NOT NULL DEFAULT '', attachment TEXT,
+            items TEXT NOT NULL DEFAULT '[]', fact_at INTEGER NOT NULL, fact_id TEXT NOT NULL,
+            streak INTEGER NOT NULL DEFAULT 0, source_chat TEXT NOT NULL, source_thread TEXT, source_entry TEXT,
+            \"by\" TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, liked_at INTEGER,
+            noted_at INTEGER, hidden_at INTEGER);
+         CREATE INDEX IF NOT EXISTS posts_feed ON posts(hidden_at, updated_at DESC);
+         CREATE INDEX IF NOT EXISTS posts_rev ON posts(rev);
+         CREATE INDEX IF NOT EXISTS entries_kind_at ON entries(kind, created_at);
+         INSERT INTO kv(k, v) VALUES('schema', '21') ON CONFLICT(k) DO UPDATE SET v = '21';
+         COMMIT;",
+    )?;
+    Ok(())
 }
 
 fn migrate_20(c: &Connection) -> Result<()> {
@@ -467,7 +489,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("20"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("21"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
     }
@@ -488,7 +510,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("20"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("21"));
         let lane = crate::store::Lane::main("g");
         assert_eq!(s.lane_epoch(&lane), 0);
         let conv = s.open_conversation(&lane, 10, "owner").unwrap();
@@ -511,7 +533,7 @@ mod tests {
                 .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("20"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("21"));
         assert!(s.peers_in().unwrap().is_empty() && s.peers_out().unwrap().is_empty());
     }
 
@@ -531,7 +553,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("20"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("21"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         assert!(s.push_tickets().is_empty(), "push tickets have a voip column");
         drop(s);

@@ -87,6 +87,8 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "lifecycle",
         "paths",
         "permit",
+        // `kernel permit feed-post` (the feed_post tool's CLI twin); `kith feed post` needs it, an older program would start the MCP server.
+        "permit-feed",
         "pkg",
         "project",
         // `kernel project-id` answers a guest run (the run-socket client, project/guest.rs); the stub bin/project-id needs it.
@@ -163,7 +165,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","ask-ledger","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","launch-exec-term","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","turn-conversation","wake"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","ask-ledger","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","launch-exec-term","lifecycle","paths","permit","permit-feed","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","turn-conversation","wake"]}"#
         );
     }
 }

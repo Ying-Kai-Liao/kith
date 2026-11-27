@@ -407,6 +407,7 @@ impl Plan {
             kind: "wakeRun",
             what: "kith --resume",
             ended: "the wake run",
+            on_fail: None,
         };
         let (handle, session) = (handle.clone(), conversation.clone());
         run_door::start(writer, &run, move |claim| {

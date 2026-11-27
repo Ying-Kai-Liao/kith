@@ -44,6 +44,9 @@ pub(crate) const INTERRUPTED: &str = "interrupted: a restart cut this run off";
 pub(super) struct Item {
     turn: i64,
     bot: String,
+    /// The agent and job the core fired: what the Feed names the run's card by.
+    agent: String,
+    job: String,
     conversation: String,
     person: String,
     prompt: String,
@@ -252,6 +255,8 @@ impl Routines {
             let item = Item {
                 turn,
                 bot,
+                agent: agent.to_owned(),
+                job: job.to_owned(),
                 conversation: t["conversation"].as_str().unwrap_or_default().to_owned(),
                 person: t["person"].as_str().unwrap_or_default().to_owned(),
                 prompt: t["prompt"].as_str().unwrap_or_default().to_owned(),
@@ -378,10 +383,27 @@ impl Routines {
                        "style": "error", "coreTurn": item.turn, "runId": id}),
             ),
         };
-        Some(
-            hub.add_entry_once(&format!("schedule-result-{}", item.turn), &Lane::main(&item.bot), kind, &data)
-                .map(drop),
-        )
+        let said = hub.add_entry_once(&format!("schedule-result-{}", item.turn), &Lane::main(&item.bot), kind, &data);
+        if let Ok((entry, true)) = &said {
+            crate::feed::host::run_post(
+                hub,
+                crate::feed::host::RunFact {
+                    chat: &item.bot,
+                    person: None,
+                    agent: Some(&item.agent),
+                    entry: Some(&entry.id),
+                    key: format!("job:{}", item.job),
+                    name: &item.name,
+                    text: data["text"].as_str().unwrap_or_default(),
+                    ok: status == Status::Succeeded,
+                    attachment: None,
+                    kind: None,
+                    fact_at: crate::store::now_ms(),
+                    fact_id: id.to_owned(),
+                },
+            );
+        }
+        Some(said.map(drop))
     }
 
     /// Tests: the items held now, `(turn, bot, pending)`.

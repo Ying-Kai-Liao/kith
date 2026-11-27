@@ -67,7 +67,7 @@ pub struct Hub {
     pub port: u16,
     pub events: broadcast::Sender<Value>,
     /// Held across "mutate store + broadcast" so events leave in rev order.
-    emit_lock: Mutex<()>,
+    pub(crate) emit_lock: Mutex<()>,
     /// Bot id -> its actors, one per place it talks (see `actors`).
     bots: Mutex<HashMap<String, actors::BotActors>>,
     /// Actor key (see `agent::bot::actor_key`) -> what that actor is doing.
@@ -239,6 +239,7 @@ impl Hub {
         crate::run_outbox::start(self);
         crate::analytics::start(self);
         hq::start(self);
+        crate::feed::like::start(self);
         crate::terminal::start(self);
         Ok(())
     }
@@ -698,6 +699,11 @@ impl Hub {
             }
         }
         landed
+    }
+
+    /// This hub as an `Arc`, for a thread that outlives the call (`None` while the host shuts down).
+    pub(crate) fn shared(&self) -> Option<Arc<Self>> {
+        self.me.upgrade()
     }
 
     /// Writes held entries again; the host calls it periodically, and every new entry does the same.
