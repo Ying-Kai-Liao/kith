@@ -114,6 +114,7 @@ fn a_wake_turn_is_claimed_only_while_the_wake_queue_is_switched() {
     let (_t, m) = machine();
     let mut c = open_all(&Layout::new(&m)).with_folders(&crate::tests::paths(&m));
     claims::reconcile(&mut c, &[], &[], i64::MAX, 1).unwrap();
+    let seen = claims::revoke_epoch(&c, "kai").unwrap();
     let turn = claims::enqueue_turn(
         &mut c,
         &NewTurn {
@@ -124,7 +125,7 @@ fn a_wake_turn_is_claimed_only_while_the_wake_queue_is_switched() {
             person: "kai",
             prompt: "[kith wake r1] hi",
             deadline: None,
-            revoke_seen: claims::revoke_epoch(&c, "kai").unwrap(),
+            revoke_seen: seen,
         },
         NOW,
     )

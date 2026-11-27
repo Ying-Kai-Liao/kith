@@ -35,7 +35,9 @@ mod tick_tests;
 mod turns;
 mod waiters;
 
-pub(crate) use call::{call, call_open, serves};
+#[cfg(test)]
+pub(crate) use call::call_open;
+pub(crate) use call::{call, serves};
 #[cfg(unix)]
 pub(crate) use tick::settle_only;
 pub(crate) use tick::{CoreLock, World, system, tick};

@@ -144,6 +144,7 @@ fn each_refusal_of_the_rollback_is_found_on_its_own() {
         "{said:?}"
     );
     // (c) two wake runs of one conversation that are not waiting.
+    let seen = claims::revoke_epoch(&c, "owner").unwrap();
     let t2 = claims::enqueue_turn(
         &mut c,
         &claims::NewTurn {
@@ -154,11 +155,12 @@ fn each_refusal_of_the_rollback_is_found_on_its_own() {
             person: "owner",
             prompt: "x",
             deadline: None,
-            revoke_seen: claims::revoke_epoch(&c, "owner").unwrap(),
+            revoke_seen: seen,
         },
         now(),
     )
     .unwrap();
+    let seen = claims::revoke_epoch(&c, "owner").unwrap();
     let t3 = claims::enqueue_turn(
         &mut c,
         &claims::NewTurn {
@@ -169,7 +171,7 @@ fn each_refusal_of_the_rollback_is_found_on_its_own() {
             person: "owner",
             prompt: "y",
             deadline: None,
-            revoke_seen: claims::revoke_epoch(&c, "owner").unwrap(),
+            revoke_seen: seen,
         },
         now(),
     )
@@ -491,4 +493,33 @@ fn a_second_step_after_a_rollback_leaves_no_waiting_wake_turn_without_a_run() {
     // Both requests are owed again after it.
     assert_eq!(r.rows().items.len(), 3);
     assert!(r.rows().items.values().all(|it| it.turn.is_none()));
+}
+
+/// WK6 model result: a turn that came in with {pid, procStart} and whose holder still runs is not settled by the rollback's
+/// settle pass either (the core's probe is what holds it; preflight 1a.3/1a.4 are an earlier named refusal of the same thing).
+#[test]
+fn the_rollbacks_settle_pass_leaves_a_turn_whose_holder_runs() {
+    let r = switched(|_| {});
+    let kid = Proc::new();
+    let mut c = core(&r);
+    call(
+        &mut c,
+        "wake.enqueue",
+        &json!({"session": "s-live", "id": "l:1", "agent": "mel", "door": "host", "text": ["hi"]}),
+    )
+    .unwrap();
+    let said = call(
+        &mut c,
+        "wake.take",
+        &json!({"holder": kid.pid(), "session": "s-live"}),
+    )
+    .unwrap();
+    let run = said["turn"]["run"].as_str().unwrap().to_owned();
+    let settled = crate::wake::settle_only(&mut c, r.env.paths.as_ref().unwrap()).unwrap();
+    assert!(settled.is_empty(), "{settled:?}");
+    let st = crate::wake::load(c.conn()).unwrap();
+    let turn = st.items["s-live"].turn.clone().unwrap();
+    assert_eq!(turn.run, run);
+    assert_eq!(turn.pid, Some(kid.pid()));
+    assert_eq!(turn.proc_start.as_deref(), Some(kid.stamp().as_str()));
 }

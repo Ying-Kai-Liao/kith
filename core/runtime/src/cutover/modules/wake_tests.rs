@@ -69,7 +69,7 @@ pub(super) struct Rig {
     pub machine: PathBuf,
 }
 
-fn idle() -> std::result::Result<Vec<(u32, Vec<String>)>, String> {
+fn idle() -> Result<Vec<(u32, Vec<String>)>, String> {
     Ok(Vec::new())
 }
 
@@ -313,6 +313,22 @@ fn the_shut_gate_refuses_a_step_but_not_a_dry_run() {
     r.untouched();
 }
 
+/// `KITH_WAKE_GATE_OPEN=1` is read by a debug build only (the e2e steps a build whose gate is shut); a release-shaped check
+/// ignores it, and the constant stays the one switch a real Mac depends on.
+#[test]
+fn the_gate_env_opens_a_debug_build_only_and_never_a_release_one() {
+    use super::wake::{RUNS_WAKE_TURNS, gate_open};
+    assert!(
+        !RUNS_WAKE_TURNS,
+        "the gate stays shut until the checklist is ticked"
+    );
+    assert!(gate_open(true, Some("1")));
+    assert!(!gate_open(true, None));
+    assert!(!gate_open(true, Some("0")));
+    assert!(!gate_open(false, Some("1")), "a release build ignores it");
+    assert!(!gate_open(false, None));
+}
+
 #[test]
 fn a_running_host_refuses_the_step_and_nothing_is_written() {
     let r = rig();
@@ -351,7 +367,7 @@ fn each_preflight_item_refuses_on_its_own_and_names_what_it_saw() {
     drop(_host);
 
     // 3: a `kith-wake deliver` is running (and is not this process).
-    fn one() -> std::result::Result<Vec<(u32, Vec<String>)>, String> {
+    fn one() -> Result<Vec<(u32, Vec<String>)>, String> {
         Ok(vec![
             (
                 4242,
@@ -377,7 +393,7 @@ fn each_preflight_item_refuses_on_its_own_and_names_what_it_saw() {
     assert!(items[0].is_empty() && items[1].is_empty() && items[3].is_empty());
 
     // 3: a process table that cannot be read says so, and refuses.
-    fn blind() -> std::result::Result<Vec<(u32, Vec<String>)>, String> {
+    fn blind() -> Result<Vec<(u32, Vec<String>)>, String> {
         Err("cannot see processes: the process list does not hold this process".into())
     }
     let items = items_of(&r, blind);

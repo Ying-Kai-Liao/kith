@@ -641,6 +641,42 @@ fn a_failed_try_waits_a_doubling_pause_and_the_fifth_ends_failed() {
     assert!((st.items["s1"].next - (T0 + queue::HELD_PAUSE)).abs() < 1e-6);
 }
 
+/// WK6 model result: a turn imported from the Python files names {pid, procStart}; while that holder runs the tick must not
+/// settle it, whatever else is true. The probe (`queue::probe`, which `recover` and the tick's `ask` use) is what holds it;
+/// the cutover's preflight items 1a.3/1a.4 are only an earlier, named refusal of the same thing.
+#[test]
+fn a_turn_whose_holder_runs_is_not_settled_by_the_tick_until_the_holder_is_gone() {
+    let (t, _l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    f.procs
+        .borrow_mut()
+        .insert(77, "Mon Jan 1 00:00:00 2026".to_owned());
+    enqueue(&mut c, &f, "sid-1", "a", "host");
+    let said = row(
+        &mut c,
+        &f,
+        "wake.take",
+        &json!({"holder": 77, "session": "sid-1"}),
+    )
+    .unwrap();
+    let run = said["turn"]["run"].as_str().unwrap().to_owned();
+    for _ in 0..2 {
+        tick(&mut c, &f, &Seen(Vec::new())).unwrap();
+        let turn = state(&mut c).items["sid-1"].turn.clone().unwrap();
+        assert_eq!(
+            (turn.run.as_str(), turn.pid, turn.proc_start.as_deref()),
+            (run.as_str(), Some(77), Some("Mon Jan 1 00:00:00 2026")),
+            "the holder runs: the turn stays, with its pid and start"
+        );
+    }
+    f.procs.borrow_mut().remove(&77);
+    tick(&mut c, &f, &Seen(Vec::new())).unwrap();
+    assert!(
+        state(&mut c).items["sid-1"].turn.is_none(),
+        "the holder is gone: owed again"
+    );
+}
+
 #[test]
 fn a_dead_turn_is_answered_when_its_marker_was_seen_and_owed_again_when_not() {
     let (t, _l, mut c) = core();

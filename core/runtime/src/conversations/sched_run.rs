@@ -76,6 +76,8 @@ pub(crate) fn claim_run(
         revoke_seen,
     };
     let claimed = (|| {
+        // This refusal keeps one queue writer: a wake turn started while the queue is still Python's (or already going back) would
+        // settle into a queue the core does not own.
         // A wake's turn starts only while the wake queue is the core's: nothing new may start on a queue that is going back
         // (a rollback's record, or a host that starts after a crash in it, must not pull a queued wake turn).
         let wakes: Option<String> = core

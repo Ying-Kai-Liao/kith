@@ -57,10 +57,12 @@ use crate::wake::{State, load};
 ///
 /// - [x] WK1-WK5 and WK4a/b/c, A2, S1, S2 and C3L are merged (the wake rows, `wake.tick`, the settle rule R4, the run door,
 ///   the channel door, the launch's attach and `end_gone`).
-/// - [ ] The lifecycle sweep runs after a tick (blocker B1: `wake_clock.rs` starts it through `kernel::launch_program()`,
-///   PR #1245 and its production-resolver row). After the switch `kith-wake drain` does nothing, so nothing else runs it.
-/// - [ ] A non-Claude agent's run-door wake runs (blocker B2: the `engine_gap` cancel in `wake_clock.rs` goes, the launch of
-///   S1/A2 runs the turn). Until then every such request is cancelled and, after five tries, ends `failed`.
+/// - [ ] The lifecycle sweep runs after a tick (blocker B1: PR #1245; `wake_clock.rs` starts it through `kernel::launch_program()`,
+///   its proof is that PR's production-resolver row). After the switch `kith-wake drain` does nothing, so nothing else runs it.
+/// - [ ] A non-Claude agent's run-door wake runs (blocker B2: PR #1250; the `engine_gap` cancel in `wake_clock.rs` goes, the
+///   launch of S1/A2 runs the turn; its proof is #1250's real-launch rows, not `wake_clock_command_tests.rs`). Python's `deliver`
+///   never delivered a non-Claude wake, so this is no regression, but until then every such request is cancelled and, after five
+///   tries, ends `failed`.
 /// - [ ] This PR's end-to-end rows pass in CI (`serve/host/tests/wake_cutover_e2e.rs`, E1 to E6, the "direct lock, schedules
 ///   cutover" host-checks row).
 pub(crate) const RUNS_WAKE_TURNS: bool = false;
@@ -68,9 +70,15 @@ pub(crate) const RUNS_WAKE_TURNS: bool = false;
 /// The build's answer. A debug build also reads `KITH_WAKE_GATE_OPEN=1`, so the end-to-end test can step a build whose gate is
 /// still shut (its other conditions are checked for real); a release build never reads it.
 fn runs_wake_turns() -> bool {
-    RUNS_WAKE_TURNS
-        || (cfg!(debug_assertions)
-            && std::env::var_os("KITH_WAKE_GATE_OPEN").is_some_and(|v| v == "1"))
+    gate_open(
+        cfg!(debug_assertions),
+        std::env::var("KITH_WAKE_GATE_OPEN").ok().as_deref(),
+    )
+}
+
+/// [`runs_wake_turns`] with its two inputs given, so a test can check the release shape.
+pub(super) fn gate_open(debug_build: bool, env: Option<&str>) -> bool {
+    RUNS_WAKE_TURNS || (debug_build && env == Some("1"))
 }
 
 /// How long the step waits for a `kith-wake` that holds a lock: the waiters' lock is held while a CI waiter looks at `gh`
@@ -463,6 +471,8 @@ impl Module for Wake {
             )));
         }
         // From here `kith-wake` asks the core, which refuses until the record says switched: a caller fails closed and keeps its work.
+        // The tombstone is for recovery: a crash between it and the record leaves `stepping` with Python already standing down, so
+        // the rerun (or the rollback) finds a queue nobody writes, instead of two writers.
         tombstone::ensure(&tombstone_of(state), self.name(), now_secs())?;
         self.crash(Crash::AfterTombstone)
     }
