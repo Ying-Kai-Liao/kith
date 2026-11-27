@@ -52,6 +52,8 @@ pub(crate) fn is_settled() -> bool {
 /// seconds, which is what confirms the pairings again after the core restarts (`ask.peerLink`: the core starts nothing of a
 /// pairing it was not told of in its own run). A host that is not the Writer answers what it is asked (the rows are read and
 /// written through the core all the same) but claims nothing, so nothing starts from a confirmation it never refreshed.
+/// An ask it accepts waits queued for the Writer's run door, which confirms first (SHOULD 5: the same on any host that is not the
+/// Writer, so there is no confirmation to run for one that never claims); if no Writer comes, the 24 h expiry ends it as lost.
 pub(crate) async fn settled(hub: &Hub) -> bool {
     if SETTLED.load(Ordering::Acquire) {
         return true;
