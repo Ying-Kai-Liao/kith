@@ -32,6 +32,11 @@ public extension HostClient {
         return try await call("allowedRules", Body(agent: agent))
     }
 
+    /// Every permission rule the agent runs with: package allow, ask and deny, then the owner's allowed.json. Owner only.
+    func agentRules(agent: String) async throws -> HostContract.AgentRules {
+        try await call("agentRules", HostContract.AgentRulesParams(agent: agent))
+    }
+
     /// Forgets one rule; the agent's next run no longer has it. A rule already gone answers "Not found".
     func removeAllowedRule(agent: String, id: String) async throws {
         struct Body: Encodable { var agent: String; var id: String }

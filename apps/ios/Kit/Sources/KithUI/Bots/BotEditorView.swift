@@ -21,6 +21,15 @@ public struct BotEditorView: View {
     @State private var error: String?
 
     public var body: some View {
+        // A kith agent's settings are its page (face, rows, Advanced); the form stays for what is not one.
+        if let id = draft.id, let bot = model.bots[id], model.isOwner, !bot.isGroup, !bot.isFlagged, bot.hqAgent?.isEmpty == false {
+            AgentPageView(botId: id, request: DetailsRequest(), call: nil)
+        } else {
+            form
+        }
+    }
+
+    private var form: some View {
         VStack(spacing: 0) {
             ModalHeader("Settings") {
                 if saving {
@@ -55,6 +64,8 @@ public struct BotEditorView: View {
 /// the details sheet's Details page) or the rest (its Settings page).
 enum FormPart {
     case all, often, rarely
+    /// The agent page's Advanced page: where it works (folder, default project) and nothing else.
+    case workspace
 }
 
 /// Bot settings, in sections in the Settings style (`CardSection`). `scrolls` is off where a
@@ -182,7 +193,11 @@ struct BotSettingsForm: View {
     }
 
     @ViewBuilder private var sections: some View {
-        if part == .often { oftenSections } else { allSections }
+        switch part {
+        case .often: oftenSections
+        case .workspace: workspaceSection
+        default: allSections
+        }
     }
 
     /// The body the avatar shows now.
@@ -193,6 +208,56 @@ struct BotSettingsForm: View {
     /// "Cyan" or "Original body", under Look and colour.
     private var lookSummary: String {
         AvatarPalette.colors.first { $0.id == AvatarPalette.pick(draft.avatarColor) }?.label ?? "Original colour"
+    }
+
+    /// On the details sheet the agent and its model are on the Details page; what's left is where it works.
+    private var workspaceSection: some View {
+        CardSection(part == .all ? "Agent" : "Workspace") {
+            ValueRow("Computer") {
+                Text(model.hostName).lineLimit(1)
+            }
+            if part == .all {
+                settingsRows
+            }
+            ValueRow("Folder") {
+                DropdownMenu {
+                    [
+                        MenuItem("Personal workspace", selected: draft.cwd.isEmpty) {
+                            withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { draft.cwd = "" }
+                        },
+                        MenuItem("Choose project folder…", selected: !draft.cwd.isEmpty) {
+                            withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { pickingFolder = true }
+                        },
+                    ]
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(draft.cwd.isEmpty ? "Personal" : (draft.cwd as NSString).lastPathComponent).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(Palette.secondary)
+                    }
+                    .foregroundStyle(Palette.text)
+                    .outlinedPill()
+                }
+                .help(draft.cwd.isEmpty ? "A persistent workspace allocated for this bot" : draft.cwd)
+            }
+            if !hqProjects.isEmpty || draft.project != nil {
+                ValueRow("Default project") {
+                    DropdownMenu {
+                        var items = [MenuItem("None", selected: draft.project == nil) { draft.project = nil }]
+                        items += hqProjects.map { project in
+                            MenuItem(project.id, selected: draft.project == project.id) { draft.project = project.id }
+                        }
+                        return items
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(draft.project ?? "None").lineLimit(1)
+                            Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(Palette.secondary)
+                        }
+                        .foregroundStyle(Palette.text)
+                        .outlinedPill()
+                    }
+                }
+            }
+        }
     }
 
     private var allSections: some View {
@@ -230,53 +295,7 @@ struct BotSettingsForm: View {
                 if part == .all { instructions }
             }
 
-            // On the details sheet the agent and its model are on the Details page; what's left is where it works.
-            CardSection(part == .all ? "Agent" : "Workspace") {
-                ValueRow("Computer") {
-                    Text(model.hostName).lineLimit(1)
-                }
-                if part == .all {
-                    settingsRows
-                }
-                ValueRow("Folder") {
-                    DropdownMenu {
-                        [
-                            MenuItem("Personal workspace", selected: draft.cwd.isEmpty) {
-                                withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { draft.cwd = "" }
-                            },
-                            MenuItem("Choose project folder…", selected: !draft.cwd.isEmpty) {
-                                withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { pickingFolder = true }
-                            },
-                        ]
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(draft.cwd.isEmpty ? "Personal" : (draft.cwd as NSString).lastPathComponent).lineLimit(1)
-                            Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(Palette.secondary)
-                        }
-                        .foregroundStyle(Palette.text)
-                        .outlinedPill()
-                    }
-                    .help(draft.cwd.isEmpty ? "A persistent workspace allocated for this bot" : draft.cwd)
-                }
-                if !hqProjects.isEmpty || draft.project != nil {
-                    ValueRow("Default project") {
-                        DropdownMenu {
-                            var items = [MenuItem("None", selected: draft.project == nil) { draft.project = nil }]
-                            items += hqProjects.map { project in
-                                MenuItem(project.id, selected: draft.project == project.id) { draft.project = project.id }
-                            }
-                            return items
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(draft.project ?? "None").lineLimit(1)
-                                Image(systemName: "chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(Palette.secondary)
-                            }
-                            .foregroundStyle(Palette.text)
-                            .outlinedPill()
-                        }
-                    }
-                }
-            }
+            workspaceSection
 
             if shown.kithSettings {
                 CardSection("Permissions") { permissionModeRow }

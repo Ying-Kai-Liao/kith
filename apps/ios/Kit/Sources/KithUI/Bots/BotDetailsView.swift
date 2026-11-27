@@ -20,9 +20,37 @@ struct CallAction {
     let start: () -> Void
 }
 
+/// The entry every caller opens: an owner's kith agent gets the one-scroll agent page; a guest, a native bot and
+/// anything without an hq agent keep the older sheet below. Group rooms never come here (RoomInfoView).
+struct BotDetailsView: View {
+    let botId: String
+    let request: DetailsRequest
+    var call: CallAction?
+    @Environment(BotStore.self) private var model
+
+    init(botId: String, request: DetailsRequest, call: CallAction? = nil) {
+        self.botId = botId
+        self.request = request
+        self.call = call
+    }
+
+    private var usesAgentPage: Bool {
+        guard model.isOwner, let bot = model.bots[botId], !bot.isGroup, !bot.isFlagged else { return false }
+        return !(bot.hqAgent ?? "").isEmpty
+    }
+
+    var body: some View {
+        if usesAgentPage {
+            AgentPageView(botId: botId, request: request, call: call)
+        } else {
+            LegacyBotDetailsView(botId: botId, request: request, call: call)
+        }
+    }
+}
+
 /// A bot's details (Grok Bot's): who it is, then its details, memory and settings. Settings save
 /// as you edit.
-struct BotDetailsView: View {
+struct LegacyBotDetailsView: View {
     let botId: String
     let routineId: String?
     @State var tab: DetailsTab
@@ -280,19 +308,6 @@ struct BotDetailsView: View {
             } catch {
                 saveError = error.localizedDescription
             }
-        }
-    }
-}
-
-/// Pull to refresh asks kith again (`refresh: true`); other bots keep a page that doesn't pull.
-private struct KithRefresh: ViewModifier {
-    let store: KithInfoStore?
-
-    @ViewBuilder func body(content: Content) -> some View {
-        if let store {
-            content.refreshable { await store.load(refresh: true) }
-        } else {
-            content
         }
     }
 }
