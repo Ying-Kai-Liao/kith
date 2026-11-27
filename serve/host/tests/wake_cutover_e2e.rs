@@ -74,6 +74,20 @@ struct Host {
     child: Reap,
 }
 
+/// The stub binary: built beside the test binaries (as `direct_park_e2e` does).
+fn stub_bin() -> &'static PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT.get_or_init(|| {
+        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core/stub/Cargo.toml");
+        let built = Command::new(cargo).args(["build", "--manifest-path"]).arg(&manifest).status().unwrap();
+        assert!(built.success(), "kith-stub did not build");
+        let stub = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("kith-stub");
+        assert!(stub.is_file(), "no {}", stub.display());
+        stub
+    })
+}
+
 /// The engine. Probes answer as Claude's do. A run records its start at once (argv, then the environment), puts its prompt in the
 /// session's transcript, and holds while `$HOLD` exists.
 const ENGINE: &str = r#"#!/bin/sh
@@ -166,7 +180,10 @@ impl Lab {
             }
         }
         std::os::unix::fs::symlink(&kernel, machine.join("cli/current")).unwrap();
-        for (name, text) in [("claude", ENGINE), ("python3", PY_SHIM), ("kith-stub", "#!/bin/sh\n")] {
+        // The real stub: it takes the writer lock and then runs the engine. A no-op script here let a wake's turn finish without the
+        // engine ever running.
+        std::os::unix::fs::symlink(stub_bin(), dir.join("bin/kith-stub")).unwrap();
+        for (name, text) in [("claude", ENGINE), ("python3", PY_SHIM)] {
             let f = dir.join("bin").join(name);
             // The host's launch hands its children their own environment, not this test's: the paths go into the scripts.
             let text = text
