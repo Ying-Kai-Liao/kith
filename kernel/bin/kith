@@ -215,7 +215,7 @@ case $1 in
                       # feed_post tool, on this run's owner token, so a tool that runs inside an owner run can post. No program, no post.
                       [[ ${1:-} == post ]] || { echo "usage: kith feed post --kind K --title T [--line L] [--file PATH | --url https://... | --number V [--unit U] [--delta D]] [--fold NAME] [--pr owner/repo#N] [--json]" >&2; exit 2; }
                       shift; . "$KITH/lib/kith-core.sh"
-                      if pbin=$(kith_core_bin permit); then exec "$pbin" kernel permit --kernel "$KITH" feed-post "$@" </dev/null; fi
+                      if pbin=$(kith_core_bin permit) && kith_core_lists permit-feed; then exec "$pbin" kernel permit --kernel "$KITH" feed-post "$@" </dev/null; fi
                       echo "kith feed post: this Mac's kith program has no Feed yet (update it)" >&2; exit 1 ;;
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
   doctor)             shift; exec "$KITH/bin/kith-doctor" "$@" ;;

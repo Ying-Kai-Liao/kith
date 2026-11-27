@@ -1,6 +1,6 @@
 //! The stdio MCP server (`kith-permit` with no verb): one JSON-RPC message per line in, one reply per line out. It is the
 //! permission prompt tool of every `claude -p` run kith starts, and offers `approve`, `request_access`, `report_bug` and, to a run
-//! with a host to ask, `request_secret`; to a guest's run, `ask_helper` and `run_door`.
+//! with a host to ask, `request_secret`; to a guest's run, `ask_helper` and `run_door`; to an owner's run with no `KITH_PERSON`, `feed_post`.
 
 use super::Env;
 use super::access::{request_access, request_secret};
