@@ -28,7 +28,9 @@ impl Fixture {
 
     fn post(&self, title: &str) -> Post {
         let w = PostWrite {
-            fold: Fold::Tool { fold: Some(title.into()) },
+            fold: Fold::Tool {
+                fold: Some(title.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_lowercase()),
+            },
             agent: "ops".into(),
             kind: "file".into(),
             title: title.into(),

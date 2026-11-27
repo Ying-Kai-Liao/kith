@@ -1,8 +1,8 @@
 use super::*;
-use anyhow::bail;
 use crate::feed::{By, Fold, PostSource, PostWrite, put_post};
 use crate::remote::identity::Identity;
 use crate::store::{BotConfig, EntryKind, Lane, Store};
+use anyhow::bail;
 use std::sync::Arc;
 
 struct Fixture {

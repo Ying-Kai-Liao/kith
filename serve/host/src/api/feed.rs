@@ -21,6 +21,8 @@ pub(super) fn call(hub: &Hub, method: &str, b: Value) -> Result<ControlFlow<Valu
         "hidePost" => hide(hub, &b)?,
         "stories" => stories(hub)?,
         "likePost" => like(hub, &b)?,
+        // Async, so api/mod.rs awaits `route` first; the arm keeps the method in this file for the router walk.
+        "feedRoute" => return Err(anyhow!("feedRoute is answered by the async router")),
         _ => return Ok(ControlFlow::Continue(b)),
     }))
 }
