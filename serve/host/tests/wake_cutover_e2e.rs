@@ -177,7 +177,18 @@ impl Lab {
             .unwrap();
         }
         // The copy's bash `kith` finds the program on PATH (the host's launch hands the engine's env, not this test's KITH_BIN).
-        std::os::unix::fs::symlink(KITH, dir.join("bin/kith")).unwrap();
+        // A wrapper, so a failing case can say what the host's launch handed the program.
+        std::fs::create_dir_all(dir.join("kcalls")).unwrap();
+        let wrapper = dir.join("bin/kith");
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\n{{ echo \"args=$*\"; env | sort; }} > \"{}/call.$$\" 2>/dev/null\nexec \"{KITH}\" \"$@\"\n",
+                dir.join("kcalls").display()
+            ),
+        )
+        .unwrap();
+        executable(&wrapper);
         let plists = home.join("Library/LaunchAgents");
         std::fs::create_dir_all(&plists).unwrap();
         let words = ["serve", "--port", "1"];
@@ -353,6 +364,17 @@ impl Lab {
         ) else {
             return;
         };
+        let mut calls: Vec<_> = std::fs::read_dir(self.dir.join("kcalls")).into_iter().flatten().flatten().collect();
+        calls.sort_by_key(std::fs::DirEntry::file_name);
+        for e in calls.iter().take(2) {
+            let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+            eprintln!("--- a call of the kith program: {}", e.file_name().to_string_lossy());
+            for l in text.lines().filter(|l| {
+                l.starts_with("args=") || l.starts_with("KITH_") || l.starts_with("HOME=") || l.starts_with("PATH=")
+            }) {
+                eprintln!("{l}");
+            }
+        }
         for table in ["turns", "claims", "wake_sessions", "wake_items", "wake_turns", "wake_answered"] {
             let Ok(mut st) = db.prepare(&format!("SELECT * FROM {table}")) else { continue };
             let names: Vec<String> = st.column_names().iter().map(|s| (*s).to_owned()).collect();

@@ -18,19 +18,25 @@ impl Core {
         let home = PathBuf::from("/tmp").join(format!("kwc-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
         std::fs::create_dir_all(home.join(".kith")).expect("home");
         let folders = crate::kernel::folders(&home);
-        if switched {
-            // The record the host reads (a Windows core has no marker to write: `mark_wake_switched_for_test` is a no-op there),
-            // then, on Unix, the record and its marker in core.db, before the daemon holds the core.
-            #[cfg(not(unix))]
-            {
+        // On Unix the record and its marker in core.db go in before the daemon holds the core.
+        #[cfg(unix)]
+        {
+            if switched {
+                kith_core::mark_wake_switched_for_test(&folders).expect("the wake switch");
+            }
+        }
+        let daemon = serve_for_test(&folders);
+        crate::terminal::core_claims::enable(&folders.state, folders.clone());
+        // A Windows core has no marker (`mark_wake_switched_for_test` is a no-op there): the host reads the record file, put in after
+        // the daemon made its folders.
+        #[cfg(not(unix))]
+        {
+            if switched {
                 let dir = folders.machine.join("core/cutover");
                 std::fs::create_dir_all(&dir).expect("cutover dir");
                 std::fs::write(dir.join("wake.switch"), "state=switched\nat=1\n").expect("switch record");
             }
-            kith_core::mark_wake_switched_for_test(&folders).expect("the wake switch");
         }
-        let daemon = serve_for_test(&folders);
-        crate::terminal::core_claims::enable(&folders.state, folders.clone());
         Self { home, folders, daemon: Some(daemon) }
     }
 
