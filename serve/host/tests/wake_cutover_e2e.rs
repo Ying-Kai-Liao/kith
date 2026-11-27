@@ -352,7 +352,7 @@ impl Lab {
 
     /// What the record folder holds and what the engine's transcripts say, for a failure message when no start shows.
     fn start_evidence(&self) -> String {
-        let list = |d: &std::path::Path| -> Vec<String> {
+        let list = |d: &Path| -> Vec<String> {
             std::fs::read_dir(d)
                 .map(|r| r.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
                 .unwrap_or_default()
