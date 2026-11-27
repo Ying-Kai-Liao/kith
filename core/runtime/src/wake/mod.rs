@@ -101,8 +101,18 @@ pub(crate) fn switched(core: &Core) -> bool {
 /// A Windows core is born switched, and `wake` is not on yet (`switched.rs`): its rows refuse by name. A test build says yes: the
 /// Windows run of the core's unit tests drives wake turns on a bare core (the refusal itself is tested on Unix, where the record is).
 #[cfg(not(unix))]
-pub(crate) fn switched(_core: &Core) -> bool {
-    cfg!(test) || crate::switched::on_windows("wake")
+pub(crate) fn switched(core: &Core) -> bool {
+    cfg!(test) || crate::switched::on_windows("wake") || switch_record_for_test(core)
+}
+
+/// Debug builds only: the host's Windows tests run this crate as a dependency (so `cfg(test)` is off) and say the queue is
+/// switched with the record file their fixture writes (`mark_wake_switched_for_test` has no marker to write on Windows).
+#[cfg(not(unix))]
+fn switch_record_for_test(core: &Core) -> bool {
+    cfg!(debug_assertions)
+        && core
+            .folders()
+            .is_some_and(|f| f.machine.join("core/cutover/wake.switch").is_file())
 }
 
 /// Runs `f` over the state in one write transaction. Answered ids older than a week are forgotten on the way.

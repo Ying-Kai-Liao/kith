@@ -82,6 +82,7 @@ case "$1 $2" in
   "plugin list") echo '[]'; exit 0 ;;
   "auth status") echo '{"loggedIn":true}'; exit 0 ;;
 esac
+exec 2>>"$HOME/.claude/projects/p1/err"
 sid=""; prompt=""; prev=""
 for a in "$@"; do
   case "$prev" in --resume|-r) sid="$a" ;; esac
@@ -341,10 +342,28 @@ impl Lab {
         let mut all: Vec<String> = std::fs::read_dir(self.home.join(".claude/projects/p1/recs"))
             .unwrap()
             .flatten()
-            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+            .filter_map(|e| std::fs::read(e.path()).ok())
+            // Lossy: an environment value that is not UTF-8 must not make a real start vanish from the count.
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
             .collect();
         all.sort();
         all
+    }
+
+    /// What the record folder holds and what the engine's transcripts say, for a failure message when no start shows.
+    fn start_evidence(&self) -> String {
+        let list = |d: &std::path::Path| -> Vec<String> {
+            std::fs::read_dir(d)
+                .map(|r| r.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+                .unwrap_or_default()
+        };
+        let p1 = self.home.join(".claude/projects/p1");
+        format!(
+            "recs={:?} p1={:?} engine stderr={:?}",
+            list(&p1.join("recs")),
+            list(&p1),
+            std::fs::read_to_string(p1.join("err")).unwrap_or_default()
+        )
     }
 
     /// How many lines of the session's transcript carry a wake marker.
@@ -545,7 +564,7 @@ async fn e1_an_owed_wake_runs_once_across_the_step() {
     let host = lab.start_host().await;
     let how = answered(&lab, "run:1", 120);
     assert!(how.starts_with("answered"), "{how}");
-    assert_eq!(lab.starts().len(), 1, "the engine started once: {:?}", lab.starts());
+    assert_eq!(lab.starts().len(), 1, "the engine started once: {:?}\n{}", lab.starts(), lab.start_evidence());
     no_turn_vars(&lab.starts()[0]);
     assert_eq!(lab.markers(SID), 1, "one marker in the transcript");
     let turns: i64 = lab.db().query_row("SELECT count(*) FROM turns WHERE source = 'wake'", [], |r| r.get(0)).unwrap();
@@ -609,7 +628,7 @@ async fn e3_a_host_door_wake_is_delivered_once_and_the_engine_sees_no_turn_varia
     lab.enqueue(SID, "run:3", "host");
     let how = answered(&lab, "run:3", 120);
     assert!(how.starts_with("answered") || how == "recovered", "{how}");
-    assert_eq!(lab.starts().len(), 1, "the note arrived once: {:?}", lab.starts());
+    assert_eq!(lab.starts().len(), 1, "the note arrived once: {:?}\n{}", lab.starts(), lab.start_evidence());
     no_turn_vars(&lab.starts()[0]);
     assert_eq!(lab.markers(SID), 1);
     lab.stop_host(host);
@@ -648,7 +667,7 @@ async fn e4_an_unread_ask_answer_arrives_as_one_wake_within_two_ticks() {
     until("the engine to start", 120, || !lab.starts().is_empty());
     until("the run to be over", 120, || lab.run_claim(SID).is_none());
     std::thread::sleep(Duration::from_secs(12));
-    assert_eq!(lab.starts().len(), 1, "one wake for the answer: {:?}", lab.starts());
+    assert_eq!(lab.starts().len(), 1, "one wake for the answer: {:?}\n{}", lab.starts(), lab.start_evidence());
     assert!(lab.starts()[0].contains("yes from Kai"), "{}", lab.starts()[0]);
     assert_eq!(lab.markers(SID), 1, "{seen}");
     lab.stop_host(host);
