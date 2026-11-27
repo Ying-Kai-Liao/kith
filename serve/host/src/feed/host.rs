@@ -29,13 +29,12 @@ pub struct HostFact {
 /// Posts the fact to the owner's Feed, or says why not in the log. Never fails the caller.
 pub fn host_post(hub: &Hub, fact: HostFact) {
     let chat = fact.chat.clone();
-    match write_of(hub, fact) {
-        Some(w) => {
-            if let Err(error) = put_post(hub, &w) {
-                tracing::warn!(%error, chat, "feed: couldn't post a host fact");
-            }
-        }
-        None => tracing::debug!(chat, "feed: a host fact is not the owner's, or has no agent: no post"),
+    let Some(w) = write_of(hub, fact) else {
+        tracing::debug!(chat, "feed: a host fact is not the owner's, or has no agent: no post");
+        return;
+    };
+    if let Err(error) = put_post(hub, &w) {
+        tracing::warn!(%error, chat, "feed: couldn't post a host fact");
     }
 }
 
@@ -102,8 +101,9 @@ pub fn run_post(hub: &Hub, r: RunFact<'_>) {
 
 /// Whether a shared file is a page: only html is, every other `send_file` stays a chat message.
 fn is_page(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    name.ends_with(".html") || name.ends_with(".htm")
+    std::path::Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
 }
 
 /// A post for each html file just committed to a chat. `shot` stays null: the shooter fills it in later.

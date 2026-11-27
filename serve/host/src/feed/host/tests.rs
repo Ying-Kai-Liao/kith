@@ -78,7 +78,7 @@ fn an_item_of_a_person_and_a_chat_with_no_agent_get_none() {
     run_post(&f.hub, RunFact { person: Some("sam"), ..run("mine", "run-1", true) });
     run_post(&f.hub, run("group", "run-2", true));
     run_post(&f.hub, run("gone", "run-3", true));
-    assert!(f.posts().is_empty());
+    assert_eq!(f.posts().len(), 0);
     run_post(&f.hub, RunFact { agent: Some("ops"), ..run("group", "run-4", true) });
     assert_eq!(f.posts().len(), 1, "a group takes the routine's agent");
 }
@@ -100,7 +100,7 @@ fn an_html_file_makes_a_page_post_and_a_text_file_none() {
     let f = Fixture::new();
     let (html, txt) = (page("report.html", "abc"), page("notes.txt", "def"));
     page_posts(&f.hub, "mine", None, None, "e1", &[&txt]);
-    assert!(f.posts().is_empty());
+    assert_eq!(f.posts().len(), 0);
     page_posts(&f.hub, "mine", None, None, "e1", &[&html, &txt]);
     let posts = f.posts();
     assert_eq!(posts.len(), 1);

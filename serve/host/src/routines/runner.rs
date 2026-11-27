@@ -209,7 +209,7 @@ impl Routines {
                         ok: run.result.is_some(),
                         attachment: None,
                         kind: None,
-                        fact_at: run.finished_at.unwrap_or_else(crate::store::now_ms),
+                        fact_at: run.finished_at.unwrap_or_else(now_ms),
                         fact_id: run.id.clone(),
                     },
                 );
