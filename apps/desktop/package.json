@@ -27,7 +27,7 @@
     "e2e:relay": "node --experimental-transform-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/relay-e2e.ts",
     "e2e:relay:host": "node --experimental-transform-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/relay-e2e-host.ts",
     "icons": "swift tools/export-symbols.swift",
-    "dist:mac": "node tools/account-config.mjs && node tools/native-host.mjs && node tools/native-screen.mjs && node tools/native-speech.mjs && electron-vite build && electron-builder --mac",
+    "dist:mac": "node tools/account-config.mjs && node tools/native-host.mjs && node tools/native-screen.mjs && node tools/native-speech.mjs && node tools/native-shoot.mjs && electron-vite build && electron-builder --mac",
     "dist:linux": "node tools/account-config.mjs && electron-vite build && electron-builder --linux",
     "dist:win": "node tools/account-config.mjs && node tools/native-host.mjs && electron-vite build && electron-builder --win"
   },
