@@ -30,7 +30,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 const KITH: &str = env!("CARGO_BIN_EXE_kith");
-const SID: &str = "sess-1";
+const SID: &str = "7d1c5a40-2b9e-4c61-8f3a-0a1b2c3d4e51";
 
 fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
@@ -598,7 +598,7 @@ async fn e5_a_rollback_while_a_wake_runs_hands_the_run_to_kith_wake_with_its_pro
     let lab = Lab::new("e5");
     lab.step_dependencies();
     lab.enqueue(SID, "run:5", "run");
-    lab.enqueue("sess-stale", "run:stale", "run");
+    lab.enqueue("7d1c5a40-2b9e-4c61-8f3a-0a1b2c3d4e52", "run:stale", "run");
     lab.step_ok("wake");
     std::fs::write(lab.dir.join("hold"), "").unwrap();
     let host = lab.start_host().await;
@@ -606,7 +606,7 @@ async fn e5_a_rollback_while_a_wake_runs_hands_the_run_to_kith_wake_with_its_pro
     until("the launch's claim to run", 30, || lab.run_claim(SID).is_some_and(|(_, s)| s == "running"));
     let (pid, _) = lab.run_claim(SID).unwrap();
     // The core answers the other request after the switch: the file from before it is stale.
-    let said = lab.owner("wake.withdraw", &json!({"session": "sess-stale"})).unwrap();
+    let said = lab.owner("wake.withdraw", &json!({"session": "7d1c5a40-2b9e-4c61-8f3a-0a1b2c3d4e52"})).unwrap();
     assert_eq!(said["count"], 1, "{said}");
     // A rollback with the host running is refused, whatever --force says.
     let refused = lab.cutover("rollback", "wake");
@@ -673,7 +673,7 @@ fn e6_a_refused_step_resumes_and_imports_what_was_written_in_between() {
     assert!(text(&refused).contains("damaged.json"), "{}", text(&refused));
     assert!(!lab.tombstone().exists(), "there is no tombstone");
     // kith-wake still writes files.
-    lab.enqueue("sess-late", "late:1", "run");
+    lab.enqueue("7d1c5a40-2b9e-4c61-8f3a-0a1b2c3d4e53", "late:1", "run");
     std::fs::remove_file(&damaged).unwrap();
     lab.step_ok("wake");
     assert!(lab.tombstone().is_file());
