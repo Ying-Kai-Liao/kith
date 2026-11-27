@@ -477,6 +477,7 @@ pub(super) fn ask(
             json!({
                 "agent": agent, "session_id": sid,
                 "at": chrono::Local::now().format("%Y-%m-%dT%H:%M").to_string(),
+                "ts": chrono::Local::now().timestamp_millis(),
                 "turns": turns, "cost": (total * 1e4).round() / 1e4, "opts": opts,
                 "dir": cwd.display().to_string(),
                 "last": p.task.split_whitespace().collect::<Vec<_>>().join(" "),
