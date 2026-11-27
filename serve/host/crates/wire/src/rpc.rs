@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "fb728f46a33aefa49589364c050b35d6bc4df6dc9483ad3fe4032799ceb89dca";
+pub const CONTRACT_SHA256: &str = "897dc6676687a416b86cf7de63b08226ccc45e2a21f3a287c77d363ff9554300";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -1137,6 +1137,27 @@ pub struct HostHealth {
     pub disks: Vec<HostDisk>,
 }
 
+/// One permission rule of an agent, raw (placeholders such as {{HOME_REAL}} unexpanded). list is allow, ask or deny; source is role/settings.json or allowed.json; id and kind come only from allowed.json entries.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRule {
+    pub list: String,
+    pub rule: String,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// An agent's permission rules, as the launcher merges them at launch: role/settings.json allow, ask and deny, then allowed.json (as allow).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRules {
+    pub agent: String,
+    pub rules: Vec<AgentRule>,
+}
+
 /// What making an invite answers: its id and links, when it lapses, and the person it is for.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1917,6 +1938,13 @@ pub struct RoomPeopleParams {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct HostHealthParams {}
 
+/// What `agentRules` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRulesParams {
+    pub agent: String,
+}
+
 /// What `myRooms` takes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct MyRoomsParams {}
@@ -2075,6 +2103,8 @@ pub mod method {
     pub const ROOM_PEOPLE: &str = "roomPeople";
     /// This computer's health: cpu load, memory pressure and swap, and free space per mounted volume. Fields the OS gives no reading for are null; cached for a few seconds.
     pub const HOST_HEALTH: &str = "hostHealth";
+    /// An agent's permission rules as data, read-only: role/settings.json allow, ask and deny, then allowed.json (as allow), each tagged with its source. Placeholders stay as written. An unknown agent, or a malformed settings.json or allowed.json, is an error; a missing file is an empty list.
+    pub const AGENT_RULES: &str = "agentRules";
     /// Rooms with people: the group rooms they are in right now (an open stay and every agent of the room still granted). Open them with history, thread, send and react, with the room's id as botId.
     pub const MY_ROOMS: &str = "myRooms";
     /// Rooms with people: leaves a group room they are in. Needs only an open stay, so a person whose agent was taken away can still get out.
@@ -2092,7 +2122,7 @@ pub mod method {
 }
 
 /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-pub const OWNER_METHODS: &[&str] = &[method::MAKE_TOPIC, method::RENAME_TOPIC, method::UNFOLD_TOPIC, method::CREATE_INVITE, method::ADD_ROOM_PERSON, method::REMOVE_ROOM_PERSON, method::ROOM_PEOPLE, method::HOST_HEALTH, method::FEED, method::LIKE_POST, method::HIDE_POST, method::STORIES, method::FEED_ROUTE];
+pub const OWNER_METHODS: &[&str] = &[method::MAKE_TOPIC, method::RENAME_TOPIC, method::UNFOLD_TOPIC, method::CREATE_INVITE, method::ADD_ROOM_PERSON, method::REMOVE_ROOM_PERSON, method::ROOM_PEOPLE, method::HOST_HEALTH, method::AGENT_RULES, method::FEED, method::LIKE_POST, method::HIDE_POST, method::STORIES, method::FEED_ROUTE];
 
 /// What an invited person may call.
 pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::START_CHAT, method::SEND, method::THREAD, method::HISTORY, method::NEW_SESSION, method::UNSEND, method::MARK_READ, method::STOP, method::UPLOAD, method::READ_UPLOAD, method::REACT, method::RESPOND_PERMISSION, method::EDIT_HANDOFF, method::KEEP_CONVERSATION, method::PROJECTS, method::THREAD_PROJECTS, method::SET_THREAD_PROJECTS, method::LINK_CODE, method::SCHEDULE_MESSAGES, method::CALL_ACCEPT, method::CALL_DECLINE, method::CALL_GREET, method::LOG_CALL, method::START_CALL, method::END_CALL, method::CREATE_BOT_INVITE, method::REVOKE_BOT_INVITE, method::REVOKE_BOT, method::MY_BOTS, method::SET_BOT_LIMITS, method::RESOLVE_CITATION, method::MY_ROOMS, method::LEAVE_ROOM];
@@ -2181,6 +2211,8 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "HostMemory", fields: &[("pressure", "HostPressure?"), ("usedBytes", "int?"), ("totalBytes", "int?"), ("swapUsedBytes", "int?"), ("swapTotalBytes", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "HostDisk", fields: &[("mount", "string"), ("name", "string"), ("totalBytes", "int"), ("freeBytes", "int")], may_omit: &[] },
         crate::check::TypeSchema { name: "HostHealth", fields: &[("at", "int"), ("cpu", "json?"), ("memory", "HostMemory"), ("disks", "[HostDisk]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "AgentRule", fields: &[("list", "string"), ("rule", "string"), ("source", "string"), ("id", "string?"), ("kind", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "AgentRules", fields: &[("agent", "string"), ("rules", "[AgentRule]")], may_omit: &[] },
         crate::check::TypeSchema { name: "CreatedInvite", fields: &[("inviteId", "string"), ("link", "string"), ("appLink", "string"), ("kithLink", "string"), ("webLink", "string?"), ("pageLink", "string?"), ("expiresAt", "int"), ("personId", "string")], may_omit: &["webLink", "pageLink"] },
         crate::check::TypeSchema { name: "RoomPersonChange", fields: &[("gen", "int"), ("changed", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "MyRoomAgent", fields: &[("id", "string"), ("name", "string")], may_omit: &[] },
@@ -2259,6 +2291,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "RemoveRoomPersonParams", fields: &[("room", "string"), ("person", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomPeopleParams", fields: &[("room", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "HostHealthParams", fields: &[], may_omit: &[] },
+        crate::check::TypeSchema { name: "AgentRulesParams", fields: &[("agent", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "MyRoomsParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "LeaveRoomParams", fields: &[("room", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "FeedParams", fields: &[("before", "int?"), ("limit", "int?")], may_omit: &[] },
@@ -2322,6 +2355,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "removeRoomPerson", who: &["owner"], params: "RemoveRoomPersonParams", result: "RoomPersonChange" },
         crate::check::MethodSchema { name: "roomPeople", who: &["owner"], params: "RoomPeopleParams", result: "RoomPeople" },
         crate::check::MethodSchema { name: "hostHealth", who: &["owner"], params: "HostHealthParams", result: "HostHealth" },
+        crate::check::MethodSchema { name: "agentRules", who: &["owner"], params: "AgentRulesParams", result: "AgentRules" },
         crate::check::MethodSchema { name: "myRooms", who: &["member"], params: "MyRoomsParams", result: "MyRooms" },
         crate::check::MethodSchema { name: "leaveRoom", who: &["member"], params: "LeaveRoomParams", result: "RoomLeft" },
         crate::check::MethodSchema { name: "feed", who: &["owner"], params: "FeedParams", result: "Feed" },
@@ -2384,6 +2418,8 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "HostMemory" => serde_json::from_value::<HostMemory>(value).map(drop),
         "HostDisk" => serde_json::from_value::<HostDisk>(value).map(drop),
         "HostHealth" => serde_json::from_value::<HostHealth>(value).map(drop),
+        "AgentRule" => serde_json::from_value::<AgentRule>(value).map(drop),
+        "AgentRules" => serde_json::from_value::<AgentRules>(value).map(drop),
         "CreatedInvite" => serde_json::from_value::<CreatedInvite>(value).map(drop),
         "RoomPersonChange" => serde_json::from_value::<RoomPersonChange>(value).map(drop),
         "MyRoomAgent" => serde_json::from_value::<MyRoomAgent>(value).map(drop),
@@ -2462,6 +2498,7 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "RemoveRoomPersonParams" => serde_json::from_value::<RemoveRoomPersonParams>(value).map(drop),
         "RoomPeopleParams" => serde_json::from_value::<RoomPeopleParams>(value).map(drop),
         "HostHealthParams" => serde_json::from_value::<HostHealthParams>(value).map(drop),
+        "AgentRulesParams" => serde_json::from_value::<AgentRulesParams>(value).map(drop),
         "MyRoomsParams" => serde_json::from_value::<MyRoomsParams>(value).map(drop),
         "LeaveRoomParams" => serde_json::from_value::<LeaveRoomParams>(value).map(drop),
         "FeedParams" => serde_json::from_value::<FeedParams>(value).map(drop),

@@ -7,6 +7,7 @@
 #[cfg(unix)]
 mod access_core_tests;
 mod accounts;
+mod agent_rules;
 pub mod authority;
 #[cfg(test)]
 pub(crate) mod authority_props;
@@ -299,6 +300,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Continue(b) => b,
     };
     let b = match accounts::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match agent_rules::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

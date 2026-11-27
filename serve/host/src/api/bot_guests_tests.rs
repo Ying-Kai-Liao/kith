@@ -558,7 +558,7 @@ async fn a_bot_guest_and_a_member_cannot_call_the_room_people_methods() {
     let active = active_bot(&r).await;
     let sam = sam(&r).await;
     for who in [&active.caller, &sam] {
-        for m in ["addRoomPerson", "removeRoomPerson", "roomPeople"] {
+        for m in ["addRoomPerson", "removeRoomPerson", "roomPeople", "agentRules"] {
             let e = call(&r, who, m, json!({"room": "r", "person": "sam"})).await.unwrap_err();
             assert!(e.is::<NotAllowed>() || e.is::<super::devices::Forbidden>(), "{m}: {e:#}");
         }

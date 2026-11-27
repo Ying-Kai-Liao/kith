@@ -1556,6 +1556,7 @@ fn a_bot_guest_may_call_only_its_short_list() {
         "addRoomPerson",
         "removeRoomPerson",
         "roomPeople",
+        "agentRules",
         // The room methods of a person: a bot guest reads a room by its own door, never theirs.
         "myRooms",
         "leaveRoom",
@@ -1679,6 +1680,7 @@ fn the_key_methods_are_on_no_guest_list() {
         "removeRoomPerson",
         "roomPeople",
         "hostHealth",
+        "agentRules",
     ] {
         assert!(routed.iter().any(|r| r == m), "{m} is not found by the router walk");
         assert!(!MEMBER_METHODS.contains(&m), "{m} on MEMBER_METHODS");
