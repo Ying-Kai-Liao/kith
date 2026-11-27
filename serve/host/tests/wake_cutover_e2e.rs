@@ -366,13 +366,17 @@ impl Lab {
         };
         let mut calls: Vec<_> = std::fs::read_dir(self.dir.join("kcalls")).into_iter().flatten().flatten().collect();
         calls.sort_by_key(std::fs::DirEntry::file_name);
-        for e in calls.iter().take(2) {
+        // Every call's arguments; the whole environment of the first one that is not a probe (a launch).
+        let mut shown = false;
+        for e in &calls {
             let text = std::fs::read_to_string(e.path()).unwrap_or_default();
-            eprintln!("--- a call of the kith program: {}", e.file_name().to_string_lossy());
-            for l in text.lines().filter(|l| {
-                l.starts_with("args=") || l.starts_with("KITH_") || l.starts_with("HOME=") || l.starts_with("PATH=")
-            }) {
-                eprintln!("{l}");
+            let args = text.lines().next().unwrap_or_default();
+            eprintln!("--- a call of the kith program: {} {args}", e.file_name().to_string_lossy());
+            if !shown && !args.contains("kernel paths") && !args.contains("memory hook") {
+                shown = true;
+                for l in text.lines().skip(1) {
+                    eprintln!("{l}");
+                }
             }
         }
         for table in ["turns", "claims", "wake_sessions", "wake_items", "wake_turns", "wake_answered"] {
