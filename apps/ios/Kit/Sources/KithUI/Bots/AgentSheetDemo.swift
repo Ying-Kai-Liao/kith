@@ -17,6 +17,9 @@ public enum DemoAgent {
         }
     }
 
+    /// Made-up spend for the page's Usage and Limit rows; nil until the demo shots need one.
+    static var usage: AgentUsage? { nil }
+
     static func response(for botId: String) -> KithInfoResponse? {
         guard DemoScreens.active, botId == Self.botId else { return nil }
         let now = Int64(Date().timeIntervalSince1970 * 1000)

@@ -19,6 +19,8 @@ final class AccessStore {
     private(set) var keys: Section<[KeyRecord]> = .loading
     private(set) var ledger: Section<[AccessGrant]> = .loading
     private(set) var allowed: Section<AllowedList> = .loading
+    /// The merged rules (`agentRules`); nil on a host that doesn't answer it, and the page falls back to `allowed`.
+    private(set) var rules: [HostContract.AgentRule]?
     private(set) var people: AgentPeople?
     /// Remove calls on their way: "key/<profile>" or "grant/<key>"; their rows are disabled.
     private(set) var removing: Set<String> = []
@@ -51,7 +53,12 @@ final class AccessStore {
         async let k: Void = loadKeys()
         async let l: Void = loadLedger()
         async let a: Void = loadAllowed()
-        _ = await (k, l, a)
+        async let r: Void = loadRules()
+        _ = await (k, l, a, r)
+    }
+
+    private func loadRules() async {
+        if let answer = try? await client().agentRules(agent: agent) { rules = answer.rules }
     }
 
     private func loadAllowed() async {
@@ -64,19 +71,22 @@ final class AccessStore {
         }
     }
 
-    func remove(_ rule: AllowedRule) async {
-        let token = "allowed/" + rule.id
+    func remove(_ rule: AllowedRule) async { await remove(ruleId: rule.id) }
+
+    func remove(ruleId: String) async {
+        let token = "allowed/" + ruleId
         guard removing.insert(token).inserted else { return }
         removeError = nil
         defer { removing.remove(token) }
         do {
-            try await client().removeAllowedRule(agent: agent, id: rule.id)
+            try await client().removeAllowedRule(agent: agent, id: ruleId)
         } catch where AccessTab.isNotFound(error) {
             // A second tap, or already gone: the refreshed list is what is true now.
         } catch {
             removeError = error.localizedDescription
         }
         await loadAllowed()
+        await loadRules()
     }
 
     private func loadKeys() async {

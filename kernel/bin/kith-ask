@@ -110,8 +110,9 @@ def keep(key, value):
 
 
 def ls(as_json=False):
-    # Newest first; same-second ties by key, so the order never depends on the file's (or the Rust map's) own order.
-    kept = sorted(sorted(load().items()), key=lambda kv: kv[1].get('at', ''), reverse=True)
+    # Newest first. `at` only has minute resolution, so rows of one minute go by `ts` (epoch ms, which older rows lack: 0),
+    # then by key: the order never depends on the file's (or the Rust map's) own order, nor on which minute a run crossed.
+    kept = sorted(sorted(load().items()), key=lambda kv: (kv[1].get('at', ''), kv[1].get('ts', 0)), reverse=True)
     if as_json:
         print(json.dumps({'conversations': [
             {'key': key, 'agent': v.get('agent'), 'dir': key.split('|', 1)[-1], 'at': v.get('at'), 'turns': v.get('turns', 0),
@@ -1140,7 +1141,7 @@ def main(argv):
     cost = (prev or {}).get('cost', 0) + (res.get('total_cost_usd') or 0)
     if sid:
         keep(key, {'agent': agent, 'session_id': sid, 'at': dt.datetime.now().isoformat(timespec='minutes'),
-                   'turns': turns, 'cost': round(cost, 4), 'opts': opts, 'dir': os.getcwd(),
+                   'ts': int(time.time() * 1000), 'turns': turns, 'cost': round(cost, 4), 'opts': opts, 'dir': os.getcwd(),
                    'last': ' '.join(task.split())})
     if parked:   # not an answer: that comes when the card is answered
         if as_json:
