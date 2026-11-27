@@ -66,6 +66,7 @@ impl Ops for Live {
             kind: "scheduleRun",
             what: if program.is_some() { "kith kernel launch" } else { "kith-sched run-turn" },
             ended: "the scheduled run",
+            on_fail: feed_failure(hub, agent, job, turn, spec_person.is_null()),
         };
         let outbox = std::cell::RefCell::new(None);
         let started = start(&self.0, &run, |claim| {
@@ -89,6 +90,32 @@ impl Ops for Live {
         }
         started
     }
+}
+
+/// Posts a failed cron job of the owner's to the Feed, when it ends. A guest's job shows nothing there.
+fn feed_failure(hub: &Hub, agent: &str, job: &str, turn: i64, owner: bool) -> Option<super::run_door::FailHook> {
+    let hub = hub.shared().filter(|_| owner)?;
+    let (agent, job) = (agent.to_owned(), job.to_owned());
+    Some(Arc::new(move |why| {
+        let chat = crate::cards::chat_for(&hub, "", &agent).id;
+        crate::feed::host::run_post(
+            &hub,
+            crate::feed::host::RunFact {
+                chat: &chat,
+                person: None,
+                agent: Some(&agent),
+                entry: None,
+                key: format!("job:{job}"),
+                name: &crate::rich_card::job_name(&job),
+                text: why,
+                ok: false,
+                attachment: None,
+                kind: None,
+                fact_at: crate::store::now_ms(),
+                fact_id: format!("turn-{turn}"),
+            },
+        );
+    }))
 }
 
 /// The kernel the run starts from; a test of the runner gives it a stand-in (`TEST_KERNEL`) whose `bin/kith-sched` ends at once.

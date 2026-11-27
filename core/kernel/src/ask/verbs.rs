@@ -18,7 +18,7 @@ pub(super) fn delegations(host: &Host, out: &mut dyn Write) -> R<i32> {
 }
 
 /// The words of a row of the mailbox as `--wait` prints them: a progress note says so.
-fn said(row: &Value) -> String {
+pub(super) fn said(row: &Value) -> String {
     let text = row.get("text").and_then(Value::as_str).unwrap_or_default();
     if row.get("kind").and_then(Value::as_str) == Some("progress") {
         format!("(progress) {text}")
@@ -27,7 +27,7 @@ fn said(row: &Value) -> String {
     }
 }
 
-fn is_final(row: &Value) -> bool {
+pub(super) fn is_final(row: &Value) -> bool {
     matches!(
         row.get("kind").and_then(Value::as_str),
         Some("answer" | "lost")
@@ -355,8 +355,18 @@ pub(super) fn to(host: &Host, argv: &[String], out: &mut dyn Write, err: &mut dy
     if !safe_id(mid) {
         return Err(nothing());
     }
-    match (host.call)("ask.to", &json!({ "id": mid })) {
-        Ok(_) => {}
+    // The words go with the check: an ask that waits on another computer keeps them to be sent there, and answers `peer`.
+    match (host.call)("ask.to", &json!({ "id": mid, "text": text })) {
+        Ok(got) => {
+            if let Some(computer) = got.get("peer").and_then(Value::as_str) {
+                let _ = writeln!(
+                    err,
+                    "{mid} is on {computer}: your message is sent as soon as that computer answers; follow it: kith ask --wait {mid}"
+                );
+                let _ = writeln!(out, "queued");
+                return Ok(0);
+            }
+        }
         Err(Fail::Refused(why)) if no_such_ask(&why) => return Err(nothing()),
         Err(f) => return Err(Stop::from_fail(&f)),
     }

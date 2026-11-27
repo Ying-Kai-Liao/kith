@@ -48,6 +48,15 @@ pub(super) struct World<'a> {
     pub env: Vec<(String, String)>,
 }
 
+/// The listed turns that may begin now: while the pairings are unsettled, the asks that came from another computer stay queued
+/// (`originComputer` is set); every other ask goes on as ever.
+pub(super) fn unsettled_held_back(turns: Vec<Value>, settled: bool) -> Vec<Value> {
+    if settled {
+        return turns;
+    }
+    turns.into_iter().filter(|t| t["originComputer"].is_null()).collect()
+}
+
 /// The ask turns one pull listed: begins each. A turn the host cannot start right now stays queued and is pulled again.
 pub(super) fn take(writer: &Arc<CoreWriter>, turns: &[Value], world: &World<'_>) {
     // One read of an agent's harness per pull, however many of its turns wait.
@@ -109,7 +118,15 @@ fn begin(writer: &Arc<CoreWriter>, t: &Value, harness: Option<&str>, world: &Wor
         return Started::Cancelled(why.to_owned());
     };
     let engine = engine_of(t, harness);
-    let run = Run { turn, conversation, person, kind: "askRun", what: "the callee", ended: "the background ask" };
+    let run = Run {
+        turn,
+        conversation,
+        person,
+        kind: "askRun",
+        what: "the callee",
+        ended: "the background ask",
+        on_fail: None,
+    };
     let (id, task) = (ask.to_owned(), t["prompt"].as_str().unwrap_or_default().to_owned());
     start_with(writer, &run, |claim| {
         let plan = Plan::of(t, &engine, &task, claim, world)?;

@@ -362,6 +362,7 @@ fn create_thread(hub: &Hub, env: &Env, reg: &Registry, bot: &BotConfig) -> Resul
         "clientNonce": "",
         "attachments": [],
         "thread": thread_value(reg, "terminal", live, false),
+        "prompter": crate::prompter::of_session(&reg.kind, reg.label.as_deref()),
     });
     let root = hub
         .add_entry_at(&Lane::main(&bot.id), EntryKind::User, turn, &data, at)
@@ -405,7 +406,7 @@ fn create_thread(hub: &Hub, env: &Env, reg: &Registry, bot: &BotConfig) -> Resul
     if dropped {
         notice(hub, &thread, "Earlier messages are in the terminal transcript.", at);
     }
-    apply(hub, &thread, &items, live);
+    apply(hub, &thread, reg, &items, live);
     save_cursor(hub, &thread, read.end, reg.transcript());
     done_importing(hub, &thread, reg);
     Ok(Some(thread))
@@ -453,7 +454,7 @@ fn import_locked(hub: &Hub, t: &Thread, reg: &Registry) -> Result<bool> {
     if read.dropped > 0 {
         notice(hub, t, "Earlier messages are in the terminal transcript.", now_ms());
     }
-    apply(hub, t, &read.items, live);
+    apply(hub, t, reg, &read.items, live);
     save_cursor(hub, t, read.end, reg.transcript());
     done_importing(hub, t, reg);
     // A terminal that ran and closed between two scans was never seen live: the session still changed under the cache.
@@ -497,7 +498,7 @@ fn writer_notice(hub: &Hub, t: &Thread, change: &str, text: &str, at: i64) {
 }
 
 /// Adds `items` to the thread as entries. `live`: a tool without an outcome yet is still running.
-fn apply(hub: &Hub, t: &Thread, items: &[Item], live: bool) {
+fn apply(hub: &Hub, t: &Thread, reg: &Registry, items: &[Item], live: bool) {
     let mut tools: Option<HashMap<String, String>> = None;
     let mut final_id = hub.store.kv_get(&final_key(t)).filter(|s| !s.is_empty());
     let lane = t.lane();
@@ -515,7 +516,10 @@ fn apply(hub: &Hub, t: &Thread, items: &[Item], live: bool) {
         let turn = hub.store.max_turn(&t.bot);
         match item {
             Item::User { text, at } => {
-                let data = json!({"text": cap_text(text), "status": "sent", "clientNonce": "", "attachments": []});
+                let data = json!({
+                    "text": cap_text(text), "status": "sent", "clientNonce": "", "attachments": [],
+                    "prompter": crate::prompter::of_session(&reg.kind, reg.label.as_deref()),
+                });
                 hub.add_entry_at(&lane, EntryKind::User, turn + 1, &data, *at);
                 final_id = None;
             }

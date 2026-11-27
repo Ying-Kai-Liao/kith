@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "16cc6e9c5a14412e680d8dff24305932f4deece079eb9b5f77a9b4f0ec20d1f7"
+    public static let sha256 = "9995a4f4afae40cfce54bf0f28d6649d6e9dd4ac47ee09942e40b3bb735b9bd1"
 }
 
 extension HostContract {
@@ -75,6 +75,18 @@ extension HostContract {
         /// A value this version doesn't know is `.guest`.
         public init(from decoder: Decoder) throws {
             self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .guest
+        }
+    }
+
+    /// How hard this computer's memory is pressed: the OS's own word. One this version doesn't know reads as normal.
+    public enum HostPressure: String, Codable, Hashable, Sendable {
+        case normal
+        case warn
+        case critical
+
+        /// A value this version doesn't know is `.normal`.
+        public init(from decoder: Decoder) throws {
+            self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .normal
         }
     }
 
@@ -1010,6 +1022,68 @@ extension HostContract {
         }
     }
 
+    /// One row of an ask's answer on the computer it was sent to: its number there, who said it, what kind (answer, progress or lost), the words and when (ms).
+    public struct PeerRow: Codable, Hashable, Sendable {
+        public var n: Int64
+        public var `as`: String?
+        public var kind: String
+        public var text: String
+        public var at: Int64?
+
+        public init(n: Int64, `as`: String? = nil, kind: String, text: String, at: Int64? = nil) {
+            self.n = n
+            self.`as` = `as`
+            self.kind = kind
+            self.text = text
+            self.at = at
+        }
+    }
+
+    /// What the callee's computer says of an ask another computer sent (`peerAsk`, `peerThread`): `paired` false when that computer is not paired at the epoch it named (nothing else is then said), `found` false for a key never seen. Else its state (open, answered, capped, stopped, lost or refused), the rows after the one asked for, what the run and what it asked cost there in US$ (`cost`), what it waits on (`waiting`) and whether it takes a follow-up (`takesTo`).
+    public struct PeerThread: Codable, Hashable, Sendable {
+        public var paired: Bool
+        public var found: Bool
+        public var state: String?
+        public var rows: [PeerRow]
+        public var cost: JSONValue?
+        public var waiting: JSONValue?
+        public var takesTo: Bool?
+
+        public init(paired: Bool, found: Bool, state: String? = nil, rows: [PeerRow], cost: JSONValue? = nil, waiting: JSONValue? = nil, takesTo: Bool? = nil) {
+            self.paired = paired
+            self.found = found
+            self.state = state
+            self.rows = rows
+            self.cost = cost
+            self.waiting = waiting
+            self.takesTo = takesTo
+        }
+    }
+
+    /// What a stop of an ask comes to on the callee's computer: its state after (stopped, or the final state it had already), or `paired` false when that computer is not paired at the epoch named.
+    public struct PeerStopped: Codable, Hashable, Sendable {
+        public var paired: Bool
+        public var state: String?
+
+        public init(paired: Bool, state: String? = nil) {
+            self.paired = paired
+            self.state = state
+        }
+    }
+
+    /// What a `--to` message comes to on the callee's computer: `taken` true when it was queued for the ask's session, or will never be (the ask is over: `note` says so); false when it should be sent again later (the ask has no session yet). `paired` false when that computer is not paired at the epoch named.
+    public struct PeerTold: Codable, Hashable, Sendable {
+        public var paired: Bool
+        public var taken: Bool
+        public var note: String?
+
+        public init(paired: Bool, taken: Bool, note: String? = nil) {
+            self.paired = paired
+            self.taken = taken
+            self.note = note
+        }
+    }
+
     /// One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer.
     public struct HandleRevoke: Codable, Hashable, Sendable {
         public var handle: String
@@ -1055,6 +1129,81 @@ extension HostContract {
             self.enabled = enabled
             self.gen = gen
             self.people = people
+        }
+    }
+
+    /// Memory and swap in bytes; each field is null where this computer's OS gives no reading.
+    public struct HostMemory: Codable, Hashable, Sendable {
+        public var pressure: HostPressure?
+        public var usedBytes: Int64?
+        public var totalBytes: Int64?
+        public var swapUsedBytes: Int64?
+        public var swapTotalBytes: Int64?
+
+        public init(pressure: HostPressure? = nil, usedBytes: Int64? = nil, totalBytes: Int64? = nil, swapUsedBytes: Int64? = nil, swapTotalBytes: Int64? = nil) {
+            self.pressure = pressure
+            self.usedBytes = usedBytes
+            self.totalBytes = totalBytes
+            self.swapUsedBytes = swapUsedBytes
+            self.swapTotalBytes = swapTotalBytes
+        }
+    }
+
+    /// One mounted volume of this computer.
+    public struct HostDisk: Codable, Hashable, Sendable {
+        public var mount: String
+        public var name: String
+        public var totalBytes: Int64
+        public var freeBytes: Int64
+
+        public init(mount: String, name: String, totalBytes: Int64, freeBytes: Int64) {
+            self.mount = mount
+            self.name = name
+            self.totalBytes = totalBytes
+            self.freeBytes = freeBytes
+        }
+    }
+
+    /// This computer's load now: cpu is {percent: number, cores: int} (json: the contract has no number type), null where unread.
+    public struct HostHealth: Codable, Hashable, Sendable {
+        public var at: Int64
+        public var cpu: JSONValue?
+        public var memory: HostMemory
+        public var disks: [HostDisk]
+
+        public init(at: Int64, cpu: JSONValue? = nil, memory: HostMemory, disks: [HostDisk]) {
+            self.at = at
+            self.cpu = cpu
+            self.memory = memory
+            self.disks = disks
+        }
+    }
+
+    /// One permission rule of an agent, raw (placeholders such as {{HOME_REAL}} unexpanded). list is allow, ask or deny; source is role/settings.json or allowed.json; id and kind come only from allowed.json entries.
+    public struct AgentRule: Codable, Hashable, Sendable {
+        public var list: String
+        public var rule: String
+        public var source: String
+        public var id: String?
+        public var kind: String?
+
+        public init(list: String, rule: String, source: String, id: String? = nil, kind: String? = nil) {
+            self.list = list
+            self.rule = rule
+            self.source = source
+            self.id = id
+            self.kind = kind
+        }
+    }
+
+    /// An agent's permission rules, as the launcher merges them at launch: role/settings.json allow, ask and deny, then allowed.json (as allow).
+    public struct AgentRules: Codable, Hashable, Sendable {
+        public var agent: String
+        public var rules: [AgentRule]
+
+        public init(agent: String, rules: [AgentRule]) {
+            self.agent = agent
+            self.rules = rules
         }
     }
 
@@ -1346,6 +1495,117 @@ extension HostContract {
 
         public init(conversations: [BotConversation]) {
             self.conversations = conversations
+        }
+    }
+
+    /// Where a Feed post came from: the owner's chat, and the thread and entry it points at when there are some. A reply goes to this chat and thread with send.
+    public struct PostSource: Codable, Hashable, Sendable {
+        public var chat: String
+        public var thread: String?
+        public var entry: String?
+
+        public init(chat: String, thread: String? = nil, entry: String? = nil) {
+            self.chat = chat
+            self.thread = thread
+            self.entry = entry
+        }
+    }
+
+    /// One card of the owner's Feed. kind is merges, failing, number, page, file, video or yourTurn (one an app doesn't know shows as a plain card). attachment is at most one of {type:file,file}, {type:page,file,shot,version}, {type:video,file}, {type:number,value,unit,delta} and {type:link,url}; file and shot are the file meta a chat entry carries. items are the fold's members: a day's merged PRs ({id, title}), or a routine's last ten runs ({id, at, ok}). streak is the failed runs in a row of a routine, ending at its newest run. title is one line of at most 80 characters and line one of at most 200. Owner only: no invited person or bot ever gets a post.
+    public struct Post: Codable, Hashable, Sendable {
+        public var id: String
+        public var rev: Int64
+        public var agent: String
+        public var kind: String
+        public var title: String
+        public var line: String
+        public var attachment: JSONValue?
+        public var items: [JSONValue]
+        public var factAt: Int64
+        public var streak: Int64
+        public var source: PostSource
+        public var by: String
+        public var createdAt: Int64
+        public var updatedAt: Int64
+        public var liked: Bool
+        public var hidden: Bool
+
+        public init(id: String, rev: Int64, agent: String, kind: String, title: String, line: String, attachment: JSONValue? = nil, items: [JSONValue], factAt: Int64, streak: Int64, source: PostSource, by: String, createdAt: Int64, updatedAt: Int64, liked: Bool, hidden: Bool) {
+            self.id = id
+            self.rev = rev
+            self.agent = agent
+            self.kind = kind
+            self.title = title
+            self.line = line
+            self.attachment = attachment
+            self.items = items
+            self.factAt = factAt
+            self.streak = streak
+            self.source = source
+            self.by = by
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.liked = liked
+            self.hidden = hidden
+        }
+    }
+
+    /// A page of the Feed, newest first. next is the updatedAt to pass as before for the page after it; absent on the last page.
+    public struct Feed: Codable, Hashable, Sendable {
+        public var posts: [Post]
+        public var next: Int64?
+
+        public init(posts: [Post], next: Int64? = nil) {
+            self.posts = posts
+            self.next = next
+        }
+    }
+
+    /// The post after the change.
+    public struct PostAnswer: Codable, Hashable, Sendable {
+        public var post: Post
+
+        public init(post: Post) {
+            self.post = post
+        }
+    }
+
+    /// A chat whose agent said something in the last three hours: the ring above the Feed. unread counts what the owner has not read there.
+    public struct Story: Codable, Hashable, Sendable {
+        public var chat: String
+        public var agent: String?
+        public var lastAt: Int64
+        public var lastEntryId: String
+        public var unread: Int64
+
+        public init(chat: String, agent: String? = nil, lastAt: Int64, lastEntryId: String, unread: Int64) {
+            self.chat = chat
+            self.agent = agent
+            self.lastAt = lastAt
+            self.lastEntryId = lastEntryId
+            self.unread = unread
+        }
+    }
+
+    /// The owner's chats with an agent entry in the last three hours, newest first.
+    public struct Stories: Codable, Hashable, Sendable {
+        public var stories: [Story]
+
+        public init(stories: [Story]) {
+            self.stories = stories
+        }
+    }
+
+    /// The agent the text fits best, why, and up to two others to pick instead.
+    public struct FeedRoute: Codable, Hashable, Sendable {
+        public var agent: String
+        public var why: String
+        public var others: [String]
+
+        public init(agent: String, why: String, others: [String]) {
+            self.agent = agent
+            self.why = why
+            self.others = others
         }
     }
 
@@ -1914,6 +2174,64 @@ extension HostContract {
         }
     }
 
+    /// What `peerAsk` takes.
+    public struct PeerAskParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+        public var agent: String
+        public var task: String
+        public var lineage: JSONValue?
+        public var opts: JSONValue?
+        public var cont: String?
+
+        public init(key: String, epoch: String, agent: String, task: String, lineage: JSONValue? = nil, opts: JSONValue? = nil, cont: String? = nil) {
+            self.key = key
+            self.epoch = epoch
+            self.agent = agent
+            self.task = task
+            self.lineage = lineage
+            self.opts = opts
+            self.cont = cont
+        }
+    }
+
+    /// What `peerThread` takes.
+    public struct PeerThreadParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+        public var after: Int64?
+
+        public init(key: String, epoch: String, after: Int64? = nil) {
+            self.key = key
+            self.epoch = epoch
+            self.after = after
+        }
+    }
+
+    /// What `peerStop` takes.
+    public struct PeerStopParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+
+        public init(key: String, epoch: String) {
+            self.key = key
+            self.epoch = epoch
+        }
+    }
+
+    /// What `peerTo` takes.
+    public struct PeerToParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+        public var text: String
+
+        public init(key: String, epoch: String, text: String) {
+            self.key = key
+            self.epoch = epoch
+            self.text = text
+        }
+    }
+
     /// What `createInvite` takes.
     public struct CreateInviteParams: Codable, Hashable, Sendable {
         public var agents: [String: String]
@@ -1960,6 +2278,21 @@ extension HostContract {
         }
     }
 
+    /// What `hostHealth` takes.
+    public struct HostHealthParams: Codable, Hashable, Sendable {
+        public init() {
+        }
+    }
+
+    /// What `agentRules` takes.
+    public struct AgentRulesParams: Codable, Hashable, Sendable {
+        public var agent: String
+
+        public init(agent: String) {
+            self.agent = agent
+        }
+    }
+
     /// What `myRooms` takes.
     public struct MyRoomsParams: Codable, Hashable, Sendable {
         public init() {
@@ -1972,6 +2305,54 @@ extension HostContract {
 
         public init(room: String) {
             self.room = room
+        }
+    }
+
+    /// What `feed` takes.
+    public struct FeedParams: Codable, Hashable, Sendable {
+        public var before: Int64?
+        public var limit: Int64?
+
+        public init(before: Int64? = nil, limit: Int64? = nil) {
+            self.before = before
+            self.limit = limit
+        }
+    }
+
+    /// What `likePost` takes.
+    public struct LikePostParams: Codable, Hashable, Sendable {
+        public var id: String
+        public var liked: Bool
+
+        public init(id: String, liked: Bool) {
+            self.id = id
+            self.liked = liked
+        }
+    }
+
+    /// What `hidePost` takes.
+    public struct HidePostParams: Codable, Hashable, Sendable {
+        public var id: String
+        public var hidden: Bool
+
+        public init(id: String, hidden: Bool) {
+            self.id = id
+            self.hidden = hidden
+        }
+    }
+
+    /// What `stories` takes.
+    public struct StoriesParams: Codable, Hashable, Sendable {
+        public init() {
+        }
+    }
+
+    /// What `feedRoute` takes.
+    public struct FeedRouteParams: Codable, Hashable, Sendable {
+        public var text: String
+
+        public init(text: String) {
+            self.text = text
         }
     }
 
@@ -2026,16 +2407,27 @@ extension HostContract {
         case botLeave
         case peerAgents
         case peerRevokes
+        case peerAsk
+        case peerThread
+        case peerStop
+        case peerTo
         case createInvite
         case addRoomPerson
         case removeRoomPerson
         case roomPeople
+        case hostHealth
+        case agentRules
         case myRooms
         case leaveRoom
+        case feed
+        case likePost
+        case hidePost
+        case stories
+        case feedRoute
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople]
+    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople, .hostHealth, .agentRules, .feed, .likePost, .hidePost, .stories, .feedRoute]
 
     /// What an invited person may call.
     public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation, .myRooms, .leaveRoom]
@@ -2050,7 +2442,7 @@ extension HostContract {
     public static let botPendingMethods: [Method] = [.hello, .botStatus, .proveBotInvite]
 
     /// What another computer of the owner's, paired here (Mac link) may call.
-    public static let peerMethods: [Method] = [.peerAgents, .peerRevokes]
+    public static let peerMethods: [Method] = [.peerAgents, .peerRevokes, .peerAsk, .peerThread, .peerStop, .peerTo]
 
     /// Decodes `data` as the contract type `name`; false when the contract has no such type. For the fixtures' tests.
     public static func decode(_ name: String, _ data: Data) throws -> Bool {
@@ -2098,10 +2490,19 @@ extension HostContract {
         case "BotSelf": _ = try d.decode(BotSelf.self, from: data)
         case "PeerAgent": _ = try d.decode(PeerAgent.self, from: data)
         case "PeerAgents": _ = try d.decode(PeerAgents.self, from: data)
+        case "PeerRow": _ = try d.decode(PeerRow.self, from: data)
+        case "PeerThread": _ = try d.decode(PeerThread.self, from: data)
+        case "PeerStopped": _ = try d.decode(PeerStopped.self, from: data)
+        case "PeerTold": _ = try d.decode(PeerTold.self, from: data)
         case "HandleRevoke": _ = try d.decode(HandleRevoke.self, from: data)
         case "HandleRevokes": _ = try d.decode(HandleRevokes.self, from: data)
         case "RoomPerson": _ = try d.decode(RoomPerson.self, from: data)
         case "RoomPeople": _ = try d.decode(RoomPeople.self, from: data)
+        case "HostMemory": _ = try d.decode(HostMemory.self, from: data)
+        case "HostDisk": _ = try d.decode(HostDisk.self, from: data)
+        case "HostHealth": _ = try d.decode(HostHealth.self, from: data)
+        case "AgentRule": _ = try d.decode(AgentRule.self, from: data)
+        case "AgentRules": _ = try d.decode(AgentRules.self, from: data)
         case "CreatedInvite": _ = try d.decode(CreatedInvite.self, from: data)
         case "RoomPersonChange": _ = try d.decode(RoomPersonChange.self, from: data)
         case "MyRoomAgent": _ = try d.decode(MyRoomAgent.self, from: data)
@@ -2119,6 +2520,13 @@ extension HostContract {
         case "BotThread": _ = try d.decode(BotThread.self, from: data)
         case "BotConversation": _ = try d.decode(BotConversation.self, from: data)
         case "BotConversations": _ = try d.decode(BotConversations.self, from: data)
+        case "PostSource": _ = try d.decode(PostSource.self, from: data)
+        case "Post": _ = try d.decode(Post.self, from: data)
+        case "Feed": _ = try d.decode(Feed.self, from: data)
+        case "PostAnswer": _ = try d.decode(PostAnswer.self, from: data)
+        case "Story": _ = try d.decode(Story.self, from: data)
+        case "Stories": _ = try d.decode(Stories.self, from: data)
+        case "FeedRoute": _ = try d.decode(FeedRoute.self, from: data)
         case "HelloParams": _ = try d.decode(HelloParams.self, from: data)
         case "KithInfoParams": _ = try d.decode(KithInfoParams.self, from: data)
         case "StartChatParams": _ = try d.decode(StartChatParams.self, from: data)
@@ -2168,12 +2576,23 @@ extension HostContract {
         case "BotLeaveParams": _ = try d.decode(BotLeaveParams.self, from: data)
         case "PeerAgentsParams": _ = try d.decode(PeerAgentsParams.self, from: data)
         case "PeerRevokesParams": _ = try d.decode(PeerRevokesParams.self, from: data)
+        case "PeerAskParams": _ = try d.decode(PeerAskParams.self, from: data)
+        case "PeerThreadParams": _ = try d.decode(PeerThreadParams.self, from: data)
+        case "PeerStopParams": _ = try d.decode(PeerStopParams.self, from: data)
+        case "PeerToParams": _ = try d.decode(PeerToParams.self, from: data)
         case "CreateInviteParams": _ = try d.decode(CreateInviteParams.self, from: data)
         case "AddRoomPersonParams": _ = try d.decode(AddRoomPersonParams.self, from: data)
         case "RemoveRoomPersonParams": _ = try d.decode(RemoveRoomPersonParams.self, from: data)
         case "RoomPeopleParams": _ = try d.decode(RoomPeopleParams.self, from: data)
+        case "HostHealthParams": _ = try d.decode(HostHealthParams.self, from: data)
+        case "AgentRulesParams": _ = try d.decode(AgentRulesParams.self, from: data)
         case "MyRoomsParams": _ = try d.decode(MyRoomsParams.self, from: data)
         case "LeaveRoomParams": _ = try d.decode(LeaveRoomParams.self, from: data)
+        case "FeedParams": _ = try d.decode(FeedParams.self, from: data)
+        case "LikePostParams": _ = try d.decode(LikePostParams.self, from: data)
+        case "HidePostParams": _ = try d.decode(HidePostParams.self, from: data)
+        case "StoriesParams": _ = try d.decode(StoriesParams.self, from: data)
+        case "FeedRouteParams": _ = try d.decode(FeedRouteParams.self, from: data)
         default: return false
         }
         return true

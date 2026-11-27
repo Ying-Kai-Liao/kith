@@ -25,6 +25,8 @@ mod delegation;
 mod doors;
 mod engine_run;
 mod environment;
+mod feed;
+mod health;
 mod hqmem;
 mod hub;
 mod kernel;
@@ -38,6 +40,7 @@ mod market;
 mod mcp;
 #[cfg(unix)]
 mod pkg_cmd;
+mod prompter;
 mod remote;
 mod rich_card;
 mod routines;
@@ -56,6 +59,7 @@ mod threads_cmd;
 mod tui;
 mod update;
 mod usage;
+mod usage_core;
 mod voice;
 mod voice_local;
 mod wake;
@@ -2087,8 +2091,8 @@ async fn shutdown_signal() {
             }
         }
     };
-    // Console close and system shutdown stand in for SIGTERM. The named stop event the plan wants (windows-owner W4/W11)
-    // needs unsafe Win32 that belongs in core/winsys, not the host.
+    // Console close and system shutdown stand in for SIGTERM, and so does the named stop event `kith serve stop` and the
+    // tests signal (windows-owner W11, D5).
     #[cfg(windows)]
     let term = async {
         use tokio::signal::windows;
@@ -2100,9 +2104,11 @@ async fn shutdown_signal() {
                 return;
             }
         };
+        let stop_event = kith_winsys::event::stop_event_name(&service::data_dir());
         tokio::select! {
             _ = close.recv() => {}
             _ = shutdown.recv() => {}
+            () = stop_event_signalled(&stop_event) => {}
         }
     };
     #[cfg(not(any(unix, windows)))]
@@ -2110,6 +2116,31 @@ async fn shutdown_signal() {
     tokio::select! {
         () = ctrl_c => {}
         () = term => {}
+    }
+}
+
+/// Resolves when the named stop event is signalled. Makes the event and clears it first: a host started after a stop must
+/// not leave at once because the last one's event was still held open by whoever signalled it. The wait is a blocking
+/// call of at most a quarter second at a time, so it never holds the runtime or a thread for good.
+#[cfg(windows)]
+async fn stop_event_signalled(name: &str) {
+    let event = match kith_winsys::event::StopEvent::create(name) {
+        Ok(event) => std::sync::Arc::new(event),
+        Err(error) => {
+            tracing::warn!(%error, "can't make the stop event");
+            return std::future::pending().await;
+        }
+    };
+    if let Err(error) = event.reset() {
+        tracing::warn!(%error, "can't clear the stop event");
+    }
+    loop {
+        let waiting = event.clone();
+        match tokio::task::spawn_blocking(move || waiting.wait(Duration::from_millis(250))).await {
+            Ok(Ok(true)) => return,
+            Ok(Ok(false)) => {}
+            _ => return std::future::pending().await,
+        }
     }
 }
 
@@ -2476,5 +2507,28 @@ mod cli_tests {
             assert!(tracing::enabled!(tracing::Level::INFO), "info from {} is filtered out", module_path!());
             assert!(!tracing::enabled!(tracing::Level::DEBUG));
         });
+    }
+}
+
+#[cfg(all(test, windows))]
+mod stop_event_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn signalling_the_named_event_resolves_the_wait() {
+        let name = format!("kith-serve-stop-test-{}", std::process::id());
+        let waiting = name.clone();
+        let wait = tokio::spawn(async move { stop_event_signalled(&waiting).await });
+        // The wait makes the event itself; open it once it is there, then signal.
+        let event = loop {
+            if let Some(e) = kith_winsys::event::StopEvent::open(&name).unwrap() {
+                break e;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!wait.is_finished());
+        event.signal().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), wait).await.unwrap().unwrap();
     }
 }

@@ -450,7 +450,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("20"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("21"));
         assert!(s.join_room_person("r", "ben", &line("personJoined")).unwrap().is_some());
         let _ = std::fs::remove_dir_all(dir);
     }
