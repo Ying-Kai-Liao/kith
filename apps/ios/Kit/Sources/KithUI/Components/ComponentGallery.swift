@@ -6,7 +6,7 @@ import SwiftUI
 /// with the launch argument `-kithComponentGallery`; add `-kithGallerySection <name>` (avatars, rows, thread,
 /// cards, dock, bar, terminal) to show one section at the top.
 public struct KithComponentGallery: View {
-    @State private var tab = CrewBoardTab.crew
+    @State private var tab = HomeTab.crew
     @State private var open = true
     @State private var live = ""
     private let section: String?
@@ -51,7 +51,7 @@ public struct KithComponentGallery: View {
             HStack {
                 ProfileTopButton(action: {}) { SkyPatch(id: "kai", size: 38, isYou: true) }
                 Spacer()
-                CrewBoardSwitch(selection: $tab, boardCount: 3)
+                HomeTabSwitch(selection: $tab)
                 Spacer()
                 TopGlassMenu("New chat") { Button("New bot", systemImage: "plus.square") {} }
             }.padding(.horizontal, 16)

@@ -39,7 +39,7 @@ modes=(
   "components-dock|-kithComponentGallery -kithGallerySection dock"
   "demo-crew|-kithDemoScreens crew"
   "demo-crew-typing|-kithDemoScreens crew-typing"
-  "demo-board|-kithDemoScreens board"
+  "demo-crew-people|-kithDemoScreens crew-people"
   "demo-chat|-kithDemoScreens chat"
   "demo-news|-kithDemoScreens news"
   "demo-settings|-kithDemoScreens settings"

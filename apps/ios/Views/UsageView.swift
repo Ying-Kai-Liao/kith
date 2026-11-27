@@ -2,23 +2,25 @@ import KithKit
 import KithUI
 import SwiftUI
 
-/// Usage limits (opened from the State tab): one grouped card per provider, a row per limit with its own bar; then, for
-/// the computer's owner, what agents and your own sessions cost at API prices and each agent's monthly limit.
+/// Usage (You > Usage): plan meters first, one grouped card per provider with a row per limit; then, for the
+/// computer's owner, this calendar month's cost at API prices, Agents | People.
 struct UsageView: View {
     @Environment(BotStore.self) private var model
     @State private var collapsed: Set<String> = []
+    private var meters: PlanMeters { PlanMeters(model.usage) }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 22) {
-                    ForEach(model.usage.providers) { provider in
-                        ProviderCard(provider: provider, collapsed: Binding(
-                            get: { collapsed.contains(provider.id) },
-                            set: { if $0 { collapsed.insert(provider.id) } else { collapsed.remove(provider.id) } }
+                    // Plan meters first; per-account meters (host fact 0.1) arrive through `PlanMeters`.
+                    ForEach(meters.accounts) { account in
+                        ProviderCard(provider: account.provider, collapsed: Binding(
+                            get: { collapsed.contains(account.id) },
+                            set: { if $0 { collapsed.insert(account.id) } else { collapsed.remove(account.id) } }
                         ))
                     }
-                    if model.usage.providers.isEmpty {
+                    if meters.accounts.isEmpty {
                         VStack(spacing: 8) {
                             Image(systemName: "chart.bar").font(.system(size: 40)).foregroundStyle(Palette.tertiary)
                             Text(model.isOwner ? "No plan limits yet." : "No usage information yet.").font(.title3.weight(.semibold)).foregroundStyle(Palette.text)

@@ -29,6 +29,10 @@ struct ChatRow: View {
     var toggleContext: () -> Void = {}
     /// A late reply: the first line of the message it answers, when that is known.
     var lateQuote: String?
+    /// The chat folds long replies to their gist; `gistOpened` is this reply opened on its own, `toggleGist` flips that.
+    var gistMode = false
+    var gistOpened = false
+    var toggleGist: () -> Void = {}
 
     var body: some View {
         let reply = onReply.map { reply in { reply(entry) } }
@@ -66,7 +70,8 @@ struct ChatRow: View {
                         ScheduleCard(entry: entry, card: card)
                     }
                 } else {
-                    AgentBubble(entry: entry, openTrace: openTrace, reply: reply, makeTopic: topicAction, late: entry.data.isLate, lateQuote: lateQuote) {
+                    AgentBubble(entry: entry, openTrace: openTrace, reply: reply, makeTopic: topicAction, late: entry.data.isLate, lateQuote: lateQuote,
+                                fold: ReplyFold.reason(for: entry, gistMode: gistMode), opened: gistOpened, toggleFold: toggleGist) {
                         withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { toggleContext() }
                     }
                     if resultAsText, entry.data.richCard?.type == "result" {
@@ -300,6 +305,10 @@ struct AgentBubble: View {
     /// A late reply: outlined, with the line it answers when that is known.
     var late = false
     var lateQuote: String?
+    /// Set while the chat is in Gist mode and this reply is long: it shows only its first sentence unless `opened`.
+    var fold: FoldReason?
+    var opened = false
+    var toggleFold: () -> Void = {}
     /// A tap on the bubble (links keep their own).
     var onTap: (() -> Void)?
     @State private var selecting = false
@@ -324,13 +333,18 @@ struct AgentBubble: View {
                     LateBubble(quote: lateQuote) {
                         MarkdownText(entry.data.text ?? "", cached: entry.data.status != "streaming").equatable().fixedSize(horizontal: false, vertical: true)
                     }
+                } else if case let .gist(gist)? = fold, !opened {
+                    GistBubble(gist: gist, open: toggleFold)
                 } else {
-                    MarkdownText(entry.data.text ?? "", cached: entry.data.status != "streaming").equatable()
-                        // A reply is never cut: take the height the text needs, whatever the row proposes.
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Palette.bubbleAgent, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
+                    VStack(alignment: .leading, spacing: 6) {
+                        MarkdownText(entry.data.text ?? "", cached: entry.data.status != "streaming").equatable()
+                            // A reply is never cut: take the height the text needs, whatever the row proposes.
+                            .fixedSize(horizontal: false, vertical: true)
+                        if fold != nil { GistToggle(title: "See less", hint: "Shows only the first sentence", action: toggleFold) }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Palette.bubbleAgent, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
                 }
             }
                 .onTapGesture { onTap?() }
@@ -620,5 +634,6 @@ extension ChatRow: @MainActor Equatable {
             && a.chat?.isWorking == b.chat?.isWorking && (a.onReply == nil) == (b.onReply == nil)
             && a.showsContext == b.showsContext && a.lateQuote == b.lateQuote
             && (a.onMakeTopic == nil) == (b.onMakeTopic == nil)
+            && a.gistMode == b.gistMode && a.gistOpened == b.gistOpened
     }
 }
