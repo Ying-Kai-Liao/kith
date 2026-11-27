@@ -36,6 +36,12 @@ public struct ThreadView: View {
     /// The reply whose time and context line is showing; scrolling closes it.
     @State var contextLineEntry: String?
     @State var loadingEarlier = false
+    /// Gist or Full for the whole chat, remembered app-wide: gist folds every long agent reply to its first sentence.
+    @AppStorage(GistSetting.key) var gistMode = false
+    /// Replies opened on their own while the chat is in Gist mode (or closed again after Full). Cleared when the mode changes.
+    @State var gistOpened: Set<String> = []
+    /// Counts the changes that resize rows in place; the list keeps the reader's place across each.
+    @State var foldEpoch = 0
     /// The task cards on screen, for the "working now" line over the box. Not read by the list, so a card scrolling in
     /// or out redraws the box only.
     @State var visibleTasks = VisibleTasks()
@@ -219,6 +225,20 @@ public struct ThreadView: View {
         }
     }
 
+    func toggleGist(_ id: String) {
+        foldEpoch += 1
+        if !gistOpened.insert(id).inserted { gistOpened.remove(id) }
+    }
+
+    /// The whole chat to Gist or Full (the pinch, and the ⋯ menu). Single replies opened by hand start over.
+    func setGist(_ on: Bool) {
+        guard on != gistMode else { return }
+        foldEpoch += 1
+        gistOpened = []
+        gistMode = on
+        UIAccessibility.post(notification: .announcement, argument: on ? "Long replies folded" : "Long replies opened")
+    }
+
     func toggleSteps(_ id: String) {
         withAnimation(Motion.reduced(Motion.layout, reduceMotion)) {
             if !expandedSteps.insert(id).inserted { expandedSteps.remove(id) }
@@ -233,7 +253,11 @@ public struct ThreadView: View {
         return ChatRow(entry: e, groupStart: groupStart, chat: bot, openTrace: { showTrace = true }, onReply: replyAction, onMakeTopic: topicAction,
                        showsContext: contextLineEntry == e.id,
                        toggleContext: { contextLineEntry = ContextLineToggle.tapped(e.id, open: contextLineEntry) },
-                       lateQuote: lateQuote(e))
+                       lateQuote: lateQuote(e),
+                       gistMode: gistMode,
+                       // A search result or jump lands on the reply itself, so it opens.
+                       gistOpened: gistOpened.contains(e.id) || model.focusEntry.map { $0.chat == botId && $0.entry == e.id } == true,
+                       toggleGist: { toggleGist(e.id) })
             .equatable()
             .task(id: missing) {
                 // Its thread's older replies are not here yet: bring them in, so the chat has them in order.
@@ -634,7 +658,8 @@ extension ThreadView {
         let focus = model.focusEntry.flatMap { $0.chat == botId ? $0.entry : nil }
             .flatMap { entry in items.first { $0.holds(entry: entry) }?.id }
         // Pull to refresh reconnects, like Reconnect in the computer menu, until the link is back.
-        return ConversationList(rows: rows, following: $following, onUserScroll: { contextLineEntry = nil }, focus: focus, focused: { model.focusEntry = nil }, nearTop: { showEarlier() }, refresh: {
+        return ConversationList(rows: rows, following: $following, onUserScroll: { contextLineEntry = nil }, keepPlace: foldEpoch,
+                                onPinch: { scale in if let on = GistSetting.mode(forPinchScale: scale, current: gistMode) { setGist(on) } }, focus: focus, focused: { if let f = model.focusEntry, f.chat == botId { gistOpened.insert(f.entry) }; model.focusEntry = nil }, nearTop: { showEarlier() }, refresh: {
             model.restartStream()
             _ = try? await model.ready()
         })
@@ -803,6 +828,8 @@ extension ThreadView {
             Button("Share access…", systemImage: "person.badge.plus", action: onShare)
         }
         if bot?.isReadOnly != true { Button("Details", systemImage: "info.circle", action: openDetails) }
+        Button(gistMode ? "Open every long reply" : "Fold long replies",
+               systemImage: gistMode ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left") { setGist(!gistMode) }
         ForEach(menuItems) { item in
             if item.divider { Divider() }
             Button(role: item.destructive ? .destructive : nil, action: item.action) {

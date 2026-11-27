@@ -27,6 +27,10 @@ struct ConversationList: View {
     @Binding var following: Bool
     /// The reader started dragging the list.
     var onUserScroll: (() -> Void)?
+    /// Changes when rows change height in place (a reply folding or opening): the list keeps the first visible row where it is.
+    var keepPlace = 0
+    /// A pinch ended with this scale (below 1 pinching in, above 1 spreading). Never begins while the list is scrolling.
+    var onPinch: ((CGFloat) -> Void)?
     /// A row to scroll to and flash once (a search result's message); `focused` is called when it has.
     var focus: String?
     var focused: (() -> Void)?
@@ -47,7 +51,7 @@ struct ConversationList: View {
             .ignoresSafeArea()
             // The list itself stays inside the safe area (so its rows never see one) and
             // reaches out past it.
-            ConversationCollection(rows: rows, following: $following, onUserScroll: onUserScroll, focus: focus, focused: focused, nearTop: nearTop, refresh: refresh, pull: pull,
+            ConversationCollection(rows: rows, following: $following, onUserScroll: onUserScroll, keepPlace: keepPlace, onPinch: onPinch, focus: focus, focused: focused, nearTop: nearTop, refresh: refresh, pull: pull,
                                    outsets: UIEdgeInsets(top: max(0, safeFrame.minY - fullFrame.minY), left: 0,
                                                          bottom: max(0, fullFrame.maxY - safeFrame.maxY), right: 0))
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { safeFrame = $0 }
@@ -65,6 +69,8 @@ private struct ConversationCollection: UIViewRepresentable {
     let rows: [ConversationRow]
     @Binding var following: Bool
     let onUserScroll: (() -> Void)?
+    let keepPlace: Int
+    let onPinch: ((CGFloat) -> Void)?
     let focus: String?
     let focused: (() -> Void)?
     let nearTop: (() -> Void)?
@@ -85,7 +91,7 @@ private struct ConversationCollection: UIViewRepresentable {
         context.coordinator.update(self, context: context)
     }
 
-    @MainActor final class Coordinator: NSObject, UICollectionViewDelegate {
+    @MainActor final class Coordinator: NSObject, UICollectionViewDelegate, UIGestureRecognizerDelegate {
         private var view: ConversationCollectionView!
         private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
         private var contents: [String: AnyView] = [:]
@@ -97,6 +103,7 @@ private struct ConversationCollection: UIViewRepresentable {
         private var revealed: String?
         private var lastOffset: CGFloat = 0
         private var reduceMotion = false
+        private var keptPlace = 0
 
         func makeView() -> ConversationCollectionView {
             let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(80))
@@ -117,6 +124,9 @@ private struct ConversationCollection: UIViewRepresentable {
             let tap = UITapGestureRecognizer(target: view, action: #selector(UIView.endEditing(_:)))
             tap.cancelsTouchesInView = false
             view.addGestureRecognizer(tap)
+            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
+            pinch.delegate = self
+            view.addGestureRecognizer(pinch)
 
             let cell = UICollectionView.CellRegistration<UICollectionViewCell, String> { [weak self] cell, _, id in
                 guard let self else { return }
@@ -174,8 +184,13 @@ private struct ConversationCollection: UIViewRepresentable {
             snapshot.reconfigureItems(ids.filter(kept.contains))
             let first = lastId == nil
             lastId = rows.last?.id
+            // Rows changed height in place (a fold): keep the reader's place, no animation.
+            let resized = keptPlace != parent.keepPlace
+            keptPlace = parent.keepPlace
 
-            if old == ids || first || view.scrollingToEnd || jump || sent {
+            if resized, !first, !jump, !sent, !view.scrollingToEnd {
+                applyKeepingPlace(snapshot)
+            } else if old == ids || first || view.scrollingToEnd || jump || sent {
                 dataSource.apply(snapshot, animatingDifferences: false)
             } else if view.following, !reduceMotion {
                 // New rows pop in as the list moves up to them, in one motion (Grok Bot's
@@ -209,6 +224,19 @@ private struct ConversationCollection: UIViewRepresentable {
                 self?.view.cellForItem(at: path)?.contentView.flash()
             }
         }
+
+        @objc private func pinched(_ pinch: UIPinchGestureRecognizer) {
+            guard pinch.state == .ended else { return }
+            parent?.onPinch?(pinch.scale)
+        }
+
+        /// The pinch does not begin while the list is being dragged or coasting, and runs beside the scroll's own pan.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard gestureRecognizer is UIPinchGestureRecognizer else { return true }
+            return !(view.isDragging || view.isDecelerating || view.scrollingToEnd)
+        }
+
+        func gestureRecognizer(_ a: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith b: UIGestureRecognizer) -> Bool { true }
 
         /// Rows going in or out above: the first row on screen stays where it is.
         private func applyKeepingPlace(_ snapshot: NSDiffableDataSourceSnapshot<Int, String>) {
