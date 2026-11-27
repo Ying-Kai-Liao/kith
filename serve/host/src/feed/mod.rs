@@ -4,6 +4,8 @@
 //! names an invitee's chat, and no post event reaches a member or a bot (`api::roles`).
 
 pub mod fold;
+pub mod like;
+pub mod route;
 
 use crate::LockExt;
 use crate::hub::Hub;
