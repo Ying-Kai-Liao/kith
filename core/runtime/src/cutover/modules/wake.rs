@@ -70,13 +70,22 @@ pub(crate) const RUNS_WAKE_TURNS: bool = false;
 /// The build's answer. A debug build also reads `KITH_WAKE_GATE_OPEN=1`, so the end-to-end test can step a build whose gate is
 /// still shut (its other conditions are checked for real); a release build never reads it.
 fn runs_wake_turns() -> bool {
-    gate_open(
-        cfg!(debug_assertions),
-        std::env::var("KITH_WAKE_GATE_OPEN").ok().as_deref(),
-    )
+    // Compiled out of a release build: only the constant answers there.
+    #[cfg(debug_assertions)]
+    {
+        gate_open(
+            cfg!(debug_assertions),
+            std::env::var("KITH_WAKE_GATE_OPEN").ok().as_deref(),
+        )
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        RUNS_WAKE_TURNS
+    }
 }
 
 /// [`runs_wake_turns`] with its two inputs given, so a test can check the release shape.
+#[cfg(any(test, debug_assertions))]
 pub(super) fn gate_open(debug_build: bool, env: Option<&str>) -> bool {
     RUNS_WAKE_TURNS || (debug_build && env == Some("1"))
 }

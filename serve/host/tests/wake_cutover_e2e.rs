@@ -358,6 +358,12 @@ impl Lab {
         for l in tail.iter().rev() {
             eprintln!("{l}");
         }
+        let core_log = std::fs::read_to_string(self.home.join("Library/Logs/kith/core.log")).unwrap_or_default();
+        let tail: Vec<&str> = core_log.lines().rev().take(60).collect();
+        eprintln!("--- core.log (last {} lines)", tail.len());
+        for l in tail.iter().rev() {
+            eprintln!("{l}");
+        }
         let Ok(db) = rusqlite::Connection::open_with_flags(
             self.machine.join("core/core.db"),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,

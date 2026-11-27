@@ -66,7 +66,7 @@ use crate::error::{Error, Result};
 /// Debug builds only: `KITH_WAKE_SWITCHED_FOR_TEST=1` in a core's own environment says the queue is switched (a difftest case of
 /// a verb that queues a wake runs its daemon with it; there is no record to write in a sandbox that has no host). A release build
 /// never reads it.
-#[cfg(unix)]
+#[cfg(all(unix, any(test, debug_assertions)))]
 pub(crate) fn forced_for_test(debug_build: bool, env: Option<&str>) -> bool {
     debug_build && env == Some("1")
 }
@@ -76,11 +76,15 @@ pub(crate) fn forced_for_test(debug_build: bool, env: Option<&str>) -> bool {
 /// a core opened without its folders all say no, so the core refuses the writes of a queue that is not its to write.
 #[cfg(unix)]
 pub(crate) fn switched(core: &Core) -> bool {
-    if forced_for_test(
-        cfg!(debug_assertions),
-        std::env::var("KITH_WAKE_SWITCHED_FOR_TEST").ok().as_deref(),
-    ) {
-        return true;
+    // Compiled out of a release build: its core cannot be told the queue is switched.
+    #[cfg(debug_assertions)]
+    {
+        if forced_for_test(
+            cfg!(debug_assertions),
+            std::env::var("KITH_WAKE_SWITCHED_FOR_TEST").ok().as_deref(),
+        ) {
+            return true;
+        }
     }
     let Some(folders) = core.folders() else {
         return false;
