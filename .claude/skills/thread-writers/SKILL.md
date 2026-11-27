@@ -529,3 +529,18 @@ spawn of this program, which waits for go and runs claude as its child, so the c
 (the part the stub plays on a Mac). Differences, none a new writer: no stub lock on Windows yet (the stub's status pipe is Unix only;
 the compaction runs unlocked and says so, `KITH_REQUIRE_STUB=1` refuses), `threads run` stays Unix only (W12-5/W12-6). Drift
 lists `proc_win.rs` and `winsys/src/procs.rs` now. SYNC not moved; the model needed no change.
+
+## Windows host turns, W12-7 (2026-11-27) - prose only, no model row, no re-sync needed
+The host's Writer mode (`core_writer.rs`, `writer*.rs`, `warm_stub.rs`) and `hostclaim.turn` build on Windows. Same steps as the
+model's (`HostClaimNext`, take, redeem on the stub's pid and stamp, release, `adopt`, `settle`); nothing new is a writer. What is
+different there: (1) the stub is started by `kith_acp::spawn_resident` inside a job the host holds (unnamed, kill on close, no
+breakaway flags, `CreateProcess` with `PROC_THREAD_ATTRIBUTE_JOB_LIST` in one call, W12 H1/H2/rule 6), its control channel is an
+owner-only named pipe the stub opens as a client (`--ctl-pipe`, already in the stub), and the stub's engine is in the stub's own job
+(W12-1). A host that ends, however it ends, ends the stub and so the engine: the writer ends no later than the recorded process
+(H1/H4). (2) The claim names the stub's pid and start stamp at `redeem`, before the prompt is sent (H3); `adopt` marks an old host's
+claim `ending` with `end_reason = host_changed` and `settle` ends it only once procstart says the stub is gone (P1), so no second
+writer starts beside a stub that is still ending. (3) C1: the stub does not outlive the host, so a host restart ends the turn there
+(`can(Chat, Windows) = Partial("a host restart ends the turn")`; the engine-layer fit is section 3 of docs/plans/engine-layer.md,
+PR #1240). The actor says so in the chat and resumes the conversation in a new process. Adopting the old stub after a restart is not
+modelled and not built. The switch stays off: `claims` is `false` in `switched::MODULES` on Windows, so the gate answers no and the
+host keeps its files mode there until the package that turns it on. Drift lists `resident.rs` and `hostclaim.rs`; SYNC not moved.

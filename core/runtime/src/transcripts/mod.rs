@@ -22,10 +22,10 @@ pub(crate) mod project;
 pub(crate) mod prune;
 pub(crate) mod read;
 pub(crate) mod reconcile;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod reconcile_tests;
 pub(crate) mod record;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod record_tests;
 pub(crate) mod rows;
 #[cfg(test)]

@@ -6,15 +6,20 @@
 //!
 //! The ACP wire is the engine's, over the stub's stdio, so [`kith_acp::Acp::pid`] is the stub's pid and the stub leads the
 //! process group: [`ResidentStub::kill_group`] signals the group, engine and children with it, and the lock goes with the
-//! stub. The stub outlives the host (it keeps a held lock until its engine exits), which is the point of holding the lock
-//! there rather than in the host.
+//! stub. On the Mac the stub outlives the host (it keeps a held lock until its engine exits), which is the point of holding the
+//! lock there rather than in the host.
+//!
+//! On Windows (W12-7) the stub runs in a job this host holds, unnamed and kill on close (`kith_acp::spawn_resident`, W12 rule 6),
+//! and holds its engine's own job (W12-1): [`ResidentStub::kill_group`] ends the host's job, and so does a host that exits or is
+//! killed. A host restart therefore ends the turn there (`can(Chat, Windows) = Partial("a host restart ends the turn")`, C1;
+//! adopting the stub after a restart is a later package). The claim is released only after the stub is gone: `restart` waits for
+//! the old pid to leave, and the core's `adopt` ends the old host's claims only once their processes are.
 //!
 //! One `ResidentStub` is one warm process and has no opinion on sessions: the actor loads its main session and its threads
 //! through [`ResidentStub::acp`] as it does today, and registers each with the core (`CoreWriter::register_proc`). A restart
 //! (a new account, a stub that failed) makes a new process with a new pid; the caller then loads its sessions again.
 //!
-//! Unix only. On Windows the stub takes a named pipe the host does not create yet, so this module is not built there and
-//! Writer mode is refused there (S2). Blocking calls (`take`, `release`, `restart`) are for a blocking thread, as
+//! Blocking calls (`take`, `release`, `restart`) are for a blocking thread, as
 //! `core_writer` says; `restart` and `spawn` need a tokio runtime (the child is a tokio process).
 //!
 use super::core_writer::WarmStub;
@@ -101,7 +106,17 @@ impl ResidentStub {
         self.acp.pid().unwrap_or(0)
     }
 
+    /// Ends the stub's job at once: the stub, its engine (the stub's own job) and what they started. The runtime then reaps the
+    /// handle. Windows has no group to signal; the job is the group.
+    #[cfg(windows)]
+    fn signal_group(&self) {
+        self.acp.end_now();
+        let acp = self.acp.clone();
+        self.handle.spawn(async move { acp.kill().await });
+    }
+
     /// Signals the stub's group and has the runtime reap the leader (a zombie still "runs" to `kill(pid, 0)`).
+    #[cfg(unix)]
     fn signal_group(&self) {
         let pid = self.stub_pid();
         if let Ok(group) = libc::pid_t::try_from(pid)

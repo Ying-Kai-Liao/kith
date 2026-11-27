@@ -529,7 +529,6 @@ fn owner_id(_core: &Core) -> Option<String> {
     None
 }
 
-#[cfg(unix)]
 fn turn(core: &mut Core, p: &Value, now: i64) -> Result<Value> {
     use crate::accounts::failover::{NewSession, Started, claim_next};
     use kith_kernel::accounts::{Ctx, System};
@@ -592,13 +591,6 @@ fn turn(core: &mut Core, p: &Value, now: i64) -> Result<Value> {
         Ok(Started::Exhausted(text)) => Ok(json!({ "status": "exhausted", "text": text })),
         Err(e) => refusal(e),
     }
-}
-
-#[cfg(not(unix))]
-fn turn(_core: &mut Core, _p: &Value, _now: i64) -> Result<Value> {
-    Err(Error::NotServed(
-        "kith-core: hostclaim.turn is not served on this platform".into(),
-    ))
 }
 
 #[cfg(test)]

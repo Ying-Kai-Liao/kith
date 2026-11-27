@@ -171,3 +171,47 @@ pub fn parent_pid() -> Option<u32> {
         found
     }
 }
+
+/// Makes this process's standard handles copies of the parent's handles `from` (stdin, stdout, stderr, by value). The parent
+/// keeps its originals non-inheritable: a handle that is inheritable in a multi-threaded host leaks into any child it starts
+/// at the same moment, and then a dead stub no longer reads as end of file on the other end of its pipes.
+pub fn take_parent_stdio(from: [usize; 3]) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle};
+    use windows_sys::Win32::System::Console::{
+        STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
+    };
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_DUP_HANDLE};
+    let parent = parent_pid().ok_or_else(|| io::Error::other("the parent is unknown"))?;
+    // SAFETY: OpenProcess takes plain values; the handle is closed below.
+    let process = unsafe { OpenProcess(PROCESS_DUP_HANDLE, 0, parent) };
+    if process.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let mut result = Ok(());
+    for (value, which) in
+        from.into_iter()
+            .zip([STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE])
+    {
+        let mut mine: HANDLE = null_mut();
+        // SAFETY: `process` is open with duplicate access; the copy goes to a handle of this process, not inheritable.
+        let ok = unsafe {
+            DuplicateHandle(
+                process,
+                value as HANDLE,
+                GetCurrentProcess(),
+                &mut mine,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        // SAFETY: `mine` is a handle this process now owns.
+        if ok == 0 || unsafe { SetStdHandle(which, mine) } == 0 {
+            result = Err(io::Error::last_os_error());
+            break;
+        }
+    }
+    // SAFETY: `process` is open and ours.
+    unsafe { CloseHandle(process) };
+    result
+}

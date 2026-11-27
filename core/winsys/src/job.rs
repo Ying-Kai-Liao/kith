@@ -49,6 +49,11 @@ const STILL_ACTIVE: u32 = 259;
 /// An open job object: the only handle to it, held by the process that made it.
 pub struct Job(Handle);
 
+// SAFETY: a kernel handle is not tied to a thread; the calls on it (query, terminate) take `&self` and the kernel serialises them.
+unsafe impl Send for Job {}
+// SAFETY: as above.
+unsafe impl Sync for Job {}
+
 impl Job {
     /// Makes an unnamed job that ends every process in it when its handle closes (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), with
     /// no breakaway flags. Null security attributes make the handle non-inheritable.
@@ -154,6 +159,11 @@ pub struct Child {
     pid: u32,
     process: Handle,
 }
+
+// SAFETY: a process handle is not tied to a thread; wait, exit-code and terminate calls on it take `&self`.
+unsafe impl Send for Child {}
+// SAFETY: as above.
+unsafe impl Sync for Child {}
 
 impl Child {
     pub fn id(&self) -> u32 {

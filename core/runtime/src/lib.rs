@@ -98,8 +98,8 @@ mod schedules;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod terminal;
 // Engine sessions held by the core (M3-6): built and tested, called by no start until the switch.
-// Unix only for now, like `authority`: it reads through `kith_kernel::threads`, which is.
-#[cfg(unix)]
+// On Windows since W12-7: `kith_kernel::threads` builds there (W12-4), and a host turn's claim (`hostclaim.turn`) starts its
+// session row here.
 #[allow(
     dead_code,
     reason = "first callers are the start protocol after the switch"

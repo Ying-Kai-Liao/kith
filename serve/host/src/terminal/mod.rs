@@ -25,10 +25,12 @@ pub(crate) use registry::{pid_runs, proc_start};
 mod sync;
 #[cfg(test)]
 mod tests;
-#[cfg(unix)]
 pub mod warm_stub;
 #[cfg(all(test, unix))]
 mod warm_stub_tests;
+#[cfg(all(test, windows))]
+#[path = "warm_stub_win_tests.rs"]
+mod warm_stub_win_tests;
 pub(crate) mod winproc;
 
 #[cfg(test)]

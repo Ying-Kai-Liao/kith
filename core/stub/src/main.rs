@@ -79,6 +79,9 @@ struct Args {
     key: String,
     status_fd: Option<i32>,
     ctl: Option<Ctl>,
+    /// Windows resident only: the parent's own handles (stdin, stdout, stderr) to take as this process's, by value.
+    #[cfg_attr(unix, allow(dead_code))] // Windows only; parse refuses it on Unix
+    stdio_from_parent: Option<[usize; 3]>,
     /// Clear the conversation's marked warm engines after the take (one-shot only).
     #[cfg_attr(windows, allow(dead_code))] // only read on Unix; Windows has nothing to clear
     lock_alone: bool,
@@ -92,6 +95,7 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
     let mut resident = false;
     let mut lock_alone = false;
     let mut ctl = None;
+    let mut stdio_from_parent = None;
     while let Some(a) = args.next() {
         match a.to_str() {
             Some("--lock-dir") => lock_dir = Some(args.next().ok_or("--lock-dir needs a value")?),
@@ -122,6 +126,25 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
                 }
                 ctl = Some(Ctl::Pipe(args.next().ok_or("--ctl-pipe needs a value")?));
             }
+            Some("--stdio-from-parent") => {
+                if cfg!(unix) {
+                    return Err("--stdio-from-parent is Windows only".into());
+                }
+                let v = args.next().ok_or("--stdio-from-parent needs a value")?;
+                let h: Vec<usize> = v
+                    .to_str()
+                    .ok_or("--stdio-from-parent is not valid UTF-8")?
+                    .split(',')
+                    .map(|n| {
+                        n.parse()
+                            .map_err(|_| "--stdio-from-parent needs three numbers")
+                    })
+                    .collect::<Result<_, _>>()?;
+                stdio_from_parent = Some(
+                    <[usize; 3]>::try_from(h)
+                        .map_err(|_| "--stdio-from-parent needs three numbers")?,
+                );
+            }
             Some("--status-fd") => {
                 let fd: i32 = args
                     .next()
@@ -146,8 +169,10 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
                             "--resident needs --ctl-fd (Unix) or --ctl-pipe (Windows)".into()
                         );
                     }
-                } else if ctl.is_some() {
-                    return Err("--ctl-fd / --ctl-pipe need --resident".into());
+                } else if ctl.is_some() || stdio_from_parent.is_some() {
+                    return Err(
+                        "--ctl-fd / --ctl-pipe / --stdio-from-parent need --resident".into(),
+                    );
                 }
                 return Ok(Args {
                     lock_dir: lock_dir.ok_or("--lock-dir is required")?,
@@ -158,6 +183,7 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
                     },
                     status_fd,
                     ctl,
+                    stdio_from_parent,
                     lock_alone,
                     engine,
                 });
@@ -337,6 +363,15 @@ fn resident_main(args: Args) -> ExitCode {
             return ExitCode::from(USAGE);
         }
     };
+    // The ctl check above proved the parent serves our channel, so it is the parent whose handles are taken. Before the engine
+    // starts, so the engine inherits them as its own stdio.
+    #[cfg(windows)]
+    if let Some(h) = args.stdio_from_parent
+        && let Err(e) = kith_stub::take_parent_stdio(h)
+    {
+        eprintln!("kith-stub: cannot take the parent's stdio: {e}");
+        return ExitCode::from(USAGE);
+    }
     // The engine first: a take answered while it is still between fork and exec would leave it a copy of the lock.
     let engine = match run::spawn(&args.engine) {
         Ok(e) => e,

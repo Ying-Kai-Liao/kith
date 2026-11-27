@@ -446,11 +446,12 @@ impl Core {
             self.say(ad, conv, agent, &format!("⚠️ {agent} didn't start: {why}"), None).await;
             return Ok(Attempt::NotStarted);
         }
-        // The kernel's one-shot takes the session's claim in process, which Windows has not got yet (W12: claims, held terminals
-        // and host turns). It is said, not skipped: the person reads why nothing came back.
+        // The kernel's one-shot (`kith run`, `launch exec`) is Unix only until W12-5, and W12-7 (host turns) did not change that: a
+        // channel run is that one-shot. It is said, not skipped: the person reads why nothing came back. When it is enabled the
+        // spawn below must go in a kill-on-close job and read the start stamp from the child's own handle (`queue::kill`).
         if cfg!(windows) {
             let text = format!(
-                "⚠️ {agent} didn't start: runs from a chat are not on Windows yet (they wait the Windows claims package, W12)"
+                "⚠️ {agent} didn't start: runs from a chat are not on Windows yet (they wait the Windows launch, W12-5)"
             );
             self.say(ad, conv, agent, &text, None).await;
             return Ok(Attempt::NotStarted);
@@ -485,8 +486,8 @@ impl Core {
         self.wake_started(task);
         let pid = child.id();
         // Its start stamp, so a later Stop can tell this process from one that was handed its pid (Windows).
-        // W12-7: the spawn must go in a kill-on-close job, and the stamp must be read from the child's handle, not by pid
-        // after the spawn (unreachable today: chat runs return NotStarted on Windows above).
+        // Unreachable today (chat runs return NotStarted on Windows above). When enabled: the spawn goes in a kill-on-close job and
+        // the stamp is read from the child's handle, not by pid after the spawn.
         #[cfg(windows)]
         if let Some(pid) = pid {
             crate::terminal::winproc::remember(pid);

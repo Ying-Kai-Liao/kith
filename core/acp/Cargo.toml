@@ -18,8 +18,12 @@ path = "src/lib.rs"
 anyhow = "1.0.104"
 libc = "0.2"
 serde_json = "1.0.151"
-tokio = { version = "1.53.1", features = ["process", "io-util", "sync", "time", "macros", "rt"] }
+tokio = { version = "1.53.1", features = ["process", "io-util", "sync", "time", "macros", "rt", "fs"] }
 tracing = "0.1.44"
+
+# Windows only: a resident stub is started in a job the host holds (W12-7, rule 6).
+[target.'cfg(windows)'.dependencies]
+kith-winsys = { path = "../winsys" }
 
 [dev-dependencies]
 tokio = { version = "1.53.1", features = ["rt-multi-thread"] }

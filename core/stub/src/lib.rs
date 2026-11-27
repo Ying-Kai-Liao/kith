@@ -44,7 +44,7 @@ mod windows;
 use windows as os;
 /// For the stub binary's `--ctl-pipe` check.
 #[cfg(windows)]
-pub use windows::{parent_pid, pipe_owned_by_us, pipe_server_pid};
+pub use windows::{parent_pid, pipe_owned_by_us, pipe_server_pid, take_parent_stdio};
 
 #[derive(Debug)]
 pub enum Error {

@@ -29,20 +29,16 @@
 //! output), and no golden holds a failover, so there is nothing to replay; the text is the host's.
 
 use kith_kernel::accounts::{self, Ctx};
-#[cfg(unix)]
 use kith_kernel::threads;
 use rusqlite::{Connection, OptionalExtension as _, Transaction, params};
 
 use super::CoreState;
-#[cfg(unix)]
 use crate::conversations::claims::{
     Claimed, NewClaim, cancel_fenced, claim_checked_in, stopped_fence,
 };
 use crate::db::Core;
-#[cfg(unix)]
 use crate::error::Error;
 use crate::error::Result;
-#[cfg(unix)]
 use crate::transcripts::{self, SessionPtr, rows::EngineSession};
 
 /// `claims.end_reason` of a claim that ended on a usage limit.
@@ -228,7 +224,6 @@ fn humanize(secs: i64) -> String {
     }
 }
 
-#[cfg(unix)]
 /// How the new engine session is made on the account a failover picked.
 pub(crate) struct NewSession<'a> {
     pub ctx: &'a threads::Ctx<'a>,
@@ -237,7 +232,6 @@ pub(crate) struct NewSession<'a> {
     pub session_id: &'a str,
 }
 
-#[cfg(unix)]
 /// What [`claim_next`] did.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Started {
@@ -253,7 +247,6 @@ pub(crate) enum Started {
     Exhausted(String),
 }
 
-#[cfg(unix)]
 /// The claim after a usage-limit exit (or any claim that should choose its account): picks, claims with `account` set,
 /// starts the engine session on it. `req.account` is the account the host's process runs as: while the core does not own
 /// account state (`accounts_core_writes` off) it is required, used as it is and recorded, and no pick is made (a claim

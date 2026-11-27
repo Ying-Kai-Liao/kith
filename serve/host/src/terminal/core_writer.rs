@@ -103,20 +103,12 @@ impl Mode {
     /// The mode right now: asks the core's gate. [`CoreWriter::begin`] asks it at every begin, and the caller's slow tick
     /// asks it again ([`CoreWriter::mode`]); it is not decided once at host start.
     pub fn select(folders: &Paths) -> Self {
-        // Writer mode runs turns on a warm stub (`warm_stub`, Unix only), so Windows never selects it, whatever the
-        // core's gate says: turns keep their claim files. Said once, not at every begin and tick.
-        if cfg!(windows) {
-            static SAID: std::sync::Once = std::sync::Once::new();
-            SAID.call_once(|| {
-                tracing::warn!(
-                    "Writer mode is not supported on Windows (no warm stub there): conversations keep using claim files"
-                );
-            });
-            // A switched machine never falls back to files (see `decide`): it waits.
-            return if crate::core_front::switch_file_exists(folders, MODULE) { Self::Held } else { Self::Files };
-        }
+        // Writer mode runs a turn on a warm stub, which Windows has since W12-7 (a named pipe, in a host-held job). Only the core's
+        // gate turns it on there (`claims` is not switched on a Windows core yet, so it answers no or refuses); Shadow, the
+        // env flag's mode, was never built for Windows and stays off.
+        let shadow = super::core_claims::flag_on() && !cfg!(windows);
         let said = row_answer(folders, "cutover.mayServe", &json!({"module": MODULE}));
-        Self::decide(&said, crate::core_front::switch_file_exists(folders, MODULE), super::core_claims::flag_on())
+        Self::decide(&said, crate::core_front::switch_file_exists(folders, MODULE), shadow)
     }
 }
 
