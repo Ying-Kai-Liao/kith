@@ -166,7 +166,10 @@ fn story_rows_name_the_newest_agent_entry_of_each_chat() {
     let s = temp_store();
     chat(&s, "c1", None);
     chat(&s, "c2", None);
-    let say = |bot: &str, kind: EntryKind| s.insert_entry(&Lane::main(bot), kind, 1, &json!({"text": "x"})).unwrap();
+    // Every entry shares one millisecond: the higher rev, the later write, is the newest.
+    let say = |bot: &str, kind: EntryKind| {
+        s.insert_entry_at(&Lane::main(bot), kind, 1, &json!({"text": "x"}), 5_000).unwrap()
+    };
     say("c1", EntryKind::Agent);
     let last = say("c1", EntryKind::Agent);
     say("c2", EntryKind::User);

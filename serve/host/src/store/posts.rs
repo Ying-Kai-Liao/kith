@@ -234,10 +234,13 @@ impl Store {
     /// Which chats the owner sees is the caller's to decide.
     pub fn story_rows(&self, since: i64) -> Result<Vec<(String, i64, String)>> {
         let c = self.db.locked();
-        // The bare `id` is the row of the MAX (SQLite's rule for a single max aggregate).
+        // Newest by created_at, then rev (the store's monotonic counter): entries of one millisecond are common.
         let mut st = c.prepare(
-            "SELECT bot_id, MAX(created_at), id FROM entries WHERE kind = 'agent' AND created_at > ?1
-             GROUP BY bot_id ORDER BY MAX(created_at) DESC",
+            "SELECT bot_id, created_at, id FROM (
+                 SELECT bot_id, created_at, id, rev,
+                        ROW_NUMBER() OVER (PARTITION BY bot_id ORDER BY created_at DESC, rev DESC) AS n
+                 FROM entries WHERE kind = 'agent' AND created_at > ?1)
+             WHERE n = 1 ORDER BY created_at DESC, rev DESC",
         )?;
         Ok(st.query_map([since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?)
     }
