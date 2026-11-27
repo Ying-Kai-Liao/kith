@@ -13,18 +13,20 @@ use std::path::Path;
 use std::sync::Arc;
 
 pub(super) async fn call(_hub: &Arc<Hub>, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
-    if method != "agentRules" {
-        return Ok(ControlFlow::Continue(b));
-    }
-    let agent = str_arg(&b, "agent")?.to_owned();
-    let answer = tokio::task::spawn_blocking(move || {
-        let home = kith_kernel::paths::known_home().unwrap_or_default();
-        let p = crate::kernel::folders(&home);
-        let kernel = crate::kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));
-        rules_of(&p, &kernel, &agent)
-    })
-    .await??;
-    Ok(ControlFlow::Break(answer))
+    // A match arm, so the router walk in the guest-list tests finds the method name.
+    Ok(ControlFlow::Break(match method {
+        "agentRules" => {
+            let agent = str_arg(&b, "agent")?.to_owned();
+            tokio::task::spawn_blocking(move || {
+                let home = kith_kernel::paths::known_home().unwrap_or_default();
+                let p = crate::kernel::folders(&home);
+                let kernel = crate::kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));
+                rules_of(&p, &kernel, &agent)
+            })
+            .await??
+        }
+        _ => return Ok(ControlFlow::Continue(b)),
+    }))
 }
 
 /// The agent's rules: its role folder's settings.json, then the allowed.json beside its role folder.

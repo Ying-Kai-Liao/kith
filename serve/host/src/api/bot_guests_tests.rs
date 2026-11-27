@@ -510,6 +510,7 @@ fn router_methods() -> BTreeSet<String> {
         include_str!("cards.rs"),
         include_str!("room_member.rs"),
         include_str!("room_people.rs"),
+        include_str!("agent_rules.rs"),
         include_str!("host.rs"),
         include_str!("folders.rs"),
         include_str!("backups.rs"),
