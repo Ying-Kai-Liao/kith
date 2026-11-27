@@ -649,10 +649,11 @@ const RESUME_PROMPT: &str = "[Kith restarted on this computer and interrupted yo
 
 /// What a Windows chat says of a turn the previous host process cut off. On Windows the warm agent runs in a job the host holds
 /// (W12 rule 6), so a host restart ends the turn with it: the named outcome of `can(Chat, Windows) = Partial("a host restart ends
-/// the turn")`. The next host does not adopt the old agent; it resumes the conversation in a new one.
+/// the turn")`. The next host does not adopt the old agent; it resumes the conversation in a new one. Worded to be true in files
+/// mode too (the default while the claims gate is off), where the turn was cut by the restart and is resumed, not ended by a job.
 #[cfg(windows)]
 const RESTART_ENDED_TURN: &str =
-    "Kith restarted on this computer, which ends a running turn on Windows. Picking the conversation up again.";
+    "Kith restarted on this computer and cut a running turn short. Picking the conversation up again.";
 
 /// How long a cancelled turn may take to wind down before its agent process is stopped.
 const CANCEL_GRACE: Duration = Duration::from_secs(15);

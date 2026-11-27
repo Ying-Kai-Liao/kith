@@ -261,7 +261,7 @@ mod windows {
     use kith_winsys::pipe;
     use std::collections::BTreeMap;
     use std::io::{BufRead, BufReader, Write};
-    use std::os::windows::io::{AsHandle, OwnedHandle};
+    use std::os::windows::io::{AsHandle, AsRawHandle, OwnedHandle};
     use std::path::Path;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::{Duration, Instant};
@@ -403,6 +403,22 @@ mod windows {
         let (stdin_r, stdin_w) = std::io::pipe().context("making the stub's stdin")?;
         let (stdout_r, stdout_w) = std::io::pipe().context("making the stub's stdout")?;
         let (stderr_r, stderr_w) = std::io::pipe().context("making the stub's stderr")?;
+        // The stub's ends are never made inheritable here: this host starts other children from other threads, and one that
+        // started while they were would hold them, so a dead stub would not read as end of file. The stub copies them out of
+        // this process itself (`--stdio-from-parent`, by value), once it has proved this process serves its control channel.
+        let ends = [
+            stdin_r.as_handle().as_raw_handle() as usize,
+            stdout_w.as_handle().as_raw_handle() as usize,
+            stderr_w.as_handle().as_raw_handle() as usize,
+        ];
+        let mut args = args;
+        args.splice(
+            1..1,
+            [
+                "--stdio-from-parent".to_owned(),
+                format!("{},{},{}", ends[0], ends[1], ends[2]),
+            ],
+        );
         let child = spawn_in_job(
             &job,
             &Launch {
@@ -410,18 +426,15 @@ mod windows {
                 args: &args,
                 env: &environment,
                 cwd: Some(Path::new(cwd)),
-                stdio: Some([
-                    stdin_r.as_handle(),
-                    stdout_w.as_handle(),
-                    stderr_w.as_handle(),
-                ]),
+                stdio: None,
             },
         )
         .with_context(|| format!("starting `kith-stub --resident {command}`"))?;
-        // The host keeps no copy of the stub's ends: a stub that is gone must read as end of file here.
-        drop((stdin_r, stdout_w, stderr_w));
         let pid = child.id();
         let mut stream = accept(listener, &name, pid, &job)?;
+        // The stub has its copies once it has opened the control channel; the host keeps none of its ends, so a stub that is
+        // gone reads as end of file here.
+        drop((stdin_r, stdout_w, stderr_w));
         stream.set_read_timeout(Some(ANSWER_WITHIN));
         stream.set_write_timeout(Some(ANSWER_WITHIN));
         let (acp, rx) = Acp::attach(
