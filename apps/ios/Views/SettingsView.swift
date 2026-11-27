@@ -5,6 +5,8 @@ import SwiftUI
 /// Settings for the selected account: the account row and any Mac that needs you first, then Crew, People,
 /// voice, notifications and the rest. The computers themselves live in Account › Your devices.
 struct SettingsView: View {
+    /// Pushed from You rather than opened as the Settings sheet.
+    var pushed = false
     @Environment(AppStore.self) private var app
     @Environment(AccountStore.self) private var accounts
     @Environment(\.openURL) private var openURL
@@ -163,7 +165,7 @@ struct SettingsView: View {
                       message: "Signs out of every account and forgets every computer on this iPhone, then shows the welcome again. Your computers keep their bots and chats; pair again to use them.") {
             [DialogAction("Start over", destructive: true) { Task { await app.startOver() } }]
         }
-        .page("Settings")
+        .page("Settings", pushed: pushed)
         .kithSheet(isPresented: $pairing) { PairingView(inModal: true) }
         .kithSheet(isPresented: $aboutAnalytics) { AnalyticsSheet() }
         .kithSheet(isPresented: $showLicenses) { LicensesSheet() }

@@ -19,7 +19,10 @@ private struct AgentPick: Identifiable, Hashable {
 /// The computer's owner only; an older host (no `usageReport`) shows nothing.
 public struct SpendSection: View {
     let store: BotStore
-    @State private var period: SpendPeriod = .month
+    /// Always this calendar month (what `usage --json` counts); the host's Today and Week windows are not offered.
+    private let period: SpendPeriod = .month
+    @State private var split: SpendSplit = .agents
+    @State private var people: [PersonTotal]?
     @State private var report: UsageReport?
     @State private var error: String?
     @State private var unsupported = false
@@ -33,10 +36,10 @@ public struct SpendSection: View {
         Group {
             if store.isOwner, !unsupported {
                 VStack(alignment: .leading, spacing: 14) {
-                    SegmentedChoice(selection: $period, options: Spend.periods().map { (id: $0.0, label: $0.1) })
                     if let report {
                         totals(report)
-                        agents(report)
+                        SegmentedChoice(selection: $split, options: SpendSplit.allCases.map { (id: $0, label: $0.label) })
+                        if split == .agents { agents(report) } else { peopleList(report) }
                     } else if let error {
                         Text(error).kithText(.secondary).foregroundStyle(Palette.danger)
                     } else {
@@ -45,7 +48,8 @@ public struct SpendSection: View {
                 }
             }
         }
-        .task(id: "\(period.rawValue)/\(reload)") { await load() }
+        .task(id: reload) { await load() }
+        .task(id: "\(split.rawValue)/\(report?.rows.map(\.agent) ?? [])/\(reload)") { await loadPeople() }
         .kithSheet(item: $open) { pick in
             AgentSpendSheet(store: store, agent: pick.agent) { reload += 1 }
         }
@@ -64,11 +68,53 @@ public struct SpendSection: View {
         }
     }
 
+    /// Each agent's `agentPeople`, a few at a time, summed per person; an agent that fails counts as nobody.
+    private func loadPeople() async {
+        guard split == .people, store.isOwner, let report else { return }
+        let client = try? await store.ready()
+        guard let client else { return }
+        let all = await withTaskGroup(of: AgentPeople?.self) { group in
+            for row in report.rows { group.addTask { try? await client.agentPeople(row.agent) } }
+            var out: [AgentPeople] = []
+            for await one in group { if let one { out.append(one) } }
+            return out
+        }
+        if !Task.isCancelled { people = PersonTotal.combine(all) }
+    }
+
+    private func peopleList(_ r: UsageReport) -> some View {
+        CardSection("People") {
+            if let people {
+                if people.isEmpty {
+                    Text("Nobody has spent on your agents this month.").kithText(.secondary).foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 14).padding(.vertical, 12)
+                }
+                ForEach(people) { person in
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.crop.circle").font(.system(size: 22)).foregroundStyle(Palette.secondary).frame(width: 30, height: 30)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(person.name).kithText(.body).fontWeight(.semibold).foregroundStyle(Palette.ink)
+                            Text(person.agents.prefix(3).map(\.agent).joined(separator: ", ")
+                                 + (person.agents.count > 3 ? " +\(person.agents.count - 3)" : ""))
+                                .kithText(.secondary).foregroundStyle(Palette.muted).lineLimit(1)
+                        }
+                        Spacer(minLength: 8)
+                        Text(Spend.money(person.total)).kithText(.body).monospacedDigit().foregroundStyle(Palette.ink)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .accessibilityElement(children: .combine)
+                }
+            } else {
+                HStack { Spacer(); Spinner(size: 18); Spacer() }.padding(.vertical, 18)
+            }
+        }
+    }
+
     private func totals(_ r: UsageReport) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(Spend.money(r.total)).font(.system(size: 34, weight: .bold)).monospacedDigit().foregroundStyle(Palette.ink)
-                Text("\(r.label) at API prices").kithText(.secondary).foregroundStyle(Palette.muted)
+                Text("\(r.label) so far, at API prices").kithText(.secondary).foregroundStyle(Palette.muted)
             }
             .accessibilityElement(children: .combine)
             // Agents in ink, your own sessions in the line colour.
