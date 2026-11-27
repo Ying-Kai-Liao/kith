@@ -105,8 +105,18 @@ fn the_tool_list_follows_the_environment() {
     let owner = Env::with(&[("KITH_ASK_TOKEN", "t"), ("KITH_ASK_SOCKET", "/s")]);
     assert_eq!(
         names(&owner),
-        ["approve", "request_access", "report_bug", "request_secret"]
+        [
+            "approve",
+            "request_access",
+            "report_bug",
+            "request_secret",
+            "feed_post"
+        ]
     );
+    // the Feed is the owner's: an owner token on a run that names a person is not offered it
+    let mut person = Env::with(&[("KITH_ASK_TOKEN", "t"), ("KITH_ASK_SOCKET", "/s")]);
+    person.set("KITH_PERSON", "sam");
+    assert!(!names(&person).contains(&"feed_post".to_owned()));
     // a token with no socket is no way to ask
     assert_eq!(names(&Env::with(&[("KITH_ASK_TOKEN", "t")])).len(), 3);
     assert_eq!(

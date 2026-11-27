@@ -1156,17 +1156,23 @@ async fn messages_to_a_held_thread_wait_and_go_out_as_one_turn_once_the_terminal
     claims(&r);
     off(&r.hub);
     let (root, _terminal, pid) = held_thread(&r, &chat);
-    let (a, b) = (send_to(&r, &chat, &root, "first", "n1").await, send_to(&r, &chat, &root, "second", "n2").await);
+    let a = send_to(&r, &chat, &root, "first", "n1").await;
+    // A body that names its own prompter is not believed: the owner's call from an app is `app`.
+    let spoof = json!({"botId": chat, "threadId": root, "text": "second", "clientNonce": "n2",
+        "prompter": {"kind": "schedule", "name": "nightly"}});
+    let b = dispatch(&r.hub, &Caller::Local, "send", spoof).await.unwrap()["entry"].clone();
     for e in [&a, &b] {
         assert_eq!(e["data"]["status"], "queued", "queued, not failed: {e}");
         assert_eq!(e["data"]["waitsFor"], "terminal");
+        assert_eq!(e["data"]["prompter"], json!({"kind": "app"}), "{e}");
     }
     let ids = |e: &Value| format!("msg:{}", e["id"].as_str().unwrap());
     let mut both = vec![ids(&a), ids(&b)];
     both.sort();
     assert_eq!(waiting_ids(&r), both, "one item for the thread, one request each");
     // A double send is the same message.
-    assert_eq!(send_to(&r, &chat, &root, "first", "n1").await["id"], a["id"]);
+    let again = send_to(&r, &chat, &root, "first", "n1").await;
+    assert_eq!((&again["id"], &again["data"]["prompter"]), (&a["id"], &a["data"]["prompter"]));
     assert_eq!(waiting_ids(&r).len(), 2);
     // The terminal still holds it: the take is given back, held, and nothing reaches an actor.
     drive(&r.hub).await;

@@ -1,0 +1,9 @@
+{
+  "method": "peerThread",
+  "type": "PeerThread",
+  "body": {
+    "found": false,
+    "paired": false,
+    "rows": []
+  }
+}

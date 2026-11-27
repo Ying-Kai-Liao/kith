@@ -1,0 +1,8 @@
+{
+  "method": "peerTo",
+  "type": "PeerTold",
+  "body": {
+    "paired": false,
+    "taken": false
+  }
+}

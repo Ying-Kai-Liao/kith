@@ -210,6 +210,7 @@ pub async fn send(hub: &Arc<Hub>, person: &str, b: &Value) -> Result<Value> {
     let name = hub.store.person(person).map_or_else(|| person.to_owned(), |p| p.name);
     let data = json!({
         "text": text, "clientNonce": nonce, "status": "sent", "sender": {"person": person, "name": name},
+        "prompter": crate::prompter::value(crate::prompter::Kind::Person, Some(person)),
     });
     let (entry, new) = hub.commit_room_post_new(room, person, &seat, nonce, &data)?;
     // The post asks the agents it @-mentions to answer (rule 6), at the default budget whatever the post says: what a person

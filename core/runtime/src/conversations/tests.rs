@@ -409,6 +409,27 @@ fn a_redeem_after_a_release_on_a_new_holder_instance_fails() {
     );
 }
 
+/// A holder that idled out holding an unacked exit leaves its claim running in the core. The same core generation
+/// reconciling again ends nothing (step 5 runs once per generation); the next hello, from a new instance, ends it through
+/// step 7 (verification/holder-idle, `gen-exit-live`).
+#[test]
+fn a_claim_whose_holder_idled_out_with_an_unacked_exit_is_ended_by_the_next_instance() {
+    let (_t, mut c) = open();
+    let (id, t) = running(&mut c, "c1", 10);
+    // The core's first hello of this generation: the holder lists the exit record, the claim stays.
+    unreconcile(&c);
+    reconcile(&mut c, &[id], &[], i64::MAX, 50).expect("first hello");
+    // A plain reconnect to the same instance reconciles nothing, even if the holder had dropped the record.
+    assert!(reconcile(&mut c, &[], &[], i64::MAX, 55).is_err());
+    assert_eq!(state(&c, id), "running");
+    // The holder left with its record; the next hello is a new instance that lists nothing. The running claim goes
+    // to `ending` (it stays the writer until its process is gone), and the turn is given back.
+    let out = different_holder(&mut c, "h2", &[], &[], i64::MAX, 60).expect("new instance");
+    assert_eq!(state(&c, id), "ending");
+    assert_eq!(out.kill.len(), 1);
+    assert_eq!(turn_state(&c, t), "queued", "the turn is given back");
+}
+
 #[test]
 fn a_claim_the_new_instance_lists_is_left_alone() {
     let (_t, mut c) = open();
@@ -1544,4 +1565,83 @@ fn a_turn_claim_is_not_made_by_the_plain_claim_calls_in_production() {
     assert!(refuse_direct_turn(Kind::Terminal, false).is_ok());
     assert!(refuse_direct_turn(Kind::External, false).is_ok());
     assert!(refuse_direct_turn(Kind::Turn, true).is_ok());
+}
+
+/// W12 rule P1: on Windows the recorded pid's stamp is the whole probe. The same stamp is alive, another is gone, an
+/// unreadable stamp is gone only when procstart says so, any error is not gone, and there is never a group stand-in.
+mod recorded_gone_by_stamp {
+    use super::super::claims::recorded_gone;
+    use crate::gate::Liveness;
+
+    /// `start` is what the stamp read gives, `gone` what procstart says about the pid.
+    struct Probe {
+        start: Option<&'static str>,
+        gone: bool,
+    }
+    impl Liveness for Probe {
+        fn start(&self, _: u32) -> Option<String> {
+            self.start.map(Into::into)
+        }
+        fn gone(&self, _: u32) -> bool {
+            self.gone
+        }
+    }
+
+    #[test]
+    fn the_same_stamp_is_alive_and_another_is_gone() {
+        let same = Probe {
+            start: Some("e100"),
+            gone: false,
+        };
+        assert!(!recorded_gone(&same, 7, "e100"));
+        // The pid was reused.
+        let reused = Probe {
+            start: Some("e200"),
+            gone: false,
+        };
+        assert!(recorded_gone(&reused, 7, "e100"));
+    }
+
+    #[test]
+    fn an_unreadable_stamp_is_gone_only_when_procstart_says_gone() {
+        let denied = Probe {
+            start: None,
+            gone: false,
+        };
+        assert!(!recorded_gone(&denied, 7, "e100"));
+        let exited = Probe {
+            start: None,
+            gone: true,
+        };
+        assert!(recorded_gone(&exited, 7, "e100"));
+    }
+
+    #[test]
+    fn a_default_liveness_has_no_group_stand_in() {
+        let p = Probe {
+            start: None,
+            gone: true,
+        };
+        assert!(!p.orphan_group(7, "e100"));
+    }
+
+    /// The real system: this process is alive on its own stamp, and a process that has exited is gone.
+    #[cfg(windows)]
+    #[test]
+    fn on_the_real_system_an_exited_process_is_gone_and_this_one_is_not() {
+        let system = crate::gate::System;
+        let own = kith_kernel::procstart::start_stamp(std::process::id()).expect("own start");
+        assert!(!recorded_gone(&system, std::process::id(), &own));
+        assert!(!system.orphan_group(std::process::id(), &own));
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping -n 30 127.0.0.1 > nul"])
+            .spawn()
+            .expect("spawn");
+        let stamp = kith_kernel::procstart::start_stamp(child.id()).expect("child start");
+        assert!(!recorded_gone(&system, child.id(), &stamp));
+        child.kill().expect("kill");
+        child.wait().expect("reaped");
+        assert!(recorded_gone(&system, child.id(), &stamp));
+        assert!(!system.orphan_group(child.id(), &stamp));
+    }
 }

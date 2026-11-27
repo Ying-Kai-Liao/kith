@@ -5,6 +5,7 @@
 
 use super::cloud::{self, Conflict};
 use super::crypto::{self, Labels, b64};
+use super::peer_asks::fence;
 use crate::LockExt;
 use crate::api::UserError;
 use crate::hub::Hub;
@@ -234,14 +235,21 @@ pub async fn decide(hub: &Hub, id: &str, approve: bool, code: Option<&str>) -> R
     let answer = answer?;
     let Some(nd) = nd else { return Ok(()) };
     let grant = answer.grant_id.filter(|g| g.starts_with("pgr_")).ok_or_else(|| anyhow!("the cloud gave no grant"))?;
-    hub.store.put_peer_in(&PeerIn {
-        computer_id: r.computer_id,
-        name: r.name,
-        device_key: b64(&r.device_key),
-        epoch: epoch(&hub.identity.sign_pub(), &r.device_key, &nd, &r.host_nonce),
-        grant_id: grant.clone(),
-        paired_at: now_ms(),
-    })?;
+    let epoch = epoch(&hub.identity.sign_pub(), &r.device_key, &nd, &r.host_nonce);
+    {
+        // The core hears of the pairing first (a new epoch ends the old one's asks in the same step), then this host writes its row;
+        // the reconcile cannot read between the two.
+        let _pairing = fence::lock().await;
+        fence::link(hub, &r.computer_id, "in", &epoch, &r.name).await?;
+        hub.store.put_peer_in(&PeerIn {
+            computer_id: r.computer_id,
+            name: r.name,
+            device_key: b64(&r.device_key),
+            epoch,
+            grant_id: grant.clone(),
+            paired_at: now_ms(),
+        })?;
+    }
     tracing::info!(grant_id = grant, "paired with another computer");
     hub.auth_changed();
     Ok(())
@@ -251,9 +259,10 @@ pub async fn decide(hub: &Hub, id: &str, approve: bool, code: Option<&str>) -> R
 
 /// The cloud can only end a pairing: a row whose grant it no longer lists (with the same keys and computers) is
 /// removed, and nothing it lists adds one. A pending pairing on A has no grant yet and waits for its answer.
-pub(super) fn apply(hub: &Hub, peers: Option<&[HostPeer]>) -> Result<()> {
+pub(super) async fn apply(hub: &Hub, peers: Option<&[HostPeer]>) -> Result<()> {
     let Some(peers) = peers else { return Ok(()) };
     let me = hub.identity.computer_id();
+    let _pairing = fence::lock().await;
     let mut changed = false;
     for p in hub.store.peers_in()? {
         let listed = peers.iter().any(|g| {
@@ -264,6 +273,7 @@ pub(super) fn apply(hub: &Hub, peers: Option<&[HostPeer]>) -> Result<()> {
         });
         if !listed {
             tracing::info!(computer_id = p.computer_id, "the cloud no longer lists a pairing; unpairing");
+            fence::end(hub, &p.computer_id, "in").await?;
             changed |= hub.store.remove_peer_in(&p.computer_id)?;
         }
     }
@@ -277,6 +287,7 @@ pub(super) fn apply(hub: &Hub, peers: Option<&[HostPeer]>) -> Result<()> {
         });
         if !listed {
             tracing::info!(computer_id = p.computer_id, "the cloud no longer lists a pairing; unpairing");
+            fence::end(hub, &p.computer_id, "out").await?;
             hub.store.remove_peer_out(&p.computer_id)?;
         }
     }
@@ -287,14 +298,17 @@ pub(super) fn apply(hub: &Hub, peers: Option<&[HostPeer]>) -> Result<()> {
 }
 
 /// Every pairing ends, and none in progress finishes: the owner they were made for is not the cloud's any more.
-pub(super) fn drop_all(hub: &Hub) -> Result<()> {
+pub(super) async fn drop_all(hub: &Hub) -> Result<()> {
     hub.cloud.pairings.incoming.locked().clear();
     hub.cloud.pairings.outgoing.locked().clear();
+    let _pairing = fence::lock().await;
     let mut changed = false;
     for p in hub.store.peers_in()? {
+        fence::end(hub, &p.computer_id, "in").await?;
         changed |= hub.store.remove_peer_in(&p.computer_id)?;
     }
     for p in hub.store.peers_out()? {
+        fence::end(hub, &p.computer_id, "out").await?;
         hub.store.remove_peer_out(&p.computer_id)?;
     }
     if changed {
@@ -355,8 +369,14 @@ pub async fn link(hub: &Arc<Hub>, which: &str) -> Result<Value> {
     let seed: [u8; 32] = crypto::random();
     let dk = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
     vault::write(&hub.store, &key_slot(&c.computer_id), &b64(&seed))?;
-    // A pairing already there ends here: its grant is no longer this computer's to use.
-    hub.store.start_peer_out(&c.computer_id, &c.name, &b64(&sign_key), &b64(&dk))?;
+    {
+        // A pairing already there ends here: its grant is no longer this computer's to use, and the asks sent under it are cut off.
+        let _pairing = fence::lock().await;
+        if hub.store.peer_out(&c.computer_id).is_some_and(|p| p.epoch.is_some()) {
+            fence::end(hub, &c.computer_id, "out").await?;
+        }
+        hub.store.start_peer_out(&c.computer_id, &c.name, &b64(&sign_key), &b64(&dk))?;
+    }
     hub.cloud.pairings.outgoing.locked().remove(&c.computer_id);
     let device_nonce: [u8; 32] = crypto::random();
     let body = CreatePeerRequest {
@@ -428,7 +448,13 @@ pub async fn status(hub: &Arc<Hub>, cid: &str) -> Result<Value> {
                     forget(hub, &p).await;
                     return Ok(answer(&p, "expired"));
                 }
-                hub.store.set_peer_out_granted(cid, grant, &epoch(&b_sign, &dk, &o.device_nonce, &ours))?;
+                let epoch = epoch(&b_sign, &dk, &o.device_nonce, &ours);
+                {
+                    // The core hears of the pairing before this host writes it (D5).
+                    let _pairing = fence::lock().await;
+                    fence::link(hub, cid, "out", &epoch, &p.name).await?;
+                    hub.store.set_peer_out_granted(cid, grant, &epoch)?;
+                }
                 hub.cloud.pairings.outgoing.locked().remove(cid);
             }
             AccessState::Denied => {
@@ -473,14 +499,46 @@ async fn first_call(hub: &Arc<Hub>, p: &PeerOut) -> Result<Value, String> {
 /// One call to a paired computer over the channel pinned at pairing: the one way this computer sends B something (Mac
 /// link). An error is a message to show; B being off is one.
 pub async fn call_peer(hub: &Arc<Hub>, p: &PeerOut, method: &str, params: Value) -> Result<Value, String> {
-    let base = cloud::base(hub).map_err(|e| e.to_string())?;
-    vault::unlock(hub.clone()).await.map_err(|e| e.to_string())?;
-    let seed = vault::read(&hub.store, &key_slot(&p.computer_id)).map_err(|e| e.to_string())?;
-    let seed = seed.as_deref().map(crypto::unb64_n::<32>).transpose().map_err(|e| e.to_string())?;
-    let seed = seed.ok_or("this computer's key for the pairing is missing")?;
-    let host_sign_key = crypto::unb64_n::<32>(&p.sign_key).map_err(|e| e.to_string())?;
+    call_peer_typed(hub, p, method, params).await.map_err(|e| match e {
+        PeerFail::Refused(why) | PeerFail::Away(why) | PeerFail::Host(why) => why,
+    })
+}
+
+/// Why a call to a paired computer did not answer.
+#[derive(Debug)]
+pub enum PeerFail {
+    /// The cloud refused the channel: this computer's key is not (or no longer) in the other's ACL. The pairing is over.
+    Refused(String),
+    /// The computer answered, with an error: it is there, and it would not take this call (a bad parameter, an agent it does not
+    /// have, "still settling"). The call is about one item; the computer is not away.
+    Host(String),
+    /// Anything else: off, asleep, the relay or the cloud out of reach, the key not readable. Nothing is settled.
+    Away(String),
+}
+
+/// [`call_peer`] that tells "no longer paired" from "not reachable": the first cuts the asks sent there off, the second waits.
+pub async fn call_peer_typed(hub: &Arc<Hub>, p: &PeerOut, method: &str, params: Value) -> Result<Value, PeerFail> {
+    let away = |e: String| PeerFail::Away(e);
+    let base = cloud::base(hub).map_err(|e| away(e.to_string()))?;
+    vault::unlock(hub.clone()).await.map_err(|e| away(e.to_string()))?;
+    let seed = vault::read(&hub.store, &key_slot(&p.computer_id)).map_err(|e| away(e.to_string()))?;
+    let seed = seed.as_deref().map(crypto::unb64_n::<32>).transpose().map_err(|e| away(e.to_string()))?;
+    let seed = seed.ok_or_else(|| away("this computer's key for the pairing is missing".to_owned()))?;
+    let host_sign_key = crypto::unb64_n::<32>(&p.sign_key).map_err(|e| away(e.to_string()))?;
     let target = kith_guest::relay::Target { cloud: base, computer_id: p.computer_id.clone(), host_sign_key };
-    let fail = |f: kith_guest::relay::Fail| f.into_cli().message;
+    let fail = |f: kith_guest::relay::Fail| {
+        let kind = match &f {
+            kith_guest::relay::Fail::Refused => 0,
+            kith_guest::relay::Fail::Host(_) => 1,
+            _ => 2,
+        };
+        let message = f.into_cli().message;
+        match kind {
+            0 => PeerFail::Refused(message),
+            1 => PeerFail::Host(message),
+            _ => PeerFail::Away(message),
+        }
+    };
     let mut channel =
         kith_guest::relay::connect(&target, &SigningKey::from_bytes(&seed), FIRST_CALL).await.map_err(fail)?;
     let answer = channel.call(method, params, FIRST_CALL).await;
@@ -522,17 +580,23 @@ pub async fn unlink(hub: &Hub, which: &str) -> Result<Value> {
         }
     };
     let cid = cid.as_str();
-    let incoming = hub.store.peer_in(cid);
-    let outgoing = hub.store.peer_out(cid);
     let mut grants = vec![];
-    if let Some(p) = incoming {
-        hub.store.remove_peer_in(cid)?;
-        hub.auth_changed();
-        grants.push(p.grant_id);
-    }
-    if let Some(p) = outgoing {
-        forget(hub, &p).await;
-        grants.extend(p.grant_id);
+    {
+        // The core ends each direction's asks first, then this host removes its row (D5); one lock holds the reconcile off.
+        let _pairing = fence::lock().await;
+        let incoming = hub.store.peer_in(cid);
+        let outgoing = hub.store.peer_out(cid);
+        if let Some(p) = incoming {
+            fence::end(hub, cid, "in").await?;
+            hub.store.remove_peer_in(cid)?;
+            hub.auth_changed();
+            grants.push(p.grant_id);
+        }
+        if let Some(p) = outgoing {
+            fence::end(hub, cid, "out").await?;
+            forget(hub, &p).await;
+            grants.extend(p.grant_id);
+        }
     }
     let Ok(base) = cloud::base(hub) else { return Ok(json!({"ok": true})) };
     for g in grants {

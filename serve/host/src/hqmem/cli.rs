@@ -399,6 +399,7 @@ fn cause_label(v: &Version) -> &'static str {
         (Cause::Restore, _) => "restore",
         (Cause::Tidy, _) => "tidy",
         (Cause::Delete, _) => "deleted",
+        (Cause::Feedback, _) => "liked a Feed post",
         (Cause::Edit, Author::Bot) => "turn",
         (Cause::Edit, Author::User) => "hand edit",
         (Cause::Edit, _) => "changed outside the hook",

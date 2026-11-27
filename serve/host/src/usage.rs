@@ -86,9 +86,17 @@ pub async fn poll(hub: Arc<Hub>) {
 
 pub async fn refresh(hub: &Hub) {
     if let Some(windows) = tokio::task::spawn_blocking(codex_usage).await.ok().flatten() {
+        tokio::spawn({
+            let windows = windows.clone();
+            async move { crate::usage_core::write("codex", &windows).await }
+        });
         merge(hub, "codex", "Codex", "sessions", windows);
     }
     if let Some(windows) = claude_cli_usage(None).await {
+        tokio::spawn({
+            let windows = windows.clone();
+            async move { crate::usage_core::write("claude", &windows).await }
+        });
         merge(hub, "claude", "Claude", "claude", windows);
     }
 }
@@ -112,6 +120,7 @@ async fn refresh_accounts(hub: &Hub) {
                 _ => None,
             };
             if let Some(windows) = windows {
+                crate::usage_core::write(&id, &windows).await;
                 hub.backups.record_reading(&id, windows);
             }
         }

@@ -131,6 +131,8 @@ fn refusal(e: Error) -> Result<Value> {
     let (kind, why) = match &e {
         Error::Stopped(w) => ("stopped", w.clone()),
         Error::Refused(w) if w.contains("has a writer") => ("held", w.clone()),
+        // Mac link limits: the computer's other asks hold all its places; the turn stays queued.
+        Error::Refused(w) if w.contains("waits for a free place") => ("held", w.clone()),
         Error::Refused(w) if w.contains("turn budget of the chain") => ("budget", w.clone()),
         Error::Refused(w) if w.contains("was revoked") => ("revoked", w.clone()),
         Error::Refused(w) if w.contains("is paused") => ("paused", w.clone()),
@@ -448,7 +450,8 @@ fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
                 (SELECT a.id || char(0) || COALESCE(a.out_path, '') FROM asks a WHERE a.turn = t.id),
                 (SELECT a.extra FROM asks a WHERE a.turn = t.id),
                 (SELECT a.caller_agent FROM asks a WHERE a.turn = t.id),
-                (SELECT a.session FROM asks a WHERE a.turn = t.id)
+                (SELECT a.session FROM asks a WHERE a.turn = t.id),
+                (SELECT a.origin_computer FROM asks a WHERE a.turn = t.id)
          FROM turns t JOIN conversations c ON c.id = t.conversation
          WHERE t.enq_key IS NULL AND t.source IN {} AND t.state IN ('queued', 'parked')
          ORDER BY t.id",
@@ -497,6 +500,8 @@ fn queued(core: &Core, sources: &[&str]) -> Result<Value> {
                     .unwrap_or(Value::Null);
                 item["askedBy"] = json!(r.get::<_, Option<String>>(16)?);
                 item["askSession"] = json!(r.get::<_, Option<String>>(17)?);
+                // The computer that sent it (an ask from a paired computer), else null: the host starts none while the pairings are unsettled.
+                item["originComputer"] = json!(r.get::<_, Option<String>>(18)?);
             }
             if wake {
                 let run: Option<String> = r.get(13)?;

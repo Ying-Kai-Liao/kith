@@ -75,6 +75,14 @@ public final class BotStore {
     public internal(set) var hello: Hello?
     /// Bots from outside (Grok and others) on this computer; see `BotGuestStore`.
     @ObservationIgnored public private(set) lazy var botGuests = BotGuestStore(store: self)
+    /// The owner's Feed (see `FeedStore`), loaded when its screen appears. Never persisted.
+    @ObservationIgnored public private(set) lazy var feed = FeedStore(host: { [weak self] in self?.client }, chats: { [weak self] in self.map { Array($0.bots.values) } ?? [] })
+    @ObservationIgnored public private(set) lazy var feedComposer = FeedComposer(
+        host: { [weak self] in self?.client }, chats: { [weak self] in self.map { Array($0.bots.values) } ?? [] },
+        startChat: { [weak self] agent in
+            guard let self else { throw HostError.unreachable }
+            return try await self.startChat(agent: agent)
+        }, home: { [weak self] in self?.hello?.home ?? "main" })
     /// The host's version and protocol levels, kept even when the rest of its `hello` can't be read.
     public internal(set) var hostVersion: HostVersion?
     public internal(set) var bots: [String: Bot] = [:]

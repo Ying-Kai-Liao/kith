@@ -336,6 +336,16 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
             }
         }
     }
+    // A holder `end` is not sure of (no stamp, access denied) still runs and keeps its claim: releasing it would let a second
+    // writer in beside it.
+    #[cfg(windows)]
+    let unsure: Vec<u32> = {
+        use super::winproc::{Ended, end};
+        let sure = |claim: &Claim| end(claim.pid, claim.proc_start.as_deref()) != Ended::NotSure;
+        holders.iter().filter(|(_, claim)| !sure(claim)).map(|(_, claim)| claim.pid).collect()
+    };
+    #[cfg(not(windows))]
+    let unsure: Vec<u32> = Vec::new();
     signal(&victims, SIGTERM);
     let deadline = std::time::Instant::now() + grace;
     while std::time::Instant::now() < deadline && victims.iter().any(|p| pid_runs(*p)) {
@@ -345,7 +355,7 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
     signal(&left, SIGKILL);
     let mut ended = Vec::new();
     for (path, claim) in holders {
-        if claim.pid == me {
+        if claim.pid == me || unsure.contains(&claim.pid) {
             continue;
         }
         // The holder got SIGKILL: its claim is stale (a zombie not yet reaped still counts as running). Given back under the
@@ -404,6 +414,10 @@ pub fn end_claimed(held: &[(u32, Option<String>)], grace: std::time::Duration) -
         }
     }
     let pids: Vec<u32> = victims.iter().map(|(p, _)| *p).collect();
+    #[cfg(windows)]
+    for (pid, started) in &victims {
+        super::winproc::end(*pid, started.as_deref());
+    }
     signal(&pids, SIGTERM);
     signal_groups(&groups, SIGTERM);
     let deadline = std::time::Instant::now() + grace;
@@ -445,7 +459,8 @@ fn leads_group(_pid: u32) -> bool {
 const SIGTERM: libc::c_int = libc::SIGTERM;
 #[cfg(unix)]
 const SIGKILL: libc::c_int = libc::SIGKILL;
-// Windows ends a claimer's tree with a job object (windows-owner W12); until then the signals below only say so.
+// Windows has no signals: a claimer is ended by pid after a start check (`winproc::end`), and its kill-on-close job ends the
+// rest (windows-owner W12 rule H4). The names stay so the shared code reads the same.
 #[cfg(not(unix))]
 const SIGTERM: i32 = 15;
 #[cfg(not(unix))]
@@ -461,10 +476,9 @@ fn signal_groups(groups: &[u32], sig: libc::c_int) {
     }
 }
 
+// No process groups on Windows (`leads_group` is false), so there is nothing to signal.
 #[cfg(not(unix))]
-fn signal_groups(_groups: &[u32], _sig: i32) {
-    tracing::warn!("process groups can't be signalled: not on Windows yet (windows-owner W12)");
-}
+fn signal_groups(_groups: &[u32], _sig: i32) {}
 
 #[cfg(unix)]
 fn signal(pids: &[u32], sig: libc::c_int) {
@@ -476,12 +490,12 @@ fn signal(pids: &[u32], sig: libc::c_int) {
     }
 }
 
+// The claimers were ended by `winproc::end` before this; descendants are not listed on Windows.
 #[cfg(not(unix))]
-fn signal(pids: &[u32], _sig: i32) {
-    tracing::warn!(?pids, "processes can't be signalled: not on Windows yet (windows-owner W12)");
-}
+fn signal(_pids: &[u32], _sig: i32) {}
 
 /// Every process below `root`, from one `ps` listing.
+#[cfg(unix)]
 fn descendants(root: u32) -> Vec<u32> {
     let Ok(out) = std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid="]).output() else { return Vec::new() };
     let table: Vec<(u32, u32)> = String::from_utf8_lossy(&out.stdout)
@@ -502,6 +516,12 @@ fn descendants(root: u32) -> Vec<u32> {
         }
     }
     found
+}
+
+/// Windows lists no descendants: the claimer's kill-on-close job ends them with it (W12 rule H4).
+#[cfg(not(unix))]
+fn descendants(_root: u32) -> Vec<u32> {
+    Vec::new()
 }
 
 /// Whether `id` can be a Claude session id (it names a file under the state folder).
@@ -568,7 +588,11 @@ pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Dura
     if parent_of(claim.pid) == Some(std::process::id()) {
         return Stopped::OwnTurn(claim);
     }
-    if cfg!(not(unix)) {
+    if cfg!(not(any(unix, windows))) {
+        return Stopped::CantStop(claim);
+    }
+    // A claim with no start recorded is unknown on Windows, not "the pid alone": nothing is ended.
+    if cfg!(windows) && claim.proc_start.as_deref().is_none_or(|s| s.trim().is_empty()) {
         return Stopped::CantStop(claim);
     }
     match claim.identity() {
@@ -587,7 +611,17 @@ pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Dura
     // holds the conversation's lock, and the lock must not be free while claude still runs.
     let mut victims = children_of(claim.pid, 4);
     victims.push(claim.pid);
+    // Windows ends the claimer in `end`, which may not be sure of it: nothing was stopped then, so no intent is left behind
+    // (it is written right after the kill there). Unix writes it first, as it signals below.
+    #[cfg(windows)]
+    {
+        if super::winproc::end(claim.pid, claim.proc_start.as_deref()) == super::winproc::Ended::NotSure {
+            return Stopped::CantStop(claim);
+        }
+        super::intent::write(state, sid, "stopped from the app", claim.pid);
+    }
     // Recorded before the signal lands (F12 rule 8): a session gone with no intent reads as a crash.
+    #[cfg(not(windows))]
     super::intent::write(state, sid, "stopped from the app", claim.pid);
     signal(&victims, SIGTERM);
     let deadline = std::time::Instant::now() + grace;
@@ -616,6 +650,12 @@ pub(super) const STOP_REAP: std::time::Duration = std::time::Duration::from_secs
 
 /// Whether `pid` still holds anything: running, and not a zombie waiting for its parent (a zombie has released its
 /// descriptors, so its flock is gone).
+#[cfg(not(unix))]
+pub(super) fn still_there(pid: u32) -> bool {
+    pid_runs(pid)
+}
+
+#[cfg(unix)]
 pub(super) fn still_there(pid: u32) -> bool {
     pid_runs(pid)
         && std::process::Command::new("ps")
@@ -625,6 +665,7 @@ pub(super) fn still_there(pid: u32) -> bool {
             .is_none_or(|o| !String::from_utf8_lossy(&o.stdout).trim_start().starts_with('Z'))
 }
 
+#[cfg(unix)]
 fn ps_pids(args: &[&str]) -> Vec<u32> {
     std::process::Command::new("ps")
         .args(args)
@@ -634,11 +675,24 @@ fn ps_pids(args: &[&str]) -> Vec<u32> {
         .unwrap_or_default()
 }
 
+#[cfg(unix)]
 pub(super) fn parent_of(pid: u32) -> Option<u32> {
     ps_pids(&["-o", "ppid=", "-p", &pid.to_string()]).first().copied()
 }
 
+/// Windows has no `ps`: a process below this host answers as its child (the Stop only asks "is it a turn of this host's").
+#[cfg(not(unix))]
+pub(super) fn parent_of(pid: u32) -> Option<u32> {
+    #[cfg(windows)]
+    if super::winproc::is_descendant(pid) {
+        return Some(std::process::id());
+    }
+    let _ = pid;
+    None
+}
+
 /// The descendants of `pid` down `depth` levels (claude and the tools it started).
+#[cfg(unix)]
 fn children_of(pid: u32, depth: usize) -> Vec<u32> {
     if depth == 0 {
         return Vec::new();
@@ -653,6 +707,11 @@ fn children_of(pid: u32, depth: usize) -> Vec<u32> {
         all.extend(children_of(k, depth - 1));
     }
     all
+}
+
+#[cfg(not(unix))]
+fn children_of(_pid: u32, _depth: usize) -> Vec<u32> {
+    Vec::new()
 }
 
 /// An advisory lock on a file, held until dropped.
