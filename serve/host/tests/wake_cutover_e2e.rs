@@ -180,14 +180,21 @@ impl Lab {
         // A wrapper, so a failing case can say what the host's launch handed the program.
         std::fs::create_dir_all(dir.join("kcalls")).unwrap();
         let wrapper = dir.join("bin/kith");
-        std::fs::write(
-            &wrapper,
-            format!(
-                "#!/bin/sh\n{{ echo \"args=$*\"; env | sort; }} > \"{}/call.$$\" 2>/dev/null\nexec \"{KITH}\" \"$@\"\n",
-                dir.join("kcalls").display()
-            ),
-        )
-        .unwrap();
+        let calls = dir.join("kcalls");
+        // A `kernel threads` call (the launch's claim) says what it printed and what the core said at that moment.
+        let script = format!(
+            "#!/bin/sh\nD=\"{calls}\"\n{{ echo \"args=$*\"; env | sort; }} > \"$D/call.$$\" 2>/dev/null\n\
+             case \"$*\" in\n\
+               \"kernel threads\"*)\n\
+                 \"{KITH}\" \"$@\" 2> \"$D/err.$$\"; rc=$?\n\
+                 cat \"$D/err.$$\" >&2\n\
+                 if [ $rc -ne 0 ]; then {{ echo \"rc=$rc\"; \"{KITH}\" kernel core-status --json; \"{KITH}\" kernel core-call claim.list --params-stdin < /dev/null; }} > \"$D/live.$$\" 2>&1; fi\n\
+                 exit $rc ;;\n\
+             esac\n\
+             exec \"{KITH}\" \"$@\"\n",
+            calls = calls.display()
+        );
+        std::fs::write(&wrapper, script).unwrap();
         executable(&wrapper);
         let plists = home.join("Library/LaunchAgents");
         std::fs::create_dir_all(&plists).unwrap();
@@ -372,6 +379,12 @@ impl Lab {
         };
         let mut calls: Vec<_> = std::fs::read_dir(self.dir.join("kcalls")).into_iter().flatten().flatten().collect();
         calls.sort_by_key(std::fs::DirEntry::file_name);
+        for e in std::fs::read_dir(self.dir.join("kcalls")).into_iter().flatten().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with("err.") || name.starts_with("live.") {
+                eprintln!("--- {name}\n{}", std::fs::read_to_string(e.path()).unwrap_or_default());
+            }
+        }
         // Every call's arguments; the whole environment of the first one that is not a probe (a launch).
         let mut shown = false;
         for e in &calls {
