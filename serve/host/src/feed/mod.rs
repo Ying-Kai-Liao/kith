@@ -8,6 +8,7 @@ pub mod fold;
 pub mod host;
 pub mod like;
 pub mod route;
+pub mod shot;
 
 pub use agent::agent_post;
 
@@ -86,6 +87,7 @@ pub fn put_post(hub: &Hub, w: &PostWrite) -> Result<Option<Post>> {
     let post = hub.store.put_post(w)?;
     if let Some(p) = &post {
         let _ = hub.events.send(event(p));
+        shot::enqueue(hub, p);
     }
     Ok(post)
 }
@@ -101,7 +103,6 @@ pub fn hide_post(hub: &Hub, id: &str, hidden: bool) -> Result<Post> {
 }
 
 /// A page's picture, for the version it was taken of. Dropped when the page has moved on (I5).
-#[allow(dead_code, reason = "the page shooter (F6) is the caller")]
 pub fn put_shot(hub: &Hub, id: &str, version: &str, shot: Option<Value>) -> Result<Option<Post>> {
     let _g = hub.emit_lock.locked();
     let post = hub.store.put_post_shot(id, version, shot)?;
