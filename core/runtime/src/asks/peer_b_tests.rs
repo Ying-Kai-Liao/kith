@@ -255,7 +255,7 @@ fn an_ask_that_already_ran_and_was_put_back_does_not_expire() {
                 "UPDATE turns SET state = 'queued', claim_id = NULL, requeues = requeues + 1, started_at = NULL WHERE id = ?1",
                 [turn],
             )?;
-            c.conn().execute("UPDATE claims SET state = 'ended' WHERE id = ?1", [claim])?;
+            c.conn().execute("UPDATE claims SET state = 'ended' WHERE claim_id = ?1", [claim])?;
             Ok(())
         })
         .unwrap();
