@@ -118,6 +118,8 @@ enum Sub {
         #[arg(long)]
         supervise: bool,
     },
+    /// Take the Feed picture of an html page with the bundled helper (Mac only): a 720x420 PNG.
+    Shoot { html: std::path::PathBuf, out: std::path::PathBuf },
     /// Show a one-time pairing QR code for the Kith iOS app (the host must be running).
     Pair {
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
@@ -1489,6 +1491,7 @@ async fn main() -> Result<()> {
         // `wanted()` takes the flag before clap; reaching here with it set would run the host unsupervised.
         Sub::Serve { supervise: true, .. } => anyhow::bail!("--supervise reached the host unhandled"),
         Sub::Serve { port, bind, supervise: false } => serve(&bind, port).await,
+        Sub::Shoot { html, out } => std::process::exit(feed::shot::cli(&html, &out)),
         Sub::Pair { port, json } => pair(port, json).await,
         Sub::Info { port, json } => info(port, json).await,
         Sub::Devices { port, action } => match action.unwrap_or(DevicesAction::List) {

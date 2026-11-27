@@ -4,6 +4,7 @@
 #   build/native/kith/             macOS: bin/kith (universal) + share/kith/kernel, as in the release tarball
 #   build/native/kith-serve.exe    Windows: the host, and kith-servew.exe that runs it at sign-in
 #   build/native/kith-speech      macOS on-device speech helper
+#   build/native/kith-shoot       macOS Feed page-picture helper (serve/packaging/shoot), found next to the host
 #   build/native/KithScreen.app   macOS screen helper (Xcode `Screen` target)
 beforePack: tools/verify-build.cjs
 appId: com.yingkailiao.kith
@@ -69,6 +70,9 @@ mac:
       to: kith-install.sh
     - from: build/native/kith-speech
       to: kith-speech
+    # Takes the Feed picture of a shared page; the host finds it next to itself (feed/shot.rs).
+    - from: build/native/kith-shoot
+      to: kith-shoot
   extraFiles:
     # Registered with SMAppService.agent when Remote screen is turned on.
     - from: build/native/KithScreen.app
