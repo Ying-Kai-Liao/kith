@@ -15,6 +15,7 @@ mod hook;
 mod hq_api;
 mod hq_tidy;
 pub mod oneshot;
+pub(crate) mod person;
 pub mod summary;
 mod summary_cli;
 pub mod tidier;
@@ -558,6 +559,8 @@ pub fn forget(conn: &Connection, text: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod person_tests;
 #[cfg(test)]
 mod promote_tests;
 #[cfg(test)]
