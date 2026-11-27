@@ -340,6 +340,16 @@ fn the_gate_env_opens_a_debug_build_only_and_never_a_release_one() {
     assert!(!gate_open(false, None));
 }
 
+/// `KITH_WAKE_SWITCHED_FOR_TEST=1` says "switched" to a debug build's core only (a difftest daemon's), never a release one's.
+#[test]
+fn the_switched_env_of_a_difftest_daemon_is_read_by_a_debug_build_only() {
+    use crate::wake::forced_for_test;
+    assert!(forced_for_test(true, Some("1")));
+    assert!(!forced_for_test(true, None));
+    assert!(!forced_for_test(true, Some("0")));
+    assert!(!forced_for_test(false, Some("1")));
+}
+
 #[test]
 fn a_running_host_refuses_the_step_and_nothing_is_written() {
     let r = rig();

@@ -882,6 +882,9 @@
   "name": "ask-to",
   "command": "ask",
   "needs": "daemon",
+  "daemon_env": {
+   "KITH_WAKE_SWITCHED_FOR_TEST": "1"
+  },
   "bin_both": true,
   "program": {
    "old": [

@@ -63,11 +63,25 @@ pub(crate) use turns::withdraw_in;
 use crate::db::Core;
 use crate::error::{Error, Result};
 
+/// Debug builds only: `KITH_WAKE_SWITCHED_FOR_TEST=1` in a core's own environment says the queue is switched (a difftest case of
+/// a verb that queues a wake runs its daemon with it; there is no record to write in a sandbox that has no host). A release build
+/// never reads it.
+#[cfg(unix)]
+pub(crate) fn forced_for_test(debug_build: bool, env: Option<&str>) -> bool {
+    debug_build && env == Some("1")
+}
+
 /// Whether the wake queue is the core's on this Mac: the `wake` cutover record says `switched` and core.db holds the marker
 /// the step wrote (the same `may_serve` as every module). `stepping`, `rolling-back`, no record, a record with no marker, and
 /// a core opened without its folders all say no, so the core refuses the writes of a queue that is not its to write.
 #[cfg(unix)]
 pub(crate) fn switched(core: &Core) -> bool {
+    if forced_for_test(
+        cfg!(debug_assertions),
+        std::env::var("KITH_WAKE_SWITCHED_FOR_TEST").ok().as_deref(),
+    ) {
+        return true;
+    }
     let Some(folders) = core.folders() else {
         return false;
     };
@@ -80,10 +94,11 @@ pub(crate) fn switched(core: &Core) -> bool {
     .ok
 }
 
-/// A Windows core is born switched, and `wake` is not on yet (`switched.rs`): its rows refuse by name.
+/// A Windows core is born switched, and `wake` is not on yet (`switched.rs`): its rows refuse by name. A test build says yes: the
+/// Windows run of the core's unit tests drives wake turns on a bare core (the refusal itself is tested on Unix, where the record is).
 #[cfg(not(unix))]
 pub(crate) fn switched(_core: &Core) -> bool {
-    crate::switched::on_windows("wake")
+    cfg!(test) || crate::switched::on_windows("wake")
 }
 
 /// Runs `f` over the state in one write transaction. Answered ids older than a week are forgotten on the way.
