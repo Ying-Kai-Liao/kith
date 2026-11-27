@@ -211,6 +211,7 @@ extension BotStore {
             upsert(e)
             bump(e.rev)
             noteVisibleConversations(e.botId, entry: e)
+            if e.kind == "agent" { feed.entryArrived() }
             let calls = Array(voiceCalls.values).filter { $0.botId == e.botId && e.rev > $0.startRev }
             guard !calls.isEmpty else { break }
             // The chat's replies and its tasks' are heard; other threads aren't.
@@ -248,6 +249,8 @@ extension BotStore {
             accessRequests = requests
         case let .conversation(conversation):
             roomConversations.note(conversation)
+        case let .post(post):
+            feed.apply(post)
         case let .undecodable(type):
             // Never skip past data we couldn't read: rewind once and fetch everything again.
             log.error("undecodable \(type) event")

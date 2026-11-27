@@ -817,3 +817,26 @@ fn a_lock_stuck_turn_ends_its_claim_once() {
     assert_eq!(again.started.as_deref(), Some("e1"));
     rig.finish(&[]);
 }
+
+/// Windows has no process groups to end: every spawn's job ends with the holder (W12 rule P2), so `end_groups` signals
+/// nothing and never reports a stuck process, whatever is recorded.
+#[cfg(windows)]
+#[test]
+fn end_groups_is_empty_on_windows() {
+    let own = kith_kernel::procstart::start_stamp(std::process::id()).unwrap();
+    let recorded = [
+        crate::db::RecordedProc {
+            pid: std::process::id(),
+            started: own,
+            conv: "c1".into(),
+        },
+        crate::db::RecordedProc {
+            pid: 4_000_000_000,
+            started: "e1".into(),
+            conv: "c2".into(),
+        },
+    ];
+    let mut notes = Vec::new();
+    super::end_groups(&mut notes, &recorded, Duration::from_millis(10)).unwrap();
+    assert!(notes.is_empty());
+}

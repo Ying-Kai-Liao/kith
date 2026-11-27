@@ -30,6 +30,14 @@ pub fn credentials(env: &Env) -> Option<(String, String)> {
     .find_map(|(t, s)| Some((env.get(t)?.to_owned(), env.get(s)?.to_owned())))
 }
 
+/// `(token, socket path)` of the owner's run only: `KITH_ASK_TOKEN` on `KITH_ASK_SOCKET`, never the guest's pair.
+pub fn ask_credentials(env: &Env) -> Option<(String, String)> {
+    Some((
+        env.get("KITH_ASK_TOKEN")?.to_owned(),
+        env.get("KITH_ASK_SOCKET")?.to_owned(),
+    ))
+}
+
 /// One request to the host over the run socket: the reply when it is a JSON object, `None` when there is no token, no
 /// socket or no answer.
 pub fn call_host(
@@ -38,7 +46,26 @@ pub fn call_host(
     body: &Map<String, Value>,
     timeout: Duration,
 ) -> Option<Map<String, Value>> {
-    let (token, path) = credentials(env)?;
+    call(credentials(env)?, method, body, timeout)
+}
+
+/// The same on the owner's socket alone (`feedPost`): a run that holds only a guest's token gets no answer, so the guest
+/// socket never sees the method.
+pub fn call_host_ask(
+    env: &Env,
+    method: &str,
+    body: &Map<String, Value>,
+    timeout: Duration,
+) -> Option<Map<String, Value>> {
+    call(ask_credentials(env)?, method, body, timeout)
+}
+
+fn call(
+    (token, path): (String, String),
+    method: &str,
+    body: &Map<String, Value>,
+    timeout: Duration,
+) -> Option<Map<String, Value>> {
     let mut msg = body.clone();
     msg.insert("token".to_owned(), Value::String(token));
     msg.insert("method".to_owned(), Value::String(method.to_owned()));

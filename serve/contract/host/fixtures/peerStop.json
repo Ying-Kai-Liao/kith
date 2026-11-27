@@ -1,0 +1,7 @@
+{
+  "method": "peerStop",
+  "type": "PeerStopped",
+  "body": {
+    "paired": false
+  }
+}

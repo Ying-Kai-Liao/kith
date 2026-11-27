@@ -18,8 +18,8 @@ pub mod hostlocal;
 // (`launch::exec`, `launch::start`) stands on claims and `kith-permit` and stays Unix only until W12. A guest's launch is
 // refused there (guests are not offered on Windows).
 pub mod launch;
-// Unix only: it forks the compaction (a parked child) and takes flocks, like `threads`, whose claims it takes.
-#[cfg(unix)]
+// On Windows (W12-4) the compaction's parked child is a spawn of this program (`proc_win.rs`) and the sweep lock is LockFileEx
+// (through `fs2`). The Unix fork is unchanged.
 pub mod lifecycle;
 pub mod log;
 pub mod ownerfs;
@@ -43,7 +43,9 @@ pub mod secrets;
 #[path = "secrets_win.rs"]
 pub mod secrets;
 pub mod settings;
-#[cfg(unix)]
+// On Windows (W12-4) the claims, the registry and their locks (LockFileEx through `fs2`; liveness through procstart). `run`, the
+// wrapper that forks claude and passes signals on, stays Unix only: it is the terminal launch (W12-5, W12-6), and
+// `threads::RUN_NOT_ON_WINDOWS` is what a caller says until then.
 pub mod threads;
 // Not Unix-only: `kith wake` on a Mac with no Python (a Windows owner) is this thin client of the core's wake rows.
 pub mod wake;
@@ -85,6 +87,8 @@ pub const MODULES: &[&str] = if cfg!(unix) {
         "lifecycle",
         "paths",
         "permit",
+        // `kernel permit feed-post` (the feed_post tool's CLI twin); `kith feed post` needs it, an older program would start the MCP server.
+        "permit-feed",
         "pkg",
         "project",
         // `kernel project-id` answers a guest run (the run-socket client, project/guest.rs); the stub bin/project-id needs it.
@@ -152,7 +156,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","ask-ledger","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","launch-exec-term","lifecycle","paths","permit","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","turn-conversation","wake"]}"#
+            r#"{"abi":1,"modules":["account","account-state","accounts","accounts-json","accounts-main-id","accounts-run-chain","acp","ask-ledger","cost","cost-ledger","delegation","engine-run","engine-run-tui","engines","launch","launch-exec","launch-exec-term","lifecycle","paths","permit","permit-feed","pkg","project","project-guest","readfence","room-ledger","sched-turn","secrets-exec","settings","threads","threads-run","threads-writer","turn-claim","turn-conversation","wake"]}"#
         );
     }
 }

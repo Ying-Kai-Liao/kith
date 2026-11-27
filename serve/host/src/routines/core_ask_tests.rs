@@ -357,3 +357,18 @@ fn a_host_restarted_mid_run_leaves_the_callee_running_and_its_answer_is_told_onc
     assert_eq!(engines(&dir), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn nothing_from_a_computer_starts_while_the_pairings_are_unsettled() {
+    // An end the core did not hear (it was busy, not restarted) is owed: the run door holds the asks that came from a computer
+    // until a clean reconcile settled it again (`peer_asks::fence`). Local asks never wait.
+    let turns = vec![
+        json!({"turn": 1, "ask": "from-b", "originComputer": "macA"}),
+        json!({"turn": 2, "ask": "local", "originComputer": null}),
+        json!({"turn": 3, "ask": "older-core-without-the-field"}),
+    ];
+    let held = super::unsettled_held_back(turns.clone(), false);
+    let names: Vec<&str> = held.iter().map(|t| t["ask"].as_str().unwrap()).collect();
+    assert_eq!(names, ["local", "older-core-without-the-field"]);
+    assert_eq!(super::unsettled_held_back(turns, true).len(), 3);
+}

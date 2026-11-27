@@ -24,11 +24,23 @@ pub(super) fn kill(pid: u32) {
     }
 }
 
-#[cfg(not(unix))]
+/// Ends the run's process by its pid after a start-stamp check against the stamp taken when the host started it (W12-3,
+/// rule P1). Never by name. A run whose start was not recorded or cannot be matched is not killed, and says so (WI1).
+/// Not reachable yet (a chat run returns `NotStarted` on Windows before the spawn), and H4 does not hold for it: the tools
+/// below the run are not in a kill-on-close job.
+// W12-7: the spawn must go in a kill-on-close job, and the stamp must be read from the child's handle, not by pid after
+// the spawn (`winproc::remember` in run.rs does the latter).
+#[cfg(windows)]
 pub(super) fn kill(pid: u32) {
-    // Stopping a channel run needs the Windows port's job objects (windows-owner W12); say so rather than answering
-    // the Stop as if it had worked (WI1).
-    tracing::warn!(pid, "channel Stop can't end the run: not on Windows yet (windows-owner W12)");
+    use crate::terminal::winproc::{Ended, end, started};
+    if end(pid, started(pid).as_deref()) == Ended::NotSure {
+        tracing::warn!(pid, "channel Stop can't end the run: its start doesn't match the one recorded");
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(super) fn kill(pid: u32) {
+    tracing::warn!(pid, "channel Stop can't end the run: not supported on this platform");
 }
 
 /// What a card's wake came to (see [`Core::wake`]).

@@ -17,7 +17,7 @@ use serde_json::{Map, Value, json};
 
 use super::core::{Core, CoreErr, registry_switched};
 use super::registry::{build, sid_lock, write_entry};
-use super::{Ctx, create_private_dir};
+use super::{Ctx, chmod_private_dir, create_private_dir, private_file};
 
 /// A `SessionStart` hook has 5 s in all, and the ps walk comes first.
 const CALL: Duration = Duration::from_secs(3);
@@ -137,11 +137,10 @@ fn call(core: Option<&dyn Core>, rec: &Value) -> (Call, String) {
 
 /// The record's spool entry `inbox/<sid>.<recordedAt>.<pid>.json`, written atomically (0700 folder, 0600 file); its path.
 fn spool(reg: &Path, sid: &str, rec: &Value) -> std::io::Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt as _;
     create_private_dir(reg)?;
     let dir = inbox(reg);
     create_private_dir(&dir)?;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    chmod_private_dir(&dir)?;
     let at = rec.get("recordedAt").map_or_else(String::new, |v| {
         v.as_u64().map_or_else(|| v.to_string(), |n| n.to_string())
     });
@@ -153,13 +152,13 @@ fn spool(reg: &Path, sid: &str, rec: &Value) -> std::io::Result<PathBuf> {
     ));
     {
         use std::io::Write as _;
-        use std::os::unix::fs::OpenOptionsExt as _;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?;
+        let mut f = private_file(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true),
+        )
+        .open(&tmp)?;
         f.write_all(crate::secrets::pyjson::dumps(rec).as_bytes())?;
     }
     std::fs::rename(&tmp, &path)?;
@@ -256,7 +255,6 @@ fn read_any(path: &Path) -> Option<Value> {
 /// each under the sid's lock (a lock not had within the wait skips that entry for the next drain). An entry the core would
 /// refuse as invalid is deleted, never placed. In Writer mode it does nothing: the core drains.
 pub fn drain(c: &Ctx) -> usize {
-    use std::os::unix::fs::PermissionsExt as _;
     let Some(reg) = c.reg_dir() else {
         return 0;
     };
@@ -290,7 +288,11 @@ pub fn drain(c: &Ctx) -> usize {
             .as_ref()
             .is_none_or(|h| order_key(rec, Some(&path), n) > order_key(h, Some(&target), 0));
         if newer {
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
             if std::fs::rename(&path, &target).is_ok() {
                 moved += 1;
             }

@@ -7,6 +7,7 @@
 #[cfg(unix)]
 mod access_core_tests;
 mod accounts;
+mod agent_rules;
 pub mod authority;
 #[cfg(test)]
 pub(crate) mod authority_props;
@@ -34,6 +35,7 @@ pub mod devices;
 #[cfg(test)]
 mod error_tests;
 mod events;
+mod feed;
 mod files;
 mod folders;
 // Unix-only until W22b/W23: the fixture is a scripted core on a Unix socket (std::os::unix, libc); Windows core pipes are W5b, guests W23.
@@ -289,11 +291,22 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };
+    if method == "feedRoute" {
+        return feed::route(&b).await;
+    }
+    let b = match feed::call(hub, method, b)? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
     let b = match folders::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };
     let b = match accounts::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match agent_rules::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

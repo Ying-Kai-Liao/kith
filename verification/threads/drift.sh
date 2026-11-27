@@ -20,6 +20,8 @@ FILES=(
   kernel/bin/kith                     # --resume: resolve + r_sid; csid: claim / terminal before claude; exec run (the Rust `kernel threads run` when the program lists threads-run, else the Python); a one-shot to `kernel launch-exec` while switched; KITH_TURN_CLAIM only to the claim calls
   core/kernel/src/lifecycle/sweep.rs  # the Rust compact and end: Taker::take (lifecycle_owner) for the parked child's pid, still(), then it execs claude; end
   core/kernel/src/lifecycle/proc.rs   # parked(): the fork that is claude (or the stub), held before its exec; reap
+  core/kernel/src/lifecycle/proc_win.rs # W12-4, Windows: parked() is a spawn of `kith kernel lifecycle parked` (waits for go, runs the program as its child, ends with its code): the claim names that pid; no stub lock yet
+  core/winsys/src/procs.rs            # W12-4, Windows: the process list and TerminateProcess the claim sweep (end_holders) and the compaction timeout use
   kernel/bin/kith-wake                # deliver/drain: kith AGENT --resume SESSION (resolve claims), skip writer_live; take: host-door items
   serve/host/src/terminal/mod.rs      # Terminal.taking, HeldByWriter, TerminalBusy
   serve/host/src/terminal/registry.rs # liveness, started_as, terminate, pid_runs
