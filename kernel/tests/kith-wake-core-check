@@ -59,7 +59,7 @@ bad() { echo "FAIL $1${2:+: $2}"; fails=$((fails + 1)); }
 is() { [[ $2 == "$3" ]] && ok "$1" || bad "$1" "got '$2', wanted '$3'"; }
 calls() { cat "$T/calls" 2>/dev/null | grep -vc '^claim\.' | tr -d ' '; }
 called() { grep -c "^$1 " "$T/calls" 2>/dev/null; }
-files() { find "$Q" -type f ! -name .tombstone 2>/dev/null | wc -l | tr -d ' '; }
+files() { find "$Q" -type f ! -name .tombstone ! -name .lock 2>/dev/null | wc -l | tr -d ' '; }
 
 # --- before the switch: the files, the core is not asked --------------------------------------------------------------
 is "unswitched: enqueue writes the queue file" "$(python3 "$W" enqueue s0 --id u:1 --agent designer -- hi)" queued
@@ -152,5 +152,37 @@ rm -f "$Q/.tombstone"
 printf 'state=switched\nat=1\n' > "$MACHINE/core/cutover/wake.switch"
 is "a switch record past stepping is the core's" "$(python3 "$W" enqueue s1 --id card:9 --agent designer -- yes)" queued
 is "with no queue file" "$(files)" 0
+
+# --- a writer that read Files mode and then waits on the lock the step holds (WK6 1c) --------------------------------------
+# `kith migrate step wake` holds queue/.lock while it imports and puts the tombstone. A writer that read the mode before the
+# tombstone and then waited on the lock must not write a queue file once it gets the lock: it reads the mode again inside the
+# lock and hands over to the core (here: down, so it fails closed and writes nothing).
+rm -rf "$KITH_STATE/sessions" "$MACHINE/core/cutover/wake.switch"
+mkdir -p "$Q"
+: > "$T/calls"
+touch "$T/down"
+python3 - "$Q/.lock" "$T/holding" <<'PY' &
+import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT, 0o600)
+fcntl.flock(fd, fcntl.LOCK_EX)
+open(sys.argv[2], 'w').close()
+while not os.path.exists(sys.argv[2] + '.release'):
+    time.sleep(0.05)
+PY
+HOLDER=$!
+for _ in $(seq 100); do [[ -e $T/holding ]] && break; sleep 0.05; done
+python3 "$W" enqueue s7 --id race:1 --agent designer -- x >"$T/out" 2>"$T/err" &
+WRITER=$!
+sleep 1   # it has read Files mode (no tombstone yet) and waits on the lock
+is "the writer is waiting on the lock, not done" "$(kill -0 "$WRITER" 2>/dev/null && echo waiting)" waiting
+printf '{"kith_tombstone": 1, "module": "wake", "rollback": "kith rollback wake"}\n' > "$Q/.tombstone"
+touch "$T/holding.release"
+wait "$HOLDER"
+wait "$WRITER"; rc=$?
+is "(c) the writer that waited is refused once the lock is let go" "$([ $rc != 0 ] && echo refused)" refused
+is "(c) it wrote no queue file after the tombstone" "$(files)" 0
+is "(c) it asked the core, which is down: the answer stays with the caller" "$(called wake.enqueue)" 1
+grep -q 'did not answer' "$T/err" && ok "(c) and said so" || bad "(c) and said so" "$(cat "$T/err")"
+rm -f "$T/down"
 
 [[ $fails == 0 ]] && echo "all checks passed" || { echo "$fails check(s) failed"; exit 1; }

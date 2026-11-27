@@ -55,8 +55,20 @@ fn strings(params: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Answers a `wake.*` method over this core, as the caller's view sees the folders.
+/// Answers a `wake.*` method over this core, as the caller's view sees the folders. The owner's writes are refused unless the
+/// `wake` module is switched (a `stepping` or `rolling-back` queue is still, or again, the files'): a caller that gets the
+/// refusal keeps its work and says so. The two reads are served either way.
 pub(crate) fn call(core: &mut Core, method: &str, params: &Value) -> Result<Value> {
+    if !matches!(method, "wake.queueList" | "wake.queueStatus") && !super::switched(core) {
+        return Err(Error::Refused(format!(
+            "kith-core: {method}: the wake queue is not switched to the core on this Mac (kith migrate step wake)"
+        )));
+    }
+    call_open(core, method, params)
+}
+
+/// [`call`] without the switch check: what the core's own tests answer over a core that was never stepped.
+pub(crate) fn call_open(core: &mut Core, method: &str, params: &Value) -> Result<Value> {
     let (folders, _) = core.folders_for(params)?;
     let sys = System {
         state: folders.state.clone(),

@@ -43,6 +43,8 @@ impl Core {
         let said =
             crate::core_front::step_claims_for_test(&folders, &home.join("kith/kernel")).expect("the claims step");
         assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
+        // The ask part of `wake.tick` answers a switched queue only.
+        kith_core::mark_wake_switched_for_test(&folders).expect("the wake switch");
         let daemon = serve_for_test(&folders);
         daemon.reconciled();
         let writer = Arc::new(CoreWriter::with_instance(folders.clone(), "kith-serve-host/1-a".to_owned()));

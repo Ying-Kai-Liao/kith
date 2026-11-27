@@ -90,6 +90,20 @@ def status(rid):
     return a['state'], a.get('run')
 
 
+def take(holder, session=None, sid=None):
+    """`wake.take` as kith-wake's `take` answers it: the turn, or None when nothing is owed."""
+    return call('wake.take', {'holder': holder, **({'session': session} if session else {}),
+                              **({'sid': sid} if sid else {})}).get('turn')
+
+
+def done(run, how='answered'):
+    return bool(call('wake.done', {'run': run, 'how': how})['done'])
+
+
+def back(run, held=False):
+    return bool(call('wake.back', {'run': run, 'held': held})['done'])
+
+
 def _say(answer):
     for line in answer.get('lines') or []:
         print(line)

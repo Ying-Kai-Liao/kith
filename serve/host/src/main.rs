@@ -1852,7 +1852,7 @@ async fn main() -> Result<()> {
             }
             through_core(|| -> Result<()> {
                 match cmd {
-                    KernelCmd::Version => println!("{}", kith_kernel::version_json()),
+                    KernelCmd::Version => println!("{}", kith_kernel::version_json_with(kith_core::version_extras())),
                     KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
                     KernelCmd::Engines { json, action } => print_engines(json, action)?,
                     #[cfg(unix)]

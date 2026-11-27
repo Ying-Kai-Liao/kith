@@ -838,7 +838,7 @@ mod stop {
     }
 
     fn owed(t: &Tree, core: &mut Core, session: &str, id: &str) {
-        wake::call(
+        wake::call_open(
             core,
             "wake.enqueue",
             &with(
@@ -850,7 +850,7 @@ mod stop {
     }
 
     fn queued(t: &Tree, core: &mut Core) -> usize {
-        wake::call(core, "wake.queueList", &t.params(&json!({}))).unwrap()["lines"]
+        wake::call_open(core, "wake.queueList", &t.params(&json!({}))).unwrap()["lines"]
             .as_array()
             .unwrap()
             .len()

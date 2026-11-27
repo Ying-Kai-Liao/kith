@@ -188,12 +188,16 @@ pub fn step_authority_for_test(folders: &Paths, kernel: &std::path::Path) -> Res
     kith_core::cutover(folders, kernel, &["step".to_owned(), "authority".to_owned()]).map_err(|e| e.to_string())
 }
 
-/// `kith migrate step claims` over `folders`, in this process: the claims are the core's, so `claim.attach` serves. Not while a
+/// `kith migrate step claims` over `folders`, in this process: the claims are the core's, so `claim.attach` serves. The wake queue is switched
+/// too (what a Mac that runs turns on the core has, WK6): a host test that queues a wake needs the core to take it. Not while a
 /// daemon holds the core.
 #[cfg(test)]
 #[cfg(unix)]
 pub fn step_claims_for_test(folders: &Paths, kernel: &std::path::Path) -> Result<Vec<String>, String> {
-    kith_core::cutover(folders, kernel, &["step".to_owned(), "claims".to_owned()]).map_err(|e| e.to_string())
+    let said =
+        kith_core::cutover(folders, kernel, &["step".to_owned(), "claims".to_owned()]).map_err(|e| e.to_string())?;
+    kith_core::mark_wake_switched_for_test(folders).map_err(|e| e.to_string())?;
+    Ok(said)
 }
 
 /// Starts a daemon on `folders`, ready before it returns.

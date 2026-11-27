@@ -23,6 +23,8 @@ mod outside;
 #[cfg(all(test, unix))]
 mod parity_tests;
 mod queue;
+#[cfg(unix)]
+pub(crate) mod rollback;
 mod settle;
 mod store;
 #[cfg(test)]
@@ -33,18 +35,26 @@ mod tick_tests;
 mod turns;
 mod waiters;
 
+#[cfg(all(test, unix))]
+pub(crate) use call::call_open;
 pub(crate) use call::{call, serves};
+#[cfg(unix)]
+pub(crate) use tick::settle_only;
 pub(crate) use tick::{CoreLock, World, system, tick};
 // The import (Unix only, like the rest of `import`) is the one outside user of the model and the counts.
 pub(crate) use model::State;
 #[cfg(unix)]
 pub(crate) use model::{Answered, Item, Waiter};
 #[cfg(unix)]
+pub(crate) use model::{file_key, number};
+#[cfg(unix)]
 pub(crate) use store::counts;
 pub(crate) use store::{load, save};
 // What the ask ledger needs of the queue (P2-3): it owes a wake in its own transaction and takes one back, on the state the
 // caller loaded (`write_tx`, or the tick's).
 pub(crate) use outside::Outside;
+#[cfg(unix)]
+pub(crate) use outside::System;
 #[cfg(all(test, unix))]
 pub(crate) use outside::{Check, Civil, PrView, Transcripts};
 pub(crate) use queue::{New, enqueue};
@@ -52,6 +62,58 @@ pub(crate) use turns::withdraw_in;
 
 use crate::db::Core;
 use crate::error::{Error, Result};
+
+/// Debug builds only: `KITH_WAKE_SWITCHED_FOR_TEST=1` in a core's own environment says the queue is switched (a difftest case of
+/// a verb that queues a wake runs its daemon with it; there is no record to write in a sandbox that has no host). A release build
+/// never reads it.
+#[cfg(all(unix, any(test, debug_assertions)))]
+pub(crate) fn forced_for_test(debug_build: bool, env: Option<&str>) -> bool {
+    debug_build && env == Some("1")
+}
+
+/// Whether the wake queue is the core's on this Mac: the `wake` cutover record says `switched` and core.db holds the marker
+/// the step wrote (the same `may_serve` as every module). `stepping`, `rolling-back`, no record, a record with no marker, and
+/// a core opened without its folders all say no, so the core refuses the writes of a queue that is not its to write.
+#[cfg(unix)]
+pub(crate) fn switched(core: &Core) -> bool {
+    // Compiled out of a release build: its core cannot be told the queue is switched.
+    #[cfg(debug_assertions)]
+    {
+        if forced_for_test(
+            cfg!(debug_assertions),
+            std::env::var("KITH_WAKE_SWITCHED_FOR_TEST").ok().as_deref(),
+        ) {
+            return true;
+        }
+    }
+    let Some(folders) = core.folders() else {
+        return false;
+    };
+    crate::cutover::same_answer::may_serve(
+        &crate::cutover::modules::wake::Wake::new(),
+        &crate::cutover::Env::with_paths(folders),
+        core.conn(),
+        false,
+    )
+    .ok
+}
+
+/// A Windows core is born switched, and `wake` is not on yet (`switched.rs`): its rows refuse by name. A test build says yes: the
+/// Windows run of the core's unit tests drives wake turns on a bare core (the refusal itself is tested on Unix, where the record is).
+#[cfg(not(unix))]
+pub(crate) fn switched(core: &Core) -> bool {
+    cfg!(test) || crate::switched::on_windows("wake") || switch_record_for_test(core)
+}
+
+/// Debug builds only: the host's Windows tests run this crate as a dependency (so `cfg(test)` is off) and say the queue is
+/// switched with the record file their fixture writes (`mark_wake_switched_for_test` has no marker to write on Windows).
+#[cfg(not(unix))]
+fn switch_record_for_test(core: &Core) -> bool {
+    cfg!(debug_assertions)
+        && core
+            .folders()
+            .is_some_and(|f| f.machine.join("core/cutover/wake.switch").is_file())
+}
 
 /// Runs `f` over the state in one write transaction. Answered ids older than a week are forgotten on the way.
 pub(crate) fn write<T>(

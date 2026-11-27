@@ -33,7 +33,7 @@ use super::{load, queue, save};
 use crate::asks;
 use crate::conversations::claims;
 use crate::db::Core;
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 /// How long the waiters' looks may take in all, so the call answers inside the client's timeout; waiters not looked at
 /// wait for the next tick.
@@ -289,10 +289,67 @@ fn close_orphans(tx: &rusqlite::Connection, after: &State, ms: i64) -> Result<()
 
 /// `wake.tick`.
 pub(crate) fn tick(access: &impl CoreLock, params: &Value, world: &World) -> Result<Value> {
-    let seen = access.with_core(|c| phase_one(c, params))?;
+    // The host ticks a `rolling-back` queue as Core (its mode reads the record), so the refusal is here, not the host's.
+    let seen = access.with_core(|c| {
+        if super::switched(c) {
+            phase_one(c, params)
+        } else {
+            Err(Error::Refused(
+                "kith-core: wake.tick: the wake queue is not switched to the core on this Mac (kith migrate step wake)"
+                    .into(),
+            ))
+        }
+    })?;
     let (out, tr) = world(&seen.folders);
     let now = out.now();
     let asked = ask(&seen, &*out, &*tr, now);
     let done = access.with_core(|c| phase_two(c, &*out, &seen, asked, now))?;
     Ok(done.json())
+}
+
+/// R4's settle pass and nothing else, for a rollback (`cutover/modules/wake.rs`): the runs whose turn is final, with their claim
+/// ended, are answered as `wake.tick` would answer them, so the files the rollback writes carry no run that is already over.
+/// No waiter fires, nothing is taken, nothing is unparked and no ask is settled. The daemon is down and the caller holds the
+/// core, so reading the transcripts here is fine. Returns the runs settled and how.
+#[cfg(unix)]
+pub(crate) fn settle_only(core: &mut Core, folders: &Paths) -> Result<Vec<(String, Verdict)>> {
+    let (out, tr) = (
+        System {
+            state: folders.state.clone(),
+            gh: None,
+        },
+        Files::of(&folders.home, &folders.machine, None),
+    );
+    let now = out.now();
+    let linked = {
+        let tx = core.conn().unchecked_transaction()?;
+        settle::runs_in(&tx, &load(&tx)?)?.0
+    };
+    let markers: BTreeMap<String, bool> = linked
+        .iter()
+        .filter(|l| l.is_final())
+        .map(|l| {
+            let marker = l.wants_marker()
+                && l.sid
+                    .as_deref()
+                    .is_some_and(|sid| tr.has(sid, &format!("[kith wake {}]", l.run)));
+            (l.run.clone(), marker)
+        })
+        .collect();
+    let tx = core.claim_tx()?;
+    let before = load(&tx)?;
+    let mut after = before.clone();
+    let mut settled = Vec::new();
+    let (linked, _) = settle::runs_in(&tx, &after)?;
+    for run in linked.iter().filter(|r| r.is_final()) {
+        let Some(marker) = markers.get(&run.run) else {
+            continue;
+        };
+        let verdict = settle::settle_in(&tx, &mut after, now, run, *marker)?;
+        settled.push((run.run.clone(), verdict));
+    }
+    turns::close_gone_in(&tx, &before, &after, now)?;
+    save(&tx, &before, &after)?;
+    tx.commit()?;
+    Ok(settled)
 }

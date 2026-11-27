@@ -159,6 +159,8 @@ impl World {
         std::fs::create_dir_all(world.folders.machine.join("live/terminal")).unwrap();
         let said = crate::core_front::step_claims_for_test(&world.folders, &kernel).expect("the claims step");
         assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
+        // The ask part of `wake.tick` and the owner's `wake.*` rows answer a switched queue only.
+        kith_core::mark_wake_switched_for_test(&world.folders).expect("the wake switch");
         let daemon = crate::core_front::serve_for_test(&world.folders);
         daemon.reconciled();
         world.daemon = Some(daemon);

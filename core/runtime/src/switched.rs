@@ -14,12 +14,14 @@
     unix,
     allow(dead_code, reason = "Windows asks; a Mac has the cutover records")
 )]
-pub(crate) const MODULES: [(&str, bool); 5] = [
+pub(crate) const MODULES: [(&str, bool); 6] = [
     ("accounts", false),
     ("authority", true),
     ("claims", false),
     ("schedules", false),
     ("transcripts", false),
+    // Wake on Windows stays refused by name until the Windows owner package that runs its turns turns this on.
+    ("wake", false),
 ];
 
 /// Whether `module` is switched on a Windows core. An unknown module is not.

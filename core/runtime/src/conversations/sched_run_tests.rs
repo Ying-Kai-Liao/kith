@@ -106,6 +106,45 @@ fn going(c: &Core) -> i64 {
         .unwrap()
 }
 
+/// U9 (WK6): nothing new starts on a wake queue that is not the core's (a rollback's record, or a host that starts after a crash
+/// in it, must not pull a queued wake turn); a schedule's turn is not asked.
+#[cfg(unix)]
+#[test]
+fn a_wake_turn_is_claimed_only_while_the_wake_queue_is_switched() {
+    let (_t, m) = machine();
+    let mut c = open_all(&Layout::new(&m)).with_folders(&crate::tests::paths(&m));
+    claims::reconcile(&mut c, &[], &[], i64::MAX, 1).unwrap();
+    let seen = claims::revoke_epoch(&c, "kai").unwrap();
+    let turn = claims::enqueue_turn(
+        &mut c,
+        &NewTurn {
+            conversation: "sess-w",
+            agent: "mel",
+            engine: "claude",
+            source: "wake",
+            person: "kai",
+            prompt: "[kith wake r1] hi",
+            deadline: None,
+            revoke_seen: seen,
+        },
+        NOW,
+    )
+    .unwrap();
+    let said = claim_for(&mut c, "sess-w", "kai", turn);
+    assert!(
+        matches!(&said, Err(Error::Refused(m)) if m.contains("wake queue is not switched")),
+        "{said:?}"
+    );
+    assert_eq!(
+        turn_state(&c, turn),
+        "queued",
+        "the refusal left the turn alone"
+    );
+    crate::cutover::modules::wake::write_switched(&Layout::new(&m), &mut c, 1).unwrap();
+    assert!(claim_for(&mut c, "sess-w", "kai", turn).is_ok());
+    // A schedule's turn never asks (checked by every other test here: they run on a core with no folders).
+}
+
 #[test]
 fn the_run_attaches_its_own_pid_once_and_only_to_a_claim_with_no_process() {
     let (_t, mut c) = world();

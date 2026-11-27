@@ -58,6 +58,8 @@ PUBLIC = {
     ("lib.rs", "EMBEDDED_WRITES"), ("lib.rs", "EMBEDDED_READS"), ("lib.rs", "embedded"),
     ("lib.rs", "cutover"),   # `kith kernel cutover ...` (M3-10a): argv in, lines out
     ("lib.rs", "cutover_outcome"),   # the same with an exit code and stderr lines (`status MODULE | --json | --require`)
+    ("lib.rs", "version_extras"),   # WK6: `kith kernel version` lists `wake-runner` when this build may step the wake queue; a different crate reads it
+    ("lib.rs", "mark_wake_switched_for_test"),   # WK6: the host's own tests start a core with the wake queue switched (the record and marker a step writes), `#[doc(hidden)]`
     ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),
     ("call.rs", "call"),
     ("daemon.rs", "Daemon"), ("daemon.rs", "spawn"), ("daemon.rs", "ready"), ("daemon.rs", "served"), ("daemon.rs", "stop"),
@@ -75,14 +77,24 @@ RUST_USERS = {"serve/host/src/main.rs", "serve/host/src/core_front.rs", "serve/h
               # M4-5 F's schedules e2e makes owner calls of its temp core (schedule.runNow) and reads its turns and fire rows; Kai 2026-11-18.
               "serve/host/tests/schedules_cutover_e2e.rs",
               # R5 ports 1/4 (PR #1083): the threads-writer e2e drives a temp core's thread writer and reads its claims.
-              "serve/host/tests/threads_writer_e2e.rs"}
+              "serve/host/tests/threads_writer_e2e.rs",
+              # WK6: the wake cutover e2e steps and rolls back a temp core's wake queue and reads its turns and rows.
+              "serve/host/tests/wake_cutover_e2e.rs",
+              # WK6: host tests that run on a core whose wake queue is switched (kith_core::mark_wake_switched_for_test and nothing else).
+              "serve/host/src/wake/tests.rs", "serve/host/src/wake_cmd/tests.rs", "serve/host/src/routines/core_ask_tests.rs",
+              "serve/host/src/routines/launch_turn_e2e_tests.rs", "serve/host/src/cards/resume/wake_clock_core_tests.rs",
+              # WK6: `kith kernel version` appends kith_core::version_extras() (wake-runner).
+              "core/kernel/src/lib.rs"};
 # Files that may say "core.db": docs, this check, and the protected-paths list (runtime-design 9b rules 1 and 2).
 EXEMPT_NAME = ("kernel/tests/kith-core-boundary-check", "kernel/lib/kith_guard.py",
                # the guard lists core.db as a secret path; its golden cases must name it (retire-python P1-8)
                "kernel/tests/difftest/golden-lib/guard-must-ask.json", "kernel/tests/difftest/golden-lib/gen-guard-must-ask.py",
                "serve/host/tests/direct_park_e2e.rs",   # opens its own temp core's db (P11; Kai 2026-11-15)
                "serve/host/tests/threads_writer_e2e.rs",   # reads its own temp core's thread claims (R5 ports 1/4, PR #1083)
-               "serve/host/tests/schedules_cutover_e2e.rs")   # reads its own temp core's fires and turns (M4-5 F; Kai 2026-11-18)
+               "serve/host/tests/schedules_cutover_e2e.rs",   # reads its own temp core's fires and turns (M4-5 F; Kai 2026-11-18)
+               "serve/host/tests/wake_cutover_e2e.rs",   # reads its own temp core's wake rows and turns (WK6)
+               "serve/host/src/wake/tests.rs",
+               "serve/host/src/cards/resume/wake_clock_core_tests.rs")   # names its temp core db to switch the wake queue (WK6)
 NAMES = re.compile(r"core\.db|core\.lock|core\.marker")
 SKIP_DIRS = {".git", "target", "node_modules", ".target-core", "worktrees", "build", ".build", "DerivedData"}
 

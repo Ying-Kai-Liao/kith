@@ -84,11 +84,22 @@ fn share_lock(dir: &Path) -> Option<std::fs::File> {
 
 /// What the files say, the lines for what was skipped, and a hash of what was read.
 pub(crate) fn read_files(state: &Path) -> Result<(State, Vec<String>, String)> {
+    read_with(state, true)
+}
+
+/// [`read_files`] for a caller that already holds both locks exclusively (the `wake` step, under its source lock): a shared
+/// request on a new descriptor would wait for ever behind this same process's exclusive one (flock belongs to the open file
+/// description).
+pub(crate) fn read_files_held(state: &Path) -> Result<(State, Vec<String>, String)> {
+    read_with(state, false)
+}
+
+fn read_with(state: &Path, lock: bool) -> Result<(State, Vec<String>, String)> {
     let queue = state.join("sessions").join("queue");
     let waits = state.join("sessions").join("waits");
     // The Python's order: the waiters' lock, then the queue's.
-    let _w = share_lock(&waits);
-    let _q = share_lock(&queue);
+    let _w = lock.then(|| share_lock(&waits)).flatten();
+    let _q = lock.then(|| share_lock(&queue)).flatten();
     let mut st = State::default();
     let mut skipped = Vec::new();
     let mut hash = Sha256::new();
@@ -205,6 +216,18 @@ pub(crate) fn run(layout: &Layout, state: &Path, dry_run: bool) -> Result<Report
     }
     let mut core = crate::start_with(layout, MIGRATIONS)?;
     into(&mut core, state, &desired, &sha, &mut rep)?;
+    Ok(rep)
+}
+
+/// [`run`] for the step, which holds both locks and the core: a real import over the files read without taking them again.
+pub(crate) fn run_in_held(core: &mut Core, state: &Path) -> Result<Report> {
+    let (desired, skipped, sha) = read_files_held(state)?;
+    let mut rep = Report {
+        dry_run: false,
+        changed: false,
+        lines: skipped,
+    };
+    into(core, state, &desired, &sha, &mut rep)?;
     Ok(rep)
 }
 

@@ -48,11 +48,10 @@ impl Real {
         let kernel = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel");
         let said = crate::core_front::step_claims_for_test(&folders, &kernel).expect("the claims step");
         assert!(said.iter().any(|l| l.contains("switched")), "{said:?}");
+        // The `wake` record and its marker in core.db, before the daemon holds the core.
+        kith_core::mark_wake_switched_for_test(&folders).expect("the wake switch");
         let daemon = serve_for_test(&folders);
         crate::terminal::core_claims::enable(&folders.state, folders.clone());
-        let dir = folders.machine.join("core/cutover");
-        std::fs::create_dir_all(&dir).expect("cutover dir");
-        std::fs::write(dir.join("wake.switch"), "state=switched\nat=1\n").expect("switch record");
         daemon.reconciled();
         Self { home, folders, daemon: Some(daemon) }
     }

@@ -689,6 +689,7 @@ fn the_cli_words_parse() {
             "transcripts: not switched",
             "claims: not switched",
             "schedules: not switched",
+            "wake: not switched",
             "authority: not switched"
         ]
     );
