@@ -9,7 +9,6 @@
 use super::launch_turn_e2e_tests::{World, built_kith, repo_kernel};
 use crate::terminal::core_writer::{CoreWriter, RunClaim};
 use crate::wake::{self, Request};
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Output, Stdio};
 
@@ -75,29 +74,11 @@ fn main_account(w: &World) -> String {
         .map_or_else(|| panic!("main-env named no main_id: {}", said(&out)), |v| v.trim_matches('\'').to_owned())
 }
 
-/// The lines the kernel's `engine-run` was started with, one per run (see [`launch`]).
-fn engine_argv(w: &World) -> Vec<String> {
-    std::fs::read_to_string(w.dir.join("engine-argv")).unwrap_or_default().lines().map(str::to_owned).collect()
-}
-
-/// The host's launch of a codex wake: `kith kernel launch-exec house --kernel K -- NOTE`, with the claim when there is one. The
-/// script finds the kith program through `KITH_BIN`: a stand-in that notes the `engine-run` argv and runs the built one.
+/// The host's launch of a codex wake: `kith kernel launch-exec house --kernel K -- NOTE`, with the claim when there is one.
 fn launch(w: &World, session: &str, claim: Option<i64>) -> Output {
     let kernel = repo_kernel().to_string_lossy().into_owned();
-    let tap = w.dir.join("kith-tap");
-    std::fs::write(
-        &tap,
-        format!(
-            "#!/bin/sh\ncase \"$*\" in *engine-run*) echo \"$*\" >> \"{}\" ;; esac\nexec \"{}\" \"$@\"\n",
-            w.dir.join("engine-argv").display(),
-            built_kith().display()
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&tap, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut cmd = w.command(&built_kith());
     cmd.args(["kernel", "launch-exec", "house", "--kernel", &kernel, "--", NOTE])
-        .env("KITH_BIN", &tap)
         .env("KITH_RESUME", session)
         .current_dir(w.dir.join("home"))
         .stdin(Stdio::null());
@@ -156,7 +137,6 @@ fn a_codex_agents_wake_on_a_bare_claude_id_is_refused_and_starts_no_codex_sessio
     assert!(said(&out).contains("unknown thread \"bare-claude-id\""), "{}", said(&out));
     assert!(!w.dir.join("acp-in").exists(), "no codex session was started: {}", said(&out));
     assert!(w.runs().is_empty(), "no engine ran: {:?}", w.runs());
-    assert!(engine_argv(&w).is_empty(), "engine-run never started: {:?}", engine_argv(&w));
     still_owed(&w, "bare-claude-id", claim);
 }
 
@@ -170,7 +150,6 @@ fn a_claimed_wake_on_a_session_made_under_another_account_is_refused_before_the_
     assert_eq!(out.status.code(), Some(1), "{}", said(&out));
     assert!(said(&out).contains("does not run on another session"), "{}", said(&out));
     assert!(w.runs().is_empty(), "no engine ran: {:?}", w.runs());
-    assert!(engine_argv(&w).is_empty(), "engine-run never started: {:?}", engine_argv(&w));
     assert!(!w.dir.join("acp-in").exists(), "no codex session was started");
     still_owed(&w, "codex:abc", claim);
 }
@@ -180,13 +159,17 @@ fn a_wake_on_its_own_session_on_its_own_account_resumes_it_through_engine_run_an
     let w = World::start();
     let claim = owed(&w, "codex:abc");
     made_under(&w, "codex:abc", &main_account(&w));
+    // The stand-in engine can load a session (the world's cannot), so a resume is seen as `session/load`, not a new session.
+    let echo = w.dir.join("acp_agent.py");
+    let src = std::fs::read_to_string(&echo).unwrap();
+    assert!(src.contains(r#""loadSession": False"#), "the echo agent's capability changed");
+    std::fs::write(&echo, src.replace(r#""loadSession": False"#, r#""loadSession": True"#)).unwrap();
     let out = launch(&w, "codex:abc", Some(claim));
     assert!(out.status.success(), "{}", said(&out));
     assert_eq!(w.runs().len(), 1, "the engine ran once: {:?}", w.runs());
-    let argv = engine_argv(&w);
-    assert_eq!(argv.len(), 1, "engine-run started once: {argv:?}");
-    assert!(argv[0].contains("--resume codex:abc"), "engine-run was told to resume the session: {argv:?}");
     let sent = std::fs::read_to_string(w.dir.join("acp-in")).unwrap();
+    assert!(sent.contains("session/load") && sent.contains("codex:abc"), "the engine loaded the owed session: {sent}");
+    assert!(!sent.contains("session/new"), "no new session beside it: {sent}");
     assert_eq!(sent.matches(NOTE).count(), 1, "the note reached the engine once: {sent}");
     assert!(!said(&out).contains("starting a new one"), "{}", said(&out));
     // The launch attached the claim to its own process; the host then reports the run's end, as the run door does.
