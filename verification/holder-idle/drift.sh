@@ -14,6 +14,8 @@ SYNC=5664661d92d536d250bab8231655ddf9f0379948
 FILES=(
   core/holder/src/holder.rs           # should_idle_out, watch_idle, the ACK arm, drop_core, reap (sweep, then record)
   core/runtime/src/holder_link.rs     # open_claims, step 7 of reconcile, claims::is_reconciled, end_gone: when an unlisted claim ends
+  core/runtime/src/conversations/claims.rs     # is_reconciled (once per generation), end_gone's kind filter
+  core/runtime/src/conversations/reconcile.rs  # release_unlisted: the effect of ending an unlisted claim
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

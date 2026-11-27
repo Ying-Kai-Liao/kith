@@ -257,6 +257,8 @@ pub(crate) fn settle_in(
     }
     // The asks of other computers: one whose link ended, or whose computer is away past the wait, is cut off (D4).
     settled.extend(super::peer::cut_off_in(tx, st, now)?);
+    // The asks other computers sent this one that nobody started in a day expire (by this computer's clock).
+    settled.extend(super::peer_b::expire_unstarted_in(tx, machine, now)?);
     rows::forget_old_in(tx, now)?;
     Ok(settled)
 }

@@ -404,6 +404,26 @@
       "doc": "The agents a paired computer may ask here.",
       "fields": { "agents": "[PeerAgent]" }
     },
+    "PeerRow": {
+      "doc": "One row of an ask's answer on the computer it was sent to: its number there, who said it, what kind (answer, progress or lost), the words and when (ms).",
+      "fields": { "n": "int", "as": "string?", "kind": "string", "text": "string", "at": "int?" },
+      "mayOmit": ["as", "at"]
+    },
+    "PeerThread": {
+      "doc": "What the callee's computer says of an ask another computer sent (`peerAsk`, `peerThread`): `paired` false when that computer is not paired at the epoch it named (nothing else is then said), `found` false for a key never seen. Else its state (open, answered, capped, stopped, lost or refused), the rows after the one asked for, what the run and what it asked cost there in US$ (`cost`), what it waits on (`waiting`) and whether it takes a follow-up (`takesTo`).",
+      "fields": { "paired": "bool", "found": "bool", "state": "string?", "rows": "[PeerRow]", "cost": "json?", "waiting": "json?", "takesTo": "bool?" },
+      "mayOmit": ["state", "cost", "waiting", "takesTo"]
+    },
+    "PeerStopped": {
+      "doc": "What a stop of an ask comes to on the callee's computer: its state after (stopped, or the final state it had already), or `paired` false when that computer is not paired at the epoch named.",
+      "fields": { "paired": "bool", "state": "string?" },
+      "mayOmit": ["state"]
+    },
+    "PeerTold": {
+      "doc": "What a `--to` message comes to on the callee's computer: `taken` true when it was queued for the ask's session, or will never be (the ask is over: `note` says so); false when it should be sent again later (the ask has no session yet). `paired` false when that computer is not paired at the epoch named.",
+      "fields": { "paired": "bool", "taken": "bool", "note": "string?" },
+      "mayOmit": ["note"]
+    },
     "HandleRevoke": {
       "doc": "One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer.",
       "fields": { "handle": "string", "revoked": "bool", "at": "int" }
@@ -945,6 +965,30 @@
       "who": ["peer"],
       "params": { "handles": "[HandleRevoke]" },
       "result": "HandleRevokes"
+    },
+    "peerAsk": {
+      "doc": "Mac link: an ask for one of this computer's agents, from the paired computer that sends it (its owner's own run; this computer's owner runs the agent). `key` is the asking computer's id for the ask, `epoch` its pairing, `lineage` the chain (`{chain, hop, cross, from, cost}`) the caps are checked from again, `opts` `{model, effort, project}`, `cont` the key of the earlier ask whose session this one continues. The same key again is the same ask, however often it is sent; every refusal is a row the next `peerThread` reads. Answers what `peerThread` would.",
+      "who": ["peer"],
+      "params": { "key": "string", "epoch": "string", "agent": "string", "task": "string", "lineage": "json?", "opts": "json?", "cont": "string?" },
+      "result": "PeerThread"
+    },
+    "peerThread": {
+      "doc": "Mac link: the ask the paired computer sent under `key`, as that computer follows it: the rows after `after`, its state and cost. Read only.",
+      "who": ["peer"],
+      "params": { "key": "string", "epoch": "string", "after": "int?" },
+      "result": "PeerThread"
+    },
+    "peerStop": {
+      "doc": "Mac link: stops the ask the paired computer sent under `key` (its run ended, a queued one never starts). A stop that comes before the ask leaves a stopped row, so the ask never starts if it arrives later. Sent again until answered.",
+      "who": ["peer"],
+      "params": { "key": "string", "epoch": "string" },
+      "result": "PeerStopped"
+    },
+    "peerTo": {
+      "doc": "Mac link: a `--to` follow-up to the ask the paired computer sent under `key`, as a turn of its session. The same words are one message.",
+      "who": ["peer"],
+      "params": { "key": "string", "epoch": "string", "text": "string" },
+      "result": "PeerTold"
     },
     "createInvite": {
       "doc": "Makes an invite for a new person (`name`) or one kith already knows (`personId`), with the agents offered (agent -> member|guest). `rooms` (rooms with people) names group rooms the person is put in once a device of theirs has proved the invite, or at the next host start if the host stopped between; a room the person left or Kai took them out of is never joined again by the invite. The cloud's invite is the same with or without rooms. Refused with rooms while the host setting is off, for a room that takes no people, for an agent in the room the person is not granted, and for a person who has already joined here.",

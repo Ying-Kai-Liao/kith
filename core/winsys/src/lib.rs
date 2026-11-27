@@ -8,6 +8,7 @@
 //! - [`event`]: a named event, the host's stop signal.
 //! - [`job`]: a named job object, and a process created inside it in one call (W12's launcher rule).
 //! - [`kill`]: end a process only if it began at the recorded time, on one handle.
+//! - [`procs`]: the process list with parents, and a hard stop of one process (the kernel's claim sweep and compaction).
 //! - [`pipe`]: a named pipe only this account can open, the host's run channel for `kith permit`.
 //!
 //! Compiled on Windows only; on every other platform the crate is empty.
@@ -20,6 +21,7 @@ pub mod event;
 pub mod job;
 pub mod kill;
 pub mod pipe;
+pub mod procs;
 pub mod tree;
 
 mod sid;

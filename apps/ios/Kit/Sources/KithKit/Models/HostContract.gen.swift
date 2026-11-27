@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "79fa3372947d821d404a90a8d1ffa84dd77b869498fce8a2cc4fa1de6b8bcc59"
+    public static let sha256 = "0a57cdd14d23870e9d1d4531c518c2b61beab7e559ea81ef04f9b172e6d387fc"
 }
 
 extension HostContract {
@@ -1007,6 +1007,68 @@ extension HostContract {
 
         public init(agents: [PeerAgent]) {
             self.agents = agents
+        }
+    }
+
+    /// One row of an ask's answer on the computer it was sent to: its number there, who said it, what kind (answer, progress or lost), the words and when (ms).
+    public struct PeerRow: Codable, Hashable, Sendable {
+        public var n: Int64
+        public var `as`: String?
+        public var kind: String
+        public var text: String
+        public var at: Int64?
+
+        public init(n: Int64, `as`: String? = nil, kind: String, text: String, at: Int64? = nil) {
+            self.n = n
+            self.`as` = `as`
+            self.kind = kind
+            self.text = text
+            self.at = at
+        }
+    }
+
+    /// What the callee's computer says of an ask another computer sent (`peerAsk`, `peerThread`): `paired` false when that computer is not paired at the epoch it named (nothing else is then said), `found` false for a key never seen. Else its state (open, answered, capped, stopped, lost or refused), the rows after the one asked for, what the run and what it asked cost there in US$ (`cost`), what it waits on (`waiting`) and whether it takes a follow-up (`takesTo`).
+    public struct PeerThread: Codable, Hashable, Sendable {
+        public var paired: Bool
+        public var found: Bool
+        public var state: String?
+        public var rows: [PeerRow]
+        public var cost: JSONValue?
+        public var waiting: JSONValue?
+        public var takesTo: Bool?
+
+        public init(paired: Bool, found: Bool, state: String? = nil, rows: [PeerRow], cost: JSONValue? = nil, waiting: JSONValue? = nil, takesTo: Bool? = nil) {
+            self.paired = paired
+            self.found = found
+            self.state = state
+            self.rows = rows
+            self.cost = cost
+            self.waiting = waiting
+            self.takesTo = takesTo
+        }
+    }
+
+    /// What a stop of an ask comes to on the callee's computer: its state after (stopped, or the final state it had already), or `paired` false when that computer is not paired at the epoch named.
+    public struct PeerStopped: Codable, Hashable, Sendable {
+        public var paired: Bool
+        public var state: String?
+
+        public init(paired: Bool, state: String? = nil) {
+            self.paired = paired
+            self.state = state
+        }
+    }
+
+    /// What a `--to` message comes to on the callee's computer: `taken` true when it was queued for the ask's session, or will never be (the ask is over: `note` says so); false when it should be sent again later (the ask has no session yet). `paired` false when that computer is not paired at the epoch named.
+    public struct PeerTold: Codable, Hashable, Sendable {
+        public var paired: Bool
+        public var taken: Bool
+        public var note: String?
+
+        public init(paired: Bool, taken: Bool, note: String? = nil) {
+            self.paired = paired
+            self.taken = taken
+            self.note = note
         }
     }
 
@@ -2025,6 +2087,64 @@ extension HostContract {
         }
     }
 
+    /// What `peerAsk` takes.
+    public struct PeerAskParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+        public var agent: String
+        public var task: String
+        public var lineage: JSONValue?
+        public var opts: JSONValue?
+        public var cont: String?
+
+        public init(key: String, epoch: String, agent: String, task: String, lineage: JSONValue? = nil, opts: JSONValue? = nil, cont: String? = nil) {
+            self.key = key
+            self.epoch = epoch
+            self.agent = agent
+            self.task = task
+            self.lineage = lineage
+            self.opts = opts
+            self.cont = cont
+        }
+    }
+
+    /// What `peerThread` takes.
+    public struct PeerThreadParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+        public var after: Int64?
+
+        public init(key: String, epoch: String, after: Int64? = nil) {
+            self.key = key
+            self.epoch = epoch
+            self.after = after
+        }
+    }
+
+    /// What `peerStop` takes.
+    public struct PeerStopParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+
+        public init(key: String, epoch: String) {
+            self.key = key
+            self.epoch = epoch
+        }
+    }
+
+    /// What `peerTo` takes.
+    public struct PeerToParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+        public var text: String
+
+        public init(key: String, epoch: String, text: String) {
+            self.key = key
+            self.epoch = epoch
+            self.text = text
+        }
+    }
+
     /// What `createInvite` takes.
     public struct CreateInviteParams: Codable, Hashable, Sendable {
         public var agents: [String: String]
@@ -2185,6 +2305,10 @@ extension HostContract {
         case botLeave
         case peerAgents
         case peerRevokes
+        case peerAsk
+        case peerThread
+        case peerStop
+        case peerTo
         case createInvite
         case addRoomPerson
         case removeRoomPerson
@@ -2214,7 +2338,7 @@ extension HostContract {
     public static let botPendingMethods: [Method] = [.hello, .botStatus, .proveBotInvite]
 
     /// What another computer of the owner's, paired here (Mac link) may call.
-    public static let peerMethods: [Method] = [.peerAgents, .peerRevokes]
+    public static let peerMethods: [Method] = [.peerAgents, .peerRevokes, .peerAsk, .peerThread, .peerStop, .peerTo]
 
     /// Decodes `data` as the contract type `name`; false when the contract has no such type. For the fixtures' tests.
     public static func decode(_ name: String, _ data: Data) throws -> Bool {
@@ -2262,6 +2386,10 @@ extension HostContract {
         case "BotSelf": _ = try d.decode(BotSelf.self, from: data)
         case "PeerAgent": _ = try d.decode(PeerAgent.self, from: data)
         case "PeerAgents": _ = try d.decode(PeerAgents.self, from: data)
+        case "PeerRow": _ = try d.decode(PeerRow.self, from: data)
+        case "PeerThread": _ = try d.decode(PeerThread.self, from: data)
+        case "PeerStopped": _ = try d.decode(PeerStopped.self, from: data)
+        case "PeerTold": _ = try d.decode(PeerTold.self, from: data)
         case "HandleRevoke": _ = try d.decode(HandleRevoke.self, from: data)
         case "HandleRevokes": _ = try d.decode(HandleRevokes.self, from: data)
         case "RoomPerson": _ = try d.decode(RoomPerson.self, from: data)
@@ -2339,6 +2467,10 @@ extension HostContract {
         case "BotLeaveParams": _ = try d.decode(BotLeaveParams.self, from: data)
         case "PeerAgentsParams": _ = try d.decode(PeerAgentsParams.self, from: data)
         case "PeerRevokesParams": _ = try d.decode(PeerRevokesParams.self, from: data)
+        case "PeerAskParams": _ = try d.decode(PeerAskParams.self, from: data)
+        case "PeerThreadParams": _ = try d.decode(PeerThreadParams.self, from: data)
+        case "PeerStopParams": _ = try d.decode(PeerStopParams.self, from: data)
+        case "PeerToParams": _ = try d.decode(PeerToParams.self, from: data)
         case "CreateInviteParams": _ = try d.decode(CreateInviteParams.self, from: data)
         case "AddRoomPersonParams": _ = try d.decode(AddRoomPersonParams.self, from: data)
         case "RemoveRoomPersonParams": _ = try d.decode(RemoveRoomPersonParams.self, from: data)

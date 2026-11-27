@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '79fa3372947d821d404a90a8d1ffa84dd77b869498fce8a2cc4fa1de6b8bcc59'
+export const CONTRACT_SHA256 = '0a57cdd14d23870e9d1d4531c518c2b61beab7e559ea81ef04f9b172e6d387fc'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -488,6 +488,39 @@ export interface PeerAgent {
 /** The agents a paired computer may ask here. */
 export interface PeerAgents {
   agents: PeerAgent[]
+}
+
+/** One row of an ask's answer on the computer it was sent to: its number there, who said it, what kind (answer, progress or lost), the words and when (ms). */
+export interface PeerRow {
+  n: number
+  as?: string | null
+  kind: string
+  text: string
+  at?: number | null
+}
+
+/** What the callee's computer says of an ask another computer sent (`peerAsk`, `peerThread`): `paired` false when that computer is not paired at the epoch it named (nothing else is then said), `found` false for a key never seen. Else its state (open, answered, capped, stopped, lost or refused), the rows after the one asked for, what the run and what it asked cost there in US$ (`cost`), what it waits on (`waiting`) and whether it takes a follow-up (`takesTo`). */
+export interface PeerThread {
+  paired: boolean
+  found: boolean
+  state?: string | null
+  rows: PeerRow[]
+  cost?: unknown | null
+  waiting?: unknown | null
+  takesTo?: boolean | null
+}
+
+/** What a stop of an ask comes to on the callee's computer: its state after (stopped, or the final state it had already), or `paired` false when that computer is not paired at the epoch named. */
+export interface PeerStopped {
+  paired: boolean
+  state?: string | null
+}
+
+/** What a `--to` message comes to on the callee's computer: `taken` true when it was queued for the ask's session, or will never be (the ask is over: `note` says so); false when it should be sent again later (the ask has no session yet). `paired` false when that computer is not paired at the epoch named. */
+export interface PeerTold {
+  paired: boolean
+  taken: boolean
+  note?: string | null
 }
 
 /** One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer. */
@@ -1033,6 +1066,37 @@ export interface PeerRevokesParams {
   handles: HandleRevoke[]
 }
 
+/** What `peerAsk` takes. */
+export interface PeerAskParams {
+  key: string
+  epoch: string
+  agent: string
+  task: string
+  lineage?: unknown | null
+  opts?: unknown | null
+  cont?: string | null
+}
+
+/** What `peerThread` takes. */
+export interface PeerThreadParams {
+  key: string
+  epoch: string
+  after?: number | null
+}
+
+/** What `peerStop` takes. */
+export interface PeerStopParams {
+  key: string
+  epoch: string
+}
+
+/** What `peerTo` takes. */
+export interface PeerToParams {
+  key: string
+  epoch: string
+  text: string
+}
+
 /** What `createInvite` takes. */
 export interface CreateInviteParams {
   agents: Record<string, string>
@@ -1135,6 +1199,10 @@ export interface Types {
   BotSelf: BotSelf
   PeerAgent: PeerAgent
   PeerAgents: PeerAgents
+  PeerRow: PeerRow
+  PeerThread: PeerThread
+  PeerStopped: PeerStopped
+  PeerTold: PeerTold
   HandleRevoke: HandleRevoke
   HandleRevokes: HandleRevokes
   RoomPerson: RoomPerson
@@ -1212,6 +1280,10 @@ export interface Types {
   BotLeaveParams: BotLeaveParams
   PeerAgentsParams: PeerAgentsParams
   PeerRevokesParams: PeerRevokesParams
+  PeerAskParams: PeerAskParams
+  PeerThreadParams: PeerThreadParams
+  PeerStopParams: PeerStopParams
+  PeerToParams: PeerToParams
   CreateInviteParams: CreateInviteParams
   AddRoomPersonParams: AddRoomPersonParams
   RemoveRoomPersonParams: RemoveRoomPersonParams
@@ -1296,6 +1368,10 @@ export const METHODS = {
   botLeave: { who: ['bot'], params: 'BotLeaveParams', result: 'Empty' },
   peerAgents: { who: ['peer'], params: 'PeerAgentsParams', result: 'PeerAgents' },
   peerRevokes: { who: ['peer'], params: 'PeerRevokesParams', result: 'HandleRevokes' },
+  peerAsk: { who: ['peer'], params: 'PeerAskParams', result: 'PeerThread' },
+  peerThread: { who: ['peer'], params: 'PeerThreadParams', result: 'PeerThread' },
+  peerStop: { who: ['peer'], params: 'PeerStopParams', result: 'PeerStopped' },
+  peerTo: { who: ['peer'], params: 'PeerToParams', result: 'PeerTold' },
   createInvite: { who: ['owner'], params: 'CreateInviteParams', result: 'CreatedInvite' },
   addRoomPerson: { who: ['owner'], params: 'AddRoomPersonParams', result: 'RoomPersonChange' },
   removeRoomPerson: { who: ['owner'], params: 'RemoveRoomPersonParams', result: 'RoomPersonChange' },
@@ -1361,6 +1437,10 @@ export interface Params {
   botLeave: BotLeaveParams
   peerAgents: PeerAgentsParams
   peerRevokes: PeerRevokesParams
+  peerAsk: PeerAskParams
+  peerThread: PeerThreadParams
+  peerStop: PeerStopParams
+  peerTo: PeerToParams
   createInvite: CreateInviteParams
   addRoomPerson: AddRoomPersonParams
   removeRoomPerson: RemoveRoomPersonParams
@@ -1425,6 +1505,10 @@ export interface Results {
   botLeave: Empty
   peerAgents: PeerAgents
   peerRevokes: HandleRevokes
+  peerAsk: PeerThread
+  peerThread: PeerThread
+  peerStop: PeerStopped
+  peerTo: PeerTold
   createInvite: CreatedInvite
   addRoomPerson: RoomPersonChange
   removeRoomPerson: RoomPersonChange
@@ -1454,7 +1538,7 @@ export const BOT_METHODS = ['hello', 'botStatus', 'proveBotInvite', 'botAsk', 'b
 export const BOT_PENDING_METHODS = ['hello', 'botStatus', 'proveBotInvite'] as const satisfies readonly MethodName[]
 
 /** What another computer of the owner's, paired here (Mac link) may call. */
-export const PEER_METHODS = ['peerAgents', 'peerRevokes'] as const satisfies readonly MethodName[]
+export const PEER_METHODS = ['peerAgents', 'peerRevokes', 'peerAsk', 'peerThread', 'peerStop', 'peerTo'] as const satisfies readonly MethodName[]
 
 // ---- checking and receiving ----
 
@@ -1532,6 +1616,10 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotSelf: { fields: { botId: 'string', name: 'string', state: 'BotGuestState', owner: 'BotOwner', agents: '[GrantedAgent]', limits: 'BotLimits', version: 'string', minClient: 'string' } },
     PeerAgent: { fields: { agent: 'string', name: 'string?' }, mayOmit: ['name'] },
     PeerAgents: { fields: { agents: '[PeerAgent]' } },
+    PeerRow: { fields: { n: 'int', as: 'string?', kind: 'string', text: 'string', at: 'int?' }, mayOmit: ['as', 'at'] },
+    PeerThread: { fields: { paired: 'bool', found: 'bool', state: 'string?', rows: '[PeerRow]', cost: 'json?', waiting: 'json?', takesTo: 'bool?' }, mayOmit: ['state', 'cost', 'waiting', 'takesTo'] },
+    PeerStopped: { fields: { paired: 'bool', state: 'string?' }, mayOmit: ['state'] },
+    PeerTold: { fields: { paired: 'bool', taken: 'bool', note: 'string?' }, mayOmit: ['note'] },
     HandleRevoke: { fields: { handle: 'string', revoked: 'bool', at: 'int' } },
     HandleRevokes: { fields: { handles: '[HandleRevoke]' } },
     RoomPerson: { fields: { person: 'string', joinedGen: 'int', leftGen: 'int?' } },
@@ -1609,6 +1697,10 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotLeaveParams: { fields: {} },
     PeerAgentsParams: { fields: {} },
     PeerRevokesParams: { fields: { handles: '[HandleRevoke]' } },
+    PeerAskParams: { fields: { key: 'string', epoch: 'string', agent: 'string', task: 'string', lineage: 'json?', opts: 'json?', cont: 'string?' } },
+    PeerThreadParams: { fields: { key: 'string', epoch: 'string', after: 'int?' } },
+    PeerStopParams: { fields: { key: 'string', epoch: 'string' } },
+    PeerToParams: { fields: { key: 'string', epoch: 'string', text: 'string' } },
     CreateInviteParams: { fields: { agents: '{string}', name: 'string?', personId: 'string?', rooms: '[string]?' } },
     AddRoomPersonParams: { fields: { room: 'string', person: 'string' } },
     RemoveRoomPersonParams: { fields: { room: 'string', person: 'string' } },

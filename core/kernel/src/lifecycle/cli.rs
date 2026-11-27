@@ -288,6 +288,14 @@ pub fn run(
     kith_bin: Option<PathBuf>,
     args: &[String],
 ) -> Out {
+    // The process a Windows compaction parks (`proc_win.rs`): this program started again, not a verb anyone types.
+    #[cfg(windows)]
+    if args.first().map(String::as_str) == Some("parked") {
+        return Out {
+            code: super::proc::parked_main(&args[1..]),
+            ..Out::default()
+        };
+    }
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     let cmd = match parse(&a) {
         Ok(cmd) => cmd,

@@ -648,7 +648,7 @@ impl<'a> Taker<'a> {
                 })
                 .is_claimer()
             {
-                holders.push(pid);
+                holders.push((pid, Some(started.to_owned())));
             }
         }
         Ok(super::end_holders(holders, grace))

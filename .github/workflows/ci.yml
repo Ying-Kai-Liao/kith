@@ -345,6 +345,8 @@ jobs:
               - '.claude/skills/holder-idle/**'
               - 'core/holder/src/holder.rs'
               - 'core/runtime/src/holder_link.rs'
+              - 'core/runtime/src/conversations/claims.rs'
+              - 'core/runtime/src/conversations/reconcile.rs'
             # kith-procstart on macOS (the other jobs read the process table on Linux only).
             procstart:
               - 'core/procstart/**'
