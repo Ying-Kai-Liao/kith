@@ -298,8 +298,11 @@ fn post(
             {
                 data["richCard"] = card;
             }
-            hub.add_entry_once(&id, &Lane::main(chat), EntryKind::Agent, &data)?;
+            let (entry, added) = hub.add_entry_once(&id, &Lane::main(chat), EntryKind::Agent, &data)?;
             snapshots.iter_mut().for_each(files::Snapshot::commit);
+            if added {
+                feed_posts(hub, chat, meta, &entry, &id, &text, &data, &snapshots);
+            }
         }
     } else if chat.is_none() {
         tracing::info!(run, agent = meta.agent, "run outbox item dropped: the person has no app chat with the agent");
@@ -311,6 +314,52 @@ fn post(
     }
     std::fs::remove_file(&at)?;
     Ok(())
+}
+
+/// The Feed's side of an item that just landed: a scheduled run's text is its job's card, and each html file is a page.
+#[allow(clippy::too_many_arguments, reason = "one fact, as the entry and the item have it")]
+fn feed_posts(
+    hub: &Hub,
+    chat: &str,
+    meta: &Meta,
+    entry: &crate::store::Entry,
+    id: &str,
+    text: &str,
+    data: &Value,
+    snapshots: &[files::Snapshot],
+) {
+    let person = meta.person.as_deref();
+    if meta.via == "schedule"
+        && let Some(job) = &meta.job
+    {
+        let file = snapshots.first().map(|s| json!({"type": "file", "file": s.meta}));
+        let kind = if file.is_some() {
+            "file"
+        } else if data.get("richCard").is_some() {
+            "news"
+        } else {
+            "plain"
+        };
+        crate::feed::host::run_post(
+            hub,
+            crate::feed::host::RunFact {
+                chat,
+                person,
+                agent: Some(&meta.agent),
+                entry: Some(&entry.id),
+                key: format!("job:{job}"),
+                name: &rich_card::job_name(job),
+                text,
+                ok: true,
+                attachment: file,
+                kind: Some(kind),
+                fact_at: entry.created_at,
+                fact_id: id.to_owned(),
+            },
+        );
+    }
+    let shared: Vec<_> = snapshots.iter().map(|s| &s.meta).collect();
+    crate::feed::host::page_posts(hub, chat, person, Some(&meta.agent), &entry.id, &shared);
 }
 
 fn outbox(meta: &Meta, sender: &str) -> Value {

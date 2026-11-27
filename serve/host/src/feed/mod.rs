@@ -5,6 +5,7 @@
 
 mod agent;
 pub mod fold;
+pub mod host;
 pub mod like;
 pub mod route;
 

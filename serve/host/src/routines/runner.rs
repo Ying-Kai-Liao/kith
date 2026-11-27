@@ -167,6 +167,11 @@ impl Routines {
         Ok(())
     }
 
+    /// What a routine is called in the Feed: its name, or its id when it is gone.
+    fn routine_name(&self, id: &str) -> String {
+        self.state.locked().routines.iter().find(|r| r.id == id).map_or_else(|| id.to_owned(), |r| r.name.clone())
+    }
+
     /// Retry transcript publication independently of task execution. The entry ID
     /// deduplicates a crash after SQLite inserted the result but before this ack.
     fn publish(&self, hub: &Hub) -> Result<()> {
@@ -180,7 +185,7 @@ impl Routines {
                     json!({"text":format!("Routine could not finish: {}",run.detail.as_deref().unwrap_or("inspect its run history")),"style":"error","routineId":run.routine_id,"runId":run.id}),
                 )
             };
-            let (_, added) =
+            let (entry, added) =
                 hub.add_entry_once(&format!("routine-result-{}", run.id), &Lane::main(&run.bot_id), kind, &data)?;
             self.change(&hub.store, |s| {
                 if let Some(r) = s.runs.iter_mut().find(|r| r.id == run.id) {
@@ -189,6 +194,26 @@ impl Routines {
                 }
                 Ok(())
             })?;
+            if added {
+                let name = self.routine_name(&run.routine_id);
+                crate::feed::host::run_post(
+                    hub,
+                    crate::feed::host::RunFact {
+                        chat: &run.bot_id,
+                        person: None,
+                        agent: None,
+                        entry: Some(&entry.id),
+                        key: run.routine_id.clone(),
+                        name: &name,
+                        text: data["text"].as_str().unwrap_or_default(),
+                        ok: run.result.is_some(),
+                        attachment: None,
+                        kind: None,
+                        fact_at: run.finished_at.unwrap_or_else(now_ms),
+                        fact_id: run.id.clone(),
+                    },
+                );
+            }
             if added && let Some(bot) = hub.store.bot(&run.bot_id)?.filter(|b| !b.deleted) {
                 crate::remote::push::notify(
                     hub,
