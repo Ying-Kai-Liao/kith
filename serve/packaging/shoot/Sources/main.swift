@@ -3,14 +3,15 @@ import Foundation
 import WebKit
 
 // kith-shoot <page.html> <out.png>: loads the page in an offscreen web view and writes a 720x420 picture (1440x840
-// pixels, 2x) of its `[data-preview]` element, else of the first 1440x840 of the page.
+// pixels, 2x) of its `[data-preview]` element, else of the first 720x420 CSS pixels (the viewport is 720x420, so text
+// reads at a normal size on the card).
 //
 // The page is untrusted: nothing persists (non-persistent data store), every http(s) and ws(s) load is blocked by a
 // content rule list, and files can be read only from the page's own folder. JS stays on because pages draw with it.
 // One try: after 10 seconds the process exits with an error.
 
-let viewWidth: CGFloat = 1440
-let viewHeight: CGFloat = 840
+let viewWidth: CGFloat = 720
+let viewHeight: CGFloat = 420
 let outWidth = 1440
 let outHeight = 840
 let timeout: TimeInterval = 10
