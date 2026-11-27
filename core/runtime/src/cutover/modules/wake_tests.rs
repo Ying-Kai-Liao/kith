@@ -1,4 +1,11 @@
 #![allow(clippy::unwrap_used)]
+#![allow(
+    clippy::items_after_statements,
+    clippy::unnecessary_wraps,
+    clippy::unused_self,
+    clippy::needless_pass_by_value,
+    reason = "a test rig: its listers have the production lister's shape, its helpers sit with their one test"
+)]
 //! The `wake` step (WK6) on temp homes only: a real core.db and real-shaped queue files. U1 the gate, U2 the preflight, U3 the
 //! crash points, U7 the step's own locks against the import's, and a step that goes round once. The rollback is in
 //! `wake_back_tests.rs`, which shares this rig. Nothing here touches the machine's own Kith folder.
@@ -315,6 +322,10 @@ fn the_shut_gate_refuses_a_step_but_not_a_dry_run() {
 
 /// `KITH_WAKE_GATE_OPEN=1` is read by a debug build only (the e2e steps a build whose gate is shut); a release-shaped check
 /// ignores it, and the constant stays the one switch a real Mac depends on.
+#[allow(
+    clippy::assertions_on_constants,
+    reason = "the constant is what this pins"
+)]
 #[test]
 fn the_gate_env_opens_a_debug_build_only_and_never_a_release_one() {
     use super::wake::{RUNS_WAKE_TURNS, gate_open};
@@ -360,11 +371,11 @@ fn items_of(r: &Rig, list: Lister) -> Vec<Vec<String>> {
 fn each_preflight_item_refuses_on_its_own_and_names_what_it_saw() {
     // 1: the host.
     let r = rig();
-    let _host = r.running_host();
+    let host = r.running_host();
     let items = items_of(&r, idle);
     assert_eq!(items[0], ["RUN"]);
     assert!(items[1..].iter().all(Vec::is_empty), "{items:?}");
-    drop(_host);
+    drop(host);
 
     // 3: a `kith-wake deliver` is running (and is not this process).
     fn one() -> Result<Vec<(u32, Vec<String>)>, String> {
@@ -670,7 +681,10 @@ fn a_step_refused_at_the_same_answer_or_the_reread_stays_stepping_with_no_tombst
     let mut core = open_all(&r.env.layout);
     w.import(&r.env, Some(&mut core), opts()).unwrap();
     // 7: the same answer holds, then a file changes.
-    assert!(w.same_answer(&r.env, core.conn()).unwrap().is_empty());
+    assert_eq!(
+        w.same_answer(&r.env, core.conn()).unwrap(),
+        Vec::<String>::new()
+    );
     r.item("s-new", "run", &[("new:1", None)], None);
     let diff = w.same_answer(&r.env, core.conn()).unwrap();
     assert_eq!(diff.len(), 1, "{diff:?}");
@@ -701,7 +715,7 @@ fn the_differences_name_what_is_in_one_side_only() {
     assert!(d.iter().any(|l| l.contains("session s2")));
     assert!(d.iter().any(|l| l.contains("answered id old:1")));
     assert!(d.iter().any(|l| l.contains("waiter w1")));
-    assert!(differences(&files, &files).is_empty());
+    assert_eq!(differences(&files, &files), Vec::<String>::new());
 }
 
 // --- U8, U9, U10 are in `switched.rs`, `sched_run_tests.rs` and `wake_back_tests.rs`. ------------------------------------------

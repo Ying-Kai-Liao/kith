@@ -179,7 +179,7 @@ impl Liveness for Gone {
 struct Rig {
     d: Daemon,
     f: Arc<Fake>,
-    _t: tempfile::TempDir,
+    t: tempfile::TempDir,
 }
 
 fn rig_with(lock_wait: Duration) -> Rig {
@@ -214,7 +214,7 @@ fn rig_on(lock_wait: Duration, switched: bool) -> Rig {
     }
     let f = Fake::new();
     d.shared().set_wake_world(f.world());
-    Rig { _t: t, d, f }
+    Rig { d, f, t }
 }
 
 fn rig() -> Rig {
@@ -1178,7 +1178,7 @@ fn the_core_lock_trait_is_what_the_daemon_gives_the_tick() {
 /// The `wake` record in the state a test needs, in this rig's machine folder.
 fn record(r: &Rig, phase: crate::cutover::state::Phase) {
     crate::cutover::state::write(
-        &crate::layout::Layout::new(&r._t.path().join("machine")),
+        &crate::layout::Layout::new(&r.t.path().join("machine")),
         "wake",
         &crate::cutover::state::Switch {
             phase,

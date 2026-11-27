@@ -187,6 +187,11 @@ impl Wake {
         self
     }
 
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "the test build injects crashes; the real build has none"
+    )]
     fn crash(&self, at: Crash) -> Result<()> {
         #[cfg(test)]
         {
@@ -210,6 +215,7 @@ impl Wake {
         LOCK_WAIT
     }
 
+    #[allow(clippy::unused_self, reason = "the test build's rig can open the gate")]
     fn facts(&self, env: &Env) -> Facts {
         let host = pre::host_line(env, STEP_RUNNING);
         #[cfg(test)]
@@ -366,7 +372,6 @@ pub(crate) fn write_switched(
 
 /// The differences between what the files say and what core.db holds, a line each (empty: the same answer).
 pub(super) fn differences(files: &State, rows: &State) -> Vec<String> {
-    let mut out = Vec::new();
     fn diff<V: PartialEq>(
         out: &mut Vec<String>,
         what: &str,
@@ -377,7 +382,7 @@ pub(super) fn differences(files: &State, rows: &State) -> Vec<String> {
             match rows.get(k) {
                 None => out.push(format!("{what} {k} is in the files and not in core.db")),
                 Some(r) if r != v => {
-                    out.push(format!("{what} {k} differs between the files and core.db"))
+                    out.push(format!("{what} {k} differs between the files and core.db"));
                 }
                 Some(_) => {}
             }
@@ -386,6 +391,7 @@ pub(super) fn differences(files: &State, rows: &State) -> Vec<String> {
             out.push(format!("{what} {k} is in core.db and not in the files"));
         }
     }
+    let mut out = Vec::new();
     diff(&mut out, "session", &files.items, &rows.items);
     diff(&mut out, "answered id", &files.answered, &rows.answered);
     diff(&mut out, "waiter", &files.waiters, &rows.waiters);

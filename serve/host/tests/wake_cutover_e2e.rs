@@ -24,6 +24,7 @@ mod common;
 
 use serde_json::{Value, json};
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -101,7 +102,8 @@ exit 0
 "#;
 
 /// Logs every python started through `PATH` that runs `kith-wake`, then runs the real one: what the host (and the test) started.
-const PY_SHIM: &str = "#!/bin/sh\ncase \"$*\" in *kith-wake*) echo \"$*\" >> \"$WAKELOG\" ;; esac\nexec /usr/bin/python3 \"$@\"\n";
+const PY_SHIM: &str =
+    "#!/bin/sh\ncase \"$*\" in *kith-wake*) echo \"$*\" >> \"$WAKELOG\" ;; esac\nexec /usr/bin/python3 \"$@\"\n";
 
 struct Lab {
     dir: PathBuf,
@@ -167,7 +169,12 @@ impl Lab {
         let plists = home.join("Library/LaunchAgents");
         std::fs::create_dir_all(&plists).unwrap();
         let words = ["serve", "--port", "1"];
-        let items: String = std::iter::once(KITH).chain(words).map(|w| format!("<string>{w}</string>")).collect();
+        let items = std::iter::once(KITH).chain(words).fold(String::new(), |mut s, w| {
+            s.push_str("<string>");
+            s.push_str(w);
+            s.push_str("</string>");
+            s
+        });
         std::fs::write(
             plists.join("dev.kith.serve.plist"),
             format!("<plist><dict><key>ProgramArguments</key><array>{items}</array></dict></plist>"),
@@ -476,8 +483,12 @@ async fn e2_a_run_cut_off_by_a_host_restart_is_ended_by_end_gone_and_answered_by
         let db = lab.db();
         (
             db.query_row("SELECT count(*) FROM turns WHERE source = 'wake'", [], |r| r.get(0)).unwrap(),
-            db.query_row("SELECT count(*) FROM claims c JOIN turns t ON t.id = c.turn WHERE t.source = 'wake'", [], |r| r.get(0))
-                .unwrap(),
+            db.query_row(
+                "SELECT count(*) FROM claims c JOIN turns t ON t.id = c.turn WHERE t.source = 'wake'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap(),
         )
     };
     assert_eq!((turns, claims), (1, 1), "the turn was never claimed again");
@@ -568,8 +579,10 @@ async fn e5_a_rollback_while_a_wake_runs_hands_the_run_to_kith_wake_with_its_pro
     // The item carries the run's turn with the launch's pid and start stamp.
     let key = {
         use sha2::{Digest as _, Sha256};
-        let hex: String = Sha256::digest(SID.as_bytes()).iter().take(16).map(|b| format!("{b:02x}")).collect();
-        hex
+        Sha256::digest(SID.as_bytes()).iter().take(16).fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
     };
     let item: Value =
         serde_json::from_slice(&std::fs::read(lab.state.join("sessions/queue").join(format!("{key}.json"))).unwrap())
@@ -611,8 +624,11 @@ fn e6_a_refused_step_resumes_and_imports_what_was_written_in_between() {
     lab.enqueue(SID, "card:6", "run");
     // A damaged item (a format this build does not know) refuses the import.
     let damaged = lab.state.join("sessions/queue/damaged.json");
-    std::fs::write(&damaged, json!({"v": 2, "session": "s-bad", "agent": "house", "door": "run", "requests": []}).to_string())
-        .unwrap();
+    std::fs::write(
+        &damaged,
+        json!({"v": 2, "session": "s-bad", "agent": "house", "door": "run", "requests": []}).to_string(),
+    )
+    .unwrap();
     let refused = lab.cutover("step", "wake");
     assert!(!refused.status.success(), "{}", text(&refused));
     assert!(text(&refused).contains("damaged.json"), "{}", text(&refused));

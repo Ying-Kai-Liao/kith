@@ -1,4 +1,10 @@
 #![allow(clippy::unwrap_used)]
+#![allow(
+    clippy::unused_self,
+    clippy::needless_pass_by_value,
+    clippy::unnecessary_wraps,
+    reason = "a test rig"
+)]
 //! The `wake` rollback (WK6 section 2, rows U6 and U10) on temp homes only: real core.db rows made through the core's own calls
 //! (`wake.enqueue`, `wake.take`, `claim_run`, `attach`), real files, a real child process for a run in flight, and the real
 //! `kernel/bin/kith-wake` reading what the rollback wrote.
@@ -253,7 +259,7 @@ fn a_waiting_run_comes_back_owed_with_the_same_tries_and_its_turn_is_cancelled()
                 [],
             )
             .unwrap();
-        assert!(!run.is_empty());
+        assert_ne!(run, "");
         turn
     };
     let said = r.rollback(r.wake(), opts()).unwrap();
