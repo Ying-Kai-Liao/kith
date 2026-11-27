@@ -33,7 +33,7 @@ use crate::terminal::core_holders::{Reader, Reading};
 use crate::terminal::core_writer::{CoreWriter, Mode};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -163,7 +163,7 @@ pub(super) fn way_of(t: &Value, harness: Option<&str>, session: &str) -> Way {
 
 /// The program, arguments and environment of a turn's run (before its claim joins the environment).
 pub(super) struct RunCommand {
-    pub program: std::path::PathBuf,
+    pub program: PathBuf,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
 }
@@ -176,8 +176,8 @@ pub(super) struct RunCommand {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn command_with(
     way: &Way,
-    bin: Option<std::path::PathBuf>,
-    launch: Option<std::path::PathBuf>,
+    bin: Option<PathBuf>,
+    launch: Option<PathBuf>,
     kernel: Option<&Path>,
     agent: &str,
     person: &str,
@@ -213,7 +213,7 @@ pub(super) fn command_with(
 fn harness_of_agent(agent: &str) -> Option<String> {
     let kernel = crate::kernel::current_kernel()?;
     let out = Command::new(kernel.join("bin/kith-pkg")).args(["resolve", agent]).stdin(Stdio::null()).output().ok()?;
-    let dir = out.status.success().then(|| std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))?;
+    let dir = out.status.success().then(|| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))?;
     let text = std::fs::read_to_string(dir.join("agent.md")).ok()?;
     let mut lines = text.lines();
     if lines.next() == Some("---") {
@@ -368,7 +368,7 @@ async fn show_holder(hub: &Hub, live: &[Card], session: &str) {
 struct Logs {
     out: std::fs::File,
     err: std::fs::File,
-    err_path: std::path::PathBuf,
+    err_path: PathBuf,
 }
 
 /// `<logs>/wake/<run>.log` and `.err`: where `kith-ask` reads what a follow-up's turn said (`follow_ups`). `None` when the folder
@@ -383,13 +383,13 @@ fn log_files(state: &Path, run: &str) -> Option<Logs> {
 
 /// What the wake kind gives the detached-run module.
 struct Plan {
-    bin: std::path::PathBuf,
+    bin: PathBuf,
     args: Vec<String>,
     env: Vec<(String, String)>,
     /// The ask a card's reply answers (its run token carries it).
     asked: Option<crate::runauth::AskReply>,
     agent: String,
-    state: std::path::PathBuf,
+    state: PathBuf,
     run: String,
     claim_person: String,
     conversation: String,
