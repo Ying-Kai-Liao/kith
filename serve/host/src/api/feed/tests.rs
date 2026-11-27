@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::bail;
 use crate::feed::{By, Fold, PostSource, PostWrite, put_post};
 use crate::remote::identity::Identity;
 use crate::store::{BotConfig, EntryKind, Lane, Store};
@@ -95,10 +96,11 @@ fn hiding_a_post_takes_it_off_the_feed_and_back() {
 }
 
 #[test]
-fn like_and_route_are_in_the_contract_and_not_answered_yet() {
+fn a_like_needs_a_known_post_and_the_route_is_taken_before_call() {
     let f = Fixture::new();
     assert!(f.answer("likePost", json!({"id": "p", "liked": true})).is_err());
-    assert!(f.answer("feedRoute", json!({"text": "hi"})).is_err());
+    assert!(f.answer("likePost", json!({"id": "p"})).is_err(), "liked is required");
+    assert!(f.answer("feedRoute", json!({"text": "hi"})).is_err(), "feedRoute is async: api/mod.rs answers it");
     assert!(matches!(call(&f.hub, "send", json!({})).unwrap(), ControlFlow::Continue(_)), "other methods pass on");
 }
 

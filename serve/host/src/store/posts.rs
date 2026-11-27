@@ -196,6 +196,50 @@ impl Store {
         Ok(Some((p, true)))
     }
 
+    /// Likes a post, or takes the like back. The post after, and whether anything changed (a repeat takes no rev).
+    /// `None` for an id that is not there. A like keeps the time of the first one.
+    pub fn set_post_liked(&self, id: &str, liked: bool) -> Result<Option<(Post, bool)>> {
+        let c = self.db.locked();
+        let tx = c.unchecked_transaction()?;
+        let Some(mut p) =
+            tx.query_row(&format!("SELECT {POST_COLS} FROM posts WHERE id = ?1"), [id], row_post).optional()?
+        else {
+            return Ok(None);
+        };
+        if p.liked_at.is_some() == liked {
+            return Ok(Some((p, false)));
+        }
+        p.liked_at = liked.then(now_ms);
+        p.rev = next_rev(&tx)?;
+        tx.execute("UPDATE posts SET rev = ?2, liked_at = ?3 WHERE id = ?1", params![id, p.rev, p.liked_at])?;
+        tx.commit()?;
+        Ok(Some((p, true)))
+    }
+
+    /// Whether a like still has to be written to the agent's memory: liked now, and not yet noted.
+    pub fn post_unnoted_like(&self, id: &str) -> Result<bool> {
+        let c = self.db.locked();
+        Ok(c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM posts WHERE id = ?1 AND liked_at IS NOT NULL AND noted_at IS NULL)",
+            [id],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Marks a like as written to memory (or given up on). Not on the wire, so no rev and no event.
+    pub fn set_post_noted(&self, id: &str) -> Result<()> {
+        let c = self.db.locked();
+        c.execute("UPDATE posts SET noted_at = ?2 WHERE id = ?1 AND noted_at IS NULL", params![id, now_ms()])?;
+        Ok(())
+    }
+
+    /// The ids of the liked posts whose memory line may still be owed: what the start pass retries.
+    pub fn posts_to_note(&self) -> Result<Vec<String>> {
+        let c = self.db.locked();
+        let mut st = c.prepare("SELECT id FROM posts WHERE liked_at IS NOT NULL AND noted_at IS NULL ORDER BY rev")?;
+        Ok(st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// A page's picture, only for the version the post shows now (I5): a picture of an older version is dropped, as is
     /// one for a post that is no page. The card keeps its place in the Feed.
     pub fn put_post_shot(&self, id: &str, version: &str, shot: Option<Value>) -> Result<Option<Post>> {

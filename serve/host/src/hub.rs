@@ -237,6 +237,7 @@ impl Hub {
         crate::run_outbox::start(self);
         crate::analytics::start(self);
         hq::start(self);
+        crate::feed::like::start(self);
         crate::terminal::start(self);
         Ok(())
     }
