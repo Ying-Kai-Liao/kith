@@ -7,14 +7,17 @@ struct ColourSheet: View {
     /// What the bot has; Done writes the look back, and the sheet above autosaves it.
     @Binding var draft: BotDraft
     var isGroup = false
+    /// The agent page's pencil: the name is edited here with the look.
+    var editsName = false
     @State private var work: BotDraft
     /// Gradient | Plain. Kept apart from `work.avatarColor` so the switch can be set before a swatch is picked.
     @State private var plain: Bool
     @Environment(\.dismissModal) private var dismiss
 
-    init(draft: Binding<BotDraft>, isGroup: Bool = false) {
+    init(draft: Binding<BotDraft>, isGroup: Bool = false, editsName: Bool = false) {
         _draft = draft
         self.isGroup = isGroup
+        self.editsName = editsName
         _work = State(initialValue: draft.wrappedValue)
         _plain = State(initialValue: AvatarPalette.isPlain(draft.wrappedValue.avatarColor))
     }
@@ -29,6 +32,12 @@ struct ColourSheet: View {
                 VStack(spacing: 22) {
                     CharacterAvatar(portrait: portrait, color: work.avatarColor, size: KithSize.botAvatarColourSheet, id: work.id ?? "")
                         .padding(.top, 14)
+                    if editsName {
+                        TextField("Name", text: $work.name)
+                            .multilineTextAlignment(.center)
+                            .fieldBox()
+                            .accessibilityLabel("Name")
+                    }
                     if !isGroup {
                         SegmentedChoice(selection: Binding(get: { plain }, set: { setPlain($0) }),
                                         options: [(false, "Gradient"), (true, "Plain")])
@@ -75,6 +84,7 @@ struct ColourSheet: View {
             Button("Done") {
                 draft.avatarColor = work.avatarColor
                 draft.avatarSource = work.avatarSource
+                if editsName, !work.name.trimmingCharacters(in: .whitespaces).isEmpty { draft.name = work.name }
                 dismiss()
             }
             .fontWeight(.semibold)

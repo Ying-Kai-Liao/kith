@@ -22,7 +22,7 @@ struct AccessTabView: View {
 
     // MARK: accounts and keys
 
-    @ViewBuilder private var accounts: some View {
+    @ViewBuilder var accounts: some View {
         switch store.keys {
         case .hidden: EmptyView()
         case .loading: CardSection("Accounts") { SheetNote(text: "Loading…") }
@@ -56,7 +56,7 @@ struct AccessTabView: View {
     // MARK: asks before
 
     /// Claude Code's permission modes as a stock menu, written through to hq.
-    @ViewBuilder private var asksBefore: some View {
+    @ViewBuilder var asksBefore: some View {
         if let kith, let info = kith.info {
             let current = HqSetting.permissionMode(info.permissionMode ?? "auto")
             CardSection("Asks before", footer: kith.permissionError.map { "Permission not changed: \($0)" }
@@ -103,7 +103,7 @@ struct AccessTabView: View {
 
     // MARK: people
 
-    @ViewBuilder private var people: some View {
+    @ViewBuilder var people: some View {
         switch store.ledger {
         case .hidden: EmptyView()
         case .loading: CardSection("People") { SheetNote(text: "Loading…") }
