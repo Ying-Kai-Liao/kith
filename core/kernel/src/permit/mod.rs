@@ -1,5 +1,5 @@
 //! `kith kernel permit ...`: the command-line verbs of `kernel/bin/kith-permit`, the permission prompt tool of every `claude -p`
-//! run, in Rust: `issue AGENT SESSION PID`, `denied --dir DIR`, `once --dir DIR` and `apply SETTINGS_FILE`. The same command
+//! run, in Rust: `issue AGENT SESSION PID`, `denied --dir DIR`, `once --dir DIR`, `apply SETTINGS_FILE` and `feed-post ...` (new, no Python twin). The same command
 //! line prints the same thing and exits with the same code (the difftest golden `permit.json` holds the Python's answers);
 //! `kith-permit` itself stays Python until `permit` is in `lib/core-switched.txt`.
 //!
@@ -33,6 +33,9 @@ mod door;
 mod helper;
 mod hooks;
 pub use hooks::{NO_VERDICT, ONCE_KEEP_S, SHORT_ONCE_S, host_once_key};
+mod feed;
+#[cfg(all(test, unix))]
+mod feed_tests;
 mod host;
 mod issue;
 mod mcp;
@@ -165,6 +168,7 @@ pub fn run(env: &Env, kernel: &Path, args: &[String], stdin: &mut dyn Read) -> O
                 ..Out::default()
             }
         }
+        ["feed-post", rest @ ..] => feed::cli(rest, env),
         #[cfg(unix)]
         ["apply", file] => apply::apply(env, kernel, file),
         #[cfg(windows)]
@@ -194,7 +198,7 @@ pub fn is_verb(args: &[String]) -> bool {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     matches!(
         a.as_slice(),
-        ["issue", _, _, _] | ["denied" | "once", "--dir", _] | ["apply", _]
+        ["issue", _, _, _] | ["denied" | "once", "--dir", _] | ["apply", _] | ["feed-post", ..]
     )
 }
 

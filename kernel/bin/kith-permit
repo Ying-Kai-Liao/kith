@@ -194,6 +194,31 @@ def secret_def():
                             'required': ['service', 'purpose']}}
 
 
+FEED = 'feed_post'
+
+
+def feed_def():
+    # Listed so the two kernels offer the same tools (the difftest compares the listing); the Rust core answers the call.
+    return {'name': FEED,
+            'description': "Put one card on the owner's Feed: something they would want to look at (a result, a number that moved, "
+                           "a page or video you made, a link). One line of what and why, not a log. Give at most one of file, url "
+                           "or number. `fold` names a card of yours that this replaces (a later post with the same fold updates "
+                           "it instead of adding another); you may start a few new cards a day. Use kind `merges` with `pr` for "
+                           "a PR you merged.",
+            'inputSchema': {'type': 'object',
+                            'properties': {'kind': {'type': 'string', 'description': 'a short word: file, number, page, video, link, failing, ...'},
+                                           'title': {'type': 'string', 'description': 'one line, at most 80 characters'},
+                                           'line': {'type': 'string', 'description': 'one more line, at most 200 characters'},
+                                           'file': {'type': 'string', 'description': 'path of a file to show (.html makes a page, .mp4/.mov a video), up to 100 MiB'},
+                                           'url': {'type': 'string', 'description': 'an https link'},
+                                           'number': {'type': 'object', 'description': 'a figure: value, unit?, delta? (the change)',
+                                                      'properties': {'value': {'type': 'number'}, 'unit': {'type': 'string'}, 'delta': {'type': 'number'}},
+                                                      'required': ['value']},
+                                           'fold': {'type': 'string', 'description': 'a-z, 0-9 and -, at most 40: posts with the same fold are one card'},
+                                           'pr': {'type': 'string', 'description': 'owner/repo#number, with kind merges'}},
+                            'required': ['kind', 'title']}}
+
+
 BUG = 'report_bug'
 
 
@@ -627,6 +652,7 @@ def handle(msg, env=os.environ):
     elif method == 'tools/list':
         # a key card needs a host to ask, so request_secret is only offered to a run that has a token
         result = {'tools': [tool_def(), access_def(), bug_def()] + ([secret_def()] if credentials(env)[0] else [])
+                           + ([feed_def()] if env.get('KITH_ASK_TOKEN') and env.get('KITH_ASK_SOCKET') and not env.get('KITH_PERSON') else [])
                            + ([helper_def()] if env.get('KITH_PERSON') and not env['KITH_PERSON'].startswith('room-') else [])
                            + ([door_def()] if env.get('KITH_PERSON') else [])}
     elif method == 'ping':
@@ -638,6 +664,8 @@ def handle(msg, env=os.environ):
             result = {'content': [{'type': 'text', 'text': request_access(a, env)}]}
         elif p.get('name') == SECRET:
             result = {'content': [{'type': 'text', 'text': request_secret(a, env)}]}
+        elif p.get('name') == FEED:
+            result = {'content': [{'type': 'text', 'text': 'kith: feed_post needs the Rust core (KITH_CORE=rust); this kernel does not post.'}], 'isError': True}
         elif p.get('name') == HELPER:
             result = {'content': [{'type': 'text', 'text': ask_helper(a, env)}]}
         elif p.get('name') == DOOR:
