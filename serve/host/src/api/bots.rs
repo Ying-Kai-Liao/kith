@@ -263,6 +263,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             if call {
                 data["via"] = "call".into();
             }
+            // The owner's call, from an app: the host says so, whatever the body carried.
+            crate::prompter::stamp(&mut data, crate::prompter::Kind::App, None);
             // What the user pasted rather than typed: memory never takes it as the user's own words.
             let pasted: Vec<&str> = b["pasted"]
                 .as_array()
