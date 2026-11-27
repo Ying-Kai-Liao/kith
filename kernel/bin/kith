@@ -1534,7 +1534,7 @@ if [[ $harness != claude ]]; then
   run_dirs=$(for ((i = 1; i < ${#dirs[@]}; i += 2)); do printf '%s\n' "${dirs[i]}"; done)
   [[ $terminal -eq 1 || $(slash_off) == false ]] && gs=1 || gs=0
   run_mcp="$runs/$$.mcp.json"; [[ -f $pkg/mcp.json ]] && run_mcp+=$'\n'"$pkg/mcp.json"
-  export KITH_RUN_PROMPT="$runs/$$.prompt.md" KITH_RUN_DIRS="$PWD"$'\n'"$run_dirs" KITH_RUN_MCP=$run_mcp KITH_RUN_GLOBAL_SKILLS=$gs
+  export KITH_RUN_PROMPT="$runs/$$.prompt.md" KITH_RUN_DIRS="$PWD"$'\n'"$run_dirs" KITH_RUN_MCP=$run_mcp KITH_RUN_GLOBAL_SKILLS=$gs KITH_RUN_NETWORK=$([[ $p_owner == 1 && $reads_others == 0 ]] && echo 1 || echo 0)
   hargs=(--)
   [[ -n $out_format ]] && hargs=(--output "$out_format" "${hargs[@]}")
   [[ -n $resume ]] && hargs=(--resume "$resume" "${hargs[@]}")

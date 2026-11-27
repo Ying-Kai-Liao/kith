@@ -222,6 +222,11 @@ fn record(row: &Value) {
     let _ = row;
 }
 
+/// The launcher's word on network inside the sandbox: only "1" counts (it decides owner and reader, and always writes it).
+fn run_network(v: Option<&str>) -> bool {
+    v == Some("1")
+}
+
 /// The engine's own terminal session: its CLI with the run's flags, in place of this process where the system allows.
 fn interactive(engine: &str, bypass: bool) -> Result<i32> {
     let prompt_file = std::env::var("KITH_RUN_PROMPT").context("KITH_RUN_PROMPT is not set (bin/kith sets it)")?;
@@ -232,6 +237,7 @@ fn interactive(engine: &str, bypass: bool) -> Result<i32> {
         model: std::env::var("KITH_MODEL").unwrap_or_default(),
         effort: std::env::var("KITH_EFFORT").unwrap_or_default(),
         bypass,
+        network: run_network(std::env::var("KITH_RUN_NETWORK").ok().as_deref()),
         global_skills: std::env::var("KITH_RUN_GLOBAL_SKILLS").is_ok_and(|v| v == "1"),
     };
     let Some(tui) = engines::tui_argv(engine, &inputs) else {

@@ -16,6 +16,8 @@ pub struct RunInputs {
     pub model: String,
     pub effort: String,
     pub bypass: bool,
+    /// Network inside the sandbox (`KITH_RUN_NETWORK=1`): the launcher gave it to an owner's run of an agent that reads no one else's text.
+    pub network: bool,
     /// The engine's own skills and plugins stay on (`KITH_RUN_GLOBAL_SKILLS=1`).
     pub global_skills: bool,
 }
@@ -88,6 +90,9 @@ fn codex(run: &RunInputs) -> Tui {
             "sandbox_workspace_write.writable_roots={}",
             toml(&roots)
         ));
+        if run.network {
+            cfg.push("sandbox_workspace_write.network_access=true".to_owned());
+        }
     }
     for (name, s) in &run.mcp {
         let mut entry = Map::new();

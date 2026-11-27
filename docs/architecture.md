@@ -139,7 +139,10 @@ An agent that reads other people's text (`reads_others` in its `capabilities.yam
 (`KITH_VIA` terminal, not started by another run): there `--bypass` (or `--permission-mode bypassPermissions`) typed on
 the command line, or with nothing typed this Mac's choice of bypass for the agent (`kith AGENT set permission
 bypassPermissions`), is kept. Not a mode an entry point set, one another run's `kith` call passed, kith's mode for every
-agent, nor the agent's `defaultMode`.
+agent, nor the agent's `defaultMode`. The same bit decides the network of a codex run in its sandbox: the launcher gives the
+engine `KITH_RUN_NETWORK=1` only for the owner's run of an agent that says `reads_others: false` (unset or unreadable: 0),
+because codex's allow-list can't hold a reader to Claude's OWNER_WEB limits, so a reader's sandboxed codex run has none (a
+command that needs it asks the person to approve it outside the sandbox). A bypass run has no sandbox and is unchanged.
 
 **Auto mode and "Always allow"** (`bin/kith-allow`, `lib/kith_allowed.py`, `bin/kith-permit denied|once`, `serve/host/src/cards/autoallow.rs`).
 In auto mode Claude Code's classifier stands in for the prompt, so a call it blocks is only a refusal. For an owner run in

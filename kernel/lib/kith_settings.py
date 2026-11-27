@@ -61,7 +61,8 @@ unattended Mac may do is decided per Mac. Without the file, or for a key it leav
                     card. Default 5; "none" turns the cap off. Asks already running finish (kith ask --cap shows or sets it)
   reads_others      capabilities.yaml `reads_others: false` marks an agent that works on the owner's own files only; its owner
                     runs may use bypassPermissions. Without it (or true) the agent reads other people's text and its
-                    owner runs are held to auto (kith_settings.py cap MODE CAPS_FILE prints the mode that applies)
+                    owner runs are held to auto (kith_settings.py cap MODE CAPS_FILE prints the mode that applies),
+                    and a codex run in its sandbox gets no network (only a reads_others: false agent's owner run does)
 
   kith_settings.py accounts [AGENT]  the set that applies (the agent's own, else the global one), one id per line
   kith_settings.py account_policy    fill or spread

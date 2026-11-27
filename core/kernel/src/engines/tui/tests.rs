@@ -23,6 +23,7 @@ fn run(
         model: model.to_owned(),
         effort: effort.to_owned(),
         bypass,
+        network: false,
         global_skills,
     }
 }
@@ -145,6 +146,53 @@ fn codex_bypass_with_every_kind_of_server_and_global_skills() {
             "--add-dir",
             "/private/var",
         ])
+    );
+}
+
+#[test]
+fn codex_sandbox_gets_network_only_when_the_launcher_said_so() {
+    let owner_run = RunInputs {
+        network: true,
+        ..run(&["/private/tmp"], &json!({}), "", "", false, false)
+    };
+    let owner = tui_argv("codex", &owner_run).unwrap();
+    assert_eq!(
+        owner.argv,
+        strs(&[
+            "codex",
+            "-c",
+            DEV,
+            "-c",
+            "sandbox_mode=\"workspace-write\"",
+            "-c",
+            "sandbox_workspace_write.writable_roots=[\"/private/tmp\"]",
+            "-c",
+            "sandbox_workspace_write.network_access=true",
+            "--disable",
+            "plugins",
+            "--disable",
+            "apps",
+            "--add-dir",
+            "/private/tmp",
+        ])
+    );
+    // A run without the flag has no network key, and neither does a bypass run, which has no sandbox at all.
+    let guest = tui_argv(
+        "codex",
+        &run(&["/private/tmp"], &json!({}), "", "", false, false),
+    )
+    .unwrap();
+    assert!(!guest.argv.iter().any(|a| a.contains("network_access")));
+    let owner_bypass = RunInputs {
+        network: true,
+        ..run(&["/private/tmp"], &json!({}), "", "", true, false)
+    };
+    let bypass = tui_argv("codex", &owner_bypass).unwrap();
+    assert!(
+        !bypass
+            .argv
+            .iter()
+            .any(|a| a.contains("network_access") || a.starts_with("sandbox_"))
     );
 }
 
