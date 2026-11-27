@@ -25,6 +25,7 @@ mod delegation;
 mod doors;
 mod engine_run;
 mod environment;
+mod feed;
 mod health;
 mod hqmem;
 mod hub;

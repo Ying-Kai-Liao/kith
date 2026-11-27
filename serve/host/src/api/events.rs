@@ -19,6 +19,9 @@ const CATCH_UP_PER_BOT: i64 = 200;
 /// (`Store::catch_up_since`). Older ones page in with `history`, so the catch-up does not grow with the history.
 const CATCH_UP_PER_CHAT: i64 = 40;
 
+/// Posts the owner's app receives in a catch-up: the newest of them, so it doesn't grow with the Feed's history.
+const CATCH_UP_POSTS: i64 = 100;
+
 /// A setup terminal's output: everything so far, then live, ending after `exit`.
 pub fn term_events(hub: &Hub, id: &str) -> Option<impl Stream<Item = Value> + Send + use<>> {
     let term = hub.terms.get(id)?;
@@ -117,6 +120,12 @@ pub fn events_stream(
     }
     for e in hub.store.catch_up_since(since, CATCH_UP_PER_CHAT)? {
         catch_up.push(json!({"type": "entry", "rev": e.rev, "entry": e}));
+    }
+    // The Feed is the owner's alone: no person or bot stream ever gets a post (a bot's stream returned above).
+    if who.is_none() {
+        for p in hub.store.posts_since(since, CATCH_UP_POSTS)? {
+            catch_up.push(crate::feed::event(&p));
+        }
     }
     // A call still ringing, for an app that connects (or reconnects) while it does.
     catch_up.extend(hub.calls.ringing(hub));
