@@ -87,7 +87,12 @@ pub(super) fn preflight(
         item(
             1,
             "the host is stopped",
-            host_line(env, host_running).into_iter().collect(),
+            // A step that holds the queue locks took host.lock first, which is the proof; its own lock would read as a host.
+            if held {
+                Vec::new()
+            } else {
+                host_line(env, host_running).into_iter().collect()
+            },
         ),
         item(
             2,

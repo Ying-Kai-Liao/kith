@@ -471,7 +471,11 @@ impl Module for Wake {
         let state = state(env)?;
         self.crash(Crash::BeforeTombstone)?;
         // A host started since the preflight would run the queue in Files mode from its own clock.
-        if let Some(why) = pre::host_line(env, STEP_RUNNING) {
+        // (The step holds host.lock itself by now: a fresh probe would read its own lock as a host.)
+        if let Some(why) = (!self.locked.load(Ordering::SeqCst))
+            .then(|| pre::host_line(env, STEP_RUNNING))
+            .flatten()
+        {
             return Err(Error::Refused(format!(
                 "cutover: wake: {why}; NOT switched"
             )));
