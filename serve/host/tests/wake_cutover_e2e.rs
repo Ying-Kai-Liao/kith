@@ -166,6 +166,8 @@ impl Lab {
             std::fs::write(&f, text).unwrap();
             executable(&f);
         }
+        // The copy's bash `kith` finds the program on PATH (the host's launch hands the engine's env, not this test's KITH_BIN).
+        std::os::unix::fs::symlink(KITH, dir.join("bin/kith")).unwrap();
         let plists = home.join("Library/LaunchAgents");
         std::fs::create_dir_all(&plists).unwrap();
         let words = ["serve", "--port", "1"];
@@ -472,13 +474,13 @@ async fn e1_an_owed_wake_runs_once_across_the_step() {
     let lab = Lab::new("e1");
     lab.step_dependencies();
     // Files mode, host down: the request is a file.
-    lab.enqueue(SID, "card:1", "run");
+    lab.enqueue(SID, "run:1", "run");
     assert!(lab.state.join("sessions/queue").read_dir().unwrap().flatten().any(|e| e.file_name() != ".lock"));
     lab.step_ok("wake");
     assert!(lab.tombstone().is_file(), "kith-wake is in Core mode now");
     let files = lab.queue_files();
     let host = lab.start_host().await;
-    let how = answered(&lab, "card:1", 120);
+    let how = answered(&lab, "run:1", 120);
     assert!(how.starts_with("answered"), "{how}");
     assert_eq!(lab.starts().len(), 1, "the engine started once: {:?}", lab.starts());
     no_turn_vars(&lab.starts()[0]);
@@ -500,7 +502,7 @@ async fn e1_an_owed_wake_runs_once_across_the_step() {
 async fn e2_a_run_cut_off_by_a_host_restart_is_ended_by_end_gone_and_answered_by_its_marker() {
     let lab = Lab::new("e2");
     lab.step_dependencies();
-    lab.enqueue(SID, "card:2", "run");
+    lab.enqueue(SID, "run:2", "run");
     lab.step_ok("wake");
     std::fs::write(lab.dir.join("hold"), "").unwrap();
     let host = lab.start_host().await;
@@ -512,7 +514,7 @@ async fn e2_a_run_cut_off_by_a_host_restart_is_ended_by_end_gone_and_answered_by
     // The engine goes on without a host: nobody waits on the child, so no report comes.
     std::fs::remove_file(lab.dir.join("hold")).unwrap();
     let host = lab.start_host().await;
-    let how = answered(&lab, "card:2", 120);
+    let how = answered(&lab, "run:2", 120);
     assert_eq!(how, "recovered", "the marker is in the transcript: the prompt was delivered");
     assert_eq!(lab.starts().len(), 1, "one engine start in all");
     assert_eq!(lab.markers(SID), 1);
@@ -541,8 +543,8 @@ async fn e3_a_host_door_wake_is_delivered_once_and_the_engine_sees_no_turn_varia
     lab.step_ok("wake");
     let host = lab.start_host().await;
     // What a reply card's answer enqueues: a host-door request for the session the ask came from.
-    lab.enqueue(SID, "card:3", "host");
-    let how = answered(&lab, "card:3", 120);
+    lab.enqueue(SID, "run:3", "host");
+    let how = answered(&lab, "run:3", 120);
     assert!(how.starts_with("answered") || how == "recovered", "{how}");
     assert_eq!(lab.starts().len(), 1, "the note arrived once: {:?}", lab.starts());
     no_turn_vars(&lab.starts()[0]);
@@ -595,8 +597,8 @@ async fn e4_an_unread_ask_answer_arrives_as_one_wake_within_two_ticks() {
 async fn e5_a_rollback_while_a_wake_runs_hands_the_run_to_kith_wake_with_its_process() {
     let lab = Lab::new("e5");
     lab.step_dependencies();
-    lab.enqueue(SID, "card:5", "run");
-    lab.enqueue("sess-stale", "card:stale", "run");
+    lab.enqueue(SID, "run:5", "run");
+    lab.enqueue("sess-stale", "run:stale", "run");
     lab.step_ok("wake");
     std::fs::write(lab.dir.join("hold"), "").unwrap();
     let host = lab.start_host().await;
@@ -634,7 +636,7 @@ async fn e5_a_rollback_while_a_wake_runs_hands_the_run_to_kith_wake_with_its_pro
         .any(|e| e.file_name().to_string_lossy().starts_with(".before-rollback-"));
     assert!(aside, "the pre-switch files were moved aside");
     let answered_json = std::fs::read_to_string(lab.state.join("sessions/queue/answered.json")).unwrap();
-    assert!(answered_json.contains("card:stale") && answered_json.contains("withdrawn"), "{answered_json}");
+    assert!(answered_json.contains("run:stale") && answered_json.contains("withdrawn"), "{answered_json}");
     // Files mode: `kith-wake drain` by hand delivers nothing while the run goes on.
     let drained = lab.wake(&["drain"]);
     assert!(drained.status.success(), "{}", text(&drained));
@@ -645,7 +647,7 @@ async fn e5_a_rollback_while_a_wake_runs_hands_the_run_to_kith_wake_with_its_pro
     std::fs::remove_file(lab.dir.join("hold")).unwrap();
     until("the request to be recovered by a drain", 120, || {
         let _ = lab.wake(&["drain"]);
-        let out = lab.wake(&["status", "card:5"]);
+        let out = lab.wake(&["status", "run:5"]);
         text(&out).trim() == "recovered" || text(&out).trim() == "answered"
     });
     assert_eq!(lab.starts().len(), 1, "one engine start in total");
@@ -658,7 +660,7 @@ async fn e5_a_rollback_while_a_wake_runs_hands_the_run_to_kith_wake_with_its_pro
 fn e6_a_refused_step_resumes_and_imports_what_was_written_in_between() {
     let lab = Lab::new("e6");
     lab.step_dependencies();
-    lab.enqueue(SID, "card:6", "run");
+    lab.enqueue(SID, "run:6", "run");
     // A damaged item (a format this build does not know) refuses the import.
     let damaged = lab.state.join("sessions/queue/damaged.json");
     std::fs::write(
@@ -676,7 +678,7 @@ fn e6_a_refused_step_resumes_and_imports_what_was_written_in_between() {
     lab.step_ok("wake");
     assert!(lab.tombstone().is_file());
     let db = lab.db();
-    for id in ["card:6", "late:1"] {
+    for id in ["run:6", "late:1"] {
         let n: i64 = db.query_row("SELECT count(*) FROM wake_items WHERE id = ?1", [id], |r| r.get(0)).unwrap();
         assert_eq!(n, 1, "{id} is in the core");
     }
