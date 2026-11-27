@@ -154,8 +154,11 @@ fn day_start(ms: i64) -> i64 {
 }
 
 fn is_html(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    n.ends_with(".html") || n.ends_with(".htm")
+    has_ext(name, &["html", "htm"])
+}
+
+fn has_ext(name: &str, exts: &[&str]) -> bool {
+    Path::new(name).extension().is_some_and(|e| exts.iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
 /// Copies `file` into the chat's files root as `send_file` does (same snapshot, same 100 MiB cap, the same list of
@@ -176,7 +179,7 @@ async fn share_file(chat: &BotConfig, agent: &str, file: &str) -> Result<(Snapsh
     let meta = json!(copy.meta);
     let (attachment, kind) = if is_html(&name) {
         (json!({"type": "page", "file": meta, "shot": null, "version": copy.meta.sha256}), "page")
-    } else if name.ends_with(".mp4") || name.ends_with(".mov") {
+    } else if has_ext(&name, &["mp4", "mov"]) {
         (json!({"type": "video", "file": meta}), "video")
     } else {
         (json!({"type": "file", "file": meta}), "file")

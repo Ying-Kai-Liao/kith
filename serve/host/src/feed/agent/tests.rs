@@ -63,7 +63,8 @@ async fn the_author_is_the_tokens_agent_and_the_chat_the_sessions() {
 async fn any_other_session_posts_from_the_agents_owner_chat() {
     let f = Fixture::new();
     for session in ["", "claude-abc", "acp:"] {
-        assert_eq!(f.post(session, card(session)).await["ok"], true);
+        // The title is required, and `""` is one of the sessions: the title is not the session.
+        assert_eq!(f.post(session, card(&format!("from {session}"))).await["ok"], true);
     }
     let posts = f.hub.store.posts_page(None, 10).unwrap();
     assert_eq!(posts.len(), 3);
@@ -80,7 +81,7 @@ async fn a_chat_of_an_invited_person_a_deleted_chat_and_no_chat_are_refused() {
     assert_eq!(f.post("acp:mine:", card("x")).await["ok"], false, "a deleted chat");
     let none = f.post("", card("x")).await;
     assert_eq!(none["ok"], false, "no owner chat left for the agent: {none}");
-    assert!(f.hub.store.posts_page(None, 10).unwrap().is_empty());
+    assert_eq!(f.hub.store.posts_page(None, 10).unwrap().len(), 0);
 }
 
 #[tokio::test]
