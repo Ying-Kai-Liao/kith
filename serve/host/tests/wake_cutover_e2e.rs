@@ -83,13 +83,14 @@ case "$1 $2" in
   "auth status") echo '{"loggedIn":true}'; exit 0 ;;
 esac
 exec 2>>"$HOME/.claude/projects/p1/err"
+echo "run argv=$*" >&2
 sid=""; prompt=""; prev=""
 for a in "$@"; do
   case "$prev" in --resume|-r) sid="$a" ;; esac
-  case "$a" in "[kith wake "*) prompt="$a" ;; esac
+  case "$a" in *"[kith wake "*) prompt="$a" ;; esac
   prev="$a"
 done
-case "$prompt" in "[kith wake "*) ;; *) exit 0 ;; esac
+case "$prompt" in *"[kith wake "*) ;; *) exit 0 ;; esac
 {
   echo "argv=$*"
   env | sort
