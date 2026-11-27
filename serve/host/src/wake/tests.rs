@@ -21,9 +21,12 @@ impl Core {
         if switched {
             // The record the host reads (a Windows core has no marker to write: `mark_wake_switched_for_test` is a no-op there),
             // then, on Unix, the record and its marker in core.db, before the daemon holds the core.
-            let dir = folders.machine.join("core/cutover");
-            std::fs::create_dir_all(&dir).expect("cutover dir");
-            std::fs::write(dir.join("wake.switch"), "state=switched\nat=1\n").expect("switch record");
+            #[cfg(not(unix))]
+            {
+                let dir = folders.machine.join("core/cutover");
+                std::fs::create_dir_all(&dir).expect("cutover dir");
+                std::fs::write(dir.join("wake.switch"), "state=switched\nat=1\n").expect("switch record");
+            }
             kith_core::mark_wake_switched_for_test(&folders).expect("the wake switch");
         }
         let daemon = serve_for_test(&folders);

@@ -166,6 +166,16 @@ impl Lab {
             std::fs::write(&f, text).unwrap();
             executable(&f);
         }
+        // The sessions a wake resumes were started before: `kith <session>` resumes only one whose transcript it finds.
+        let project = home.join(".claude/projects/p1");
+        std::fs::create_dir_all(&project).unwrap();
+        for sid in [SID, "7d1c5a40-2b9e-4c61-8f3a-0a1b2c3d4e52", "7d1c5a40-2b9e-4c61-8f3a-0a1b2c3d4e53"] {
+            std::fs::write(
+                project.join(format!("{sid}.jsonl")),
+                format!("{}\n", json!({"type": "user", "cwd": home.to_string_lossy(), "message": "earlier"})),
+            )
+            .unwrap();
+        }
         // The copy's bash `kith` finds the program on PATH (the host's launch hands the engine's env, not this test's KITH_BIN).
         std::os::unix::fs::symlink(KITH, dir.join("bin/kith")).unwrap();
         let plists = home.join("Library/LaunchAgents");
