@@ -165,11 +165,6 @@ impl World {
         world
     }
 
-    /// The core re-reads the module switch records (a test writes one after the daemon started).
-    pub(super) fn reconciled(&self) {
-        self.daemon.as_ref().expect("the daemon").reconciled();
-    }
-
     /// The `turns` rows of a conversation: (id, state).
     pub(super) fn turns(&self, conversation: &str) -> Vec<(i64, String)> {
         self.daemon.as_ref().expect("the daemon").turns(conversation)

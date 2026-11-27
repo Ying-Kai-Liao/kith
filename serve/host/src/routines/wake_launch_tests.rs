@@ -72,8 +72,7 @@ fn main_account(w: &World) -> String {
     String::from_utf8_lossy(&out.stdout)
         .split_whitespace()
         .find_map(|t| t.strip_prefix("main_id="))
-        .map(|v| v.trim_matches('\'').to_owned())
-        .unwrap_or_else(|| panic!("main-env named no main_id: {}", said(&out)))
+        .map_or_else(|| panic!("main-env named no main_id: {}", said(&out)), |v| v.trim_matches('\'').to_owned())
 }
 
 /// The lines the kernel's `engine-run` was started with, one per run (see [`launch`]).
