@@ -21,16 +21,33 @@ struct HomeTopBar<Trailing: View>: View {
     }
 }
 
-/// The Feed place: its own navigation stack under the shared sky and top bar. The feed screen is `FeedPlaceholderView`,
-/// the one view the Feed package replaces.
+/// The Feed place: its own navigation stack under the shared sky and top bar, showing the owner's Feed.
 struct HomeFeedStack: View {
     @Binding var tab: HomeTab
+    @Environment(AppStore.self) private var app
+    @Environment(AccountStore.self) private var accounts
+
+    /// The feed is the owner's: the first computer you own.
+    private var feedStore: BotStore? {
+        accounts.computers.lazy.compactMap { accounts.store(for: $0.id) }.first { $0.isOwner }
+    }
+
+    /// Opens a chat the way Crew does: through `AppStore.openBot`, landing on the entry when given.
+    private func openChat(_ store: BotStore, chat: String, entry: String?) {
+        store.focusEntry = entry.map { .init(chat: chat, entry: $0) }
+        app.openBot(BotReference(accountId: accounts.accountId, computerId: store.computer.id, botId: chat))
+    }
 
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
                 SkyBackground(.home)
-                FeedPlaceholderView()
+                if let store = feedStore {
+                    FeedView(store: store) { chat, entry in openChat(store, chat: chat, entry: entry) }
+                        .id(store.computer.id)
+                } else {
+                    Text("Connect a computer to see the Feed.").foregroundStyle(Palette.secondary)
+                }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 // The same width as Crew's new-chat button, so the switch sits where it does there.
