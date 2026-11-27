@@ -74,8 +74,9 @@ pub fn forget_home(home: &Path) {
     end_holders_of(home);
 }
 
-/// Windows: `stop` cannot send SIGTERM (there is no `kill`), so the host dies hard and never stops its core, and the
-/// holder the core started is built to outlive its starter (it breaks out of the starter's job). A holder left running
+/// Windows: `stop` ends the host and its core but, by the architect's rule (decisions.md, 2026-11-27), never the core's own
+/// holder: it is built to outlive its starter (it breaks out of the starter's job) and leaves by itself once idle, after
+/// 120 s, as on the Mac. A test home is gone long before that, and a holder left running
 /// keeps `target\debug\kith-holder.exe` open, and cargo cannot replace it later in the job ("Access is denied"). Ends
 /// the holders whose command line names this test home (the core starts them with `--dir <home>\...`). Matches on the
 /// home's folder name (`kith-e2e-<uuid>`), not its full path: the runner's temp dir is spelled `RUNNER~1` in the holder's
@@ -229,6 +230,8 @@ pub async fn serve_with(home: &Path, extra: &[&str], env: &[(&str, &str)]) -> (C
                 }
                 assert_quick_start(&log_path, env);
                 let child = child.0.take().unwrap();
+                #[cfg(windows)]
+                HOSTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((child.id(), home.to_owned()));
                 return (child, base);
             }
             assert!(Instant::now() < deadline, "host didn't start{}", log_tail(&log_path));
@@ -360,6 +363,9 @@ pub fn stop(child: &mut Child) {
 }
 
 fn stop_process(child: &mut Child) {
+    #[cfg(windows)]
+    signal_stop_event(child.id());
+    #[cfg(not(windows))]
     let _ = Command::new("kill").arg(child.id().to_string()).status();
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -370,6 +376,25 @@ fn stop_process(child: &mut Child) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// Windows: the homes of the hosts `serve_with` started, by pid. `stop` has only the child, and the stop event is named
+/// for the host's data folder.
+#[cfg(windows)]
+static HOSTS: std::sync::Mutex<Vec<(u32, std::path::PathBuf)>> = std::sync::Mutex::new(Vec::new());
+
+/// Windows: the stand-in for SIGTERM. Signals the named stop event of the host `pid`, which then leaves the way it does on
+/// SIGTERM. A host this file did not start, or one that never made the event, is left to the hard kill after the wait.
+#[cfg(windows)]
+fn signal_stop_event(pid: u32) {
+    // Removed here: the host is going, and a reused pid must not pick this home.
+    let mut hosts = HOSTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(at) = hosts.iter().position(|(p, _)| *p == pid) else { return };
+    let (_, home) = hosts.remove(at);
+    let name = kith_winsys::event::stop_event_name(&home);
+    if let Ok(Some(event)) = kith_winsys::event::StopEvent::open(&name) {
+        let _ = event.signal();
+    }
 }
 
 /// Python as the test machine names it.

@@ -15,15 +15,19 @@ const SUPERVISOR: &str = crate::environment::SUPERVISOR;
 const HOST: &str = "kith-serve.exe";
 const HOLDER: &str = "kith-holder.exe";
 
+/// How long `stop` lets the host leave on its own before it ends it.
+const GRACE: std::time::Duration = std::time::Duration::from_secs(10);
+
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 /// Out of the job of whoever ran `install` (Node puts its children in a job that
 /// dies with it, and the service must outlive the app that installed it).
 const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
 
-/// Stops the running service. Its configuration stays for a later start; a
-/// manually started `kith-serve serve` is left alone.
+/// Stops the running service. Its configuration stays for a later start. The stop event is named for the data folder, so
+/// it also ends a `kith-serve serve` started by hand on the same data folder; one on another folder is left alone.
 pub fn stop() -> Result<()> {
+    stop_gracefully();
     // Under the holder (opt-in, see `holder_wanted`) the supervising holder goes first, or it would start the host again.
     // Only that one, found by its folder: another holder on the machine (the core's detached one, which must outlive a
     // host restart, or a dev identity's) is never stopped by its image name.
@@ -40,6 +44,26 @@ pub fn stop() -> Result<()> {
         .stderr(Stdio::null())
         .status();
     wait_for_host_exit()
+}
+
+/// Signals the host's named stop event and waits up to [`GRACE`] for the host to leave, so it stops its agents and its core
+/// the way it does on SIGTERM. No event (no host, or one older than the event) or a host that stays: the caller ends it hard.
+/// The supervisor may start the host again in the meantime; the caller's `taskkill /T` takes that one too. The core's own
+/// holder is not ended here: it outlives `stop` by design and leaves by itself once idle (decisions.md, 2026-11-27).
+fn stop_gracefully() {
+    let name = kith_winsys::event::stop_event_name(&data_dir());
+    let Ok(Some(event)) = kith_winsys::event::StopEvent::open(&name) else { return };
+    if event.signal().is_err() {
+        return;
+    }
+    let deadline = std::time::Instant::now() + GRACE;
+    while std::time::Instant::now() < deadline {
+        // The host holds `host.lock` until it is gone.
+        if super::lock_host().is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 /// Ends the `kith-holder supervise` process whose command line names `dir` as a whole quoted word (install quotes every

@@ -69,6 +69,19 @@ pub fn listable(c: &Ctx, cwd: &str) -> bool {
     run_kind(c).is_some() && !format!("{cwd}/").contains("/.claude/worktrees/")
 }
 
+/// Whether `comm` (a path, or the bare name the process list gives) names the program `name`. On Windows the list gives
+/// `claude.exe`.
+fn program_is(comm: &str, name: &str) -> bool {
+    let file = Path::new(comm).file_name().and_then(|n| n.to_str());
+    if cfg!(windows) {
+        file.is_some_and(|f| {
+            f.eq_ignore_ascii_case(name) || f.eq_ignore_ascii_case(&format!("{name}.exe"))
+        })
+    } else {
+        file == Some(name)
+    }
+}
+
 /// The claude process above this hook: the ancestor whose `<claude dir>/sessions/<pid>.json` names our session, else the
 /// first one called claude.
 fn claude_pid(c: &Ctx, sid: &str) -> Option<i64> {
@@ -90,7 +103,7 @@ fn claude_pid(c: &Ctx, sid: &str) -> Option<i64> {
             return Some(pid);
         }
         let (up, comm) = os::ps_row(pid);
-        if named == 0 && Path::new(&comm).file_name().is_some_and(|n| n == "claude") {
+        if named == 0 && program_is(&comm, "claude") {
             named = pid;
         }
         pid = up;
@@ -107,7 +120,7 @@ pub(super) fn launcher_of(pid: Option<i64>) -> Vec<(&'static str, Value)> {
         return Vec::new();
     }
     let (_, comm) = os::ps_row(parent);
-    if Path::new(comm.trim()).file_name().and_then(|n| n.to_str()) != Some("kith-stub") {
+    if !program_is(comm.trim(), "kith-stub") {
         return Vec::new();
     }
     vec![
@@ -236,7 +249,6 @@ pub(super) fn build(c: &Ctx, stdin: &str) -> Result<Option<Built>, String> {
 /// when it was not had (held past the wait, a sid that is no file name, or no way to open it).
 pub(super) fn sid_lock(reg: &Path, sid: &str) -> Option<std::fs::File> {
     use fs2::FileExt;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     if sid.is_empty()
         || sid.len() > 64
         || !sid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
@@ -245,15 +257,16 @@ pub(super) fn sid_lock(reg: &Path, sid: &str) -> Option<std::fs::File> {
     }
     let dir = reg.join("locks");
     std::fs::create_dir_all(&dir).ok()?;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).ok()?;
-    let f = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .open(dir.join(format!("{sid}.lock")))
-        .ok()?;
+    super::chmod_private_dir(&dir).ok()?;
+    let f = super::private_file(
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false),
+    )
+    .open(dir.join(format!("{sid}.lock")))
+    .ok()?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
     while f.try_lock_exclusive().is_err() {
         if std::time::Instant::now() >= deadline {

@@ -151,7 +151,7 @@ layer, `MEMORY.md`, `people/mum.md`; anything that isn't a Markdown memory file 
 
 | Method | Arguments | Answer |
 | --- | --- | --- |
-| `kithMemoryList` | | `{ agent: [file], shared: [file] }`, `file` = `{ name, shared, path, size, modified }` |
+| `kithMemoryList` | `person?` | `{ agent: [file], shared: [file] }`, `file` = `{ name, shared, path, size, modified }`. With `person` (a plain id such as `alan` or `bot-7a0c9f07`): only the agent's files under `memory/people/<person>/`, `shared` empty; an id with a separator, `.`/`..` or a leading dot is a 400 |
 | `kithMemoryRead` | `shared`, `name` | `{ name, shared, text, bytes, modified, truncated?, exists }`; a file not made yet is `text: ""`, `exists: false`; at most 512 KB |
 | `kithMemorySave` | `shared`, `name`, `text` | `{ version, warnings }`: Kai's save, never refused (a size cap or a big drop only warns); `version` is `null` when nothing changed |
 | `kithMemoryHistory` | `shared`, `name`, `limit?` (50, max 500) | `{ name, shared, versions: [version] }`, newest first |
@@ -159,6 +159,7 @@ layer, `MEMORY.md`, `people/mum.md`; anything that isn't a Markdown memory file 
 | `kithMemoryRestore` | `shared`, `name`, `version` | `{ version, warnings }`: the file becomes that version's content, as a new version (cause `restore`) |
 | `kithMemoryDelete` | `shared`, `name` | `{ version }`: the file is removed and the deletion is a version (cause `delete`), so `kithMemoryRestore` brings it back. MEMORY.md is refused. Owner only (as `kith memory rm`) |
 | `kithMemoryForget` | `text` | `{ forgotten: true, text }`: no agent or tidy writes the fact again (as `kith memory forget`). Owner only |
+| `kithMemoryForgetPerson` | `person`, `name?` | `{ person, removed: [{ name, version }] }`: removes the agent's files under `memory/people/<person>/` (or only `name`, relative to that folder), each as a version (cause `delete`) so `kithMemoryRestore` brings it back. A missing folder or file, or a second forget, is a success with `removed: []`. Same id rules as `kithMemoryList`. Owner only |
 | `kithMemoryTidyUps` | `limit?` (20, max 100) | `{ tidyUps: [tidyUp] }`, newest first |
 | `kithMemoryUndoTidy` | `id` | `{ restored: [label], refused: [{ file, reason }], undone }` |
 | `kithMemoryPromotions` | `status?` (`pending` default, `declined`, `approved`, `stale`), `limit?` | `{ promotions: [{ id, file, from, audience, room, projects, reason, asks, status, at, decidedAt }] }` |

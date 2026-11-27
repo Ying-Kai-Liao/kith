@@ -9,7 +9,7 @@
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -205,47 +205,39 @@ pub(crate) fn run(tool: Tool, who: &RunIdentity, args: &[String]) -> Result<Valu
     if let (Tool::MemorySearch, Some(project)) = (tool, &who.project) {
         both(&mut command, "PROJECT", project);
     }
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        run_in_job(&command)
+    }
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt as _;
-        command.process_group(0);
+        run_group(command)
     }
-    let mut child = command
-        .spawn()
-        .map_err(|_| Error::Refused("could not run that".into()))?;
-    // The readers hand their bytes over a channel, so the wait for them can have an end of its own: a descendant that left the
-    // process group may hold a pipe open after the tool is gone, and the call must not outlive its budget for that.
-    let read = |pipe: Option<Box<dyn std::io::Read + Send>>| {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut out = Vec::new();
-            if let Some(p) = pipe {
-                // Output past the cap is left unread: a child blocked on its full pipe is cut off by the budget.
-                let _ = p.take(MAX_OUTPUT as u64).read_to_end(&mut out);
-            }
-            let _ = tx.send(out);
-        });
-        rx
-    };
-    let out = read(child.stdout.take().map(|p| Box::new(p) as _));
-    let err = read(child.stderr.take().map(|p| Box::new(p) as _));
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() < BUDGET => std::thread::sleep(Duration::from_millis(10)),
-            _ => {
-                end_group(&mut child);
-                return Err(Error::Refused("timed out".into()));
-            }
+}
+
+/// Collects what a tool wrote on one pipe over a channel, so the wait for it can have an end of its own: a descendant
+/// that left the tool's group (or job) may hold a pipe open after the tool is gone, and the call must not outlive its
+/// budget for that.
+fn reader(pipe: Option<Box<dyn std::io::Read + Send>>) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        if let Some(p) = pipe {
+            // Output past the cap is left unread: a child blocked on its full pipe is cut off by the budget.
+            let _ = p.take(MAX_OUTPUT as u64).read_to_end(&mut out);
         }
-    };
-    // The tool is gone; anything it left behind in its group goes too, and the readers end at the pipes' close.
-    end_group_of(child.id());
+        let _ = tx.send(out);
+    });
+    rx
+}
+
+/// The tool is gone and anything it left behind with it, so the readers end at the pipes' close.
+fn collect(
+    code: i32,
+    started: Instant,
+    out: &std::sync::mpsc::Receiver<Vec<u8>>,
+    err: &std::sync::mpsc::Receiver<Vec<u8>>,
+) -> Result<Value> {
     let left = BUDGET.saturating_sub(started.elapsed());
     let Ok(stdout) = out.recv_timeout(left) else {
         return Err(Error::Refused("timed out".into()));
@@ -258,10 +250,108 @@ pub(crate) fn run(tool: Tool, who: &RunIdentity, args: &[String]) -> Result<Valu
     Ok(json!({
         "stdout": String::from_utf8_lossy(&stdout),
         "stderr": String::from_utf8_lossy(&stderr),
-        "code": status.code().unwrap_or(1),
+        "code": code,
     }))
 }
 
+/// Unix: the tool runs in a process group of its own, killed whole when the budget runs out.
+#[cfg(unix)]
+fn run_group(mut command: Command) -> Result<Value> {
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|_| Error::Refused("could not run that".into()))?;
+    let out = reader(child.stdout.take().map(|p| Box::new(p) as _));
+    let err = reader(child.stderr.take().map(|p| Box::new(p) as _));
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < BUDGET => std::thread::sleep(Duration::from_millis(10)),
+            _ => {
+                end_group(&mut child);
+                return Err(Error::Refused("timed out".into()));
+            }
+        }
+    };
+    // The tool is gone; anything it left behind in its group goes too.
+    end_group_of(child.id());
+    collect(status.code().unwrap_or(1), started, &out, &err)
+}
+
+/// Windows: the tool runs in a job this call holds alone and that ends everything in it when the handle closes (W12 rules
+/// H1 to H4). The budget, a finished tool and a core that dies all end what it started: through the core's own handle,
+/// never by name or pid. Ending an already empty job is fine, so a repeat is harmless.
+#[cfg(windows)]
+fn run_in_job(command: &Command) -> Result<Value> {
+    use kith_winsys::job::{Job, Launch, spawn_in_job};
+    use std::os::windows::io::AsHandle as _;
+
+    let refuse = |_: std::io::Error| Error::Refused("could not run that".into());
+    // The whole environment the tool gets: ours, less what `command` removed, plus what it set (names are not case
+    // sensitive here).
+    let mut env: Vec<(String, String)> = std::env::vars_os()
+        .map(|(k, v)| {
+            (
+                k.to_string_lossy().into_owned(),
+                v.to_string_lossy().into_owned(),
+            )
+        })
+        .collect();
+    for (k, v) in command.get_envs() {
+        let k = k.to_string_lossy().into_owned();
+        env.retain(|(n, _)| !n.eq_ignore_ascii_case(&k));
+        if let Some(v) = v {
+            env.push((k, v.to_string_lossy().into_owned()));
+        }
+    }
+    let args: Vec<String> = command
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let job = Job::create().map_err(refuse)?;
+    let nul = std::fs::File::open("NUL").map_err(refuse)?;
+    let (out_r, out_w) = std::io::pipe().map_err(refuse)?;
+    let (err_r, err_w) = std::io::pipe().map_err(refuse)?;
+    let child = {
+        let launch = Launch {
+            program: Path::new(command.get_program()),
+            args: &args,
+            env: &env,
+            cwd: None,
+            stdio: Some([nul.as_handle(), out_w.as_handle(), err_w.as_handle()]),
+        };
+        spawn_in_job(&job, &launch).map_err(refuse)?
+    };
+    // Our write ends close here, so the readers end when the tool's last holder does.
+    drop((out_w, err_w, nul));
+    let out = reader(Some(Box::new(out_r)));
+    let err = reader(Some(Box::new(err_r)));
+    let started = Instant::now();
+    let code = loop {
+        let left = BUDGET.saturating_sub(started.elapsed());
+        match child.wait_for(left.min(Duration::from_millis(10))) {
+            Ok(Some(code)) => break code,
+            Ok(None) if !left.is_zero() => {}
+            _ => {
+                let _ = job.terminate(1);
+                return Err(Error::Refused("timed out".into()));
+            }
+        }
+    };
+    // The tool is gone; anything it left behind in the job goes too.
+    let _ = job.terminate(1);
+    collect(i32::try_from(code).unwrap_or(1), started, &out, &err)
+}
+
+#[cfg(unix)]
 fn end_group(child: &mut std::process::Child) {
     end_group_of(child.id());
     let _ = child.kill();
@@ -273,5 +363,30 @@ fn end_group_of(pid: u32) {
     crate::holder_link::signal_group(pid, "KILL");
 }
 
-#[cfg(not(unix))]
-fn end_group_of(_pid: u32) {}
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    fn cmd(line: &str) -> Command {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let mut c = Command::new(Path::new(&root).join("System32").join("cmd.exe"));
+        c.args(["/c", line]);
+        c
+    }
+
+    #[test]
+    fn a_tool_in_the_job_gives_its_output_and_exit_code() {
+        let out = run_in_job(&cmd("echo hi & exit 3")).expect("run");
+        assert_eq!(out["stdout"].as_str().map(str::trim), Some("hi"));
+        assert_eq!(out["code"], 3);
+    }
+
+    #[test]
+    fn what_the_tool_left_running_ends_with_the_job() {
+        // A detached ping keeps stderr (the pipe) open for a minute: the call returns only because the job was ended.
+        let started = Instant::now();
+        let out = run_in_job(&cmd("start /b ping -n 60 127.0.0.1 > nul & exit 0")).expect("run");
+        assert_eq!(out["code"], 0);
+        assert!(started.elapsed() < Duration::from_secs(20));
+    }
+}

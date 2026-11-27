@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "16cc6e9c5a14412e680d8dff24305932f4deece079eb9b5f77a9b4f0ec20d1f7"
+    public static let sha256 = "58a31f2b53c9401d865950de7a4a3e12340b3dfc59c40773f9060a8fda2d88e9"
 }
 
 extension HostContract {
@@ -75,6 +75,18 @@ extension HostContract {
         /// A value this version doesn't know is `.guest`.
         public init(from decoder: Decoder) throws {
             self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .guest
+        }
+    }
+
+    /// How hard this computer's memory is pressed: the OS's own word. One this version doesn't know reads as normal.
+    public enum HostPressure: String, Codable, Hashable, Sendable {
+        case normal
+        case warn
+        case critical
+
+        /// A value this version doesn't know is `.normal`.
+        public init(from decoder: Decoder) throws {
+            self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .normal
         }
     }
 
@@ -1010,6 +1022,68 @@ extension HostContract {
         }
     }
 
+    /// One row of an ask's answer on the computer it was sent to: its number there, who said it, what kind (answer, progress or lost), the words and when (ms).
+    public struct PeerRow: Codable, Hashable, Sendable {
+        public var n: Int64
+        public var `as`: String?
+        public var kind: String
+        public var text: String
+        public var at: Int64?
+
+        public init(n: Int64, `as`: String? = nil, kind: String, text: String, at: Int64? = nil) {
+            self.n = n
+            self.`as` = `as`
+            self.kind = kind
+            self.text = text
+            self.at = at
+        }
+    }
+
+    /// What the callee's computer says of an ask another computer sent (`peerAsk`, `peerThread`): `paired` false when that computer is not paired at the epoch it named (nothing else is then said), `found` false for a key never seen. Else its state (open, answered, capped, stopped, lost or refused), the rows after the one asked for, what the run and what it asked cost there in US$ (`cost`), what it waits on (`waiting`) and whether it takes a follow-up (`takesTo`).
+    public struct PeerThread: Codable, Hashable, Sendable {
+        public var paired: Bool
+        public var found: Bool
+        public var state: String?
+        public var rows: [PeerRow]
+        public var cost: JSONValue?
+        public var waiting: JSONValue?
+        public var takesTo: Bool?
+
+        public init(paired: Bool, found: Bool, state: String? = nil, rows: [PeerRow], cost: JSONValue? = nil, waiting: JSONValue? = nil, takesTo: Bool? = nil) {
+            self.paired = paired
+            self.found = found
+            self.state = state
+            self.rows = rows
+            self.cost = cost
+            self.waiting = waiting
+            self.takesTo = takesTo
+        }
+    }
+
+    /// What a stop of an ask comes to on the callee's computer: its state after (stopped, or the final state it had already), or `paired` false when that computer is not paired at the epoch named.
+    public struct PeerStopped: Codable, Hashable, Sendable {
+        public var paired: Bool
+        public var state: String?
+
+        public init(paired: Bool, state: String? = nil) {
+            self.paired = paired
+            self.state = state
+        }
+    }
+
+    /// What a `--to` message comes to on the callee's computer: `taken` true when it was queued for the ask's session, or will never be (the ask is over: `note` says so); false when it should be sent again later (the ask has no session yet). `paired` false when that computer is not paired at the epoch named.
+    public struct PeerTold: Codable, Hashable, Sendable {
+        public var paired: Bool
+        public var taken: Bool
+        public var note: String?
+
+        public init(paired: Bool, taken: Bool, note: String? = nil) {
+            self.paired = paired
+            self.taken = taken
+            self.note = note
+        }
+    }
+
     /// One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer.
     public struct HandleRevoke: Codable, Hashable, Sendable {
         public var handle: String
@@ -1055,6 +1129,81 @@ extension HostContract {
             self.enabled = enabled
             self.gen = gen
             self.people = people
+        }
+    }
+
+    /// Memory and swap in bytes; each field is null where this computer's OS gives no reading.
+    public struct HostMemory: Codable, Hashable, Sendable {
+        public var pressure: HostPressure?
+        public var usedBytes: Int64?
+        public var totalBytes: Int64?
+        public var swapUsedBytes: Int64?
+        public var swapTotalBytes: Int64?
+
+        public init(pressure: HostPressure? = nil, usedBytes: Int64? = nil, totalBytes: Int64? = nil, swapUsedBytes: Int64? = nil, swapTotalBytes: Int64? = nil) {
+            self.pressure = pressure
+            self.usedBytes = usedBytes
+            self.totalBytes = totalBytes
+            self.swapUsedBytes = swapUsedBytes
+            self.swapTotalBytes = swapTotalBytes
+        }
+    }
+
+    /// One mounted volume of this computer.
+    public struct HostDisk: Codable, Hashable, Sendable {
+        public var mount: String
+        public var name: String
+        public var totalBytes: Int64
+        public var freeBytes: Int64
+
+        public init(mount: String, name: String, totalBytes: Int64, freeBytes: Int64) {
+            self.mount = mount
+            self.name = name
+            self.totalBytes = totalBytes
+            self.freeBytes = freeBytes
+        }
+    }
+
+    /// This computer's load now: cpu is {percent: number, cores: int} (json: the contract has no number type), null where unread.
+    public struct HostHealth: Codable, Hashable, Sendable {
+        public var at: Int64
+        public var cpu: JSONValue?
+        public var memory: HostMemory
+        public var disks: [HostDisk]
+
+        public init(at: Int64, cpu: JSONValue? = nil, memory: HostMemory, disks: [HostDisk]) {
+            self.at = at
+            self.cpu = cpu
+            self.memory = memory
+            self.disks = disks
+        }
+    }
+
+    /// One permission rule of an agent, raw (placeholders such as {{HOME_REAL}} unexpanded). list is allow, ask or deny; source is role/settings.json or allowed.json; id and kind come only from allowed.json entries.
+    public struct AgentRule: Codable, Hashable, Sendable {
+        public var list: String
+        public var rule: String
+        public var source: String
+        public var id: String?
+        public var kind: String?
+
+        public init(list: String, rule: String, source: String, id: String? = nil, kind: String? = nil) {
+            self.list = list
+            self.rule = rule
+            self.source = source
+            self.id = id
+            self.kind = kind
+        }
+    }
+
+    /// An agent's permission rules, as the launcher merges them at launch: role/settings.json allow, ask and deny, then allowed.json (as allow).
+    public struct AgentRules: Codable, Hashable, Sendable {
+        public var agent: String
+        public var rules: [AgentRule]
+
+        public init(agent: String, rules: [AgentRule]) {
+            self.agent = agent
+            self.rules = rules
         }
     }
 
@@ -1914,6 +2063,64 @@ extension HostContract {
         }
     }
 
+    /// What `peerAsk` takes.
+    public struct PeerAskParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+        public var agent: String
+        public var task: String
+        public var lineage: JSONValue?
+        public var opts: JSONValue?
+        public var cont: String?
+
+        public init(key: String, epoch: String, agent: String, task: String, lineage: JSONValue? = nil, opts: JSONValue? = nil, cont: String? = nil) {
+            self.key = key
+            self.epoch = epoch
+            self.agent = agent
+            self.task = task
+            self.lineage = lineage
+            self.opts = opts
+            self.cont = cont
+        }
+    }
+
+    /// What `peerThread` takes.
+    public struct PeerThreadParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+        public var after: Int64?
+
+        public init(key: String, epoch: String, after: Int64? = nil) {
+            self.key = key
+            self.epoch = epoch
+            self.after = after
+        }
+    }
+
+    /// What `peerStop` takes.
+    public struct PeerStopParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+
+        public init(key: String, epoch: String) {
+            self.key = key
+            self.epoch = epoch
+        }
+    }
+
+    /// What `peerTo` takes.
+    public struct PeerToParams: Codable, Hashable, Sendable {
+        public var key: String
+        public var epoch: String
+        public var text: String
+
+        public init(key: String, epoch: String, text: String) {
+            self.key = key
+            self.epoch = epoch
+            self.text = text
+        }
+    }
+
     /// What `createInvite` takes.
     public struct CreateInviteParams: Codable, Hashable, Sendable {
         public var agents: [String: String]
@@ -1957,6 +2164,21 @@ extension HostContract {
 
         public init(room: String) {
             self.room = room
+        }
+    }
+
+    /// What `hostHealth` takes.
+    public struct HostHealthParams: Codable, Hashable, Sendable {
+        public init() {
+        }
+    }
+
+    /// What `agentRules` takes.
+    public struct AgentRulesParams: Codable, Hashable, Sendable {
+        public var agent: String
+
+        public init(agent: String) {
+            self.agent = agent
         }
     }
 
@@ -2026,16 +2248,22 @@ extension HostContract {
         case botLeave
         case peerAgents
         case peerRevokes
+        case peerAsk
+        case peerThread
+        case peerStop
+        case peerTo
         case createInvite
         case addRoomPerson
         case removeRoomPerson
         case roomPeople
+        case hostHealth
+        case agentRules
         case myRooms
         case leaveRoom
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople]
+    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople, .hostHealth, .agentRules]
 
     /// What an invited person may call.
     public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation, .myRooms, .leaveRoom]
@@ -2050,7 +2278,7 @@ extension HostContract {
     public static let botPendingMethods: [Method] = [.hello, .botStatus, .proveBotInvite]
 
     /// What another computer of the owner's, paired here (Mac link) may call.
-    public static let peerMethods: [Method] = [.peerAgents, .peerRevokes]
+    public static let peerMethods: [Method] = [.peerAgents, .peerRevokes, .peerAsk, .peerThread, .peerStop, .peerTo]
 
     /// Decodes `data` as the contract type `name`; false when the contract has no such type. For the fixtures' tests.
     public static func decode(_ name: String, _ data: Data) throws -> Bool {
@@ -2098,10 +2326,19 @@ extension HostContract {
         case "BotSelf": _ = try d.decode(BotSelf.self, from: data)
         case "PeerAgent": _ = try d.decode(PeerAgent.self, from: data)
         case "PeerAgents": _ = try d.decode(PeerAgents.self, from: data)
+        case "PeerRow": _ = try d.decode(PeerRow.self, from: data)
+        case "PeerThread": _ = try d.decode(PeerThread.self, from: data)
+        case "PeerStopped": _ = try d.decode(PeerStopped.self, from: data)
+        case "PeerTold": _ = try d.decode(PeerTold.self, from: data)
         case "HandleRevoke": _ = try d.decode(HandleRevoke.self, from: data)
         case "HandleRevokes": _ = try d.decode(HandleRevokes.self, from: data)
         case "RoomPerson": _ = try d.decode(RoomPerson.self, from: data)
         case "RoomPeople": _ = try d.decode(RoomPeople.self, from: data)
+        case "HostMemory": _ = try d.decode(HostMemory.self, from: data)
+        case "HostDisk": _ = try d.decode(HostDisk.self, from: data)
+        case "HostHealth": _ = try d.decode(HostHealth.self, from: data)
+        case "AgentRule": _ = try d.decode(AgentRule.self, from: data)
+        case "AgentRules": _ = try d.decode(AgentRules.self, from: data)
         case "CreatedInvite": _ = try d.decode(CreatedInvite.self, from: data)
         case "RoomPersonChange": _ = try d.decode(RoomPersonChange.self, from: data)
         case "MyRoomAgent": _ = try d.decode(MyRoomAgent.self, from: data)
@@ -2168,10 +2405,16 @@ extension HostContract {
         case "BotLeaveParams": _ = try d.decode(BotLeaveParams.self, from: data)
         case "PeerAgentsParams": _ = try d.decode(PeerAgentsParams.self, from: data)
         case "PeerRevokesParams": _ = try d.decode(PeerRevokesParams.self, from: data)
+        case "PeerAskParams": _ = try d.decode(PeerAskParams.self, from: data)
+        case "PeerThreadParams": _ = try d.decode(PeerThreadParams.self, from: data)
+        case "PeerStopParams": _ = try d.decode(PeerStopParams.self, from: data)
+        case "PeerToParams": _ = try d.decode(PeerToParams.self, from: data)
         case "CreateInviteParams": _ = try d.decode(CreateInviteParams.self, from: data)
         case "AddRoomPersonParams": _ = try d.decode(AddRoomPersonParams.self, from: data)
         case "RemoveRoomPersonParams": _ = try d.decode(RemoveRoomPersonParams.self, from: data)
         case "RoomPeopleParams": _ = try d.decode(RoomPeopleParams.self, from: data)
+        case "HostHealthParams": _ = try d.decode(HostHealthParams.self, from: data)
+        case "AgentRulesParams": _ = try d.decode(AgentRulesParams.self, from: data)
         case "MyRoomsParams": _ = try d.decode(MyRoomsParams.self, from: data)
         case "LeaveRoomParams": _ = try d.decode(LeaveRoomParams.self, from: data)
         default: return false

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "16cc6e9c5a14412e680d8dff24305932f4deece079eb9b5f77a9b4f0ec20d1f7";
+pub const CONTRACT_SHA256: &str = "58a31f2b53c9401d865950de7a4a3e12340b3dfc59c40773f9060a8fda2d88e9";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -142,6 +142,29 @@ impl AgentRole {
         match self {
             Self::Member => "member",
             Self::Guest => "guest",
+        }
+    }
+}
+
+/// How hard this computer's memory is pressed: the OS's own word. One this version doesn't know reads as normal.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum HostPressure {
+    #[serde(rename = "warn")]
+    Warn,
+    #[serde(rename = "critical")]
+    Critical,
+    /// Also what a value this version doesn't know is read as.
+    #[default]
+    #[serde(rename = "normal", other)]
+    Normal,
+}
+
+impl HostPressure {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Warn => "warn",
+            Self::Critical => "critical",
         }
     }
 }
@@ -1042,6 +1065,55 @@ pub struct PeerAgents {
     pub agents: Vec<PeerAgent>,
 }
 
+/// One row of an ask's answer on the computer it was sent to: its number there, who said it, what kind (answer, progress or lost), the words and when (ms).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerRow {
+    pub n: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#as: Option<String>,
+    pub kind: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+}
+
+/// What the callee's computer says of an ask another computer sent (`peerAsk`, `peerThread`): `paired` false when that computer is not paired at the epoch it named (nothing else is then said), `found` false for a key never seen. Else its state (open, answered, capped, stopped, lost or refused), the rows after the one asked for, what the run and what it asked cost there in US$ (`cost`), what it waits on (`waiting`) and whether it takes a follow-up (`takesTo`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerThread {
+    pub paired: bool,
+    pub found: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    pub rows: Vec<PeerRow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub takes_to: Option<bool>,
+}
+
+/// What a stop of an ask comes to on the callee's computer: its state after (stopped, or the final state it had already), or `paired` false when that computer is not paired at the epoch named.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerStopped {
+    pub paired: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+}
+
+/// What a `--to` message comes to on the callee's computer: `taken` true when it was queued for the ask's session, or will never be (the ask is over: `note` says so); false when it should be sent again later (the ask has no session yet). `paired` false when that computer is not paired at the epoch named.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerTold {
+    pub paired: bool,
+    pub taken: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 /// One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1075,6 +1147,64 @@ pub struct RoomPeople {
     pub enabled: bool,
     pub r#gen: i64,
     pub people: Vec<RoomPerson>,
+}
+
+/// Memory and swap in bytes; each field is null where this computer's OS gives no reading.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HostMemory {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pressure: Option<HostPressure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_bytes: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap_used_bytes: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap_total_bytes: Option<i64>,
+}
+
+/// One mounted volume of this computer.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HostDisk {
+    pub mount: String,
+    pub name: String,
+    pub total_bytes: i64,
+    pub free_bytes: i64,
+}
+
+/// This computer's load now: cpu is {percent: number, cores: int} (json: the contract has no number type), null where unread.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HostHealth {
+    pub at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<serde_json::Value>,
+    pub memory: HostMemory,
+    pub disks: Vec<HostDisk>,
+}
+
+/// One permission rule of an agent, raw (placeholders such as {{HOME_REAL}} unexpanded). list is allow, ask or deny; source is role/settings.json or allowed.json; id and kind come only from allowed.json entries.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRule {
+    pub list: String,
+    pub rule: String,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// An agent's permission rules, as the launcher merges them at launch: role/settings.json allow, ask and deny, then allowed.json (as allow).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRules {
+    pub agent: String,
+    pub rules: Vec<AgentRule>,
 }
 
 /// What making an invite answers: its id and links, when it lapses, and the person it is for.
@@ -1739,6 +1869,49 @@ pub struct PeerRevokesParams {
     pub handles: Vec<HandleRevoke>,
 }
 
+/// What `peerAsk` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerAskParams {
+    pub key: String,
+    pub epoch: String,
+    pub agent: String,
+    pub task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opts: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cont: Option<String>,
+}
+
+/// What `peerThread` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerThreadParams {
+    pub key: String,
+    pub epoch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<i64>,
+}
+
+/// What `peerStop` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerStopParams {
+    pub key: String,
+    pub epoch: String,
+}
+
+/// What `peerTo` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerToParams {
+    pub key: String,
+    pub epoch: String,
+    pub text: String,
+}
+
 /// What `createInvite` takes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1773,6 +1946,17 @@ pub struct RemoveRoomPersonParams {
 #[serde(rename_all = "camelCase")]
 pub struct RoomPeopleParams {
     pub room: String,
+}
+
+/// What `hostHealth` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct HostHealthParams {}
+
+/// What `agentRules` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRulesParams {
+    pub agent: String,
 }
 
 /// What `myRooms` takes.
@@ -1886,6 +2070,14 @@ pub mod method {
     pub const PEER_AGENTS: &str = "peerAgents";
     /// Mac link: the handle-only revokes and undos the caller knows. Each newer than this computer's own is applied here (the person is revoked or restored); the answer is this computer's list, so a computer that was off catches up.
     pub const PEER_REVOKES: &str = "peerRevokes";
+    /// Mac link: an ask for one of this computer's agents, from the paired computer that sends it (its owner's own run; this computer's owner runs the agent). `key` is the asking computer's id for the ask, `epoch` its pairing, `lineage` the chain (`{chain, hop, cross, from, cost}`) the caps are checked from again, `opts` `{model, effort, project}`, `cont` the key of the earlier ask whose session this one continues. The same key again is the same ask, however often it is sent; every refusal is a row the next `peerThread` reads. Answers what `peerThread` would.
+    pub const PEER_ASK: &str = "peerAsk";
+    /// Mac link: the ask the paired computer sent under `key`, as that computer follows it: the rows after `after`, its state and cost. Read only.
+    pub const PEER_THREAD: &str = "peerThread";
+    /// Mac link: stops the ask the paired computer sent under `key` (its run ended, a queued one never starts). A stop that comes before the ask leaves a stopped row, so the ask never starts if it arrives later. Sent again until answered.
+    pub const PEER_STOP: &str = "peerStop";
+    /// Mac link: a `--to` follow-up to the ask the paired computer sent under `key`, as a turn of its session. The same words are one message.
+    pub const PEER_TO: &str = "peerTo";
     /// Makes an invite for a new person (`name`) or one kith already knows (`personId`), with the agents offered (agent -> member|guest). `rooms` (rooms with people) names group rooms the person is put in once a device of theirs has proved the invite, or at the next host start if the host stopped between; a room the person left or Kai took them out of is never joined again by the invite. The cloud's invite is the same with or without rooms. Refused with rooms while the host setting is off, for a room that takes no people, for an agent in the room the person is not granted, and for a person who has already joined here.
     pub const CREATE_INVITE: &str = "createInvite";
     /// Rooms with people: lets a person into a group room, one step with one new gen. Refused while the host setting is off, for the owner, for a room with no Kith agent or with an outside bot, and for a person not granted every agent in it (asked live).
@@ -1894,6 +2086,10 @@ pub mod method {
     pub const REMOVE_ROOM_PERSON: &str = "removeRoomPerson";
     /// Rooms with people: every stay in a group room and the room's gen.
     pub const ROOM_PEOPLE: &str = "roomPeople";
+    /// This computer's health: cpu load, memory pressure and swap, and free space per mounted volume. Fields the OS gives no reading for are null; cached for a few seconds.
+    pub const HOST_HEALTH: &str = "hostHealth";
+    /// An agent's permission rules as data, read-only: role/settings.json allow, ask and deny, then allowed.json (as allow), each tagged with its source. Placeholders stay as written. An unknown agent, or a malformed settings.json or allowed.json, is an error; a missing file is an empty list.
+    pub const AGENT_RULES: &str = "agentRules";
     /// Rooms with people: the group rooms they are in right now (an open stay and every agent of the room still granted). Open them with history, thread, send and react, with the room's id as botId.
     pub const MY_ROOMS: &str = "myRooms";
     /// Rooms with people: leaves a group room they are in. Needs only an open stay, so a person whose agent was taken away can still get out.
@@ -1901,7 +2097,7 @@ pub mod method {
 }
 
 /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-pub const OWNER_METHODS: &[&str] = &[method::MAKE_TOPIC, method::RENAME_TOPIC, method::UNFOLD_TOPIC, method::CREATE_INVITE, method::ADD_ROOM_PERSON, method::REMOVE_ROOM_PERSON, method::ROOM_PEOPLE];
+pub const OWNER_METHODS: &[&str] = &[method::MAKE_TOPIC, method::RENAME_TOPIC, method::UNFOLD_TOPIC, method::CREATE_INVITE, method::ADD_ROOM_PERSON, method::REMOVE_ROOM_PERSON, method::ROOM_PEOPLE, method::HOST_HEALTH, method::AGENT_RULES];
 
 /// What an invited person may call.
 pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::START_CHAT, method::SEND, method::THREAD, method::HISTORY, method::NEW_SESSION, method::UNSEND, method::MARK_READ, method::STOP, method::UPLOAD, method::READ_UPLOAD, method::REACT, method::RESPOND_PERMISSION, method::EDIT_HANDOFF, method::KEEP_CONVERSATION, method::PROJECTS, method::THREAD_PROJECTS, method::SET_THREAD_PROJECTS, method::LINK_CODE, method::SCHEDULE_MESSAGES, method::CALL_ACCEPT, method::CALL_DECLINE, method::CALL_GREET, method::LOG_CALL, method::START_CALL, method::END_CALL, method::CREATE_BOT_INVITE, method::REVOKE_BOT_INVITE, method::REVOKE_BOT, method::MY_BOTS, method::SET_BOT_LIMITS, method::RESOLVE_CITATION, method::MY_ROOMS, method::LEAVE_ROOM];
@@ -1916,7 +2112,7 @@ pub const BOT_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PR
 pub const BOT_PENDING_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PROVE_BOT_INVITE];
 
 /// What another computer of the owner's, paired here (Mac link) may call.
-pub const PEER_METHODS: &[&str] = &[method::PEER_AGENTS, method::PEER_REVOKES];
+pub const PEER_METHODS: &[&str] = &[method::PEER_AGENTS, method::PEER_REVOKES, method::PEER_ASK, method::PEER_THREAD, method::PEER_STOP, method::PEER_TO];
 
 /// The contract as data, for `crate::check` (the producer's strict check and the consumer's).
 pub static SCHEMA: crate::check::Schema = crate::check::Schema {
@@ -1926,6 +2122,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::EnumSchema { name: "BotStatus", values: &["idle", "working", "needsInput", "error"], unknown: "idle" },
         crate::check::EnumSchema { name: "Permission", values: &["default", "acceptEdits", "plan", "auto", "bypassPermissions"], unknown: "unknown" },
         crate::check::EnumSchema { name: "AgentRole", values: &["member", "guest"], unknown: "guest" },
+        crate::check::EnumSchema { name: "HostPressure", values: &["normal", "warn", "critical"], unknown: "normal" },
         crate::check::EnumSchema { name: "Device", values: &["laptop", "macmini", "macstudio", "imac", "macpro", "desktop", "linux"], unknown: "desktop" },
         crate::check::EnumSchema { name: "BotProvider", values: &["grok", "muse", "dots", "codex", "cursor", "other"], unknown: "other" },
         crate::check::EnumSchema { name: "BotGuestState", values: &["invited", "joining", "pending", "active", "denied", "revoked"], unknown: "unknown" },
@@ -1982,10 +2179,19 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotSelf", fields: &[("botId", "string"), ("name", "string"), ("state", "BotGuestState"), ("owner", "BotOwner"), ("agents", "[GrantedAgent]"), ("limits", "BotLimits"), ("version", "string"), ("minClient", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "PeerAgent", fields: &[("agent", "string"), ("name", "string?")], may_omit: &["name"] },
         crate::check::TypeSchema { name: "PeerAgents", fields: &[("agents", "[PeerAgent]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerRow", fields: &[("n", "int"), ("as", "string?"), ("kind", "string"), ("text", "string"), ("at", "int?")], may_omit: &["as", "at"] },
+        crate::check::TypeSchema { name: "PeerThread", fields: &[("paired", "bool"), ("found", "bool"), ("state", "string?"), ("rows", "[PeerRow]"), ("cost", "json?"), ("waiting", "json?"), ("takesTo", "bool?")], may_omit: &["state", "cost", "waiting", "takesTo"] },
+        crate::check::TypeSchema { name: "PeerStopped", fields: &[("paired", "bool"), ("state", "string?")], may_omit: &["state"] },
+        crate::check::TypeSchema { name: "PeerTold", fields: &[("paired", "bool"), ("taken", "bool"), ("note", "string?")], may_omit: &["note"] },
         crate::check::TypeSchema { name: "HandleRevoke", fields: &[("handle", "string"), ("revoked", "bool"), ("at", "int")], may_omit: &[] },
         crate::check::TypeSchema { name: "HandleRevokes", fields: &[("handles", "[HandleRevoke]")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomPerson", fields: &[("person", "string"), ("joinedGen", "int"), ("leftGen", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomPeople", fields: &[("enabled", "bool"), ("gen", "int"), ("people", "[RoomPerson]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "HostMemory", fields: &[("pressure", "HostPressure?"), ("usedBytes", "int?"), ("totalBytes", "int?"), ("swapUsedBytes", "int?"), ("swapTotalBytes", "int?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "HostDisk", fields: &[("mount", "string"), ("name", "string"), ("totalBytes", "int"), ("freeBytes", "int")], may_omit: &[] },
+        crate::check::TypeSchema { name: "HostHealth", fields: &[("at", "int"), ("cpu", "json?"), ("memory", "HostMemory"), ("disks", "[HostDisk]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "AgentRule", fields: &[("list", "string"), ("rule", "string"), ("source", "string"), ("id", "string?"), ("kind", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "AgentRules", fields: &[("agent", "string"), ("rules", "[AgentRule]")], may_omit: &[] },
         crate::check::TypeSchema { name: "CreatedInvite", fields: &[("inviteId", "string"), ("link", "string"), ("appLink", "string"), ("kithLink", "string"), ("webLink", "string?"), ("pageLink", "string?"), ("expiresAt", "int"), ("personId", "string")], may_omit: &["webLink", "pageLink"] },
         crate::check::TypeSchema { name: "RoomPersonChange", fields: &[("gen", "int"), ("changed", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "MyRoomAgent", fields: &[("id", "string"), ("name", "string")], may_omit: &[] },
@@ -2052,10 +2258,16 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotLeaveParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "PeerAgentsParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "PeerRevokesParams", fields: &[("handles", "[HandleRevoke]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerAskParams", fields: &[("key", "string"), ("epoch", "string"), ("agent", "string"), ("task", "string"), ("lineage", "json?"), ("opts", "json?"), ("cont", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerThreadParams", fields: &[("key", "string"), ("epoch", "string"), ("after", "int?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerStopParams", fields: &[("key", "string"), ("epoch", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerToParams", fields: &[("key", "string"), ("epoch", "string"), ("text", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "CreateInviteParams", fields: &[("agents", "{string}"), ("name", "string?"), ("personId", "string?"), ("rooms", "[string]?")], may_omit: &[] },
         crate::check::TypeSchema { name: "AddRoomPersonParams", fields: &[("room", "string"), ("person", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "RemoveRoomPersonParams", fields: &[("room", "string"), ("person", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "RoomPeopleParams", fields: &[("room", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "HostHealthParams", fields: &[], may_omit: &[] },
+        crate::check::TypeSchema { name: "AgentRulesParams", fields: &[("agent", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "MyRoomsParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "LeaveRoomParams", fields: &[("room", "string")], may_omit: &[] },
     ],
@@ -2109,10 +2321,16 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "botLeave", who: &["bot"], params: "BotLeaveParams", result: "Empty" },
         crate::check::MethodSchema { name: "peerAgents", who: &["peer"], params: "PeerAgentsParams", result: "PeerAgents" },
         crate::check::MethodSchema { name: "peerRevokes", who: &["peer"], params: "PeerRevokesParams", result: "HandleRevokes" },
+        crate::check::MethodSchema { name: "peerAsk", who: &["peer"], params: "PeerAskParams", result: "PeerThread" },
+        crate::check::MethodSchema { name: "peerThread", who: &["peer"], params: "PeerThreadParams", result: "PeerThread" },
+        crate::check::MethodSchema { name: "peerStop", who: &["peer"], params: "PeerStopParams", result: "PeerStopped" },
+        crate::check::MethodSchema { name: "peerTo", who: &["peer"], params: "PeerToParams", result: "PeerTold" },
         crate::check::MethodSchema { name: "createInvite", who: &["owner"], params: "CreateInviteParams", result: "CreatedInvite" },
         crate::check::MethodSchema { name: "addRoomPerson", who: &["owner"], params: "AddRoomPersonParams", result: "RoomPersonChange" },
         crate::check::MethodSchema { name: "removeRoomPerson", who: &["owner"], params: "RemoveRoomPersonParams", result: "RoomPersonChange" },
         crate::check::MethodSchema { name: "roomPeople", who: &["owner"], params: "RoomPeopleParams", result: "RoomPeople" },
+        crate::check::MethodSchema { name: "hostHealth", who: &["owner"], params: "HostHealthParams", result: "HostHealth" },
+        crate::check::MethodSchema { name: "agentRules", who: &["owner"], params: "AgentRulesParams", result: "AgentRules" },
         crate::check::MethodSchema { name: "myRooms", who: &["member"], params: "MyRoomsParams", result: "MyRooms" },
         crate::check::MethodSchema { name: "leaveRoom", who: &["member"], params: "LeaveRoomParams", result: "RoomLeft" },
     ],
@@ -2163,10 +2381,19 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotSelf" => serde_json::from_value::<BotSelf>(value).map(drop),
         "PeerAgent" => serde_json::from_value::<PeerAgent>(value).map(drop),
         "PeerAgents" => serde_json::from_value::<PeerAgents>(value).map(drop),
+        "PeerRow" => serde_json::from_value::<PeerRow>(value).map(drop),
+        "PeerThread" => serde_json::from_value::<PeerThread>(value).map(drop),
+        "PeerStopped" => serde_json::from_value::<PeerStopped>(value).map(drop),
+        "PeerTold" => serde_json::from_value::<PeerTold>(value).map(drop),
         "HandleRevoke" => serde_json::from_value::<HandleRevoke>(value).map(drop),
         "HandleRevokes" => serde_json::from_value::<HandleRevokes>(value).map(drop),
         "RoomPerson" => serde_json::from_value::<RoomPerson>(value).map(drop),
         "RoomPeople" => serde_json::from_value::<RoomPeople>(value).map(drop),
+        "HostMemory" => serde_json::from_value::<HostMemory>(value).map(drop),
+        "HostDisk" => serde_json::from_value::<HostDisk>(value).map(drop),
+        "HostHealth" => serde_json::from_value::<HostHealth>(value).map(drop),
+        "AgentRule" => serde_json::from_value::<AgentRule>(value).map(drop),
+        "AgentRules" => serde_json::from_value::<AgentRules>(value).map(drop),
         "CreatedInvite" => serde_json::from_value::<CreatedInvite>(value).map(drop),
         "RoomPersonChange" => serde_json::from_value::<RoomPersonChange>(value).map(drop),
         "MyRoomAgent" => serde_json::from_value::<MyRoomAgent>(value).map(drop),
@@ -2233,10 +2460,16 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotLeaveParams" => serde_json::from_value::<BotLeaveParams>(value).map(drop),
         "PeerAgentsParams" => serde_json::from_value::<PeerAgentsParams>(value).map(drop),
         "PeerRevokesParams" => serde_json::from_value::<PeerRevokesParams>(value).map(drop),
+        "PeerAskParams" => serde_json::from_value::<PeerAskParams>(value).map(drop),
+        "PeerThreadParams" => serde_json::from_value::<PeerThreadParams>(value).map(drop),
+        "PeerStopParams" => serde_json::from_value::<PeerStopParams>(value).map(drop),
+        "PeerToParams" => serde_json::from_value::<PeerToParams>(value).map(drop),
         "CreateInviteParams" => serde_json::from_value::<CreateInviteParams>(value).map(drop),
         "AddRoomPersonParams" => serde_json::from_value::<AddRoomPersonParams>(value).map(drop),
         "RemoveRoomPersonParams" => serde_json::from_value::<RemoveRoomPersonParams>(value).map(drop),
         "RoomPeopleParams" => serde_json::from_value::<RoomPeopleParams>(value).map(drop),
+        "HostHealthParams" => serde_json::from_value::<HostHealthParams>(value).map(drop),
+        "AgentRulesParams" => serde_json::from_value::<AgentRulesParams>(value).map(drop),
         "MyRoomsParams" => serde_json::from_value::<MyRoomsParams>(value).map(drop),
         "LeaveRoomParams" => serde_json::from_value::<LeaveRoomParams>(value).map(drop),
         _ => return None,

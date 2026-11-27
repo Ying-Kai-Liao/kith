@@ -1,0 +1,9 @@
+{
+  "method": "peerAsk",
+  "type": "PeerThread",
+  "body": {
+    "found": false,
+    "paired": false,
+    "rows": []
+  }
+}

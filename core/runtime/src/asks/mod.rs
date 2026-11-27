@@ -31,6 +31,9 @@ mod ledger;
 #[cfg(all(test, unix))]
 mod ledger_tests;
 mod peer;
+mod peer_b;
+#[cfg(all(test, unix))]
+mod peer_b_tests;
 #[cfg(all(test, unix))]
 mod peer_tests;
 mod rows;
@@ -42,6 +45,7 @@ mod tests;
 
 pub(crate) use call::{call, serves};
 pub(crate) use peer::cut_origin_in;
+pub(crate) use peer_b::busy_origin_in;
 pub(crate) use rows::mark_read_by_wake_in;
 pub(crate) use sweep::{Looked, Seen, look, seen_in, settle_in as sweep_in};
 
@@ -571,6 +575,10 @@ fn open_checked_in(
             "kith-core: asks: {} is not paired with this computer at epoch {}; the ask is refused",
             og.computer, og.epoch
         )));
+    }
+    // Mac link limits: a computer has only so many asks waiting here (the refusal is a row it reads back).
+    if let Some(og) = origin {
+        peer_b::room_in(tx, og.computer)?;
     }
     // A `bg` open that is made again (a retry after a lost answer) finds its ask and its one turn, and makes no second.
     if let (Some(l), Some(old)) = (&o.ledger, get(tx, o.id)?)

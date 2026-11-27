@@ -15,17 +15,17 @@ use crate::wake::Fail;
 const USAGE: &str = "usage: kith ask <agent> [-c] [--as NAME] [-C DIR] [-p PROJECT] [-m MODEL] [-e EFFORT] [-H HARNESS] [--json] \"task\"";
 
 /// The command line of `kith ask AGENT ...` after the agent.
-struct Parsed {
-    cont: bool,
-    name: Option<String>,
-    as_json: bool,
-    dir: Option<String>,
+pub(super) struct Parsed {
+    pub(super) cont: bool,
+    pub(super) name: Option<String>,
+    pub(super) as_json: bool,
+    pub(super) dir: Option<String>,
     /// `-p`, `-m`, `-e`, `-H` (long or short, as given) with their values, in order.
-    opts: Vec<(String, String)>,
-    task: String,
+    pub(super) opts: Vec<(String, String)>,
+    pub(super) task: String,
 }
 
-fn parse(rest: &[String]) -> R<Parsed> {
+pub(super) fn parse(rest: &[String]) -> R<Parsed> {
     let mut p = Parsed {
         cont: false,
         name: None,
@@ -92,7 +92,7 @@ fn project_of(opts: &[(String, String)]) -> Option<String> {
 }
 
 /// The flag a stored option is kept under: `-p`, `-m`, `-e`, `-H`.
-fn short(flag: &str) -> String {
+pub(super) fn short(flag: &str) -> String {
     if flag.len() == 2 {
         return flag.to_owned();
     }
@@ -180,7 +180,7 @@ fn conversation(host: &Host, agent: &str, p: &Parsed) -> Where {
     Where { key, prev }
 }
 
-fn prev_str<'a>(prev: Option<&'a Value>, key: &str) -> Option<&'a str> {
+pub(super) fn prev_str<'a>(prev: Option<&'a Value>, key: &str) -> Option<&'a str> {
     prev?.get(key)?.as_str()
 }
 
@@ -196,8 +196,10 @@ pub(super) fn writer_live(host: &Host, sid: &str) -> bool {
             .into_iter()
             .flatten()
             .any(|c| c.get("conversation").and_then(Value::as_str) == Some(sid)),
-        // Matched by text: the core's refusal (core/runtime/src/conversations/external.rs) carries no code yet.
-        Err(Fail::Refused(why)) if why.contains("not switched to the core") => {
+        // The core's refusal (core/runtime/src/conversations/external.rs) carries a code; its words are free to change.
+        Err(Fail::Refused(why))
+            if crate::wake::has_code(&why, crate::wake::CLAIMS_NOT_SWITCHED) =>
+        {
             let dir = host.state.join("live").join("terminal");
             [format!("{sid}.claim"), format!("{sid}.takeover.claim")]
                 .iter()
@@ -236,7 +238,7 @@ fn claim_file_alive(path: &std::path::Path) -> bool {
 }
 
 /// A continued conversation keeps its project, model, effort and harness unless this call names new ones.
-fn merged_opts(p: &Parsed, prev: Option<&Value>) -> Vec<(String, String)> {
+pub(super) fn merged_opts(p: &Parsed, prev: Option<&Value>) -> Vec<(String, String)> {
     let mut kith_opts = p.opts.clone();
     for (flag, alias) in [
         ("-p", "--project"),
