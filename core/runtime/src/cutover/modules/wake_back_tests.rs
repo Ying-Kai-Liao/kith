@@ -111,7 +111,7 @@ fn each_refusal_of_the_rollback_is_found_on_its_own() {
     let kid = Proc::new();
     let mut c = core(&r);
     // (a) a wake turn claimed and no process attached.
-    let (_, turn) = taken(&mut c, "sa", "a:1", "host");
+    let (_, turn) = taken(&mut c, "sa", "a:1", "run");
     let seen = claims::revoke_epoch(&c, "owner").unwrap();
     claim_run(&mut c, "sa", "owner", turn, Some(OLD), seen, now()).unwrap();
     let said = crate::wake::rollback::refusals(c.conn()).unwrap();
@@ -138,9 +138,8 @@ fn each_refusal_of_the_rollback_is_found_on_its_own() {
         "a run with its pid and stamp is handed over"
     );
     c.conn()
-        .execute(
-            "UPDATE claims SET pid_started = NULL WHERE conversation = 'sd'",
-            [],
+        .execute_batch(
+            "PRAGMA ignore_check_constraints = ON; UPDATE claims SET pid_started = NULL WHERE conversation = 'sd'; PRAGMA ignore_check_constraints = OFF;",
         )
         .unwrap();
     let said = crate::wake::rollback::refusals(c.conn()).unwrap();
@@ -204,9 +203,8 @@ fn a_refused_rollback_writes_nothing_and_leaves_the_queue_the_cores() {
         let (_, turn) = taken(&mut c, "sd", "d:1", "run");
         running(&mut c, "sd", turn, &kid);
         c.conn()
-            .execute(
-                "UPDATE claims SET pid_started = NULL WHERE conversation = 'sd'",
-                [],
+            .execute_batch(
+                "PRAGMA ignore_check_constraints = ON; UPDATE claims SET pid_started = NULL WHERE conversation = 'sd'; PRAGMA ignore_check_constraints = OFF;",
             )
             .unwrap();
     }

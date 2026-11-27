@@ -209,6 +209,7 @@ fn the_module_is_registered_and_names_auth_json_as_its_tombstone() {
             "transcripts",
             "claims",
             "schedules",
+            "wake",
             "authority"
         ]
     );

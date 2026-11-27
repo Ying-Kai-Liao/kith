@@ -406,6 +406,7 @@ fn the_modules_are_listed_and_accounts_is_checkable() {
             "transcripts",
             "claims",
             "schedules",
+            "wake",
             "authority"
         ]
     );

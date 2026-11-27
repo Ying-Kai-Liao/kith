@@ -327,6 +327,40 @@ impl Lab {
         v["state"].as_str().map(str::to_owned)
     }
 
+    /// A failing case prints what the processes said and what the core holds: CI is the only place these run.
+    fn say_what_happened(&self) {
+        let log = self.host_log();
+        let tail: Vec<&str> = log.lines().rev().take(150).collect();
+        eprintln!("--- host.log (last {} lines)", tail.len());
+        for l in tail.iter().rev() {
+            eprintln!("{l}");
+        }
+        let Ok(db) = rusqlite::Connection::open_with_flags(
+            self.machine.join("core/core.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ) else {
+            return;
+        };
+        for table in ["turns", "claims", "wake_sessions", "wake_items", "wake_turns", "wake_answered"] {
+            let Ok(mut st) = db.prepare(&format!("SELECT * FROM {table}")) else { continue };
+            let names: Vec<String> = st.column_names().iter().map(|s| (*s).to_owned()).collect();
+            eprintln!("--- {table}");
+            let Ok(rows) = st.query_map([], |r| {
+                Ok(names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| format!("{n}={}", r.get_ref(i).map(|v| format!("{v:?}")).unwrap_or_default()))
+                    .collect::<Vec<_>>()
+                    .join(" "))
+            }) else {
+                continue;
+            };
+            for row in rows.flatten() {
+                eprintln!("{row}");
+            }
+        }
+    }
+
     fn host_log(&self) -> String {
         std::fs::read_to_string(self.dir.join("host.log")).unwrap_or_default()
     }
@@ -398,6 +432,9 @@ impl Lab {
 
 impl Drop for Lab {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.say_what_happened();
+        }
         // What a run left (held by `hold`), and the holder: only pids this test started.
         let _ = std::fs::remove_file(self.dir.join("hold"));
         for pid in self.left.borrow().iter() {
