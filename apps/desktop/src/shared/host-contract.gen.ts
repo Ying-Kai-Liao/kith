@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = 'b7ed4215534d8e1257ec4a9cd6d8624daba9c590351de9f1d21f7417c93bff58'
+export const CONTRACT_SHA256 = '58a31f2b53c9401d865950de7a4a3e12340b3dfc59c40773f9060a8fda2d88e9'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -35,6 +35,12 @@ export const AgentRoleValues = ['member', 'guest'] as const
 export type AgentRole = (typeof AgentRoleValues)[number]
 /** How a consumer reads a AgentRole word: one this version doesn't know is 'guest'. */
 export const decodeAgentRole = (raw: unknown): AgentRole => known(AgentRoleValues, raw, 'guest')
+
+/** How hard this computer's memory is pressed: the OS's own word. One this version doesn't know reads as normal. */
+export const HostPressureValues = ['normal', 'warn', 'critical'] as const
+export type HostPressure = (typeof HostPressureValues)[number]
+/** How a consumer reads a HostPressure word: one this version doesn't know is 'normal'. */
+export const decodeHostPressure = (raw: unknown): HostPressure => known(HostPressureValues, raw, 'normal')
 
 /** What kind of computer the host runs on (the apps' computer icon). One this version doesn't know is a desktop. */
 export const DeviceValues = ['laptop', 'macmini', 'macstudio', 'imac', 'macpro', 'desktop', 'linux'] as const
@@ -547,6 +553,46 @@ export interface RoomPeople {
   enabled: boolean
   gen: number
   people: RoomPerson[]
+}
+
+/** Memory and swap in bytes; each field is null where this computer's OS gives no reading. */
+export interface HostMemory {
+  pressure?: HostPressure | null
+  usedBytes?: number | null
+  totalBytes?: number | null
+  swapUsedBytes?: number | null
+  swapTotalBytes?: number | null
+}
+
+/** One mounted volume of this computer. */
+export interface HostDisk {
+  mount: string
+  name: string
+  totalBytes: number
+  freeBytes: number
+}
+
+/** This computer's load now: cpu is {percent: number, cores: int} (json: the contract has no number type), null where unread. */
+export interface HostHealth {
+  at: number
+  cpu?: unknown | null
+  memory: HostMemory
+  disks: HostDisk[]
+}
+
+/** One permission rule of an agent, raw (placeholders such as {{HOME_REAL}} unexpanded). list is allow, ask or deny; source is role/settings.json or allowed.json; id and kind come only from allowed.json entries. */
+export interface AgentRule {
+  list: string
+  rule: string
+  source: string
+  id?: string | null
+  kind?: string | null
+}
+
+/** An agent's permission rules, as the launcher merges them at launch: role/settings.json allow, ask and deny, then allowed.json (as allow). */
+export interface AgentRules {
+  agent: string
+  rules: AgentRule[]
 }
 
 /** What making an invite answers: its id and links, when it lapses, and the person it is for. */
@@ -1063,6 +1109,14 @@ export interface RoomPeopleParams {
   room: string
 }
 
+/** What `hostHealth` takes. */
+export type HostHealthParams = Record<string, never>
+
+/** What `agentRules` takes. */
+export interface AgentRulesParams {
+  agent: string
+}
+
 /** What `myRooms` takes. */
 export type MyRoomsParams = Record<string, never>
 
@@ -1122,6 +1176,11 @@ export interface Types {
   HandleRevokes: HandleRevokes
   RoomPerson: RoomPerson
   RoomPeople: RoomPeople
+  HostMemory: HostMemory
+  HostDisk: HostDisk
+  HostHealth: HostHealth
+  AgentRule: AgentRule
+  AgentRules: AgentRules
   CreatedInvite: CreatedInvite
   RoomPersonChange: RoomPersonChange
   MyRoomAgent: MyRoomAgent
@@ -1196,6 +1255,8 @@ export interface Types {
   AddRoomPersonParams: AddRoomPersonParams
   RemoveRoomPersonParams: RemoveRoomPersonParams
   RoomPeopleParams: RoomPeopleParams
+  HostHealthParams: HostHealthParams
+  AgentRulesParams: AgentRulesParams
   MyRoomsParams: MyRoomsParams
   LeaveRoomParams: LeaveRoomParams
 }
@@ -1279,6 +1340,8 @@ export const METHODS = {
   addRoomPerson: { who: ['owner'], params: 'AddRoomPersonParams', result: 'RoomPersonChange' },
   removeRoomPerson: { who: ['owner'], params: 'RemoveRoomPersonParams', result: 'RoomPersonChange' },
   roomPeople: { who: ['owner'], params: 'RoomPeopleParams', result: 'RoomPeople' },
+  hostHealth: { who: ['owner'], params: 'HostHealthParams', result: 'HostHealth' },
+  agentRules: { who: ['owner'], params: 'AgentRulesParams', result: 'AgentRules' },
   myRooms: { who: ['member'], params: 'MyRoomsParams', result: 'MyRooms' },
   leaveRoom: { who: ['member'], params: 'LeaveRoomParams', result: 'RoomLeft' },
 } as const
@@ -1343,6 +1406,8 @@ export interface Params {
   addRoomPerson: AddRoomPersonParams
   removeRoomPerson: RemoveRoomPersonParams
   roomPeople: RoomPeopleParams
+  hostHealth: HostHealthParams
+  agentRules: AgentRulesParams
   myRooms: MyRoomsParams
   leaveRoom: LeaveRoomParams
 }
@@ -1406,12 +1471,14 @@ export interface Results {
   addRoomPerson: RoomPersonChange
   removeRoomPerson: RoomPersonChange
   roomPeople: RoomPeople
+  hostHealth: HostHealth
+  agentRules: AgentRules
   myRooms: MyRooms
   leaveRoom: RoomLeft
 }
 
 /** What the owner alone (a method no one else may call; the owner may call every method) may call. */
-export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic', 'createInvite', 'addRoomPerson', 'removeRoomPerson', 'roomPeople'] as const satisfies readonly MethodName[]
+export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic', 'createInvite', 'addRoomPerson', 'removeRoomPerson', 'roomPeople', 'hostHealth', 'agentRules'] as const satisfies readonly MethodName[]
 
 /** What an invited person may call. */
 export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread', 'history', 'newSession', 'unsend', 'markRead', 'stop', 'upload', 'readUpload', 'react', 'respondPermission', 'editHandoff', 'keepConversation', 'projects', 'threadProjects', 'setThreadProjects', 'linkCode', 'scheduleMessages', 'callAccept', 'callDecline', 'callGreet', 'logCall', 'startCall', 'endCall', 'createBotInvite', 'revokeBotInvite', 'revokeBot', 'myBots', 'setBotLimits', 'resolveCitation', 'myRooms', 'leaveRoom'] as const satisfies readonly MethodName[]
@@ -1448,6 +1515,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotStatus: { values: BotStatusValues, unknown: 'idle' },
     Permission: { values: PermissionValues, unknown: 'unknown' },
     AgentRole: { values: AgentRoleValues, unknown: 'guest' },
+    HostPressure: { values: HostPressureValues, unknown: 'normal' },
     Device: { values: DeviceValues, unknown: 'desktop' },
     BotProvider: { values: BotProviderValues, unknown: 'other' },
     BotGuestState: { values: BotGuestStateValues, unknown: 'unknown' },
@@ -1512,6 +1580,11 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     HandleRevokes: { fields: { handles: '[HandleRevoke]' } },
     RoomPerson: { fields: { person: 'string', joinedGen: 'int', leftGen: 'int?' } },
     RoomPeople: { fields: { enabled: 'bool', gen: 'int', people: '[RoomPerson]' } },
+    HostMemory: { fields: { pressure: 'HostPressure?', usedBytes: 'int?', totalBytes: 'int?', swapUsedBytes: 'int?', swapTotalBytes: 'int?' } },
+    HostDisk: { fields: { mount: 'string', name: 'string', totalBytes: 'int', freeBytes: 'int' } },
+    HostHealth: { fields: { at: 'int', cpu: 'json?', memory: 'HostMemory', disks: '[HostDisk]' } },
+    AgentRule: { fields: { list: 'string', rule: 'string', source: 'string', id: 'string?', kind: 'string?' } },
+    AgentRules: { fields: { agent: 'string', rules: '[AgentRule]' } },
     CreatedInvite: { fields: { inviteId: 'string', link: 'string', appLink: 'string', kithLink: 'string', webLink: 'string?', pageLink: 'string?', expiresAt: 'int', personId: 'string' }, mayOmit: ['webLink', 'pageLink'] },
     RoomPersonChange: { fields: { gen: 'int', changed: 'bool' } },
     MyRoomAgent: { fields: { id: 'string', name: 'string' } },
@@ -1586,6 +1659,8 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     AddRoomPersonParams: { fields: { room: 'string', person: 'string' } },
     RemoveRoomPersonParams: { fields: { room: 'string', person: 'string' } },
     RoomPeopleParams: { fields: { room: 'string' } },
+    HostHealthParams: { fields: {} },
+    AgentRulesParams: { fields: { agent: 'string' } },
     MyRoomsParams: { fields: {} },
     LeaveRoomParams: { fields: { room: 'string' } },
   },
