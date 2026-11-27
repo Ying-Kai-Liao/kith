@@ -825,6 +825,8 @@ async fn a_thread_row_carries_its_summary_only_to_its_audience() {
 #[tokio::test]
 async fn who_prompted_an_entry_is_not_shown_to_an_invitee_or_a_bot_guest() {
     let r = Rig::new().await;
+    // The invitee's chat is made from the owner's bot of the agent, so that bot has to exist first.
+    r.owner_bot("house");
     let (sam, _) = joined(&r, json!({"house": "member"})).await;
     let theirs = chat_of(&r, &sam).await;
     let data = json!({"text": "hi", "status": "sent", "prompter": {"kind": "app"}});
