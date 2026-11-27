@@ -38,7 +38,6 @@ struct AgentPageView: View {
     @State private var editingInstructions = false
     @State private var showingUsage = false
     @State private var editingLimit = false
-    @State private var sharing = false
     @State private var template: EditorRequest?
 
     init(botId: String, request: DetailsRequest, call: CallAction?) {
@@ -101,7 +100,6 @@ struct AgentPageView: View {
                 }
             }
         }
-        .kithSheet(isPresented: $sharing) { ShareAgentSheet(store: model, agent: agent, name: name) }
         .kithSheet(item: $template) { BotTemplateView(draft: $0.draft) }
     }
 
@@ -199,7 +197,6 @@ struct AgentPageView: View {
                 if let call {
                     pill("Call", "phone.fill", enabled: call.blocked == nil, action: call.start)
                 }
-                pill("Share", "square.and.arrow.up", enabled: !offline) { sharing = true }
             }
             if let reason = call?.blocked {
                 Text(reason).font(.system(size: 11.5)).foregroundStyle(Palette.muted)
@@ -330,7 +327,7 @@ struct AgentPageView: View {
         case .advanced:
             if let draft = Binding($draft) {
                 AgentAdvancedPage(name: name, draft: draft, kith: kith, access: access, shown: shown,
-                                  open: { self.subpage = $0 }, askBuilder: builder == nil ? nil : askBuilder)
+                                  open: { self.subpage = $0 }, askBuilder: builderAsk)
             }
         case .keys:
             if let access { AgentKeysPage(store: access) }
@@ -350,6 +347,11 @@ struct AgentPageView: View {
 
     /// builder's chat, when this computer has one.
     private var builder: Bot? { model.agentBot("builder") }
+
+    private var builderAsk: ((String) -> Void)? {
+        guard builder != nil else { return nil }
+        return { askBuilder($0) }
+    }
 
     private func askBuilder(_ text: String) {
         guard let builder else { return }

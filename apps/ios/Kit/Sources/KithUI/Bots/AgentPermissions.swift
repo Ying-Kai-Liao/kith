@@ -35,6 +35,27 @@ enum AgentPermissions {
             })]
     }
 
+    /// The merged rules from `agentRules`, grouped Allow, Ask, Never in the host's order. Only a rule from
+    /// allowed.json (it carries an id) can be removed; the package's own rules are read-only.
+    static func groups(rules: [HostContract.AgentRule]) -> [PermissionGroup] {
+        let lists: [(key: String, title: String, empty: String)] = [
+            ("allow", "Allow without asking", "Nothing yet. “Always allow” on a blocked action lands here."),
+            ("ask", "Always ask", "Nothing here."),
+            ("deny", "Never", "Nothing here."),
+        ]
+        return lists.map { list in
+            let own = rules.filter { $0.list == list.key }
+            let lines = own.enumerated().map { index, rule -> PermissionLine in
+                let owned = rule.source == "allowed.json" && rule.id != nil
+                return PermissionLine(id: owned ? "allowed/" + rule.id! : "\(list.key)/\(index)", text: rule.rule, detail: nil,
+                                      source: owned ? "You allowed it" : "Package", removable: owned)
+            }
+            return PermissionGroup(id: list.key, title: list.title,
+                                   footer: list.key == "allow" && lines.contains { $0.removable } ? "A removed rule is gone at this agent's next run." : nil,
+                                   emptyNote: list.empty, lines: lines)
+        }
+    }
+
     /// The rule id a removable line stands for.
     static func ruleId(_ line: PermissionLine) -> String { String(line.id.dropFirst("allowed/".count)) }
 
@@ -56,6 +77,18 @@ struct AgentPermissionsPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             AccessTabView(store: store, kith: kith).asksBefore
+            if let rules = store.rules {
+                ForEach(AgentPermissions.groups(rules: rules)) { group in
+                    CardSection(group.title, footer: group.footer) {
+                        if group.lines.isEmpty { SheetNote(text: group.emptyNote) }
+                        ForEach(group.lines) { line in
+                            SheetRow(icon: group.id == "deny" ? "nosign" : "checkmark.shield", title: line.text, detail: line.source) {
+                                if line.removable { remove(line) }
+                            }
+                        }
+                    }
+                }
+            } else {
             switch store.allowed {
             case .hidden: EmptyView()
             case .loading: CardSection("Allow without asking") { SheetNote(text: "Loading…") }
@@ -76,6 +109,7 @@ struct AgentPermissionsPage: View {
                     }
                 }
             }
+            }
             if let error = store.removeError {
                 Text("Not removed: \(error)").font(.footnote).foregroundStyle(Palette.danger)
             }
@@ -94,8 +128,8 @@ struct AgentPermissionsPage: View {
             ProgressView().controlSize(.small)
         } else {
             IconButton("Remove", systemImage: "trash") {
-                guard case .loaded(let list) = store.allowed, let rule = list.allowed.first(where: { $0.id == AgentPermissions.ruleId(line) }) else { return }
-                Task { await store.remove(rule) }
+                let id = AgentPermissions.ruleId(line)
+                Task { await store.remove(ruleId: id) }
             }
             .disabled(model.isOffline)
         }
