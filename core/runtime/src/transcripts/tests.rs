@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use kith_kernel::threads::Ctx;
 use rusqlite::Connection;
+#[cfg(unix)]
 use serde_json::{Value, json};
 
 use super::place::{Choice, apply, decide, step};
