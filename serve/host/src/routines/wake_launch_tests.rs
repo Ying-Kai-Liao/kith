@@ -163,12 +163,20 @@ fn a_wake_on_its_own_session_on_its_own_account_resumes_it_through_engine_run_an
     let echo = w.dir.join("acp_agent.py");
     let src = std::fs::read_to_string(&echo).unwrap();
     assert!(src.contains(r#""loadSession": False"#), "the echo agent's capability changed");
-    std::fs::write(&echo, src.replace(r#""loadSession": False"#, r#""loadSession": True"#)).unwrap();
+    let load = r#"    elif method == "session/load":
+        send({"jsonrpc": "2.0", "id": m["id"], "result": {"modes": {"availableModes": [{"id": "read-only"}, {"id": "auto"}, {"id": "full-access"}]}}})
+    elif method == "session/prompt":"#;
+    let src = src.replace(r#""loadSession": False"#, r#""loadSession": True"#);
+    assert!(src.contains("    elif method == \"session/prompt\":"), "the echo agent's prompt branch changed");
+    std::fs::write(&echo, src.replace("    elif method == \"session/prompt\":", load)).unwrap();
     let out = launch(&w, "codex:abc", Some(claim));
     assert!(out.status.success(), "{}", said(&out));
     assert_eq!(w.runs().len(), 1, "the engine ran once: {:?}", w.runs());
     let sent = std::fs::read_to_string(w.dir.join("acp-in")).unwrap();
-    assert!(sent.contains("session/load") && sent.contains("codex:abc"), "the engine loaded the owed session: {sent}");
+    assert!(
+        sent.contains("session/load") && sent.contains(r#""sessionId":"abc""#),
+        "the engine loaded the owed session: {sent}"
+    );
     assert!(!sent.contains("session/new"), "no new session beside it: {sent}");
     assert_eq!(sent.matches(NOTE).count(), 1, "the note reached the engine once: {sent}");
     assert!(!said(&out).contains("starting a new one"), "{}", said(&out));
