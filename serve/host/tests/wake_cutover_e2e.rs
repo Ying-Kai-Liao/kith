@@ -142,7 +142,7 @@ impl Lab {
             // choice of state folder, which moves its machine folder (and so the core's socket) away from the host's.
             &kith_home.join("kernel"),
             &dir.join("bin"),
-            &home.join(".claude/rec"),
+            &home.join(".claude/projects/p1/recs"),
             &home.join(".claude"),
         ] {
             std::fs::create_dir_all(d).unwrap();
@@ -168,7 +168,7 @@ impl Lab {
             let f = dir.join("bin").join(name);
             // The host's launch hands its children their own environment, not this test's: the paths go into the scripts.
             let text = text
-                .replace("$REC", &home.join(".claude/rec").to_string_lossy())
+                .replace("$REC", &home.join(".claude/projects/p1/recs").to_string_lossy())
                 .replace("$HOLD", &dir.join("hold").to_string_lossy())
                 .replace("$WAKELOG", &dir.join("wake.log").to_string_lossy());
             std::fs::write(&f, text).unwrap();
@@ -238,7 +238,7 @@ impl Lab {
             ("PYTHONDONTWRITEBYTECODE", "1".to_owned()),
             ("KITH_SERVE_CLOUD", "off".to_owned()),
             ("KITH_WAKE_NO_KICK", "1".to_owned()),
-            ("REC", p(&self.home.join(".claude/rec"))),
+            ("REC", p(&self.home.join(".claude/projects/p1/recs"))),
             ("HOLD", p(&self.dir.join("hold"))),
             ("WAKELOG", p(&self.dir.join("wake.log"))),
             // Never this Mac's master key item.
@@ -338,7 +338,7 @@ impl Lab {
 
     /// The engine starts that carried a wake's note: (file, its text).
     fn starts(&self) -> Vec<String> {
-        let mut all: Vec<String> = std::fs::read_dir(self.home.join(".claude/rec"))
+        let mut all: Vec<String> = std::fs::read_dir(self.home.join(".claude/projects/p1/recs"))
             .unwrap()
             .flatten()
             .filter_map(|e| std::fs::read_to_string(e.path()).ok())
