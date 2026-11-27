@@ -24,6 +24,7 @@ use crate::wake::{Call, Fail};
 
 mod conv;
 mod fg;
+mod peer;
 mod remote;
 mod verbs;
 
@@ -227,6 +228,8 @@ fn go(host: &Host, args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
         "delegations" => verbs::delegations(host, out),
         // The host's tick settles what no one reported and wakes the askers (R4): there is nothing left to sweep.
         "--sweep" => Ok(0),
+        // An agent on another computer: over the Mac link when it is paired, else over ssh when it is in remotes.json.
+        _ if peer::split(&first).is_some() => peer::route(host, bg, &args, out, err),
         _ if first.contains('@') => remote::ask(host, bg, &args, err),
         _ => fg::ask(host, bg, &first, rest, out, err),
     }

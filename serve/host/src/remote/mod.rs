@@ -11,6 +11,7 @@ pub mod handle_revokes;
 pub mod identity;
 pub mod members;
 pub mod owner;
+pub mod peer_asks;
 pub mod peers;
 pub mod push;
 pub mod relay;

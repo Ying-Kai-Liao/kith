@@ -249,6 +249,22 @@ async fn the_peer_methods_answer_as_the_contract_and_its_fixtures_say() {
     let mut answers = BTreeMap::new();
     answers.insert("peerAgents", ("peerAgents", call(&r, &studio, "peerAgents", json!({})).await));
     answers.insert("peerRevokes", ("peerRevokes", call(&r, &studio, "peerRevokes", json!({"handles": []})).await));
+    // The ask methods answer from the core's rows once the caller is paired at the epoch it names; a caller that is not gets
+    // `paired: false` and nothing else, which needs no core (the rows' shapes are the tests of `remote::peer_asks`).
+    let old = json!({"key": "k1", "epoch": "an-old-epoch"});
+    let with = |extra: Value| {
+        let mut p = old.clone();
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        p
+    };
+    for (method, extra) in [
+        ("peerAsk", json!({"agent": "house", "task": "do it"})),
+        ("peerThread", json!({})),
+        ("peerStop", json!({})),
+        ("peerTo", json!({"text": "and this"})),
+    ] {
+        answers.insert(method, (method, call(&r, &studio, method, with(extra)).await));
+    }
     let methods: std::collections::BTreeSet<_> = answers.values().map(|(m, _)| *m).collect();
     assert_eq!(methods, rpc::PEER_METHODS.iter().copied().collect(), "a fixture for every peer method");
     answers_are_their_fixtures("peer", &answers);
