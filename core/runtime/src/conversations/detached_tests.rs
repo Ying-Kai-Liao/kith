@@ -44,7 +44,15 @@ impl Liveness for Sys {
 
 fn world() -> (tempfile::TempDir, Core) {
     let (t, m) = machine();
-    let mut core = start_with(&Layout::new(&m), MIGRATIONS).expect("start");
+    let layout = Layout::new(&m);
+    let mut core = start_with(&layout, MIGRATIONS).expect("start");
+    // A wake's turn is claimed only while the wake queue is the core's (WK6): these runs are of a switched Mac.
+    #[cfg(unix)]
+    {
+        core = core.with_folders(&crate::tests::paths(&m));
+        crate::cutover::modules::wake::write_switched(&layout, &mut core, 1)
+            .expect("the wake switch");
+    }
     claims::reconcile(&mut core, &[], &[], i64::MAX, 1).expect("reconcile");
     (t, core)
 }

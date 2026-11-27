@@ -35,7 +35,7 @@ mod tick_tests;
 mod turns;
 mod waiters;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use call::call_open;
 pub(crate) use call::{call, serves};
 #[cfg(unix)]
