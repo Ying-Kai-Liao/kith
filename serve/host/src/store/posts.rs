@@ -290,5 +290,23 @@ impl Store {
     }
 }
 
+impl Store {
+    /// How many cards an agent's tool wrote since `since` (the day's cap, F2). Host-written rows are not the tool's.
+    pub fn agent_posts_since(&self, agent: &str, since: i64) -> Result<i64> {
+        let c = self.db.locked();
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM posts WHERE \"by\" = 'agent' AND agent = ?1 AND created_at >= ?2",
+            params![agent, since],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Whether a fold key has a row: a write under it replaces, so it is no new card.
+    pub fn post_key_exists(&self, key: &str) -> Result<bool> {
+        let c = self.db.locked();
+        Ok(c.query_row("SELECT 1 FROM posts WHERE fold_key = ?1", [key], |_| Ok(())).optional()?.is_some())
+    }
+}
+
 #[cfg(test)]
 mod tests;

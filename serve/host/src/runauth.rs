@@ -25,6 +25,10 @@
 //! service's key (`cards::secret`): it makes a card in the owner's chat and answers at once `{"ok": true, "carded":
 //! true, "message"}` or `{"ok": false, "error"}`. An owner token only (`TokenScope::OwnerAsk`); a guest's is "not authorized".
 //!
+//! `feedPost` (`{"token", "method": "feedPost", "kind", "title", "line"?, "file"? | "url"? | "number"?, "fold"?, "pr"?}`)
+//! is the owner run's `feed_post` tool: one card on the owner's Feed (`feed::agent_post`). An owner token only; the
+//! author is the token's agent and the chat comes from its session, neither from the request.
+//!
 //! `consumeOnce` (`{"token", "method": "consumeOnce", "tool", "input"}`) is the owner run's `PreToolUse` hook using up the
 //! yes of an auto-mode card ("Allow once"): the host noted it when `requestPermission` with `autoMode` ended in allow, under
 //! the run and the call's key, and answers `{"ok": true, "allowed": bool}`, true once. An owner token only, and only its own
@@ -754,6 +758,9 @@ pub enum AccessCall {
     Consume,
     /// An owner run asks for a service's key (`{"service", "purpose"}`): a card in the owner's chat, `cards::secret`.
     Secret(Value),
+    /// An owner run posts to the owner's Feed (`feed_post`): the arguments, only the known ones, each string capped.
+    /// `feed::agent_post` judges them; the author and the chat come from the token, never from here.
+    Post(Value),
     /// An owner run asks for the card history (`kith cards history`): answered only for an agent whose package says
     /// `cards: read`, `cards::history`.
     History(usize),
@@ -867,6 +874,36 @@ pub fn authorize_with(
             let call = AccessCall::Secret(json!({"service": service, "purpose": purpose}));
             Ok(Authorized { identity, ask: None, access: Some(call) })
         }
+        "feedPost" => {
+            // The Feed is the owner's: a guest's run never posts, and it is not told why (as for `requestSecret`).
+            if identity.scope != TokenScope::OwnerAsk {
+                return Err(Response::refused("not authorized"));
+            }
+            let mut post = serde_json::Map::new();
+            for k in ["kind", "title", "line", "file", "url", "fold", "pr"] {
+                match &req[k] {
+                    Value::Null => {}
+                    Value::String(s) if s.len() <= MAX_ARG_LEN => {
+                        post.insert(k.to_owned(), Value::String(s.clone()));
+                    }
+                    _ => return Err(Response::refused("bad request")),
+                }
+            }
+            match &req["number"] {
+                Value::Null => {}
+                Value::Object(n)
+                    if n.get("unit").is_none_or(|u| u.as_str().is_some_and(|u| u.len() <= MAX_ARG_LEN)) =>
+                {
+                    let (value, delta) = (n.get("value"), n.get("delta"));
+                    if value.is_none_or(|v| !v.is_number()) || delta.is_some_and(|d| !d.is_number()) {
+                        return Err(Response::refused("bad request"));
+                    }
+                    post.insert("number".to_owned(), json!({"value": value, "unit": n.get("unit"), "delta": delta}));
+                }
+                _ => return Err(Response::refused("bad request")),
+            }
+            Ok(Authorized { identity, ask: None, access: Some(AccessCall::Post(Value::Object(post))) })
+        }
         "consumeOnce" => {
             // The owner's run only, and only the yes its own token asked for (the table is keyed by the run).
             if identity.scope != TokenScope::OwnerAsk {
@@ -966,6 +1003,9 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
                 let service = req["service"].as_str().unwrap_or_default();
                 let purpose = req["purpose"].as_str().unwrap_or_default();
                 Response::Line(crate::cards::secret::request(&hub, &origin, service, purpose).await)
+            }
+            (Some(hub), AccessCall::Post(args)) => {
+                Response::Line(crate::feed::agent_post(&hub, &identity, &args).await)
             }
             (Some(hub), AccessCall::History(limit)) => {
                 Response::Line(crate::cards::history::list(&hub, &identity, limit).await)
@@ -1615,6 +1655,36 @@ mod tests {
         let g = RunGrant::issue(&t, id("sam")).unwrap();
         g.bind_local(6);
         let guest = json!({"token": g.token, "method": "requestSecret", "service": "github", "purpose": "x"});
+        assert_eq!(authorize(&t, guest.to_string().as_bytes(), peer(6)), Err(Response::refused("not authorized")));
+    }
+
+    #[test]
+    fn only_an_owner_token_can_post_to_the_feed_and_only_its_known_arguments_get_through() {
+        let t = open_table();
+        let token = t.insert_ask(ask_identity("echo", "s1", None), 5, Duration::from_secs(60)).unwrap();
+        let line = json!({"token": token, "method": "feedPost", "kind": "number", "title": "Users", "line": "up",
+                          "number": {"value": 3, "unit": "k", "extra": 1}, "agent": "someone-else", "chat": "c1"});
+        let job = authorize(&t, line.to_string().as_bytes(), peer(5)).unwrap();
+        assert_eq!(job.identity.agent, "echo", "the author is the token's");
+        assert_eq!(
+            job.access,
+            Some(AccessCall::Post(json!({
+                "kind": "number", "title": "Users", "line": "up",
+                "number": {"value": 3, "unit": "k", "delta": null}
+            }))),
+            "agent, chat and anything unknown are dropped"
+        );
+        let long = json!({"token": token, "method": "feedPost", "kind": "k", "title": "x".repeat(MAX_ARG_LEN + 1)});
+        assert_eq!(authorize(&t, long.to_string().as_bytes(), peer(5)), Err(Response::refused("bad request")));
+        let not_text = json!({"token": token, "method": "feedPost", "kind": "k", "title": 5});
+        assert_eq!(authorize(&t, not_text.to_string().as_bytes(), peer(5)), Err(Response::refused("bad request")));
+        let bad_number =
+            json!({"token": token, "method": "feedPost", "kind": "k", "title": "t", "number": {"value": "3"}});
+        assert_eq!(authorize(&t, bad_number.to_string().as_bytes(), peer(5)), Err(Response::refused("bad request")));
+        // A guest's run (an invited person's or a bot guest's) is not authorized, whatever it sends.
+        let g = RunGrant::issue(&t, id("sam")).unwrap();
+        g.bind_local(6);
+        let guest = json!({"token": g.token, "method": "feedPost", "kind": "k", "title": "t"});
         assert_eq!(authorize(&t, guest.to_string().as_bytes(), peer(6)), Err(Response::refused("not authorized")));
     }
 
