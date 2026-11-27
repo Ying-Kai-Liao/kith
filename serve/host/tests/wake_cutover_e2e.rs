@@ -138,6 +138,9 @@ impl Lab {
             &kernel.join("bin"),
             &machine.join("cli"),
             &state.join("live/terminal"),
+            // The old link layout's mark: the host's runs get KITH_STATE=<home>/kith/state, and without it a child reads that as a
+            // choice of state folder, which moves its machine folder (and so the core's socket) away from the host's.
+            &kith_home.join("kernel"),
             &dir.join("bin"),
             &dir.join("rec"),
             &home.join(".claude"),
