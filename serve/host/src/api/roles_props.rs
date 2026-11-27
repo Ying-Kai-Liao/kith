@@ -1677,6 +1677,7 @@ fn the_key_methods_are_on_no_guest_list() {
         "addRoomPerson",
         "removeRoomPerson",
         "roomPeople",
+        "hostHealth",
     ] {
         assert!(routed.iter().any(|r| r == m), "{m} is not found by the router walk");
         assert!(!MEMBER_METHODS.contains(&m), "{m} on MEMBER_METHODS");
