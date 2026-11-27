@@ -36,7 +36,7 @@ export PATH=$T/bin:$PATH
 
 KITH=$KERNEL/bin/kith
 fails=0
-check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; tail -n 3 "$T/err" "$T/out" 2>/dev/null | cut -c1-300; fails=$((fails + 1)); fi; }
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; tail -n 3 "$T/err" "$T/out" "$T/seen" 2>/dev/null | cut -c1-1500; fails=$((fails + 1)); fi; }
 # one field of the run's JSON (the last line of $T/out)
 field() { python3 -c 'import json,sys; d=json.loads(open(sys.argv[1]).read().splitlines()[-1]); v=d.get(sys.argv[2]); print(json.dumps(v) if isinstance(v,(dict,list,bool)) or v is None else v)' "$T/out" "$1"; }
 # the prompts the fake saw, one per line
@@ -116,7 +116,7 @@ net_seen() {   # net_seen KITH_PROGRAM ENV..: "<KITH_RUN_NETWORK> <launcher: lau
     net=$(printf '%s' "$info" | grep -o 'KITH_RUN_NETWORK=[01]' | head -n 1 | cut -d= -f2)
     pm=$(printf '%s' "$info" | grep -o -e '--permission-mode [A-Za-z]*' | head -n 1 | cut -d' ' -f2)
     case $launcher in *launch-exec*) launcher=launch-exec ;; *) launcher=bash ;; esac
-    printf '%s %s %s' "${net:-unset}" "$launcher" "${pm:-none}"
+    printf '%s %s %s' "${net:-unset}" "$launcher" "${pm:-none}" | tee "$T/seen"; printf '\n%s\n' "$info" | cut -c1-1500 >> "$T/seen"
     kill -TERM "$run_pid" 2>/dev/null
   fi
   wait "$run_pid" 2>/dev/null
