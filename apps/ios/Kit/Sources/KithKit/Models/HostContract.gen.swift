@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "0fbea85615536649949a4d3ff1d3bcaf4b59075ec4dd778cbd9034330083941e"
+    public static let sha256 = "fb728f46a33aefa49589364c050b35d6bc4df6dc9483ad3fe4032799ceb89dca"
 }
 
 extension HostContract {
@@ -1408,6 +1408,117 @@ extension HostContract {
         }
     }
 
+    /// Where a Feed post came from: the owner's chat, and the thread and entry it points at when there are some. A reply goes to this chat and thread with send.
+    public struct PostSource: Codable, Hashable, Sendable {
+        public var chat: String
+        public var thread: String?
+        public var entry: String?
+
+        public init(chat: String, thread: String? = nil, entry: String? = nil) {
+            self.chat = chat
+            self.thread = thread
+            self.entry = entry
+        }
+    }
+
+    /// One card of the owner's Feed. kind is merges, failing, number, page, file, video or yourTurn (one an app doesn't know shows as a plain card). attachment is at most one of {type:file,file}, {type:page,file,shot,version}, {type:video,file}, {type:number,value,unit,delta} and {type:link,url}; file and shot are the file meta a chat entry carries. items are the fold's members: a day's merged PRs ({id, title}), or a routine's last ten runs ({id, at, ok}). streak is the failed runs in a row of a routine, ending at its newest run. title is one line of at most 80 characters and line one of at most 200. Owner only: no invited person or bot ever gets a post.
+    public struct Post: Codable, Hashable, Sendable {
+        public var id: String
+        public var rev: Int64
+        public var agent: String
+        public var kind: String
+        public var title: String
+        public var line: String
+        public var attachment: JSONValue?
+        public var items: [JSONValue]
+        public var factAt: Int64
+        public var streak: Int64
+        public var source: PostSource
+        public var by: String
+        public var createdAt: Int64
+        public var updatedAt: Int64
+        public var liked: Bool
+        public var hidden: Bool
+
+        public init(id: String, rev: Int64, agent: String, kind: String, title: String, line: String, attachment: JSONValue? = nil, items: [JSONValue], factAt: Int64, streak: Int64, source: PostSource, by: String, createdAt: Int64, updatedAt: Int64, liked: Bool, hidden: Bool) {
+            self.id = id
+            self.rev = rev
+            self.agent = agent
+            self.kind = kind
+            self.title = title
+            self.line = line
+            self.attachment = attachment
+            self.items = items
+            self.factAt = factAt
+            self.streak = streak
+            self.source = source
+            self.by = by
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.liked = liked
+            self.hidden = hidden
+        }
+    }
+
+    /// A page of the Feed, newest first. next is the updatedAt to pass as before for the page after it; absent on the last page.
+    public struct Feed: Codable, Hashable, Sendable {
+        public var posts: [Post]
+        public var next: Int64?
+
+        public init(posts: [Post], next: Int64? = nil) {
+            self.posts = posts
+            self.next = next
+        }
+    }
+
+    /// The post after the change.
+    public struct PostAnswer: Codable, Hashable, Sendable {
+        public var post: Post
+
+        public init(post: Post) {
+            self.post = post
+        }
+    }
+
+    /// A chat whose agent said something in the last three hours: the ring above the Feed. unread counts what the owner has not read there.
+    public struct Story: Codable, Hashable, Sendable {
+        public var chat: String
+        public var agent: String?
+        public var lastAt: Int64
+        public var lastEntryId: String
+        public var unread: Int64
+
+        public init(chat: String, agent: String? = nil, lastAt: Int64, lastEntryId: String, unread: Int64) {
+            self.chat = chat
+            self.agent = agent
+            self.lastAt = lastAt
+            self.lastEntryId = lastEntryId
+            self.unread = unread
+        }
+    }
+
+    /// The owner's chats with an agent entry in the last three hours, newest first.
+    public struct Stories: Codable, Hashable, Sendable {
+        public var stories: [Story]
+
+        public init(stories: [Story]) {
+            self.stories = stories
+        }
+    }
+
+    /// The agent the text fits best, why, and up to two others to pick instead.
+    public struct FeedRoute: Codable, Hashable, Sendable {
+        public var agent: String
+        public var why: String
+        public var others: [String]
+
+        public init(agent: String, why: String, others: [String]) {
+            self.agent = agent
+            self.why = why
+            self.others = others
+        }
+    }
+
     /// What `hello` takes.
     public struct HelloParams: Codable, Hashable, Sendable {
         public init() {
@@ -2040,6 +2151,54 @@ extension HostContract {
         }
     }
 
+    /// What `feed` takes.
+    public struct FeedParams: Codable, Hashable, Sendable {
+        public var before: Int64?
+        public var limit: Int64?
+
+        public init(before: Int64? = nil, limit: Int64? = nil) {
+            self.before = before
+            self.limit = limit
+        }
+    }
+
+    /// What `likePost` takes.
+    public struct LikePostParams: Codable, Hashable, Sendable {
+        public var id: String
+        public var liked: Bool
+
+        public init(id: String, liked: Bool) {
+            self.id = id
+            self.liked = liked
+        }
+    }
+
+    /// What `hidePost` takes.
+    public struct HidePostParams: Codable, Hashable, Sendable {
+        public var id: String
+        public var hidden: Bool
+
+        public init(id: String, hidden: Bool) {
+            self.id = id
+            self.hidden = hidden
+        }
+    }
+
+    /// What `stories` takes.
+    public struct StoriesParams: Codable, Hashable, Sendable {
+        public init() {
+        }
+    }
+
+    /// What `feedRoute` takes.
+    public struct FeedRouteParams: Codable, Hashable, Sendable {
+        public var text: String
+
+        public init(text: String) {
+            self.text = text
+        }
+    }
+
     /// Each method's name, as called.
     public enum Method: String, CaseIterable, Sendable {
         case hello
@@ -2098,10 +2257,15 @@ extension HostContract {
         case hostHealth
         case myRooms
         case leaveRoom
+        case feed
+        case likePost
+        case hidePost
+        case stories
+        case feedRoute
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople, .hostHealth]
+    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic, .createInvite, .addRoomPerson, .removeRoomPerson, .roomPeople, .hostHealth, .feed, .likePost, .hidePost, .stories, .feedRoute]
 
     /// What an invited person may call.
     public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation, .myRooms, .leaveRoom]
@@ -2188,6 +2352,13 @@ extension HostContract {
         case "BotThread": _ = try d.decode(BotThread.self, from: data)
         case "BotConversation": _ = try d.decode(BotConversation.self, from: data)
         case "BotConversations": _ = try d.decode(BotConversations.self, from: data)
+        case "PostSource": _ = try d.decode(PostSource.self, from: data)
+        case "Post": _ = try d.decode(Post.self, from: data)
+        case "Feed": _ = try d.decode(Feed.self, from: data)
+        case "PostAnswer": _ = try d.decode(PostAnswer.self, from: data)
+        case "Story": _ = try d.decode(Story.self, from: data)
+        case "Stories": _ = try d.decode(Stories.self, from: data)
+        case "FeedRoute": _ = try d.decode(FeedRoute.self, from: data)
         case "HelloParams": _ = try d.decode(HelloParams.self, from: data)
         case "KithInfoParams": _ = try d.decode(KithInfoParams.self, from: data)
         case "StartChatParams": _ = try d.decode(StartChatParams.self, from: data)
@@ -2244,6 +2415,11 @@ extension HostContract {
         case "HostHealthParams": _ = try d.decode(HostHealthParams.self, from: data)
         case "MyRoomsParams": _ = try d.decode(MyRoomsParams.self, from: data)
         case "LeaveRoomParams": _ = try d.decode(LeaveRoomParams.self, from: data)
+        case "FeedParams": _ = try d.decode(FeedParams.self, from: data)
+        case "LikePostParams": _ = try d.decode(LikePostParams.self, from: data)
+        case "HidePostParams": _ = try d.decode(HidePostParams.self, from: data)
+        case "StoriesParams": _ = try d.decode(StoriesParams.self, from: data)
+        case "FeedRouteParams": _ = try d.decode(FeedRouteParams.self, from: data)
         default: return false
         }
         return true

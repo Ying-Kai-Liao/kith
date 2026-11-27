@@ -571,7 +571,56 @@
         "state": "ConversationState"
       }
     },
-    "BotConversations": { "doc": "A bot's conversations, newest first.", "fields": { "conversations": "[BotConversation]" } }
+    "BotConversations": { "doc": "A bot's conversations, newest first.", "fields": { "conversations": "[BotConversation]" } },
+    "PostSource": {
+      "doc": "Where a Feed post came from: the owner's chat, and the thread and entry it points at when there are some. A reply goes to this chat and thread with send.",
+      "fields": { "chat": "string", "thread": "string?", "entry": "string?" },
+      "mayOmit": ["thread", "entry"]
+    },
+    "Post": {
+      "doc": "One card of the owner's Feed. kind is merges, failing, number, page, file, video or yourTurn (one an app doesn't know shows as a plain card). attachment is at most one of {type:file,file}, {type:page,file,shot,version}, {type:video,file}, {type:number,value,unit,delta} and {type:link,url}; file and shot are the file meta a chat entry carries. items are the fold's members: a day's merged PRs ({id, title}), or a routine's last ten runs ({id, at, ok}). streak is the failed runs in a row of a routine, ending at its newest run. title is one line of at most 80 characters and line one of at most 200. Owner only: no invited person or bot ever gets a post.",
+      "fields": {
+        "id": "string",
+        "rev": "int",
+        "agent": "string",
+        "kind": "string",
+        "title": "string",
+        "line": "string",
+        "attachment": "json?",
+        "items": "[json]",
+        "factAt": "int",
+        "streak": "int",
+        "source": "PostSource",
+        "by": "string",
+        "createdAt": "int",
+        "updatedAt": "int",
+        "liked": "bool",
+        "hidden": "bool"
+      },
+      "mayOmit": ["attachment"]
+    },
+    "Feed": {
+      "doc": "A page of the Feed, newest first. next is the updatedAt to pass as before for the page after it; absent on the last page.",
+      "fields": { "posts": "[Post]", "next": "int?" },
+      "mayOmit": ["next"]
+    },
+    "PostAnswer": {
+      "doc": "The post after the change.",
+      "fields": { "post": "Post" }
+    },
+    "Story": {
+      "doc": "A chat whose agent said something in the last three hours: the ring above the Feed. unread counts what the owner has not read there.",
+      "fields": { "chat": "string", "agent": "string?", "lastAt": "int", "lastEntryId": "string", "unread": "int" },
+      "mayOmit": ["agent"]
+    },
+    "Stories": {
+      "doc": "The owner's chats with an agent entry in the last three hours, newest first.",
+      "fields": { "stories": "[Story]" }
+    },
+    "FeedRoute": {
+      "doc": "The agent the text fits best, why, and up to two others to pick instead.",
+      "fields": { "agent": "string", "why": "string", "others": "[string]" }
+    }
   },
   "methods": {
     "hello": {
@@ -955,6 +1004,36 @@
       "who": ["member"],
       "params": { "room": "string" },
       "result": "RoomLeft"
+    },
+    "feed": {
+      "doc": "The owner's Feed: posts that are not hidden, newest updatedAt first, before the given updatedAt. limit is at most 50 and 30 when left out. New and changed posts also arrive as post events on the owner's stream.",
+      "who": ["owner"],
+      "params": { "before": "int?", "limit": "int?" },
+      "result": "Feed"
+    },
+    "likePost": {
+      "doc": "Likes a post, or takes the like back. A host from before the likes package refuses it.",
+      "who": ["owner"],
+      "params": { "id": "string", "liked": "bool" },
+      "result": "PostAnswer"
+    },
+    "hidePost": {
+      "doc": "Hides a post from the Feed, or brings it back. A post that changes after it was hidden comes back by itself.",
+      "who": ["owner"],
+      "params": { "id": "string", "hidden": "bool" },
+      "result": "PostAnswer"
+    },
+    "stories": {
+      "doc": "The owner's chats with an agent entry in the last three hours. Computed from the entries; there is no event, so an app asks again when the Feed appears.",
+      "who": ["owner"],
+      "params": {},
+      "result": "Stories"
+    },
+    "feedRoute": {
+      "doc": "Which agent the text fits best, for the Feed's box with no tag. A host from before the route package refuses it.",
+      "who": ["owner"],
+      "params": { "text": "string" },
+      "result": "FeedRoute"
     }
   }
 }

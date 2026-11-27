@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "0fbea85615536649949a4d3ff1d3bcaf4b59075ec4dd778cbd9034330083941e";
+pub const CONTRACT_SHA256: &str = "fb728f46a33aefa49589364c050b35d6bc4df6dc9483ad3fe4032799ceb89dca";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -1352,6 +1352,84 @@ pub struct BotConversations {
     pub conversations: Vec<BotConversation>,
 }
 
+/// Where a Feed post came from: the owner's chat, and the thread and entry it points at when there are some. A reply goes to this chat and thread with send.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PostSource {
+    pub chat: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
+}
+
+/// One card of the owner's Feed. kind is merges, failing, number, page, file, video or yourTurn (one an app doesn't know shows as a plain card). attachment is at most one of {type:file,file}, {type:page,file,shot,version}, {type:video,file}, {type:number,value,unit,delta} and {type:link,url}; file and shot are the file meta a chat entry carries. items are the fold's members: a day's merged PRs ({id, title}), or a routine's last ten runs ({id, at, ok}). streak is the failed runs in a row of a routine, ending at its newest run. title is one line of at most 80 characters and line one of at most 200. Owner only: no invited person or bot ever gets a post.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Post {
+    pub id: String,
+    pub rev: i64,
+    pub agent: String,
+    pub kind: String,
+    pub title: String,
+    pub line: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<serde_json::Value>,
+    pub items: Vec<serde_json::Value>,
+    pub fact_at: i64,
+    pub streak: i64,
+    pub source: PostSource,
+    pub by: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub liked: bool,
+    pub hidden: bool,
+}
+
+/// A page of the Feed, newest first. next is the updatedAt to pass as before for the page after it; absent on the last page.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Feed {
+    pub posts: Vec<Post>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<i64>,
+}
+
+/// The post after the change.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PostAnswer {
+    pub post: Post,
+}
+
+/// A chat whose agent said something in the last three hours: the ring above the Feed. unread counts what the owner has not read there.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Story {
+    pub chat: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    pub last_at: i64,
+    pub last_entry_id: String,
+    pub unread: i64,
+}
+
+/// The owner's chats with an agent entry in the last three hours, newest first.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Stories {
+    pub stories: Vec<Story>,
+}
+
+/// The agent the text fits best, why, and up to two others to pick instead.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedRoute {
+    pub agent: String,
+    pub why: String,
+    pub others: Vec<String>,
+}
+
 /// What `hello` takes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct HelloParams {}
@@ -1850,6 +1928,43 @@ pub struct LeaveRoomParams {
     pub room: String,
 }
 
+/// What `feed` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i64>,
+}
+
+/// What `likePost` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LikePostParams {
+    pub id: String,
+    pub liked: bool,
+}
+
+/// What `hidePost` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HidePostParams {
+    pub id: String,
+    pub hidden: bool,
+}
+
+/// What `stories` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct StoriesParams {}
+
+/// What `feedRoute` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedRouteParams {
+    pub text: String,
+}
+
 /// Each method's name, as called.
 pub mod method {
     /// The connection handshake; answered to a member or a bot without paths, addresses, backends or screen state, with the agents they hold.
@@ -1964,10 +2079,20 @@ pub mod method {
     pub const MY_ROOMS: &str = "myRooms";
     /// Rooms with people: leaves a group room they are in. Needs only an open stay, so a person whose agent was taken away can still get out.
     pub const LEAVE_ROOM: &str = "leaveRoom";
+    /// The owner's Feed: posts that are not hidden, newest updatedAt first, before the given updatedAt. limit is at most 50 and 30 when left out. New and changed posts also arrive as post events on the owner's stream.
+    pub const FEED: &str = "feed";
+    /// Likes a post, or takes the like back. A host from before the likes package refuses it.
+    pub const LIKE_POST: &str = "likePost";
+    /// Hides a post from the Feed, or brings it back. A post that changes after it was hidden comes back by itself.
+    pub const HIDE_POST: &str = "hidePost";
+    /// The owner's chats with an agent entry in the last three hours. Computed from the entries; there is no event, so an app asks again when the Feed appears.
+    pub const STORIES: &str = "stories";
+    /// Which agent the text fits best, for the Feed's box with no tag. A host from before the route package refuses it.
+    pub const FEED_ROUTE: &str = "feedRoute";
 }
 
 /// What the owner alone (a method no one else may call; the owner may call every method) may call.
-pub const OWNER_METHODS: &[&str] = &[method::MAKE_TOPIC, method::RENAME_TOPIC, method::UNFOLD_TOPIC, method::CREATE_INVITE, method::ADD_ROOM_PERSON, method::REMOVE_ROOM_PERSON, method::ROOM_PEOPLE, method::HOST_HEALTH];
+pub const OWNER_METHODS: &[&str] = &[method::MAKE_TOPIC, method::RENAME_TOPIC, method::UNFOLD_TOPIC, method::CREATE_INVITE, method::ADD_ROOM_PERSON, method::REMOVE_ROOM_PERSON, method::ROOM_PEOPLE, method::HOST_HEALTH, method::FEED, method::LIKE_POST, method::HIDE_POST, method::STORIES, method::FEED_ROUTE];
 
 /// What an invited person may call.
 pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::START_CHAT, method::SEND, method::THREAD, method::HISTORY, method::NEW_SESSION, method::UNSEND, method::MARK_READ, method::STOP, method::UPLOAD, method::READ_UPLOAD, method::REACT, method::RESPOND_PERMISSION, method::EDIT_HANDOFF, method::KEEP_CONVERSATION, method::PROJECTS, method::THREAD_PROJECTS, method::SET_THREAD_PROJECTS, method::LINK_CODE, method::SCHEDULE_MESSAGES, method::CALL_ACCEPT, method::CALL_DECLINE, method::CALL_GREET, method::LOG_CALL, method::START_CALL, method::END_CALL, method::CREATE_BOT_INVITE, method::REVOKE_BOT_INVITE, method::REVOKE_BOT, method::MY_BOTS, method::SET_BOT_LIMITS, method::RESOLVE_CITATION, method::MY_ROOMS, method::LEAVE_ROOM];
@@ -2073,6 +2198,13 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotThread", fields: &[("conversation", "string"), ("entries", "[BotEntry]"), ("done", "bool"), ("turn", "int?"), ("state", "ConversationState")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotConversation", fields: &[("conversation", "string"), ("agent", "string"), ("ref", "string?"), ("originLabel", "string"), ("lastAt", "int"), ("state", "ConversationState")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotConversations", fields: &[("conversations", "[BotConversation]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PostSource", fields: &[("chat", "string"), ("thread", "string?"), ("entry", "string?")], may_omit: &["thread", "entry"] },
+        crate::check::TypeSchema { name: "Post", fields: &[("id", "string"), ("rev", "int"), ("agent", "string"), ("kind", "string"), ("title", "string"), ("line", "string"), ("attachment", "json?"), ("items", "[json]"), ("factAt", "int"), ("streak", "int"), ("source", "PostSource"), ("by", "string"), ("createdAt", "int"), ("updatedAt", "int"), ("liked", "bool"), ("hidden", "bool")], may_omit: &["attachment"] },
+        crate::check::TypeSchema { name: "Feed", fields: &[("posts", "[Post]"), ("next", "int?")], may_omit: &["next"] },
+        crate::check::TypeSchema { name: "PostAnswer", fields: &[("post", "Post")], may_omit: &[] },
+        crate::check::TypeSchema { name: "Story", fields: &[("chat", "string"), ("agent", "string?"), ("lastAt", "int"), ("lastEntryId", "string"), ("unread", "int")], may_omit: &["agent"] },
+        crate::check::TypeSchema { name: "Stories", fields: &[("stories", "[Story]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "FeedRoute", fields: &[("agent", "string"), ("why", "string"), ("others", "[string]")], may_omit: &[] },
         crate::check::TypeSchema { name: "HelloParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "KithInfoParams", fields: &[("botId", "string"), ("refresh", "bool?")], may_omit: &[] },
         crate::check::TypeSchema { name: "StartChatParams", fields: &[("agent", "string")], may_omit: &[] },
@@ -2129,6 +2261,11 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "HostHealthParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "MyRoomsParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "LeaveRoomParams", fields: &[("room", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "FeedParams", fields: &[("before", "int?"), ("limit", "int?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "LikePostParams", fields: &[("id", "string"), ("liked", "bool")], may_omit: &[] },
+        crate::check::TypeSchema { name: "HidePostParams", fields: &[("id", "string"), ("hidden", "bool")], may_omit: &[] },
+        crate::check::TypeSchema { name: "StoriesParams", fields: &[], may_omit: &[] },
+        crate::check::TypeSchema { name: "FeedRouteParams", fields: &[("text", "string")], may_omit: &[] },
     ],
     methods: &[
         crate::check::MethodSchema { name: "hello", who: &["member", "bot", "botPending"], params: "HelloParams", result: "Hello" },
@@ -2187,6 +2324,11 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "hostHealth", who: &["owner"], params: "HostHealthParams", result: "HostHealth" },
         crate::check::MethodSchema { name: "myRooms", who: &["member"], params: "MyRoomsParams", result: "MyRooms" },
         crate::check::MethodSchema { name: "leaveRoom", who: &["member"], params: "LeaveRoomParams", result: "RoomLeft" },
+        crate::check::MethodSchema { name: "feed", who: &["owner"], params: "FeedParams", result: "Feed" },
+        crate::check::MethodSchema { name: "likePost", who: &["owner"], params: "LikePostParams", result: "PostAnswer" },
+        crate::check::MethodSchema { name: "hidePost", who: &["owner"], params: "HidePostParams", result: "PostAnswer" },
+        crate::check::MethodSchema { name: "stories", who: &["owner"], params: "StoriesParams", result: "Stories" },
+        crate::check::MethodSchema { name: "feedRoute", who: &["owner"], params: "FeedRouteParams", result: "FeedRoute" },
     ],
 };
 
@@ -2259,6 +2401,13 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotThread" => serde_json::from_value::<BotThread>(value).map(drop),
         "BotConversation" => serde_json::from_value::<BotConversation>(value).map(drop),
         "BotConversations" => serde_json::from_value::<BotConversations>(value).map(drop),
+        "PostSource" => serde_json::from_value::<PostSource>(value).map(drop),
+        "Post" => serde_json::from_value::<Post>(value).map(drop),
+        "Feed" => serde_json::from_value::<Feed>(value).map(drop),
+        "PostAnswer" => serde_json::from_value::<PostAnswer>(value).map(drop),
+        "Story" => serde_json::from_value::<Story>(value).map(drop),
+        "Stories" => serde_json::from_value::<Stories>(value).map(drop),
+        "FeedRoute" => serde_json::from_value::<FeedRoute>(value).map(drop),
         "HelloParams" => serde_json::from_value::<HelloParams>(value).map(drop),
         "KithInfoParams" => serde_json::from_value::<KithInfoParams>(value).map(drop),
         "StartChatParams" => serde_json::from_value::<StartChatParams>(value).map(drop),
@@ -2315,6 +2464,11 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "HostHealthParams" => serde_json::from_value::<HostHealthParams>(value).map(drop),
         "MyRoomsParams" => serde_json::from_value::<MyRoomsParams>(value).map(drop),
         "LeaveRoomParams" => serde_json::from_value::<LeaveRoomParams>(value).map(drop),
+        "FeedParams" => serde_json::from_value::<FeedParams>(value).map(drop),
+        "LikePostParams" => serde_json::from_value::<LikePostParams>(value).map(drop),
+        "HidePostParams" => serde_json::from_value::<HidePostParams>(value).map(drop),
+        "StoriesParams" => serde_json::from_value::<StoriesParams>(value).map(drop),
+        "FeedRouteParams" => serde_json::from_value::<FeedRouteParams>(value).map(drop),
         _ => return None,
     })
 }

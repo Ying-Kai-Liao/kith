@@ -549,6 +549,7 @@ pub(super) fn router_methods() -> Vec<String> {
         include_str!("delegations.rs"),
         include_str!("kith_tools.rs"),
         include_str!("scratch.rs"),
+        include_str!("feed.rs"),
     ];
     let mut out = std::collections::BTreeSet::new();
     for src in sources {
@@ -1686,4 +1687,24 @@ fn the_key_methods_are_on_no_guest_list() {
         assert!(!UNPROVEN_METHODS.contains(&m), "{m} on UNPROVEN_METHODS");
         assert!(!roles::member_may(m) && !roles::bot_may(m));
     }
+}
+
+/// The Feed is the owner's alone (api/feed.rs): its five methods are on no guest list, and a post event reaches no
+/// person and no bot, however the post was written.
+#[test]
+fn the_feed_methods_are_on_no_guest_list_and_a_post_event_reaches_only_the_owner() {
+    let routed = router_methods();
+    for m in ["feed", "likePost", "hidePost", "stories", "feedRoute"] {
+        assert!(routed.iter().any(|r| r == m), "{m} is not found by the router walk");
+        assert!(!MEMBER_METHODS.contains(&m), "{m} on MEMBER_METHODS");
+        assert!(!roles::BOT_METHODS.contains(&m), "{m} on BOT_METHODS");
+        assert!(!roles::BOT_PENDING_METHODS.contains(&m), "{m} on BOT_PENDING_METHODS");
+        assert!(!UNPROVEN_METHODS.contains(&m), "{m} on UNPROVEN_METHODS");
+        assert!(!roles::member_may(m) && !roles::bot_may(m));
+    }
+    let w = World::new();
+    let post = json!({"type": "post", "rev": 7, "post": {"id": "p-1", "source": {"chat": "house"}}});
+    assert!(roles::event_for(&w.hub.store, Some("p1"), post.clone()).is_none(), "a member hears no post");
+    assert!(roles::event_for(&w.hub.store, None, post.clone()).is_some(), "the owner does");
+    assert!(roles::event_for_bot(&w.hub.store, "bot1", post).is_none(), "a bot hears no post");
 }
