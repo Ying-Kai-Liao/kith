@@ -23,6 +23,9 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
     static let maxArea: CGFloat = 3_000_000
     private static let maxPixels: CGFloat = 8_000_000
     var timeout: Duration = .seconds(15)
+    /// For the web content process to start and load the page: slow on a loaded or freshly booted device (a CI
+    /// simulator needs close to a minute the first time), so long, but still bounded.
+    var setupTimeout: Duration = .seconds(60)
 
     private let cache = NSCache<NSString, UIImage>()
     private var failed = Set<String>()
@@ -165,7 +168,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         navigated = false
         self.webView = webView
         // A page that never reports back (a content process that is slow or stuck) must not hold every diagram.
-        let loaded = await Self.bounded(.seconds(20), fallback: false) {
+        let loaded = await Self.bounded(setupTimeout, fallback: false) {
             await withCheckedContinuation { continuation in
                 self.loading = continuation
                 webView.loadHTMLString(Self.html, baseURL: nil)
@@ -175,7 +178,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         // The first diagram on a fresh page is slow while mermaid warms up (seconds on an older phone), so one is
         // drawn here, with time to spare, rather than charged to a real diagram's timeout.
         guard loaded, self.webView === webView,
-              case .drawn = await within(.seconds(30), { await self.render("graph TD\nA", dark: false, in: webView) }),
+              case .drawn = await within(setupTimeout * 2, { await self.render("graph TD\nA", dark: false, in: webView) }),
               self.webView === webView
         else {
             discard()
