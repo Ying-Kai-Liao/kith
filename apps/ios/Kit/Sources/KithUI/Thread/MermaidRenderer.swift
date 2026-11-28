@@ -114,10 +114,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
 
     /// Runs `work`, or gives up after `limit` with `fallback`. The web view can't cancel a script, so the race is by hand.
     static func bounded<T>(_ limit: Duration, fallback: T, _ work: @escaping @MainActor () async -> T) async -> T {
-        final class Once {
-            var continuation: CheckedContinuation<T, Never>?
-        }
-        let once = Once()
+        let once = Once<T>()
         return await withCheckedContinuation { continuation in
             once.continuation = continuation
             Task { @MainActor in
@@ -262,6 +259,11 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
       }
     })()
     """
+}
+
+/// The waiting side of a race: whichever of the work and the clock finishes first resumes it, once.
+@MainActor private final class Once<T> {
+    var continuation: CheckedContinuation<T, Never>?
 }
 
 private extension CGFloat {
