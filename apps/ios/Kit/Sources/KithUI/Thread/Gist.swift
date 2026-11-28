@@ -102,10 +102,11 @@ enum Gist {
     }
 }
 
-/// Why a reply shows less than it says. One reason today; a later one (a 1:1 reply to someone else's prompt folding to
-/// a line) is another case here.
+/// Why a reply shows less than it says: it is long (`gist`, in Gist mode), or it belongs to a run someone else
+/// prompted in the agent's own chat (`othersRun`, see `OthersRun`; always, Gist mode or not).
 enum FoldReason: Equatable {
     case gist(String)
+    case othersRun(title: String, count: Int, live: Bool)
 }
 
 /// Which replies the chat's Gist mode folds: only an agent's finished, long, plain prose. Asks, warnings, cards, files
