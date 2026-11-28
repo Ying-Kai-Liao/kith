@@ -26,6 +26,7 @@ async fn start(permission: &str) -> (Host, PathBuf) {
         ("KITH_AUTH", &home.join("auth.json").to_string_lossy()),
         ("KITH_STATE", &home.join("state").to_string_lossy()),
         ("KITH_HOME", &home.join("kith-home").to_string_lossy()),
+        ("RUST_LOG", "kith_serve=debug,kith_core=debug,kith_kernel=debug"),
     ])
     .await;
     (host, home)
@@ -56,11 +57,32 @@ async fn requests_after_a_turn(host: &Host, bot: &str, home: &Path) -> Vec<Value
             return all;
         }
         if Instant::now() >= deadline {
+            probe_dump(host, home);
             let history = host.call("history", json!({"botId": bot})).await;
             panic!("the agent never got a prompt; requests {all:?}; chat {history}");
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// STRESS PROBE (never merged): what the host and the stub were doing when the turn never reached the agent.
+fn probe_dump(host: &Host, home: &Path) {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    host.home.hash(&mut hash);
+    let log = PathBuf::from("/tmp").join(format!("ks-{:x}", hash.finish())).join("host-output.log");
+    eprintln!("PROBE-DUMP host home {}", host.home.display());
+    eprintln!("PROBE-DUMP stub calls:\n{}", std::fs::read_to_string(home.join("calls.jsonl")).unwrap_or_default());
+    let ps = std::process::Command::new("ps").args(["-eo", "pid,ppid,etimes,stat,wchan:20,args", "--forest"]).output();
+    if let Ok(ps) = ps {
+        let text = String::from_utf8_lossy(&ps.stdout);
+        let keep: Vec<&str> = text.lines().filter(|l| l.contains("kith") || l.contains("python") || l.contains("PID")).collect();
+        eprintln!("PROBE-DUMP ps:\n{}", keep.join("\n"));
+    }
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().collect();
+    eprintln!("PROBE-DUMP host log {} ({} lines):\n{}", log.display(), lines.len(), lines[lines.len().saturating_sub(300)..].join("\n"));
+    let _ = std::fs::copy(&log, format!("/tmp/probe-host-{}.log", uuid::Uuid::new_v4()));
 }
 
 fn set_modes(requests: &[Value]) -> Vec<String> {
@@ -89,8 +111,10 @@ async fn an_owners_run_starts_in_the_mode_launch_json_reports() {
 async fn an_invitees_run_never_starts_in_bypass() {
     // The kernel's mode for the agent is a free shell; for sam's run it is confined to "default", which is where the
     // adapter starts anyway, so nothing is set.
+    let t0 = Instant::now();
     let (mut host, home) = start("bypassPermissions").await;
     let _ = house(&host).await;
+    eprintln!("PROBE house {:?} home {}", t0.elapsed(), host.home.display());
     let mut chat = String::new();
     host.restart(|dir| {
         let db = rusqlite::Connection::open(dir.join("serve.db")).unwrap();
@@ -99,14 +123,10 @@ async fn an_invitees_run_never_starts_in_bypass() {
         chat = db.query_row("SELECT id FROM bots", [], |r| r.get(0)).unwrap();
     })
     .await;
-    // The restarted host has the bot as sam's before anything is sent.
-    for _ in 0..200 {
-        if host.roster().await.iter().any(|b| b["id"] == chat.as_str()) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    eprintln!("PROBE restarted {:?}", t0.elapsed());
+    eprintln!("PROBE roster loop done {:?}", t0.elapsed());
     let requests = requests_after_a_turn(&host, &chat, &home).await;
+    eprintln!("PROBE turn done {:?}", t0.elapsed());
     assert!(requests.iter().any(|r| r["method"] == "session/new" || r["method"] == "session/load"), "{requests:?}");
     assert!(set_modes(&requests).is_empty(), "{requests:?}");
     let _ = std::fs::remove_dir_all(&home);
