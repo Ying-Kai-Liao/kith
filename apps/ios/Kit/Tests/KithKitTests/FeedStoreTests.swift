@@ -186,6 +186,10 @@ private func store(_ host: FakeFeed, chats: [Bot] = [], debounce: Duration = .mi
         FeedComposer(host: { host }, chats: { chats }, startChat: { started.ids.append($0); return bot($0) },
                      home: { "main" }, debounce: .milliseconds(10))
     }
+    /// Waits for the composer's debounced pick; a fixed sleep flaked on the loaded CI simulator.
+    private func settle(_ until: () -> Bool) async throws {
+        for _ in 0..<500 where !until() { try await Task.sleep(for: .milliseconds(10)) }
+    }
     final class StartLog { var ids: [String] = [] }
 
     @Test func untaggedSendWaitsForAPickForTheseWords() async throws {
@@ -195,7 +199,7 @@ private func store(_ host: FakeFeed, chats: [Bot] = [], debounce: Duration = .mi
         c.edit("book a table")
         await c.send()
         #expect(host.sent.isEmpty)
-        try await Task.sleep(for: .milliseconds(100))
+        try await settle { c.target != nil }
         #expect(c.target == "otto")
         c.edit("book a table for two")
         #expect(c.target == nil)
@@ -206,7 +210,7 @@ private func store(_ host: FakeFeed, chats: [Bot] = [], debounce: Duration = .mi
         let host = FakeFeed()
         let c = composer(host, chats: [bot("main")])
         c.edit("hello")
-        try await Task.sleep(for: .milliseconds(100))
+        try await settle { c.pick != nil }
         #expect(c.pick?.agent == "main" && c.pick?.fallback == true)
         #expect(c.canSend)
     }

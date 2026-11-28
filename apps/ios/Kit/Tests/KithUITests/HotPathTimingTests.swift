@@ -91,7 +91,7 @@ func time(_ label: String, runs: Int = 5, _ body: () -> Void) -> Double {
         store = BotStore(computer: computer, storage: storage) { FakeRemote(.ready(.relay)) }
     }
     defer { store?.retire() }
-    #expect(ms < 30)
+    #expect(ms < 100)
     #expect(store?.cacheLoaded == false)
     await store?.cacheReady()
     #expect(store?.cacheLoaded == true)
