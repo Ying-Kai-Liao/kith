@@ -107,6 +107,8 @@ export async function verifySig(req: Request, body: Uint8Array, now = Date.now()
 export interface ClerkUser {
   userId: string;
   email: string | null;
+  /** The display name the other side of a person chat sees; null when the token carries none. */
+  name: string | null;
   /** The Clerk session this token belongs to. */
   sid: string;
   /** The `Origin` the token was minted for; Clerk omits it when the Origin was empty. */
@@ -135,9 +137,11 @@ export async function verifyClerkToken(token: string, env: Env): Promise<ClerkUs
     if (claims.iss !== env.CLERK_ISSUER || typeof claims.sub !== "string" || !claims.sub || !claims.sid) return null;
     const email = (claims as { email?: unknown }).email;
     const azp = (claims as { azp?: unknown }).azp;
+    const name = (claims as { name?: unknown }).name;
     return {
       userId: claims.sub,
       email: typeof email === "string" && email ? email : null,
+      name: typeof name === "string" && name.trim() && name.length <= 100 ? name.trim() : null,
       sid: claims.sid,
       azp: typeof azp === "string" && azp ? azp : null,
     };

@@ -394,7 +394,7 @@ describe("revoking a person on every computer of the owner (R6, R7)", () => {
   it("cuts the account's memberships and grants on every Mac of the owner and lists it as revoked on each", async () => {
     const { a, b, friend } = await twoMacs();
     const { grantId } = await grantAccess(friend, b);
-    expect((await revoke(a, friend.userId)).body).toEqual({ ok: true });
+    expect((await revoke(a, friend.userId)).body.ok).toBe(true);
     for (const h of [a, b]) {
       const s = await state(h);
       expect(s.revoked).toEqual([friend.userId]);
@@ -416,7 +416,7 @@ describe("revoking a person on every computer of the owner (R6, R7)", () => {
     const r = await accept(friend, fresh.inviteId, fresh.token);
     expect(r.status).toBe(410);
     expect(JSON.stringify(r.body)).toContain("access to this computer was removed");
-    expect((await unrevoke(b, friend.userId)).body).toEqual({ ok: true });
+    expect((await unrevoke(b, friend.userId)).body.ok).toBe(true);
     for (const h of [a, b]) expect((await state(h)).revoked).toEqual([]);
     // The undo gave back the membership on b, so the fresh invite finds the account already a member there.
     expect((await accept(friend, fresh.inviteId, fresh.token)).status).toBe(409);
@@ -426,7 +426,7 @@ describe("revoking a person on every computer of the owner (R6, R7)", () => {
     const { a, b, friend } = await twoMacs();
     await revoke(a, friend.userId);
     for (const h of [a, b]) expect((await state(h)).memberships).toEqual([]);
-    expect((await unrevoke(b, friend.userId)).body).toEqual({ ok: true });
+    expect((await unrevoke(b, friend.userId)).body.ok).toBe(true);
     for (const h of [a, b]) expect((await state(h)).memberships.map((m: Json) => m.userId)).toEqual([friend.userId]);
     // Undoing again, or after the owner ended a membership by hand, brings nothing back.
     expect((await unrevoke(a, friend.userId)).status).toBe(200);
@@ -442,7 +442,7 @@ describe("revoking a person on every computer of the owner (R6, R7)", () => {
     const { grantId } = await grantAccess(friend, b);
     await revoke(a, friend.userId);
     expect((await state(b)).grants).toEqual([]);
-    expect((await unrevoke(a, friend.userId)).body).toEqual({ ok: true });
+    expect((await unrevoke(a, friend.userId)).body.ok).toBe(true);
     const grants = (await state(b)).grants as Json[];
     expect(grants).toHaveLength(1);
     expect(grants[0]!.grantId).not.toBe(grantId);

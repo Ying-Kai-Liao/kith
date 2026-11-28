@@ -4,6 +4,7 @@
 import { randomId, sha256, utf8 } from "../auth";
 import { ApiError, audit, body, host, notify, revokeMembership, str, user, type Ctx } from "./common";
 import type { Responses } from "../contract.gen";
+import { contactBetween, endContact, pauseContact, resumeContact, undoContact, type ContactOutcome } from "./contacts";
 
 /** The host makes 24 h invites; a longer ask is a bug or a hostile host, not clock skew. */
 const MAX_INVITE_TTL_MS = 48 * 3600_000;
@@ -92,24 +93,53 @@ async function ownerComputers(c: Ctx, ownerUserId: string): Promise<string[]> {
 }
 
 /** The account a host names in a person revoke or undo: one that exists and isn't the computer's owner. */
-async function revokeTarget(c: Ctx): Promise<{ owner: string; userId: string }> {
+async function revokeTarget(c: Ctx): Promise<{ owner: string; userId: string; computerId: string; epoch: number | null; pgen: number | null; mode: "pause" | "remove" }> {
   const comp = await host(c);
-  const userId = str(body(c), "userId", 64);
+  const b = body(c);
+  const userId = str(b, "userId", 64);
+  // The contact epoch and pause generation the Mac last pulled; a host from before contacts sends neither.
+  if (b.epoch !== undefined && b.epoch !== null && (!Number.isSafeInteger(b.epoch) || (b.epoch as number) < 1)) {
+    throw new ApiError("badRequest", "Invalid epoch");
+  }
+  if (b.pgen !== undefined && b.pgen !== null && (!Number.isSafeInteger(b.pgen) || (b.pgen as number) < 0)) {
+    throw new ApiError("badRequest", "Invalid pgen");
+  }
   if (!comp.owner_user_id) throw new ApiError("forbidden", "Sign in on the computer to revoke people");
   if (userId === comp.owner_user_id) throw new ApiError("badRequest", "The owner can't be revoked");
   const known = await c.env.DB.prepare("SELECT 1 FROM accounts WHERE user_id = ?").bind(userId).first();
   if (!known) throw new ApiError("notFound", "No such account");
-  return { owner: comp.owner_user_id, userId };
+  return { owner: comp.owner_user_id, userId, computerId: comp.id, epoch: (b.epoch as number | undefined | null) ?? null,
+    pgen: (b.pgen as number | undefined | null) ?? null,
+    // A missing or unknown mode is a pause: only a request that says "remove" can end a contact (§2.4).
+    mode: b.mode === "remove" ? "remove" : "pause",
+  };
 }
+
+const personRevoked = (o: ContactOutcome | null): Responses["hostRevokePerson"] =>
+  o
+    ? { ok: !["staleEpoch", "stalePause", "removed"].includes(o.status), status: o.status, epoch: o.epoch, live: o.live, pgen: o.pgen }
+    : { ok: true, status: null, epoch: null, live: null, pgen: null };
 
 /**
  * The owner revoked a person (R6, R7): the account loses its memberships on every computer the owner has (the relay
  * blocks its devices there), may not join one again until undone, and every one of those Macs is told to pull, where
  * `GET /v1/host/state` lists it under `revoked` and the Mac sets the person's revoked state in its own kith-auth.
  * Revoking again is a no-op that still tells the Macs.
+ *
+ * When the owner is the one whose invite made the contact with this account, the revoke is a pause by default: one batch
+ * does the revocation row and every cut and the contact stays live, so a host from before contacts can never end a chat.
+ * Only `mode: "remove"` ends it, naming the epoch the host saw (§2.4, §2.6). A stale epoch or pause generation changes
+ * nothing and says so.
  */
 export async function hostRevokePerson(c: Ctx): Promise<Responses["hostRevokePerson"]> {
-  const { owner, userId } = await revokeTarget(c);
+  const { owner, userId, computerId, epoch, pgen, mode } = await revokeTarget(c);
+  const contact = await contactBetween(c.env, owner, userId);
+  const mine = contact && contact.inviter_user_id === owner ? contact : null;
+  if (mine && mode === "remove") {
+    if (epoch === null) throw new ApiError("badRequest", "A remove names the contact epoch");
+    return personRevoked(await endContact(c, mine, epoch, `computer:${computerId}`));
+  }
+  if (mine) return personRevoked(await pauseContact(c, mine, pgen, `computer:${computerId}`));
   // The row first: an accept that races this either lands before (and its membership is cut below) or sees the row.
   await c.env.DB.batch([
     c.env.DB.prepare("INSERT OR IGNORE INTO revocations(owner_user_id, user_id, revoked_at) VALUES (?, ?, ?)").bind(owner, userId, c.now),
@@ -122,12 +152,23 @@ export async function hostRevokePerson(c: Ctx): Promise<Responses["hostRevokePer
     if (active) await revokeMembership(c.env, computerId, userId, `owner:${owner}`, userId, c.now);
     else await notify(c.env, computerId);
   }
-  return { ok: true };
+  return personRevoked(null);
 }
 
 /** Undo of a person revoke: the row goes and every Mac of the owner is told; each clears the state in kith-auth. */
 export async function hostUnrevokePerson(c: Ctx): Promise<Responses["hostUnrevokePerson"]> {
-  const { owner, userId } = await revokeTarget(c);
+  const { owner, userId, computerId, epoch, pgen } = await revokeTarget(c);
+  const contact = await contactBetween(c.env, owner, userId);
+  if (contact && contact.inviter_user_id === owner) {
+    // An ended contact comes back through the one path that moves its epoch (a host without an epoch means the ended
+    // one); a live one is a resume, unless the host names an epoch and no generation (a late copy of an undo). A resume
+    // of an ended contact (it names a generation only) is refused as `removed`.
+    const resume = pgen !== null && epoch === null;
+    if (contact.live ? epoch !== null && pgen === null : !resume) {
+      return personRevoked(await undoContact(c, contact, epoch ?? contact.epoch, `computer:${computerId}`));
+    }
+    return personRevoked(await resumeContact(c, contact, pgen, `computer:${computerId}`));
+  }
   const revoked = await c.env.DB.prepare("SELECT revoked_at FROM revocations WHERE owner_user_id = ? AND user_id = ?")
     .bind(owner, userId)
     .first<{ revoked_at: number }>();
@@ -158,7 +199,7 @@ export async function hostUnrevokePerson(c: Ctx): Promise<Responses["hostUnrevok
     audit(c.env, `owner:${owner}`, "person.unrevoke", userId, "ok", c.now),
   ]);
   for (const computerId of await ownerComputers(c, owner)) await notify(c.env, computerId);
-  return { ok: true };
+  return personRevoked(null);
 }
 
 /** The accounts the owner of `computerId` revoked, for its host state. */
@@ -221,6 +262,15 @@ export async function acceptInvite(c: Ctx, [inviteId]: string[]): Promise<Respon
        SELECT ?1, computer_id, ?2, invite_id, ?3 FROM invites WHERE invite_id = ?4 AND accepted_by = ?2 AND accepted_at = ?3
        ON CONFLICT DO NOTHING`,
     ).bind(membershipId, u.userId, c.now, inviteId),
+    // The pair's contact (person chats): made on the first accept, left as it is on any later one. An ended one can't
+    // reach here: its revocation row stops the accept above (invariant C-R).
+    c.env.DB.prepare(
+      `INSERT INTO contacts(contact_id, user_lo, user_hi, inviter_user_id, epoch, base, live, created_at, updated_at)
+       SELECT ?1, min(c.owner_user_id, i.accepted_by), max(c.owner_user_id, i.accepted_by), c.owner_user_id, 1, 1, 1, ?2, ?2
+       FROM invites i JOIN computers c ON c.id = i.computer_id
+       WHERE i.invite_id = ?3 AND i.accepted_by = ?4 AND i.accepted_at = ?2 AND c.owner_user_id IS NOT NULL
+       ON CONFLICT(user_lo, user_hi) DO NOTHING`,
+    ).bind(randomId("ct_"), c.now, inviteId, u.userId),
   ]);
   if (won!.meta.changes === 0) {
     const latest = await c.env.DB.prepare("SELECT * FROM invites WHERE invite_id = ?").bind(inviteId).first<InviteRow>();

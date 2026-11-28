@@ -73,6 +73,17 @@
     ],
     "revoked": [
       "user_9xyz"
+    ],
+    "contacts": [
+      {
+        "userId": "user_3def",
+        "contactId": "ct_AAAAAAAAAAAAAAAAAAAAAA",
+        "epoch": 2,
+        "base": 1,
+        "live": true,
+        "endedBy": null,
+        "pgen": 1
+      }
     ]
   }
 }

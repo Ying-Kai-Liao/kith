@@ -36,10 +36,10 @@ describe("Android devices", () => {
     const before = await Promise.all(tables.map(table => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()));
     await applyD1Migrations(db, env.TEST_MIGRATIONS.slice(androidMigration));
     const after = await Promise.all(tables.map(table => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()));
-    // Later migrations add columns (devices.clerk_sid): what existed is kept, the new column starts empty.
+    // Later migrations add columns (devices.clerk_sid, box_pub, box_sig): what existed is kept, the new columns start empty.
     const [devices, ...rest] = after.map(result => result.results);
-    const withoutSid = (devices as { clerk_sid: unknown }[]).map(({ clerk_sid, ...d }) => {
-      expect(clerk_sid).toBeNull();
+    const withoutSid = (devices as { clerk_sid: unknown; box_pub: unknown; box_sig: unknown }[]).map(({ clerk_sid, box_pub, box_sig, ...d }) => {
+      expect([clerk_sid, box_pub, box_sig]).toEqual([null, null, null]);
       return d;
     });
     expect(withoutSid).toEqual(before[0]!.results);

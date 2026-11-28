@@ -28,6 +28,31 @@
       "values": ["macos", "linux", "windows"],
       "unknown": "unknown"
     },
+    "PcSendStatus": {
+      "doc": "How the cloud answered a person-chat send. ok: queued. duplicate: that msgId was already queued as is. contactEnded: the contact is over. staleEpoch: the contact is at another epoch (answer carries it). recipientsChanged: the devices to seal to changed (answer carries the fresh directory).",
+      "values": ["ok", "duplicate", "contactEnded", "staleEpoch", "recipientsChanged"],
+      "unknown": "unknown"
+    },
+    "ContactRole": {
+      "doc": "Which side of a contact this account is: the one whose invite made it, or the one who accepted.",
+      "values": ["inviter", "invitee"],
+      "unknown": "invitee"
+    },
+    "ContactEndedBy": {
+      "doc": "Who ended a contact, as this account sees it: me, the other person, or the system (an account was deleted).",
+      "values": ["me", "them", "system"],
+      "unknown": "system"
+    },
+    "PersonRevokeMode": {
+      "doc": "What a host's person revoke does to the person's contact: pause cuts the agents lent and keeps the chat, remove ends the contact too. A missing or unknown mode is pause (the least change).",
+      "values": ["pause", "remove"],
+      "unknown": "pause"
+    },
+    "ContactChange": {
+      "doc": "How the cloud answered an end, an undo, a pause or a resume of a contact. alreadyEnded and alreadyLive: a repeat of a change that stands. staleEpoch: the contact has moved on to another epoch since the named one (the answer carries it). stalePause: the pause generation named is not the current one (the answer carries it). removed: a pause or resume of a contact that is ended (use the undo).",
+      "values": ["ok", "alreadyEnded", "alreadyLive", "staleEpoch", "stalePause", "removed"],
+      "unknown": "unknown"
+    },
     "Decision": {
       "doc": "The host's answer to an access request. The cloud refuses one it doesn't know.",
       "values": ["approve", "deny"],
@@ -40,7 +65,10 @@
     "Health": { "fields": { "ok": "bool", "version": "string" } },
     "Me": { "fields": { "userId": "string", "email": "string?", "createdAt": "int" } },
 
-    "RegisterDevice": { "doc": "Body of POST /v1/devices.", "fields": { "name": "string", "platform": "DevicePlatform" } },
+    "RegisterDevice": {
+      "doc": "Body of POST /v1/devices. boxKey (X25519, base64url) and boxSig (the device key's Ed25519 signature over 'kith/pc-box/v1' + userId + boxKey, base64url) are set once: they make the device a recipient of person chats. Absent from an app that predates them.",
+      "fields": { "name": "string", "platform": "DevicePlatform", "boxKey": "string?", "boxSig": "string?" }
+    },
     "RegisteredDevice": {
       "fields": { "deviceId": "string", "deviceKey": "string", "name": "string", "platform": "string", "createdAt": "int" }
     },
@@ -181,7 +209,20 @@
         "botDevices": "[BotDevice]?",
         "revoked": "[string]?",
         "peerRequests": "[HostPeerRequest]?",
-        "peers": "[HostPeer]?"
+        "peers": "[HostPeer]?",
+        "contacts": "[HostContact]?"
+      }
+    },
+    "HostContact": {
+      "doc": "The computer owner's contact with another account (person chats). endedBy is owner:<userId>, computer:<id>, accountDeleted or backfill; null while live. contacts is absent from a cloud that predates them.",
+      "fields": {
+        "userId": "string",
+        "contactId": "string",
+        "epoch": "int",
+        "base": "int",
+        "live": "bool",
+        "pgen": "int?",
+        "endedBy": "string?"
       }
     },
     "PeerComputer": {
@@ -227,7 +268,70 @@
       "mayOmit": ["grantId"]
     },
     "CreateInvite": { "fields": { "inviteId": "string", "tokenHash": "string", "expiresAt": "int" } },
-    "PersonRevoke": { "fields": { "userId": "string" } },
+    "PersonRevoke": {
+      "doc": "mode remove needs epoch, the contact epoch the Mac last pulled (an undo names the ended one); pgen is the pause generation it last pulled (a pause or resume names it, so a late copy of an old one changes nothing). Absent from a host that predates contacts: a revoke is then a pause.",
+      "fields": { "userId": "string", "epoch": "int?", "mode": "PersonRevokeMode?", "pgen": "int?" }
+    },
+    "PersonRevoked": {
+      "doc": "Answer to a person revoke or undo. status, epoch and live are null when the person has no contact (nothing but the revocation changed). A staleEpoch answer changed nothing: epoch is the contact's current one.",
+      "fields": { "ok": "bool", "status": "ContactChange?", "epoch": "int?", "live": "bool?", "pgen": "int?" }
+    },
+    "ContactPerson": { "doc": "The other account of a contact, as that account's name and email are known.", "fields": { "userId": "string", "name": "string?", "email": "string?" } },
+    "DirectoryDevice": {
+      "doc": "A device with a person-chat box key. boxSig is checked by the cloud at registration and by every sender.",
+      "fields": { "userId": "string", "key": "string", "boxKey": "string", "boxSig": "string", "platform": "string", "name": "string", "addedAt": "int" }
+    },
+    "DirectoryComputer": { "doc": "A claimed computer: a recipient under the key 'computer:<computerId>'.", "fields": { "userId": "string", "computerId": "string", "signKey": "string", "boxKey": "string" } },
+    "ContactDirectory": {
+      "doc": "Every key a message of this contact is sealed to, of both accounts, sorted.",
+      "fields": { "devices": "[DirectoryDevice]", "computers": "[DirectoryComputer]" }
+    },
+    "Contact": {
+      "doc": "One contact of the caller's. directory is there while the contact is live.",
+      "fields": {
+        "contactId": "string",
+        "other": "ContactPerson",
+        "role": "ContactRole",
+        "epoch": "int",
+        "base": "int",
+        "live": "bool",
+        "paused": "bool?",
+        "endedBy": "ContactEndedBy?",
+        "endedAt": "int?",
+        "directory": "ContactDirectory?"
+      },
+      "mayOmit": ["directory"]
+    },
+    "ContactList": { "fields": { "contacts": "[Contact]" } },
+    "PcRecipient": { "doc": "One recipient's wrap of the message key: key is a device key or 'computer:<id>'; epk and wrap are base64url.", "fields": { "key": "string", "epk": "string", "wrap": "string" } },
+    "PcSend": {
+      "doc": "Body of a person-chat send. ct and sig are base64url; the cloud checks sig and the recipients' hash, never the plaintext.",
+      "fields": { "msgId": "string", "epoch": "int", "ct": "string", "sig": "string", "recipients": "[PcRecipient]" }
+    },
+    "PcSent": {
+      "fields": { "status": "PcSendStatus", "msgId": "string?", "epoch": "int?", "directory": "ContactDirectory?" },
+      "mayOmit": ["directory"]
+    },
+    "PcInboxItem": {
+      "doc": "A queued message for the asking device or computer: its own epk and wrap, and the hash of everyone's.",
+      "fields": {
+        "msgId": "string",
+        "contactId": "string",
+        "epoch": "int",
+        "senderUserId": "string",
+        "senderKey": "string",
+        "ct": "string",
+        "sig": "string",
+        "epk": "string",
+        "wrap": "string",
+        "recipientsHash": "string",
+        "createdAt": "int"
+      }
+    },
+    "PcInbox": { "doc": "Up to 100 rows; next is the cursor for the page after, null at the end.", "fields": { "messages": "[PcInboxItem]", "next": "string?" } },
+    "PcAck": { "fields": { "msgIds": "[string]" } },
+    "ContactEpoch": { "doc": "Body of an end or an undo: the epoch the caller saw.", "fields": { "epoch": "int" } },
+    "ContactChanged": { "fields": { "status": "ContactChange", "epoch": "int", "live": "bool", "pgen": "int?" } },
     "AcceptInvite": { "doc": "token is h1 (the invite link's proof), never the token itself.", "fields": { "token": "string" } },
     "InviteAccepted": { "fields": { "computerId": "string", "membershipId": "string?" } },
     "AcceptBotInvite": { "fields": { "token": "string", "name": "string", "provider": "string?" } },
@@ -301,10 +405,32 @@
     "hostRevokeMembership": {
       "method": "POST", "path": "v1/host/memberships/{membershipId}/revoke", "auth": "host", "response": "OkAnswer"
     },
-    "hostRevokePerson": { "method": "POST", "path": "v1/host/people/revoke", "auth": "host", "request": "PersonRevoke", "response": "OkAnswer" },
-    "hostUnrevokePerson": {
-      "method": "POST", "path": "v1/host/people/unrevoke", "auth": "host", "request": "PersonRevoke", "response": "OkAnswer"
+    "hostRevokePerson": {
+      "method": "POST", "path": "v1/host/people/revoke", "auth": "host", "request": "PersonRevoke", "response": "PersonRevoked"
     },
+    "hostUnrevokePerson": {
+      "method": "POST", "path": "v1/host/people/unrevoke", "auth": "host", "request": "PersonRevoke", "response": "PersonRevoked"
+    },
+    "listContacts": { "method": "GET", "path": "v1/contacts", "auth": "user+sig", "response": "ContactList" },
+    "sendPersonChat": {
+      "method": "POST", "path": "v1/contacts/{contactId}/messages", "auth": "user+sig", "request": "PcSend", "response": "PcSent"
+    },
+    "pcInbox": { "doc": "?after=<next> continues a page.", "method": "GET", "path": "v1/pc/inbox", "auth": "user+sig", "response": "PcInbox" },
+    "pcAck": { "method": "POST", "path": "v1/pc/ack", "auth": "user+sig", "request": "PcAck", "response": "OkAnswer" },
+    "endContact": {
+      "doc": "The owner route: ends the contact at once for the inviter, from any device (a web one too).",
+      "method": "POST", "path": "v1/contacts/{contactId}/end", "auth": "user+sig", "request": "ContactEpoch", "response": "ContactChanged"
+    },
+    "undoEndContact": {
+      "doc": "Brings an ended contact back at a new epoch; from a native device only.",
+      "method": "POST", "path": "v1/contacts/{contactId}/undo", "auth": "user+sig", "request": "ContactEpoch", "response": "ContactChanged"
+    },
+    "hostPcInbox": { "doc": "?after=<next> continues a page.", "method": "GET", "path": "v1/host/pc/inbox", "auth": "host", "response": "PcInbox" },
+    "hostPcAck": { "method": "POST", "path": "v1/host/pc/ack", "auth": "host", "request": "PcAck", "response": "OkAnswer" },
+    "hostSendPersonChat": {
+      "method": "POST", "path": "v1/host/contacts/{contactId}/messages", "auth": "host", "request": "PcSend", "response": "PcSent"
+    },
+
     "acceptInvite": {
       "method": "POST", "path": "v1/invites/{inviteId}/accept", "auth": "user", "request": "AcceptInvite", "response": "InviteAccepted"
     },

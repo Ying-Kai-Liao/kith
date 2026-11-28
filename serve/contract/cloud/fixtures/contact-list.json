@@ -1,0 +1,58 @@
+{
+  "type": "ContactList",
+  "body": {
+    "contacts": [
+      {
+        "contactId": "ct_AAAAAAAAAAAAAAAAAAAAAA",
+        "other": {
+          "userId": "user_3def",
+          "name": "Sam",
+          "email": "sam@example.com"
+        },
+        "role": "inviter",
+        "epoch": 2,
+        "base": 1,
+        "live": true,
+        "endedBy": null,
+        "endedAt": null,
+        "directory": {
+          "devices": [
+            {
+              "userId": "user_3def",
+              "key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+              "boxKey": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+              "boxSig": "c2lnbmF0dXJl",
+              "platform": "ios",
+              "name": "Sam’s iPhone",
+              "addedAt": 1793000000000
+            }
+          ],
+          "computers": [
+            {
+              "userId": "user_2abc",
+              "computerId": "bGFwdG9wIGNvbXB1dGVyIGlk",
+              "signKey": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+              "boxKey": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ"
+            }
+          ]
+        },
+        "paused": false
+      },
+      {
+        "contactId": "ct_BBBBBBBBBBBBBBBBBBBBBB",
+        "other": {
+          "userId": "user_4ghi",
+          "name": null,
+          "email": null
+        },
+        "role": "invitee",
+        "epoch": 1,
+        "base": 1,
+        "live": false,
+        "endedBy": "them",
+        "endedAt": 1793000100000,
+        "paused": false
+      }
+    ]
+  }
+}

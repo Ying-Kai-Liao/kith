@@ -45,8 +45,8 @@ export interface Ctx {
 
 type Body = Record<string, unknown>;
 
-export function body(c: Ctx): Body {
-  if (c.raw.length > MAX_BODY) throw new ApiError("badRequest", "Body too large");
+export function body(c: Ctx, max = MAX_BODY): Body {
+  if (c.raw.length > max) throw new ApiError("badRequest", "Body too large");
   if (!c.raw.length) return {};
   let v: unknown;
   try {
@@ -85,6 +85,7 @@ export function key(b: Body, name: string, len: number): string {
 interface User {
   userId: string;
   email: string | null;
+  name: string | null;
   createdAt: number;
   /** The Clerk session and the origin its token was minted for (web devices bind to them). */
   sid: string;
@@ -95,14 +96,14 @@ export async function user(c: Ctx): Promise<User> {
   const clerk = await verifyClerk(c.req, c.env);
   if (!clerk) throw new ApiError("unauthenticated");
   const row = await c.env.DB.prepare(
-    `INSERT INTO accounts(user_id, email, created_at) VALUES (?1, ?2, ?3)
-     ON CONFLICT(user_id) DO UPDATE SET email = COALESCE(excluded.email, accounts.email)
-     RETURNING status, email, created_at`,
+    `INSERT INTO accounts(user_id, email, name, created_at) VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT(user_id) DO UPDATE SET email = COALESCE(excluded.email, accounts.email), name = COALESCE(excluded.name, accounts.name)
+     RETURNING status, email, name, created_at`,
   )
-    .bind(clerk.userId, clerk.email, c.now)
-    .first<{ status: string; email: string | null; created_at: number }>();
+    .bind(clerk.userId, clerk.email, clerk.name, c.now)
+    .first<{ status: string; email: string | null; name: string | null; created_at: number }>();
   if (!row || row.status === "deleted") throw new ApiError("accountDeleted");
-  return { userId: clerk.userId, email: row.email, createdAt: row.created_at, sid: clerk.sid, azp: clerk.azp };
+  return { userId: clerk.userId, email: row.email, name: row.name, createdAt: row.created_at, sid: clerk.sid, azp: clerk.azp };
 }
 
 /**
@@ -300,6 +301,29 @@ export async function ownsComputers(env: Env, userId: string): Promise<boolean> 
   return !!(await env.DB.prepare("SELECT 1 FROM computers WHERE owner_user_id = ? LIMIT 1").bind(userId).first());
 }
 
+/**
+ * Drops the person-chat recipient rows matching `where` (positional `?`, at most two binds), then the messages that have
+ * none left. Done in slices so an account with a full queue stays inside the Worker's limits. Not one batch with the
+ * caller's change: the rows it names are found first, and a send that lands in between is refused by the recipient guard
+ * in `sendMessage`, which checks the device or computer is still live.
+ */
+export async function dropRecipients(env: Env, where: string, binds: unknown[]): Promise<void> {
+  for (;;) {
+    const { results } = await env.DB.prepare(`SELECT DISTINCT msg_id FROM pc_recipients WHERE ${where} LIMIT 80`)
+      .bind(...binds)
+      .all<{ msg_id: string }>();
+    if (!results.length) return;
+    const ids = results.map((r) => r.msg_id);
+    const marks = ids.map(() => "?").join(",");
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM pc_recipients WHERE (${where}) AND msg_id IN (${marks})`).bind(...binds, ...ids),
+      env.DB.prepare(
+        `DELETE FROM pc_messages WHERE msg_id IN (${marks}) AND NOT EXISTS (SELECT 1 FROM pc_recipients r WHERE r.msg_id = pc_messages.msg_id)`,
+      ).bind(...ids),
+    ]);
+  }
+}
+
 /** Removes a computer from its account: grants revoked, pending requests cancelled, sockets closed. */
 export async function unclaim(env: Env, id: string, actor: string, now: number): Promise<void> {
   const { stmts, blocks } = await revokeGrants(env, "g.computer_id = ?", [id], "unclaimed", now);
@@ -335,6 +359,8 @@ export async function unclaim(env: Env, id: string, actor: string, now: number):
     audit(env, actor, "computer.unclaim", id, "ok", now),
   ]);
   await notify(env, id, blocked);
+  // A computer nobody owns collects no person chats.
+  await dropRecipients(env, "recipient_key = ?", [`computer:${id}`]);
   // The other end of each pairing: an answering computer closes the asker's socket, an asking one re-reads its state.
   for (const g of peers) {
     if (g.to_computer_id === id) await notify(env, g.from_computer_id);
