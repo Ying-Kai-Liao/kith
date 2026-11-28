@@ -20,9 +20,8 @@ public struct FeedView: View {
 
     public var body: some View {
         content
-            .background(Palette.background)
-            .safeAreaInset(edge: .bottom) {
-                if feed.phase != .needsUpdate { FeedComposerBar(composer: composer, onOpenChat: onOpenChat) }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if feed.phase != .needsUpdate { FeedDock(composer: composer, onOpenChat: onOpenChat) }
             }
             .task { await feed.load() }
             .alert("Feed", isPresented: Binding(get: { feed.notice != nil }, set: { if !$0 { feed.notice = nil } })) {

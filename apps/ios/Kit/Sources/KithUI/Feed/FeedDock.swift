@@ -1,13 +1,35 @@
 import KithKit
 import SwiftUI
 
-/// The Feed's bottom box: @ chips choose the agent; with none, the computer's pick shows as a chip to change.
-struct FeedComposerBar: View {
+/// The Feed's bottom box: Crew's own `ChatDock`, with the Feed's routing in its accessory slot. @ chips choose the
+/// agent; with none, the computer's pick shows as a chip to change. Nothing is sent on a pick the person has not seen.
+struct FeedDock: View {
     let composer: FeedComposer
     let onOpenChat: (_ chat: String, _ entry: String?) -> Void
+    @State private var dictation = HomeDictation()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        ChatDock(text: Binding(get: { composer.text }, set: { composer.edit($0) }), placeholder: "Ask anyone",
+                 showsCall: false,
+                 onSend: send,
+                 onMic: { dictation.toggle(current: composer.text) { composer.edit($0) } },
+                 sendStyle: composer.canSend ? .ink : .muted, micListening: dictation.listening,
+                 canSend: composer.canSend, showsPlus: false) {
+            accessory
+        }
+        .padding(.bottom, 4)
+        // Swallow taps in the dock's gaps so they never reach a post scrolling beneath it.
+        .background(Color.clear.contentShape(Rectangle()).onTapGesture {})
+        .onDisappear { dictation.stop() }
+    }
+
+    private func send() {
+        dictation.stop()
+        Task { await composer.send() }
+    }
+
+    private var accessory: some View {
+        VStack(alignment: .leading, spacing: 6) {
             if let sent = composer.sent {
                 HStack {
                     Text("Sent to \(composer.name(of: sent.agent))").font(KithText.secondary.font).foregroundStyle(Palette.muted)
@@ -16,22 +38,8 @@ struct FeedComposerBar: View {
             }
             if let error = composer.error { Text(error).font(KithText.secondary.font).foregroundStyle(Palette.negative) }
             chips
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("Ask anyone", text: Binding(get: { composer.text }, set: { composer.edit($0) }), axis: .vertical)
-                    .lineLimit(1...5)
-                    .font(KithText.body.font)
-                    .padding(.vertical, 10)
-                Button { Task { await composer.send() } } label: {
-                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
-                        .foregroundStyle(composer.canSend ? Palette.accentFill : Palette.faint)
-                }
-                .disabled(!composer.canSend)
-                .accessibilityLabel("Send")
-            }
-            .padding(.leading, 16).padding(.trailing, 8)
-            .kithGlassPill()
         }
-        .padding(.horizontal, KithSpacing.gutter).padding(.bottom, 8)
+        .padding(.horizontal, 14).padding(.top, 10)
     }
 
     /// The chosen or picked agent first and filled; the rest as outlines.

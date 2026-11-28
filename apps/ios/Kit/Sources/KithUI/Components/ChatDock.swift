@@ -143,6 +143,8 @@ public struct ChatDock<Accessory: View>: View {
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1...5)
                         .padding(.vertical, 8)
+                        // Without the + the words would sit against the pill's edge.
+                        .padding(.leading, showsPlus ? 0 : 12)
                         .disabled(micListening)
                         .modifier(OptionalFocus(binding: focus))
                     if let turns, trailing.contains(.send), !micListening { TurnsChip(count: turns) }

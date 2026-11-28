@@ -32,6 +32,14 @@ struct HomeFeedStack: View {
         accounts.computers.lazy.compactMap { accounts.store(for: $0.id) }.first { $0.isOwner }
     }
 
+    private static var isDemo: Bool {
+        #if DEBUG
+        DemoScreens.name == "feed"
+        #else
+        false
+        #endif
+    }
+
     /// Opens a chat the way Crew does: through `AppStore.openBot`, landing on the entry when given.
     private func openChat(_ store: BotStore, chat: String, entry: String?) {
         store.focusEntry = entry.map { .init(chat: chat, entry: $0) }
@@ -42,7 +50,11 @@ struct HomeFeedStack: View {
         NavigationStack {
             ZStack(alignment: .top) {
                 SkyBackground(.home)
-                if let store = feedStore {
+                if Self.isDemo {
+                    #if DEBUG
+                    FeedDemoScreen()
+                    #endif
+                } else if let store = feedStore {
                     FeedView(store: store) { chat, entry in openChat(store, chat: chat, entry: entry) }
                         .id(store.computer.id)
                 } else {
@@ -58,3 +70,11 @@ struct HomeFeedStack: View {
         .tint(Palette.text)
     }
 }
+
+#if DEBUG
+/// `-kithDemoScreens feed`: the Feed over invented posts.
+private struct FeedDemoScreen: View {
+    @State private var parts = FeedDemo.make()
+    var body: some View { FeedView(feed: parts.feed, composer: parts.composer) { _, _ in } }
+}
+#endif

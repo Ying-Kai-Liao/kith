@@ -15,7 +15,12 @@ struct RootView: View {
     /// A call the person accepted, until its voice call ends.
     @State private var answered: AnsweredCall?
     /// Crew or Feed: each keeps its own navigation stack.
-    @State private var homeTab = HomeTab.crew
+    @State private var homeTab: HomeTab = {
+        #if DEBUG
+        if DemoScreens.name == "feed" { return .feed }
+        #endif
+        return .crew
+    }()
 
     /// The open bot, as a NavigationStack path.
     private var path: Binding<[BotReference]> {
