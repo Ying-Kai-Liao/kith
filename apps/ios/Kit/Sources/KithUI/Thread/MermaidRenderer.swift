@@ -32,6 +32,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
     private var drawing: [String: Task<UIImage?, Never>] = [:]
     private var tail: Task<Void, Never>?
     private(set) var webView: WKWebView?
+    private var window: UIWindow?
     private var navigated = false
     private var loading: CheckedContinuation<Bool, Never>?
 
@@ -105,6 +106,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
               width <= Self.maxSide, height <= Self.maxSide, width * height <= Self.maxArea
         else { return .failed }
         webView.frame = CGRect(x: 0, y: 0, width: width, height: height)
+        window?.frame = CGRect(x: -10_000, y: 0, width: width, height: height)
         let config = WKSnapshotConfiguration()
         config.rect = CGRect(x: 0, y: 0, width: width, height: height)
         // At most 2 pixels a point, fewer for a large diagram.
@@ -167,6 +169,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         webView.navigationDelegate = self
         navigated = false
         self.webView = webView
+        host(webView)
         // A page that never reports back (a content process that is slow or stuck) must not hold every diagram.
         let loaded = await Self.bounded(setupTimeout, fallback: false) {
             await withCheckedContinuation { continuation in
@@ -187,9 +190,27 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         return webView
     }
 
+    /// A web view that is in no window counts as not visible: WebKit holds back its load, its paint and its snapshots
+    /// (on a CI simulator the first loads never finished and a snapshot never came back). So it sits in a window
+    /// that nobody can see or touch, off the edge of the screen.
+    private func host(_ webView: WKWebView) {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: -10_000, y: 0, width: 800, height: 600)
+        window.windowLevel = UIWindow.Level(rawValue: -1)
+        window.isUserInteractionEnabled = false
+        window.alpha = 0.01
+        window.addSubview(webView)
+        window.isHidden = false
+        self.window = window
+    }
+
     private func discard() {
         webView?.navigationDelegate = nil
         webView?.stopLoading()
+        webView?.removeFromSuperview()
+        window?.isHidden = true
+        window = nil
         webView = nil
         finishLoading(false)
     }
