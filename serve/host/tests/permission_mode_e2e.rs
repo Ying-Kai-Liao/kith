@@ -26,7 +26,7 @@ async fn start(permission: &str) -> (Host, PathBuf) {
         ("KITH_AUTH", &home.join("auth.json").to_string_lossy()),
         ("KITH_STATE", &home.join("state").to_string_lossy()),
         ("KITH_HOME", &home.join("kith-home").to_string_lossy()),
-        ("RUST_LOG", "kith_serve=debug,kith_core=debug,kith_kernel=debug"),
+        ("RUST_LOG", "kith_serve=debug,kith_serve::agent=trace,kith_core=debug,kith_kernel=debug"),
     ])
     .await;
     (host, home)
@@ -78,6 +78,21 @@ fn probe_dump(host: &Host, home: &Path) {
         let text = String::from_utf8_lossy(&ps.stdout);
         let keep: Vec<&str> = text.lines().filter(|l| l.contains("kith") || l.contains("python") || l.contains("PID")).collect();
         eprintln!("PROBE-DUMP ps:\n{}", keep.join("\n"));
+    }
+    let port = host.base().rsplit(':').next().unwrap_or_default().to_owned();
+    let pgrep = std::process::Command::new("pgrep").args(["-f", &format!("kith-serve serve --bind 127.0.0.1 --port {port}$")]).output();
+    if let Ok(out) = pgrep {
+        for pid in String::from_utf8_lossy(&out.stdout).split_whitespace() {
+            let bt = std::process::Command::new("sudo")
+                .args(["gdb", "-p", pid, "-batch", "-ex", "set pagination off", "-ex", "thread apply all bt 40"])
+                .output();
+            if let Ok(bt) = bt {
+                let text = String::from_utf8_lossy(&bt.stdout).into_owned();
+                let _ = std::fs::write(format!("/tmp/probe-gdb-{pid}.txt"), &text);
+                eprintln!("PROBE-DUMP gdb {pid}: {} bytes, frames with kith:\n{}", text.len(),
+                    text.lines().filter(|l| l.contains("kith") || l.starts_with("Thread")).take(400).collect::<Vec<_>>().join("\n"));
+            }
+        }
     }
     let text = std::fs::read_to_string(&log).unwrap_or_default();
     let lines: Vec<&str> = text.lines().collect();
