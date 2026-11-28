@@ -51,7 +51,43 @@ public enum DemoScreens {
     /// Simulator shots against a real host: `SIMCTL_CHILD_KITH_OPEN_<what>=<value>` opens that screen
     /// (`SPEND=architect` or `architect/limit`, `BOARD=1`, `SHARE=1`, `USAGE_SCROLL=spend`).
     public static func open(_ what: String) -> String? { ProcessInfo.processInfo.environment["KITH_OPEN_\(what)"] }
+
+    /// The `you`, `usage` and `routines` demos: made-up plan meters per account (Claude, a second Claude account, Codex
+    /// from today's provider set) and routines for the demo agents.
+    public static var meterAccounts: [HarnessAccount]? {
+        guard active else { return nil }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let json = """
+        [{"id":"claude","status":"ready","ready":true,"usage":{"readAt":\(now - 120_000),"windows":[
+            {"name":"five_hour","percent":42,"resetsAt":\(now + 7_200_000)},{"name":"seven_day","percent":18,"resetsAt":\(now + 3 * 86_400_000)}]}},
+         {"id":"claude:school","status":"ready","ready":true,"usage":{"readAt":\(now - 2 * 3_600_000),"windows":[
+            {"name":"five_hour","percent":91,"resetsAt":\(now + 1_800_000)},{"name":"seven_day","percent":64,"resetsAt":\(now + 86_400_000)}]}},
+         {"id":"codex","status":"signed_out","ready":false,"usage":null}]
+        """
+        return (try? JSONDecoder().decode([HarnessAccount].self, from: Data(json.utf8)))
+    }
+
+    /// Routines of the demo agents: one running, one paused, one needing attention.
+    public static var routines: RoutineListing? {
+        guard active else { return nil }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        func routine(_ id: String, _ bot: String, _ name: String, _ every: String, enabled: Bool = true, error: String? = nil) -> [String: Any] {
+            var r: [String: Any] = ["id": id, "botId": bot, "name": name, "instruction": "Do it.", "triggers": [], "enabled": enabled,
+                                    "createdAt": now, "updatedAt": now, "triggerDescriptions": [every]]
+            if let error { r["lastError"] = error }
+            return r
+        }
+        let json: [String: Any] = [
+            "routines": [routine("r1", "ada", "Morning brief", "Every day at 7:00"),
+                         routine("r2", "ada", "Weekly review", "Every Friday at 16:00", enabled: false),
+                         routine("r3", "remy", "Mockup check", "Every 2 hours"),
+                         routine("r4", "pip", "Inbox sweep", "Every day at 18:30", error: "bad schedule")],
+            "runs": [["id": "u1", "routineId": "r3", "botId": "remy", "status": "running", "createdAt": now - 60_000]],
+        ]
+        return (try? JSONSerialization.data(withJSONObject: json)).flatMap { try? JSONDecoder().decode(RoutineListing.self, from: $0) }
+    }
     #else
+    public static var meterAccounts: [HarnessAccount]? { nil }
     public static func open(_ what: String) -> String? { nil }
     public static var active: Bool { false }
     public static let chatBotId = "coder"
@@ -117,6 +153,11 @@ extension AccountStore {
             bot("team", "Release crew", kind: "group", unread: 2, last: "Ada: the build is green", minutesAgo: 12, members: ["ada", "remy", "pip"]),
         ].compactMap { $0 }
         for b in bots { store.bots[b.id] = b }
+        if let usage = try? JSONDecoder().decode(Usage.self, from: Data("""
+            {"providers":[{"id":"claude","name":"Claude","windows":[],"source":"claude","updatedAt":\(now)},
+                          {"id":"codex","name":"Codex","windows":[{"id":"primary","label":"5-hour","percent":27,"resetsAt":\(now + 5_400_000)}],
+                           "source":"sessions","updatedAt":\(now - 600_000)}]}
+            """.utf8)) { store.usage = usage }
         seedChat(store, now: now)
         seedBoard(store, now: now)
         seedRoom(store, now: now)

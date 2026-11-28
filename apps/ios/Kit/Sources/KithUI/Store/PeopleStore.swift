@@ -121,6 +121,14 @@ public final class PeopleStore {
         await write { try await $0.setPersonAccess(personId: personId, agents: agents, projects: projects) }
     }
 
+    /// Puts someone who has joined into group rooms. Rooms ride only on the real client, like `createInvite(rooms:)`.
+    func addToRooms(_ personId: String, rooms: [String]) async -> Bool {
+        await write { host in
+            guard let client = host as? HostClient else { return }
+            for room in rooms { try await client.addRoomPerson(room: room, person: personId) }
+        }
+    }
+
     func writeAccess(personId: String, agents: [String: InviteRole]) async -> Bool {
         await write { try await $0.setPersonAccess(personId: personId, agents: agents, projects: nil) }
     }
