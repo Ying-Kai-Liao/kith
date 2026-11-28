@@ -7,22 +7,24 @@ public struct FeedView: View {
     let feed: FeedStore
     let composer: FeedComposer
     let onOpenChat: (_ chat: String, _ entry: String?) -> Void
+    let attach: FeedAttach?
 
-    public init(feed: FeedStore, composer: FeedComposer, onOpenChat: @escaping (_ chat: String, _ entry: String?) -> Void) {
+    public init(feed: FeedStore, composer: FeedComposer, attach: FeedAttach? = nil,
+                onOpenChat: @escaping (_ chat: String, _ entry: String?) -> Void) {
         self.feed = feed
         self.composer = composer
+        self.attach = attach
         self.onOpenChat = onOpenChat
     }
 
-    public init(store: BotStore, onOpenChat: @escaping (_ chat: String, _ entry: String?) -> Void) {
-        self.init(feed: store.feed, composer: store.feedComposer, onOpenChat: onOpenChat)
+    public init(store: BotStore, attach: FeedAttach? = nil, onOpenChat: @escaping (_ chat: String, _ entry: String?) -> Void) {
+        self.init(feed: store.feed, composer: store.feedComposer, attach: attach, onOpenChat: onOpenChat)
     }
 
     public var body: some View {
         content
-            .background(Palette.background)
-            .safeAreaInset(edge: .bottom) {
-                if feed.phase != .needsUpdate { FeedComposerBar(composer: composer, onOpenChat: onOpenChat) }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if feed.phase != .needsUpdate { FeedDock(composer: composer, onOpenChat: onOpenChat, attach: attach) }
             }
             .task { await feed.load() }
             .alert("Feed", isPresented: Binding(get: { feed.notice != nil }, set: { if !$0 { feed.notice = nil } })) {
