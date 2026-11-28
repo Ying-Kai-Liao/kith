@@ -64,17 +64,19 @@ public struct HarnessAccount: Decodable, Hashable, Sendable, Identifiable {
     public var outUntil: Date?
     public var reason: String?
     public var windows: [Window]
+    /// When the host read `windows` (fact 0.1); nil when the account has no usage.
+    public var usageReadAt: Date?
     public var pins: [Pin]
     public var loggedIn: Bool
 
     private enum CodingKeys: String, CodingKey {
         case id, harness, account, kind, inSet, order, status, ready, why, fix, outUntil, reason, usage, pins, loggedIn
     }
-    private enum UsageKeys: String, CodingKey { case windows }
+    private enum UsageKeys: String, CodingKey { case windows, readAt }
 
     public init(id: String, harness: String = "", account: String = "", kind: String? = nil, inSet: Bool = false,
                 order: Int? = nil, status: Status = .ready, ready: Bool = true, why: String? = nil, fix: String? = nil,
-                outUntil: Date? = nil, reason: String? = nil, windows: [Window] = [], pins: [Pin] = [], loggedIn: Bool = true) {
+                outUntil: Date? = nil, reason: String? = nil, windows: [Window] = [], usageReadAt: Date? = nil, pins: [Pin] = [], loggedIn: Bool = true) {
         self.id = id
         self.harness = harness
         self.account = account
@@ -88,6 +90,7 @@ public struct HarnessAccount: Decodable, Hashable, Sendable, Identifiable {
         self.outUntil = outUntil
         self.reason = reason
         self.windows = windows
+        self.usageReadAt = usageReadAt
         self.pins = pins
         self.loggedIn = loggedIn
     }
@@ -109,6 +112,7 @@ public struct HarnessAccount: Decodable, Hashable, Sendable, Identifiable {
         reason = try? c.decodeIfPresent(String.self, forKey: .reason)
         let usage = try? c.nestedContainer(keyedBy: UsageKeys.self, forKey: .usage)
         windows = (try? usage?.decodeIfPresent([HarnessAccount.Window].self, forKey: .windows)) ?? []
+        usageReadAt = (try? usage?.decodeIfPresent(Double.self, forKey: .readAt)).flatMap { $0 }.map { Date(timeIntervalSince1970: $0 / 1000) }
         pins = (try? c.decodeIfPresent([Pin].self, forKey: .pins)) ?? []
         loggedIn = (try? c.decodeIfPresent(Bool.self, forKey: .loggedIn)) ?? true
     }
