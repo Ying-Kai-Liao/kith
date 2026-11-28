@@ -53,7 +53,7 @@ private func store(_ host: FakeFeed, chats: [Bot] = [], debounce: Duration = .mi
 }
 
 /// Polls until a debounced effect has happened; fixed sleeps flaked on the loaded CI simulator.
-private func settle(_ until: () -> Bool) async throws {
+@MainActor private func settle(_ until: () -> Bool) async throws {
     for _ in 0..<500 where !until() { try await Task.sleep(for: .milliseconds(10)) }
 }
 
