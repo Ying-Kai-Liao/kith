@@ -1607,13 +1607,22 @@ jobs:
     needs: changes
     if: needs.changes.outputs.ios == 'true' && needs.changes.outputs.heavy == 'true'
     runs-on: macos-26
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
           path: build/dd/SourcePackages
           key: ${{ runner.os }}-ios-packages-${{ hashFiles('apps/ios/Kit/Package.swift', 'apps/Kith.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+      # The Kit package's unit tests (KithKitTests, KithUITests) need a simulator, so xcodebuild, not swift test.
+      - name: Test the Kit package on the simulator
+        working-directory: apps/ios/Kit
+        run: >-
+          xcodebuild test
+          -scheme KithKit-Package
+          -derivedDataPath ../../../build/dd-kit
+          -destination 'platform=iOS Simulator,name=iPhone 17'
+          CODE_SIGNING_ALLOWED=NO
       # The project is committed (xcodegen output), so there is nothing to generate.
       - name: Build iOS Dev for the simulator
         run: >-
