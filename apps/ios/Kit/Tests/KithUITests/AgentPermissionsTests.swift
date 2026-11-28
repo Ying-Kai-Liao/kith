@@ -1,3 +1,4 @@
+import Foundation
 import KithKit
 import Testing
 @testable import KithUI
@@ -28,4 +29,14 @@ private let rules: [HostContract.AgentRule] = [
     let groups = AgentPermissions.groups(rules: [])
     #expect(groups.count == 3)
     #expect(groups.allSatisfy { $0.lines.isEmpty })
+}
+
+@Test func asksBeforeSaysRiskyStepsUnlessChecksAreOff() throws {
+    #expect(AgentPermissions.askLabel(nil) == nil)
+    var info = try JSONDecoder().decode(KithInfo.self, from: Data(#"{"agent":"a"}"#.utf8))
+    #expect(AgentPermissions.askLabel(info) == "Risky steps")
+    info.permissionMode = "default"
+    #expect(AgentPermissions.askLabel(info) == "Risky steps")
+    info.permissionMode = "bypassPermissions"
+    #expect(AgentPermissions.askLabel(info) == "Never asks")
 }

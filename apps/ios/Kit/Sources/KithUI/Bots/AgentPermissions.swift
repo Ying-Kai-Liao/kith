@@ -59,9 +59,9 @@ enum AgentPermissions {
     /// The rule id a removable line stands for.
     static func ruleId(_ line: PermissionLine) -> String { String(line.id.dropFirst("allowed/".count)) }
 
-    /// "Asks before: Default" on the agent page, from kith's answer.
-    static func modeLabel(_ info: KithInfo?) -> String? {
-        info.map { HqSetting.permissionLabel($0.permissionMode ?? "auto") }
+    /// "Asks before: Risky steps" on the agent page, from kith's answer: "Never asks" only when permission checks are off.
+    static func askLabel(_ info: KithInfo?) -> String? {
+        info.map { HqSetting.permissionMode($0.permissionMode ?? "auto") == "bypassPermissions" ? "Never asks" : "Risky steps" }
     }
 }
 

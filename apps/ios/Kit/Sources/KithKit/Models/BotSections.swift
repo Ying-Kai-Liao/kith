@@ -74,6 +74,12 @@ public struct HqSetting: Equatable, Sendable {
         permissionModes.first { $0.id == permissionMode(mode) }?.label ?? mode
     }
 
+    /// A value hq reports (`claude`, `codex`, `default`) as a word to read: the first letter up, model ids left alone.
+    public static func display(_ value: String) -> String {
+        guard !value.contains("-"), !value.contains(":"), let first = value.first else { return value }
+        return first.uppercased() + value.dropFirst()
+    }
+
     private static let callModelNames: [(id: String, label: String)] = [
         ("sonnet", "Sonnet"), ("haiku", "Haiku"), ("opus", "Opus"), ("own", "Agent's own model"),
     ]
@@ -99,8 +105,8 @@ public struct HqSetting: Equatable, Sendable {
             HqSetting(key: .callModel, label: "Call model", value: info.map { $0.callModel ?? "default" } ?? "…",
                       editable: info != nil,
                       hint: "The model that answers when you talk to this agent in a voice call. Typed messages use the agent's own model."),
-            HqSetting(key: .harness, label: "Harness", value: info.map { $0.harness ?? "claude" } ?? "…", editable: info != nil,
-                      hint: "The program that runs this agent on this computer. Switching drops a model the new harness can't run."),
+            HqSetting(key: .harness, label: "Engine", value: info.map { $0.harness ?? "claude" } ?? "…", editable: info != nil,
+                      hint: "The program that runs this agent on this computer. Switching drops a model the new engine can't run."),
             HqSetting(key: .model, label: "Model", value: info.map { $0.model ?? "default" } ?? "…", editable: info != nil,
                       hint: "Kept by Kith for this agent. Every chat of this agent uses it from its next turn."),
             HqSetting(key: .effort, label: "Effort", value: info.map { $0.effort ?? "default" } ?? "…", editable: info != nil,
