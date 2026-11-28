@@ -42,8 +42,8 @@ public enum DemoScreens {
     /// The `botguest-*` demos: Rex (Sam's Grok bot) asked "personal"; its chat row and one conversation, shaped like a real host's.
     public static let botGuestChatId = "personal"
     public static let botGuestRoot = "bg-root"
-    /// The bot the `chat` demo opens.
-    public static let chatBotId = "coder"
+    /// The bot the `chat` demo opens. The `fold` demo has its own, so entries an earlier demo cached for "coder" don't mix in.
+    public static var chatBotId: String { name == "fold" ? "folder" : "coder" }
     /// What the Crew dock starts with: `crew-typing` shows it mid-search.
     public static var query: String { name == "crew-typing" ? "co" : "" }
     /// The demos that show more than one computer: a Mac that's offline and one that turned the phone away.
