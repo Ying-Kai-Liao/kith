@@ -1617,12 +1617,19 @@ jobs:
       # The Kit package's unit tests (KithKitTests, KithUITests) need a simulator, so xcodebuild, not swift test.
       - name: Test the Kit package on the simulator
         working-directory: apps/ios/Kit
-        run: >-
-          xcodebuild test
-          -scheme KithKit-Package
-          -derivedDataPath ../../../build/dd-kit
-          -destination 'platform=iOS Simulator,name=iPhone 17'
-          CODE_SIGNING_ALLOWED=NO
+        # The macos-26 images carry different simulators from run to run, so pick whichever iPhone is installed.
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devs = [d for rt in json.load(sys.stdin)["devices"].values() for d in rt if d["name"].startswith("iPhone")]
+          print(devs[-1]["udid"] if devs else "")
+          ')
+          [ -n "$UDID" ] || { echo "no iPhone simulator is installed on this runner" >&2; exit 1; }
+          xcodebuild test \
+            -scheme KithKit-Package \
+            -derivedDataPath ../../../build/dd-kit \
+            -destination "id=$UDID" \
+            CODE_SIGNING_ALLOWED=NO
       # The project is committed (xcodegen output), so there is nothing to generate.
       - name: Build iOS Dev for the simulator
         run: >-
