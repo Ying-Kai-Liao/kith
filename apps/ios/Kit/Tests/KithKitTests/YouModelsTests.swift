@@ -51,3 +51,39 @@ private func people(_ agent: String, _ spend: [String: Double]) throws -> AgentP
     #expect(PlanMeters(usage).accounts.map(\.title) == ["Claude", "Codex"])
     #expect(PlanMeters(Usage()).accounts.isEmpty)
 }
+
+private func harness(_ json: String) throws -> [HarnessAccount] {
+    try JSONDecoder().decode([HarnessAccount].self, from: Data(json.utf8))
+}
+
+@Test func planMetersPerAccountUseTheirOwnWindows() throws {
+    let usage = try JSONDecoder().decode(Usage.self, from: Data(#"{"providers":[{"id":"claude","name":"Claude","windows":[{"id":"w","label":"old","percent":1}],"source":"claude","updatedAt":0}]}"#.utf8))
+    let accounts = try harness(#"""
+    [{"id":"claude","usage":{"readAt":1000000,"windows":[{"name":"five_hour","percent":40,"resetsAt":2000000},{"name":"seven_day","percent":10}]}},
+     {"id":"claude:school","usage":{"readAt":900000,"windows":[{"name":"five_hour","percent":90}]}}]
+    """#)
+    let meters = PlanMeters(usage, accounts: accounts)
+    #expect(meters.accounts.map(\.title) == ["Claude", "Claude · school"])
+    #expect(meters.accounts[0].provider.windows.map(\.label) == ["5-hour", "Weekly"])
+    #expect(meters.accounts[0].provider.windows[0].resetsAt == 2_000_000)
+    #expect(meters.accounts[0].readAt == Date(timeIntervalSince1970: 1000))
+    #expect(meters.accounts[1].provider.windows[0].percent == 90)
+}
+
+@Test func planMetersFallBackToTheProviderWhenAnAccountHasNoUsage() throws {
+    let usage = try JSONDecoder().decode(Usage.self, from: Data(#"{"providers":[{"id":"codex","name":"Codex","windows":[{"id":"p","label":"5-hour","percent":27}],"source":"sessions","updatedAt":0}]}"#.utf8))
+    let accounts = try harness(#"[{"id":"codex","status":"signed_out","usage":null}]"#)
+    let meters = PlanMeters(usage, accounts: accounts)
+    #expect(meters.accounts.map(\.title) == ["Codex"])
+    #expect(meters.accounts[0].readAt == nil)
+    // A host before 0.1 answers no usage field at all.
+    #expect(PlanMeters(usage, accounts: try harness(#"[{"id":"codex"}]"#)).accounts.map(\.title) == ["Codex"])
+    #expect(PlanMeters(usage, accounts: nil).accounts.map(\.title) == ["Codex"])
+}
+
+@Test func planMetersReadLabel() {
+    let now = Date(timeIntervalSince1970: 100_000)
+    #expect(PlanMeters.readLabel(now.addingTimeInterval(-20), now: now) == "just now")
+    #expect(PlanMeters.readLabel(now.addingTimeInterval(-300), now: now) == "5m ago")
+    #expect(PlanMeters.readLabel(now.addingTimeInterval(-7200), now: now) == "2h ago")
+}

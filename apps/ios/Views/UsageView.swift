@@ -7,15 +7,17 @@ import SwiftUI
 struct UsageView: View {
     @Environment(BotStore.self) private var model
     @State private var collapsed: Set<String> = []
-    private var meters: PlanMeters { PlanMeters(model.usage) }
+    /// Each account's windows (host fact 0.1); nil until the host answers, or when it can't (older host, not the owner).
+    @State private var harness: [HarnessAccount]?
+    private var meters: PlanMeters { PlanMeters(model.usage, accounts: harness) }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 22) {
-                    // Plan meters first; per-account meters (host fact 0.1) arrive through `PlanMeters`.
+                    // Plan meters first, one set per account.
                     ForEach(meters.accounts) { account in
-                        ProviderCard(provider: account.provider, collapsed: Binding(
+                        ProviderCard(provider: account.provider, readAt: account.readAt, collapsed: Binding(
                             get: { collapsed.contains(account.id) },
                             set: { if $0 { collapsed.insert(account.id) } else { collapsed.remove(account.id) } }
                         ))
@@ -42,12 +44,27 @@ struct UsageView: View {
             }
         }
         .background(Palette.background)
-        .refreshable { await model.refreshUsage() }
+        .task { await loadAccounts() }
+        .refreshable {
+            await model.refreshUsage()
+            await loadAccounts()
+        }
+    }
+}
+
+extension UsageView {
+    /// An answer that fails keeps what is shown: the provider sets stand in until the host reads the accounts.
+    private func loadAccounts() async {
+        if let demo = DemoScreens.meterAccounts { harness = demo; return }
+        guard model.isOwner, let client = model.client else { return }
+        if let answer = try? await client.accounts() { harness = answer.accounts }
     }
 }
 
 private struct ProviderCard: View {
     let provider: UsageProvider
+    /// When the host read this account's windows (per-account meters); nil for the provider-wide set.
+    var readAt: Date?
     @Binding var collapsed: Bool
     @AppStorage(SharedStore.usageIconStyleKey, store: UserDefaults(suiteName: SharedStore.appGroup))
     private var usageIconStyle = UsageIconStyle.character.rawValue
@@ -75,8 +92,12 @@ private struct ProviderCard: View {
                     if let top = provider.tightest { limitRow(top.label, top.percent, top.resetsShort()) }
                 } else {
                     ForEach(provider.windows) { w in limitRow(w.label, w.percent, w.resetsShort()) }
-                    infoRow("Source", source)
-                    infoRow("Updated", Date(milliseconds: provider.updatedAt).formatted(date: .abbreviated, time: .shortened))
+                    if let readAt {
+                        infoRow("Read", PlanMeters.readLabel(readAt))
+                    } else {
+                        infoRow("Source", source)
+                        infoRow("Updated", Date(milliseconds: provider.updatedAt).formatted(date: .abbreviated, time: .shortened))
+                    }
                 }
             }
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))

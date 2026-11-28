@@ -81,6 +81,17 @@ struct YouView: View {
         }
         .page("You")
         .navigationDestination(isPresented: $showAccount) { AccountSwitcherView(pushed: true) }
+        #if DEBUG
+        .task {
+            // `-kithDemoScreens usage` / `routines` open their page over the You page.
+            try? await Task.sleep(for: .milliseconds(600))
+            switch DemoScreens.name {
+            case "usage": showUsage = true
+            case "routines": showRoutines = true
+            default: break
+            }
+        }
+        #endif
         .navigationDestination(isPresented: $showComputers) { AccountSwitcherView(pushed: true) }
         .navigationDestination(isPresented: $showUsage) {
             YouComputerPage("Usage") { UsageView().environment($0).id($0.computer.id) }

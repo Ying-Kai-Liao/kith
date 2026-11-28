@@ -2,14 +2,16 @@ import KithKit
 import SwiftUI
 
 /// You > Routines: every routine of the computer's agents, one section per agent, each with an on/off switch.
-/// A row opens the same editor as the agent's own Routines card. Loads each agent's list (the host answers per bot) and
-/// reloads every few seconds, since a routine can also be switched from a chat card.
+/// A row opens the same editor as the agent's own Routines card. Loads each agent's list (the host answers per bot) on
+/// appearing, on pull to refresh, when the app comes back to the front and after its own changes; nothing polls.
 public struct RoutinesByAgentView: View {
     let store: BotStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var routines: [Routine] = []
     @State private var runs: [RoutineRun] = []
     @State private var loaded = false
+    @State private var loading = false
     @State private var loadError: String?
     @State private var error: String?
     /// Routines whose switch is in flight: their switch is off until the host answers.
@@ -47,11 +49,10 @@ public struct RoutinesByAgentView: View {
             if let error { SheetNote(text: error, danger: true) }
         }
         .foregroundStyle(Palette.text)
-        .task(id: names.keys.sorted()) {
-            repeat {
-                await load()
-                do { try await Task.sleep(for: .seconds(4)) } catch { break }
-            } while !Task.isCancelled
+        .task(id: names.keys.sorted()) { await load() }
+        .refreshable { await load() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await load() } }
         }
         .kithSheet(item: $editing) { target in
             RoutineEditorView(botId: target.botId, routine: routines.first { $0.id == target.routineId }) { _ in
@@ -110,7 +111,18 @@ public struct RoutinesByAgentView: View {
     }
 
     private func load() async {
-        guard let client = store.client else { return }
+        #if DEBUG
+        if let demo = DemoScreens.routines {
+            routines = demo.routines
+            runs = demo.runs
+            loaded = true
+            return
+        }
+        #endif
+        // A pull to refresh while a load runs joins it rather than starting a second one.
+        guard let client = store.client, !loading else { return }
+        loading = true
+        defer { loading = false }
         let ids = names.keys.sorted()
         let results = await withTaskGroup(of: (RoutineListing?, Error?).self) { group in
             for id in ids {
