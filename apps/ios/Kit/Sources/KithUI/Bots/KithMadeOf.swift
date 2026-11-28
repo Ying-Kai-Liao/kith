@@ -1,15 +1,17 @@
 import KithKit
 import SwiftUI
 
-/// What an agent is made of, read from its package: projects, harness, then skills, tools, MCP servers and plugins.
+/// What an agent is made of, read from its package: projects, engine, then skills, tools, MCP servers and plugins.
 /// View only: changes go through builder (the agent page's Advanced page says so).
 struct KithMadeOf: View {
     let info: KithInfo
+    /// False where the engine already has its row (the agent page's How it thinks).
+    var showsEngine = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             projects(info)
-            harness(info)
+            if showsEngine { harness(info) }
             capabilities(info)
         }
     }
@@ -31,8 +33,8 @@ struct KithMadeOf: View {
     @ViewBuilder func harness(_ info: KithInfo) -> some View {
         // Model, effort and permission are in the bot's settings (hq-backed rows, once); the harness is what is left here.
         if let harness = info.harness {
-            CardSection("Harness", footer: "Set in the agent's package") {
-                SheetRow(icon: "cpu", title: harness)
+            CardSection("Engine", footer: "Set in the agent's package") {
+                SheetRow(icon: "cpu", title: HqSetting.display(harness))
             }
         }
     }

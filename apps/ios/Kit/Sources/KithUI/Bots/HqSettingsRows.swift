@@ -7,18 +7,20 @@ struct HqSettingsRows: View {
     let store: KithInfoStore
     /// False once the Access tab shows the permission mode.
     var showsPermission = true
+    /// False on the agent page: the voice model is under Calls there, not in how it thinks.
+    var showsCallModel = true
     @Environment(BotStore.self) private var botStore
     /// The harness's models, for the Model row; empty until (or unless) the computer lists them.
     @State private var models: [AgentModels.Model] = []
 
     var body: some View {
-        ForEach(HqSetting.rows(store.info).filter { showsPermission || $0.key != .permission }, id: \.key) { row in
+        ForEach(HqSetting.rows(store.info).filter { (showsPermission || $0.key != .permission) && (showsCallModel || $0.key != .callModel) }, id: \.key) { row in
             ValueRow(row.label, detail: row.hint) {
                 if row.editable {
                     ChoicePicker(selection: binding(row), options: choices(row), detail: { row.key == .permission ? HqSetting.permissionDetail($0) : nil })
                         .disabled(isSaving(row.key))
                 } else {
-                    Text(row.value).foregroundStyle(Palette.secondary).lineLimit(1)
+                    Text(HqSetting.display(row.value)).foregroundStyle(Palette.secondary).lineLimit(1)
                 }
             }
         }
@@ -30,7 +32,7 @@ struct HqSettingsRows: View {
                 Button("Retry") { Task { await store.load(refresh: true) } }.font(.footnote)
             }
         }
-        if let error = store.callModelError {
+        if showsCallModel, let error = store.callModelError {
             Text("Call model not changed: \(error)").font(.footnote).foregroundStyle(Palette.danger)
         }
         if let error = store.settingError {

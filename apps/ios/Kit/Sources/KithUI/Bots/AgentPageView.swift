@@ -39,6 +39,8 @@ struct AgentPageView: View {
     @State private var showingUsage = false
     @State private var editingLimit = false
     @State private var template: EditorRequest?
+    @State private var sharing = false
+    @State private var deleting: Bot?
 
     init(botId: String, request: DetailsRequest, call: CallAction?) {
         self.botId = botId
@@ -101,6 +103,8 @@ struct AgentPageView: View {
             }
         }
         .kithSheet(item: $template) { BotTemplateView(draft: $0.draft) }
+        .kithSheet(isPresented: $sharing) { InviteSheet(store: model, prefill: .agent(agent)) }
+        .deleteBotConfirmation($deleting) { dismiss() }
     }
 
     // MARK: the page
@@ -125,17 +129,6 @@ struct AgentPageView: View {
 
     private var closeButton: some View {
         HStack(spacing: 8) {
-            if let bot {
-                Button { template = EditorRequest(BotDraft(bot)) } label: {
-                    Label("Create template", systemImage: "square.on.square")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.ink)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Palette.panel, in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
             Spacer(minLength: 0)
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
@@ -197,6 +190,9 @@ struct AgentPageView: View {
                 if let call {
                     pill("Call", "phone.fill", enabled: call.blocked == nil, action: call.start)
                 }
+                if model.isOwner, AgentShare.canShare(hqAgent: agent) {
+                    pill("Share", "person.badge.plus", enabled: !offline) { sharing = true }
+                }
             }
             if let reason = call?.blocked {
                 Text(reason).font(.system(size: 11.5)).foregroundStyle(Palette.muted)
@@ -227,12 +223,13 @@ struct AgentPageView: View {
         CardSection {
             navRow("Usage", icon: "chart.bar", value: usageLine, enabled: !offline && usage != nil) { showingUsage = true }
             instructionsRow
-            navRow("Asks before", icon: "checkmark.shield", value: AgentPermissions.modeLabel(kith?.info) ?? "…",
+            navRow("Asks before", icon: "checkmark.shield", value: AgentPermissions.askLabel(kith?.info) ?? "…",
                    enabled: access?.available != false) { subpage = .permissions }
             navRow("People", icon: "person.2", value: peopleValue, enabled: access?.available != false) { subpage = .people }
             navRow("Limit", icon: "gauge.with.dots.needle.33percent", value: limitValue,
                    enabled: !offline && usage != nil) { editingLimit = true }
             navRow("Memory", icon: "brain", value: "What it knows") { subpage = .memory }
+            navRow("Routines", icon: "clock", value: routinesValue) { subpage = .routines }
         }
         if let draft = Binding($draft) {
             CardSection {
@@ -246,6 +243,22 @@ struct AgentPageView: View {
         }
         CardSection {
             navRow("Advanced", icon: "slider.horizontal.3", value: "Model, routines") { subpage = .advanced }
+        }
+        CardSection(footer: bot.hidden ? "Hidden from the Crew list. Show in Crew puts it back; its chat and files stay." : nil) {
+            Button { template = EditorRequest(BotDraft(bot)) } label: {
+                SheetRow(icon: "square.on.square", title: "Create template", chevron: true)
+            }
+            .buttonStyle(.plain)
+            Button { model.setHidden(bot, !bot.hidden) } label: {
+                SheetRow(icon: bot.hidden ? "eye" : "eye.slash", title: bot.hidden ? "Show in Crew" : "Hide from Crew")
+            }
+            .buttonStyle(.plain)
+            .disabled(offline)
+            Button { deleting = bot } label: {
+                SheetRow(icon: "trash", title: "Delete \(bot.name)")
+            }
+            .buttonStyle(.plain)
+            .disabled(offline)
         }
         if let saveError {
             Text(saveError).font(.footnote).foregroundStyle(Palette.danger).frame(maxWidth: .infinity, alignment: .leading)
@@ -285,6 +298,11 @@ struct AgentPageView: View {
     private var limitValue: String {
         guard let usage else { return usageFailed ? "Unavailable" : "…" }
         return usage.limit.map { Spend.money($0) } ?? "None"
+    }
+
+    private var routinesValue: String {
+        let count = kith?.info?.schedules.count ?? 0
+        return count == 0 ? "" : "\(count) from kith"
     }
 
     private var peopleValue: String {
@@ -328,7 +346,7 @@ struct AgentPageView: View {
         case .advanced:
             if let draft = Binding($draft) {
                 AgentAdvancedPage(name: name, draft: draft, kith: kith, access: access, shown: shown,
-                                  open: { self.subpage = $0 }, askBuilder: builderAsk)
+                                  open: { self.subpage = $0 }, askBuilder: builderAsk, askAgent: { ask(botId, $0) })
             }
         case .keys:
             if let access { AgentKeysPage(store: access) }

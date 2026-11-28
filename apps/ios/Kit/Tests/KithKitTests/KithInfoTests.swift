@@ -226,3 +226,11 @@ private actor RecordingTransport: HostTransport {
     #expect(try decode(Bot.self, #"{"id":"k","hqAgent":"house"}"#).isFlagged == false)
     #expect(try decode(Bot.self, #"{"id":"old"}"#).isFlagged == false, "an older host sends no flag")
 }
+
+@Test func hqValuesReadAsWordsAndTheEngineRowIsCalledEngine() throws {
+    #expect(HqSetting.display("claude") == "Claude")
+    #expect(HqSetting.display("default") == "Default")
+    #expect(HqSetting.display("claude-sonnet-4-6") == "claude-sonnet-4-6")
+    #expect(HqSetting.display("codex:deep") == "codex:deep")
+    #expect(HqSetting.rows(try houseInfo()).first { $0.key == .harness }?.label == "Engine")
+}
