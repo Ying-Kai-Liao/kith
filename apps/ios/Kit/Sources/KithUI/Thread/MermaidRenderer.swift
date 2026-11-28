@@ -106,7 +106,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
               width <= Self.maxSide, height <= Self.maxSide, width * height <= Self.maxArea
         else { return .failed }
         webView.frame = CGRect(x: 0, y: 0, width: width, height: height)
-        window?.frame = CGRect(x: -10_000, y: 0, width: width, height: height)
+        window?.frame = CGRect(x: 0, y: 0, width: width, height: height)
         let config = WKSnapshotConfiguration()
         config.rect = CGRect(x: 0, y: 0, width: width, height: height)
         // At most 2 pixels a point, fewer for a large diagram.
@@ -192,11 +192,11 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
 
     /// A web view that is in no window counts as not visible: WebKit holds back its load, its paint and its snapshots
     /// (on a CI simulator the first loads never finished and a snapshot never came back). So it sits in a window
-    /// that nobody can see or touch, off the edge of the screen.
+    /// that nobody can see or touch, under the app.
     private func host(_ webView: WKWebView) {
         let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
         let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
-        window.frame = CGRect(x: -10_000, y: 0, width: 800, height: 600)
+        window.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
         window.windowLevel = UIWindow.Level(rawValue: -1)
         window.isUserInteractionEnabled = false
         window.alpha = 0.01
