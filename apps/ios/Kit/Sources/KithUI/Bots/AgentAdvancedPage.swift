@@ -13,13 +13,21 @@ struct AgentAdvancedPage: View {
     let open: (AgentSubpage) -> Void
     /// Puts a draft in builder's chat; nil when this computer has no builder.
     let askBuilder: ((String) -> Void)?
+    /// Puts a draft in this agent's own chat; nothing is sent.
+    let askAgent: (String) -> Void
     @Environment(BotStore.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            CardSection(footer: "Say it in your words. \(name) shows the change and waits for your Allow.") {
+                Button { askAgent("I want to change how you work: ") } label: {
+                    SheetRow(icon: "sparkles", title: "Ask \(name) to change these", chevron: true, accent: true)
+                }
+                .buttonStyle(.plain)
+            }
             if let kith {
                 CardSection("How it thinks", footer: model.isOffline ? "\(model.hostName) is offline, so these can't change now." : nil) {
-                    HqSettingsRows(store: kith, showsPermission: false)
+                    HqSettingsRows(store: kith, showsPermission: false, showsCallModel: false)
                 }
                 .disabled(model.isOffline)
             } else {
@@ -36,13 +44,9 @@ struct AgentAdvancedPage: View {
             CardSection("Activity") {
                 SwitchRow("Show summary on row", detail: "The list shows the latest thread's summary instead of the last message, once one is written.",
                           isOn: Binding(get: { draft.rowShowsSummary ?? false }, set: { draft.rowShowsSummary = $0 }))
-                Button { open(.routines) } label: {
-                    SheetRow(icon: "clock", title: "Routines", value: routinesValue, chevron: true)
-                }
-                .buttonStyle(.plain)
             }
             if let info = kith?.info {
-                KithMadeOf(info: info)
+                KithMadeOf(info: info, showsEngine: false)
                 CardSection(footer: "Skills, tools and connectors change through builder. It shows the change and waits for your Allow.") {
                     Button { askBuilder?("I want to change \(name)'s skills, tools or connectors: ") } label: {
                         SheetRow(icon: "sparkles", title: "Ask builder", detail: askBuilder == nil ? "builder isn't on this computer" : nil,
@@ -62,11 +66,6 @@ struct AgentAdvancedPage: View {
         guard let access else { return "" }
         if case .loaded = access.keys { return access.held.isEmpty ? "None" : "\(access.held.count)" }
         return ""
-    }
-
-    private var routinesValue: String {
-        let count = kith?.info?.schedules.count ?? 0
-        return count == 0 ? "" : "\(count) from kith"
     }
 }
 
