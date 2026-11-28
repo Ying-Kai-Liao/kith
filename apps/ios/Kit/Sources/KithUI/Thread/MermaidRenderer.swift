@@ -113,7 +113,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
     }
 
     /// Runs `work`, or gives up after `limit` with `fallback`. The web view can't cancel a script, so the race is by hand.
-    static func bounded<T>(_ limit: Duration, fallback: T, _ work: @escaping @MainActor () async -> T) async -> T {
+    static func bounded<T>(_ limit: Duration, fallback: sending T, _ work: @escaping @MainActor () async -> T) async -> T {
         let once = Once<T>()
         return await withCheckedContinuation { continuation in
             once.continuation = continuation
