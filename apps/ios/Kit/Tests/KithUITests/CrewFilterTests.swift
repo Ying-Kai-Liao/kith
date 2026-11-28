@@ -60,3 +60,9 @@ private func person(_ id: String, lastAt: Int64 = 0) -> CrewOrderItem {
     #expect(!rows[0].rowModel.dimmed)
     #expect(rows[0].id != rows[1].id)
 }
+
+@Test func aPersonInitialFallsBackToTheIdThenAQuestionMark() {
+    #expect(PersonInitial.letter(name: "  sam", id: "x") == "S")
+    #expect(PersonInitial.letter(name: "", id: "maya") == "M")
+    #expect(PersonInitial.letter(name: " ", id: "") == "?")
+}

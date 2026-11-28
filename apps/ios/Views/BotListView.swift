@@ -339,6 +339,7 @@ struct BotListView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .contentMargins(.bottom, 16, for: .scrollContent)
         .environment(\.defaultMinListRowHeight, 0)
         .scrollDismissesKeyboard(.immediately)
         .onDisappear { dictation.stop() }

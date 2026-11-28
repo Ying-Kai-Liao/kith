@@ -69,7 +69,7 @@ public struct CrewPerson: Identifiable, Equatable, Sendable {
         let names = person.agents.keys.sorted()
         let status = suspended ? "Access paused" : names.isEmpty ? "No agents yet" : "Uses " + names.joined(separator: ", ")
         let trailing: String? = suspended ? "Paused" : nil
-        return CrewRowModel(id: id, shape: .person(personId: person.personId), name: person.name, trailing: trailing, status: status,
+        return CrewRowModel(id: id, shape: .person(personId: person.personId, name: person.name), name: person.name, trailing: trailing, status: status,
                             dimmed: suspended)
     }
 

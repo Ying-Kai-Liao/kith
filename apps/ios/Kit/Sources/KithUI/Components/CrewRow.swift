@@ -26,7 +26,7 @@ public struct CrewRowModel: Identifiable, Equatable, Sendable {
         /// A room with several agents: two bots on the diagonal and one sky patch. Named in Inter, never Nunito.
         case group(CrewFace, CrewFace, personId: String)
         /// A person you share with: their sky patch alone.
-        case person(personId: String)
+        case person(personId: String, name: String = "")
     }
 
     public var id: String
@@ -120,6 +120,14 @@ public struct CrewRow: View {
     }
 }
 
+public enum PersonInitial {
+    /// First letter of the name, else of the id; "?" when both are empty.
+    public static func letter(name: String, id: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        return (trimmed.isEmpty ? id : trimmed).first.map { String($0).uppercased() } ?? "?"
+    }
+}
+
 /// The 48 pt mark of a row: agent, team or group.
 struct CrewRowFace: View {
     let shape: CrewRowModel.Shape
@@ -145,8 +153,14 @@ struct CrewRowFace: View {
                 SkyPatch(id: person, size: 22).offset(x: -4, y: 4)
             }
             .frame(width: box, height: box)
-        case .person(let person):
-            SkyPatch(id: person, size: box).frame(width: box, height: box)
+        case .person(let person, let name):
+            // Initials on a neutral disc: never the sky of the profile button.
+            Text(PersonInitial.letter(name: name, id: person))
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .foregroundStyle(Palette.ink2)
+                .frame(width: box, height: box)
+                .background(Palette.panel, in: Circle())
+                .overlay(Circle().strokeBorder(Palette.line, lineWidth: 1))
         case .group(let a, let b, let person):
             ZStack {
                 bot(a, size: 30).position(x: 15, y: 15)
