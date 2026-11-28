@@ -245,7 +245,7 @@ struct AgentPageView: View {
             }
         }
         CardSection {
-            navRow("Advanced", icon: "slider.horizontal.3", value: "Model, limits, routines") { subpage = .advanced }
+            navRow("Advanced", icon: "slider.horizontal.3", value: "Model, routines") { subpage = .advanced }
         }
         if let saveError {
             Text(saveError).font(.footnote).foregroundStyle(Palette.danger).frame(maxWidth: .infinity, alignment: .leading)
@@ -258,7 +258,8 @@ struct AgentPageView: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.5)
+        // Still loading is not off: only a computer that is away dims the row.
+        .opacity(enabled || !offline ? 1 : 0.5)
     }
 
     /// kith's role prompt opens in place; an agent with none gets the standing instructions editor.
