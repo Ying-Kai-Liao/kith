@@ -66,10 +66,13 @@ public struct CrewPerson: Identifiable, Equatable, Sendable {
 
     public var rowModel: CrewRowModel {
         // Who they use, not a count; no time, since last seen is not a message and must not read like one.
-        let names = person.agents.keys.sorted()
-        let status = suspended ? "Access paused" : names.isEmpty ? "No agents yet" : "Uses " + names.joined(separator: ", ")
-        let trailing: String? = suspended ? "Paused" : nil
-        return CrewRowModel(id: id, shape: .person(personId: person.personId), name: person.name, trailing: trailing, status: status,
+        let names = person.agents.keys.sorted().map { $0.prefix(1).uppercased() + $0.dropFirst() }
+        let listed = names.count > 2 ? names.prefix(2).joined(separator: ", ") + " and \(names.count - 2) more"
+            : names.joined(separator: " and ")
+        let status = suspended ? "Access paused" : names.isEmpty ? "No agents yet" : "Uses " + listed
+        // The dimmed row and "Access paused" already say it.
+        let trailing: String? = nil
+        return CrewRowModel(id: id, shape: .person(personId: person.personId, name: person.name), name: person.name, trailing: trailing, status: status,
                             dimmed: suspended)
     }
 

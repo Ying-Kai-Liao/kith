@@ -56,7 +56,13 @@ private func person(_ id: String, lastAt: Int64 = 0) -> CrewOrderItem {
     let rows = CrewPerson.rows([("mac-a", [people[0]]), ("mac-b", [people[1]])])
     #expect(rows.count == 2)
     #expect(rows[0].lastAt == 5_000 && rows[1].lastAt == 0)
-    #expect(rows[1].rowModel.trailing == "Paused" && rows[1].rowModel.dimmed)
+    #expect(rows[1].rowModel.status == "Access paused" &&rows[1].rowModel.dimmed)
     #expect(!rows[0].rowModel.dimmed)
     #expect(rows[0].id != rows[1].id)
+}
+
+@Test func aPersonInitialFallsBackToTheIdThenAQuestionMark() {
+    #expect(PersonInitial.letter(name: "  sam", id: "x") == "S")
+    #expect(PersonInitial.letter(name: "", id: "maya") == "M")
+    #expect(PersonInitial.letter(name: " ", id: "") == "?")
 }
