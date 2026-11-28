@@ -51,7 +51,7 @@ struct CrewPersonDestination: View {
 
     var body: some View {
         if let store = accounts.store(for: target.computerId), let service = people.service(for: target.computerId) {
-            SharingPersonSheet(personId: target.personId, service: service, store: store)
+            PersonPageView(personId: target.personId, people: service.store, store: store)
         }
     }
 }

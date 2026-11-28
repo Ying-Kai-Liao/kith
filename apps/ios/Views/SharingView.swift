@@ -101,7 +101,7 @@ struct SharingView: View {
         .task { await service.reload(); await store.botGuests.refresh() }
         .botSheets($botSheet, viewer: .owner)
         .kithSheet(isPresented: $sharing) { ShareFlowSheet(service: service, store: store) }
-        .kithSheet(item: $editing) { person in SharingPersonSheet(personId: person.id, service: service, store: store) }
+        .kithSheet(item: $editing) { person in PersonPageView(personId: person.id, people: people, store: store) }
         .kithSheet(isPresented: $showActivity) { ActivitySheet(people: people) }
         .kithSheet(isPresented: $showAdvanced) { PeopleView(people: people, store: store) }
     }

@@ -29,7 +29,8 @@
 		A11CE00000000000000000B1 /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE00000000000000000A1 /* PeopleView.swift */; };
 		A11CE0000000000000000D12 /* SharingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D11 /* SharingView.swift */; };
 		A11CE0000000000000000D22 /* ShareFlowSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D21 /* ShareFlowSheet.swift */; };
-		A11CE0000000000000000D32 /* SharingPersonSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D31 /* SharingPersonSheet.swift */; };
+		A11CE0000000000000000D32 /* PersonPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000D31 /* PersonPageView.swift */; };
+		A11CE0000000000000000F72 /* PersonPageExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000F71 /* PersonPageExtras.swift */; };
 		C7E300000000000000000101 /* CrewPeople.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E300000000000000000100 /* CrewPeople.swift */; };
 		C7E300000000000000000103 /* CrewListParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E300000000000000000102 /* CrewListParts.swift */; };
 		C7E300000000000000000105 /* HomeTopBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E300000000000000000104 /* HomeTopBar.swift */; };
@@ -171,7 +172,8 @@
 		A11CE00000000000000000A1 /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000D11 /* SharingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharingView.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000D21 /* ShareFlowSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareFlowSheet.swift; sourceTree = "<group>"; };
-		A11CE0000000000000000D31 /* SharingPersonSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharingPersonSheet.swift; sourceTree = "<group>"; };
+		A11CE0000000000000000D31 /* PersonPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonPageView.swift; sourceTree = "<group>"; };
+		A11CE0000000000000000F71 /* PersonPageExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonPageExtras.swift; sourceTree = "<group>"; };
 		C7E300000000000000000100 /* CrewPeople.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewPeople.swift; sourceTree = "<group>"; };
 		C7E300000000000000000102 /* CrewListParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewListParts.swift; sourceTree = "<group>"; };
 		C7E300000000000000000104 /* HomeTopBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeTopBar.swift; sourceTree = "<group>"; };
@@ -318,7 +320,8 @@
 				A11CE00000000000000000A1 /* PeopleView.swift */,
 				A11CE0000000000000000D11 /* SharingView.swift */,
 				A11CE0000000000000000D21 /* ShareFlowSheet.swift */,
-				A11CE0000000000000000D31 /* SharingPersonSheet.swift */,
+				A11CE0000000000000000D31 /* PersonPageView.swift */,
+				A11CE0000000000000000F71 /* PersonPageExtras.swift */,
 				C7E300000000000000000100 /* CrewPeople.swift */,
 				C7E300000000000000000102 /* CrewListParts.swift */,
 				C7E300000000000000000104 /* HomeTopBar.swift */,
@@ -716,7 +719,8 @@
 				A11CE00000000000000000B1 /* PeopleView.swift in Sources */,
 				A11CE0000000000000000D12 /* SharingView.swift in Sources */,
 				A11CE0000000000000000D22 /* ShareFlowSheet.swift in Sources */,
-				A11CE0000000000000000D32 /* SharingPersonSheet.swift in Sources */,
+				A11CE0000000000000000D32 /* PersonPageView.swift in Sources */,
+				A11CE0000000000000000F72 /* PersonPageExtras.swift in Sources */,
 				C7E300000000000000000101 /* CrewPeople.swift in Sources */,
 				C7E300000000000000000103 /* CrewListParts.swift in Sources */,
 				C7E300000000000000000105 /* HomeTopBar.swift in Sources */,
