@@ -892,7 +892,7 @@ private struct HomeSheets: ViewModifier {
                 NewChatSheet(store: target.store).environment(accounts)
             }
             .kithSheet(item: $inviting) { target in
-                InvitePeopleSheet(store: target.store)
+                InviteSheet(store: target.store)
             }
             .botSheets($botSheet, viewer: .owner)
             .kithSheet(item: $sharingAgent) { target in
@@ -944,22 +944,6 @@ private struct HomeSheets: ViewModifier {
             .fullScreenCover(isPresented: $pickingCamera) {
                 CameraPicker(picked: addCamera).ignoresSafeArea()
             }
-    }
-}
-
-/// People on a computer, from the new-chat menu and a row's Share: who is invited, and the way to invite someone.
-private struct InvitePeopleSheet: View {
-    let store: BotStore
-    @State private var people: PeopleStore
-
-    init(store: BotStore) {
-        self.store = store
-        _people = State(initialValue: PeopleStore(store: store))
-    }
-
-    var body: some View {
-        PeopleView(people: people, store: store)
-            .task { await people.load() }
     }
 }
 

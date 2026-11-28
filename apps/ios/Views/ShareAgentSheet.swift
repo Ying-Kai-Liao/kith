@@ -40,7 +40,7 @@ struct ShareAgentSheet: View {
         .safeAreaInset(edge: .top, spacing: 0) { ModalHeader("Share \(name)") }
         .task { await service.reload() }
         .task { await spend.load() }
-        .kithSheet(isPresented: $sharing) { ShareFlowSheet(service: service, store: store, prefill: [.agent(agent)]) }
+        .kithSheet(isPresented: $sharing) { InviteSheet(store: store, people: service.store, prefill: .agent(agent)) }
         .kithDialog("Remove \(removing?.name ?? "")?",
                     isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                     message: "They lose \(name). Anything else they have stays.") {
