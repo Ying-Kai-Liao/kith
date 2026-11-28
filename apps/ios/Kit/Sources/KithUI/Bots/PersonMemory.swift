@@ -329,3 +329,8 @@ extension PersonMemoryModel {
     }
 }
 #endif
+
+#if DEBUG
+let ciCatchProbeDebugOnly = 1
+#endif
+let ciCatchProbeUse = ciCatchProbeDebugOnly
