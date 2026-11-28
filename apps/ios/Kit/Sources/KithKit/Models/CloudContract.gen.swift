@@ -5,7 +5,7 @@ import Foundation
 
 /// The cloud contract these types were made from.
 public enum CloudContract {
-    public static let sha256 = "8adb935ba1cc5b8344f1d1fb22556c6104ddca532e019c0829cfa1c69e5fbcee"
+    public static let sha256 = "8ebd055464b0a3c07a7fa36530d7a88ca2beb87d2131f00bdebee5785861972c"
 }
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
@@ -749,7 +749,7 @@ public struct CreateInvite: Codable, Hashable, Sendable {
     }
 }
 
-/// mode remove needs epoch, the contact epoch the Mac last pulled (an undo names the ended one); pgen is the pause generation it last pulled (a pause or resume names it, so a late copy of an old one changes nothing). Absent from a host that predates contacts: a revoke is then a pause.
+/// mode remove needs epoch, the contact epoch the Mac last pulled (an undo names the ended one); pgen is the pause generation it last pulled (a pause or resume names it, so a late copy of an old one changes nothing). A request that has a mode must carry its generation (epoch for remove, pgen for pause); only a request with no mode (a host from before contacts) may omit them: its revoke is a pause, its unrevoke undoes the epoch ended now or, when live, resumes.
 public struct PersonRevoke: Codable, Hashable, Sendable {
     public var userId: String
     public var epoch: Int64?
@@ -1117,6 +1117,9 @@ public enum CloudErrorCode: String, Sendable {
     case unknownComputer
     case alreadyClaimed
     case conflict
+    case staleEpoch
+    case stalePause
+    case removed
     case tooMany
     case inviteUsed
     case paused
@@ -1150,6 +1153,9 @@ public enum CloudErrorCode: String, Sendable {
         case .unknownComputer: 404
         case .alreadyClaimed: 409
         case .conflict: 409
+        case .staleEpoch: 409
+        case .stalePause: 409
+        case .removed: 409
         case .tooMany: 409
         case .inviteUsed: 409
         case .paused: 409
