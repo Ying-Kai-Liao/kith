@@ -82,7 +82,9 @@ public enum DemoScreens {
                          routine("r2", "ada", "Weekly review", "Every Friday at 16:00", enabled: false),
                          routine("r3", "remy", "Mockup check", "Every 2 hours"),
                          routine("r4", "pip", "Inbox sweep", "Every day at 18:30", error: "bad schedule")],
-            "runs": [["id": "u1", "routineId": "r3", "botId": "remy", "status": "running", "createdAt": now - 60_000]],
+            "runs": [["id": "u1", "routineId": "r3", "botId": "remy", "status": "running", "createdAt": now - 60_000],
+                     ["id": "u2", "routineId": "r1", "botId": "ada", "status": "completed", "createdAt": now - 3 * 3_600_000],
+                     ["id": "u3", "routineId": "r2", "botId": "ada", "status": "completed", "createdAt": now - 4 * 86_400_000]],
         ]
         return (try? JSONSerialization.data(withJSONObject: json)).flatMap { try? JSONDecoder().decode(RoutineListing.self, from: $0) }
     }

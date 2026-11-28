@@ -77,14 +77,18 @@ public struct RoutinesByAgentView: View {
         }
     }
 
-    /// What's happening now, else when it runs.
+    /// First line: what's happening now or what needs attention. Then the schedule and when it last ran.
     private func summary(_ routine: Routine) -> String {
-        if let active = runs.first(where: { $0.routineId == routine.id && $0.isActive }) { return Self.runLabel(active) }
-        if routine.lastError != nil { return "Schedule needs attention" }
-        if let last = runs.first(where: { $0.routineId == routine.id }), ["failed", "interrupted"].contains(last.status) {
-            return "Last run \(Self.runLabel(last).lowercased())"
+        let last = RoutineSummary.lastRun(of: routine, in: runs)
+        var lines: [String] = []
+        if let active = runs.first(where: { $0.routineId == routine.id && $0.isActive }) {
+            lines.append(Self.runLabel(active))
+        } else if let attention = RoutineSummary.attention(routine, lastRun: last) {
+            lines.append(attention)
         }
-        return routine.triggerDescriptions.joined(separator: " · ")
+        let schedule = RoutineSummary.schedule(routine)
+        lines.append(([schedule].filter { !$0.isEmpty } + [RoutineSummary.lastRan(last)]).joined(separator: " · "))
+        return lines.joined(separator: "\n")
     }
 
     private static func runLabel(_ run: RoutineRun) -> String {
