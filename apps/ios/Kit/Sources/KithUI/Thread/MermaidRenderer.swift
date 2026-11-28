@@ -199,7 +199,6 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         window.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
         window.windowLevel = UIWindow.Level(rawValue: -1)
         window.isUserInteractionEnabled = false
-        window.alpha = 0.01
         window.addSubview(webView)
         window.isHidden = false
         self.window = window
