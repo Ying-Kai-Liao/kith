@@ -56,24 +56,25 @@ struct OthersRunLine: View {
     var body: some View {
         if case let .othersRun(title, count, live) = reason {
             Button(action: toggle) {
-                HStack(spacing: 8) {
-                    if live { Spinner(size: 12) }
-                    Text("\(title) · \(OthersRun.countText(count))")
-                        .kithText(.secondary)
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Palette.muted)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                HStack(spacing: 10) {
+                    Rectangle().fill(Palette.border).frame(height: 1)
+                    HStack(spacing: 6) {
+                        if live { Spinner(size: 12) }
+                        Text("\(title) · \(OthersRun.countText(count))")
+                            .kithText(.secondary)
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Palette.muted)
+                            .rotationEffect(.degrees(expanded ? 180 : 0))
+                    }
+                    .layoutPriority(1)
+                    Rectangle().fill(Palette.border).frame(height: 1)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
                 .frame(minHeight: 44)
-                .background(Palette.panel, in: Capsule())
-                .contentShape(Capsule())
+                .contentShape(Rectangle())
             }
             .buttonStyle(PressScale())
             .accessibilityElement(children: .ignore)

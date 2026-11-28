@@ -65,6 +65,8 @@ enum OthersRun {
                 if entry.kind == "user" {
                     switch Source(entry) {
                     case .others:
+                        // A different prompter starts its own line, so each title names who it was.
+                        if let current = run?.prompters.last, current != entry.data.prompter { close() }
                         held = []
                         if run == nil { run = Builder(firstId: item.id) }
                         run?.add(item, prompter: entry.data.prompter)

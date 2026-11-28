@@ -371,7 +371,6 @@ extension AccountStore {
                 return entry("user", ago: ago, data: ["text": text, "prompter": prompter])
             }
             list = [
-                prompted("Fix the sleep notice", ago: 90, "app"), reply(nil, ago: 89, "Found it: two places post the notice."),
                 prompted("Add a test for the sweep", ago: 60, "manager"), reply(nil, ago: 58, "Test added."),
                 prompted("Run it", ago: 56, "manager"), reply(nil, ago: 54, "Passed: 12 tests."),
                 prompted("Draft the daily digest", ago: 40, "schedule", "daily digest"), reply(nil, ago: 38, "Digest drafted."),

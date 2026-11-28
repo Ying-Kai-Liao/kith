@@ -97,6 +97,13 @@ private let own = EntryPrompter(kind: "app")
     #expect(live(streaming, working: false))
 }
 
+@Test func aNewPrompterStartsItsOwnRun() {
+    let list = items([entry(1, "user", "a", prompter: sam), entry(2, "agent", "r"),
+                      entry(3, "user", "b", prompter: sam), entry(4, "agent", "r2"),
+                      entry(5, "user", "c", prompter: EntryPrompter(kind: "agent", name: "writer")), entry(6, "agent", "r3")])
+    #expect(shape(OthersRun.fold(list, working: false)) == ["run(4)", "run(2)"])
+}
+
 @Test func newEntriesJoiningARunKeepItsRowAndUpdateTheCount() {
     let first = items([entry(1, "user", "x", prompter: sam), entry(2, "agent", "r")])
     let more = items([entry(1, "user", "x", prompter: sam), entry(2, "agent", "r"),
