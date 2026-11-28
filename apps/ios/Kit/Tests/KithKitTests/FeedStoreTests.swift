@@ -52,6 +52,11 @@ private func store(_ host: FakeFeed, chats: [Bot] = [], debounce: Duration = .mi
     FeedStore(host: { host }, chats: { chats }, storyDebounce: debounce, pageSize: 2)
 }
 
+/// Polls until a debounced effect has happened; fixed sleeps flaked on the loaded CI simulator.
+private func settle(_ until: () -> Bool) async throws {
+    for _ in 0..<500 where !until() { try await Task.sleep(for: .milliseconds(10)) }
+}
+
 @Suite @MainActor struct FeedStoreTests {
     @Test func loadsNewestFirstAndPages() async {
         let host = FakeFeed()
@@ -187,10 +192,6 @@ private func store(_ host: FakeFeed, chats: [Bot] = [], debounce: Duration = .mi
     private func composer(_ host: FakeFeed, chats: [Bot], started: StartLog = StartLog()) -> FeedComposer {
         FeedComposer(host: { host }, chats: { chats }, startChat: { started.ids.append($0); return bot($0) },
                      home: { "main" }, debounce: .milliseconds(10))
-    }
-    /// Waits for the composer's debounced pick; a fixed sleep flaked on the loaded CI simulator.
-    private func settle(_ until: () -> Bool) async throws {
-        for _ in 0..<500 where !until() { try await Task.sleep(for: .milliseconds(10)) }
     }
     final class StartLog { var ids: [String] = [] }
 
