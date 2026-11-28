@@ -20,19 +20,21 @@ public enum CrewRows {
         }
         let waiting = BoardModel.waitingCount(in: store.entries[bot.id] ?? [])
         let state: BotAvatarState = asleep ? .asleep : bot.needsInput ? .needsYou(max(waiting, 1)) : bot.isWorking ? .working : .idle
-        let trailing: String? = asleep ? "asleep" : bot.isWorking && !bot.needsInput ? "working"
-            : bot.lastAt > 0 ? RelativeTime.day(Date(milliseconds: bot.lastAt)) : nil
+        // "Working" shows once, in the status line (and the avatar's state): the right edge stays a time.
+        let trailing: String? = asleep ? "asleep" : bot.lastAt > 0 ? RelativeTime.day(Date(milliseconds: bot.lastAt)) : nil
         return CrewRowModel(id: rowId(item), shape: shape, name: bot.name, withPerson: person, trailing: trailing,
-                            status: status(bot, store: store), count: waiting, unread: bot.unread > 0, state: state, tag: bot.botGuest?.tag, botProvider: bot.botGuest?.provider)
+                            status: status(bot, store: store, waiting: waiting), count: waiting, unread: bot.unread > 0, state: state, tag: bot.botGuest?.tag, botProvider: bot.botGuest?.provider)
     }
 
     public static func rowId(_ item: RosterItem) -> String { "\(item.ref.computerId)/\(item.bot.id)" }
 
-    @MainActor static func status(_ bot: Bot, store: BotStore) -> String {
+    @MainActor static func status(_ bot: Bot, store: BotStore, waiting: Int = 0) -> String {
         let using = store.screen?.agentBot == bot.id ? "Using the computer · " : ""
         if bot.needsInput { return using + (bot.activity.isEmpty ? "Needs your approval" : bot.activity) }
         if bot.isWorking { return using + (bot.activity.isEmpty ? "Working…" : bot.activity) }
         if bot.status == "error" { return using + MessagePreview.text(bot.lastMessage ?? "Something went wrong") }
+        // A badge belongs to something waiting on you, so the line says so instead of the quiet setup detail.
+        if waiting > 0, bot.rowLine == nil { return using + "Waiting for your answer" }
         return using + MessagePreview.text(bot.rowLine ?? (bot.isGroup ? "\(bot.members.count) agents" : "\(store.backendName(bot.backend)) · \(bot.folderName)"))
     }
 
