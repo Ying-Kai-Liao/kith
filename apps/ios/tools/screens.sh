@@ -42,6 +42,7 @@ modes=(
   "demo-crew-people|-kithDemoScreens crew-people"
   "demo-chat|-kithDemoScreens chat"
   "demo-news|-kithDemoScreens news"
+  "demo-fold|-kithDemoScreens fold"
   "demo-settings|-kithDemoScreens settings"
   "demo-computers|-kithDemoScreens computers"
   "demo-account|-kithDemoScreens account"

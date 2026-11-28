@@ -22,6 +22,8 @@ public struct ThreadView: View {
     @State var expandedSteps: Set<String> = []
     /// Topic cards opened inline, by card id. Not persisted: a topic starts folded.
     @State var expandedTopics: Set<String> = []
+    /// Runs others prompted that the reader opened (see `OthersRun`).
+    @State var expandedRuns: Set<String> = []
     /// The topic whose title is being asked for or changed.
     @State var titling: TopicTitling?
     @State var botChat: BotChatTarget?
@@ -175,6 +177,8 @@ public struct ThreadView: View {
             topicRow(group)
         case .task(let root, let thread):
             taskCard(root: root, thread: thread)
+        case .othersRun(let group):
+            othersRunRow(group)
         case .steps(let run):
             StepsRow(run: run, expanded: expandedSteps.contains(run.id),
                      toggle: { toggleSteps(run.id) }, openTrace: { showTrace = true })
@@ -188,6 +192,26 @@ public struct ThreadView: View {
                 }.buttonStyle(.plain)
             } else {
                 entryRow(e, groupStart: groupStart, inTopic: inTopic)
+            }
+        }
+    }
+
+    /// A run someone else prompted: one line, and when opened its entries as ordinary rows. An ask inside it is its own
+    /// row under this one, so it shows either way.
+    func othersRunRow(_ group: OthersRunGroup) -> some View {
+        let open = expandedRuns.contains(group.id)
+            || model.focusEntry.map { $0.chat == botId && group.holds(entry: $0.entry) } == true
+        return VStack(alignment: .leading, spacing: 0) {
+            OthersRunLine(reason: group.reason, expanded: open) {
+                foldEpoch += 1
+                withAnimation(Motion.reduced(Motion.layout, reduceMotion)) {
+                    if !expandedRuns.insert(group.id).inserted { expandedRuns.remove(group.id) }
+                }
+            }
+            .padding(.top, 12)
+            if open {
+                // row -> othersRunRow -> row is a recursive opaque type; AnyView breaks the cycle.
+                ForEach(group.items) { inner in AnyView(row(inner)) }
             }
         }
     }
@@ -375,6 +399,9 @@ struct ChatItem: Identifiable {
         /// Main chat only: a task's first message and its thread (replies and tool calls, in time order) as one card
         /// at the place the task started (see `TaskCard`).
         case task(root: Entry, thread: [Entry])
+        /// An agent's own 1:1 chat only: a run someone else prompted, folded to one line. Made by `OthersRun.fold`
+        /// over the built items, never by `build`.
+        case othersRun(OthersRunGroup)
     }
 
     let id: String
@@ -499,6 +526,7 @@ struct ChatItem: Identifiable {
         case let .steps(run): run.steps.contains { $0.id == id }
         case let .topic(group): group.members.contains { $0.id == id || ThreadFeed.stableId($0) == id }
         case let .task(root, thread): ([root] + thread).contains { $0.id == id || ThreadFeed.stableId($0) == id }
+        case let .othersRun(group): group.holds(entry: id)
         case .exchanges, .separator: false
         }
     }
@@ -608,7 +636,9 @@ extension ThreadView {
     /// scrolls up; the chat follows the newest message until they scroll away, and a reply is
     /// revealed steadily as it's written.
     var transcript: some View {
-        let items = ChatItem.build(model.allEntries(botId), groupingExchanges: true)
+        var items = ChatItem.build(model.allEntries(botId), groupingExchanges: true)
+        // Only the owner's own 1:1 chat folds: a group, a guest chat and a member's view never carry who prompted.
+        if model.isOwner, let bot, !bot.isGroup, bot.botGuest == nil { items = OthersRun.fold(items, working: bot.isWorking) }
         var rows: [ConversationRow] = []
         if moreOnComputer {
             rows.append(ConversationRow("earlier") {

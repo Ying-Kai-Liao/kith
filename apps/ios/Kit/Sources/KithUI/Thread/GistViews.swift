@@ -46,3 +46,40 @@ struct GistToggle: View {
         .accessibilityHint(hint)
     }
 }
+
+/// A run someone else prompted, folded to one line: "Worked with coder · 6 messages". Tapping opens it in place.
+struct OthersRunLine: View {
+    let reason: FoldReason
+    let expanded: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        if case let .othersRun(title, count, live) = reason {
+            Button(action: toggle) {
+                HStack(spacing: 8) {
+                    if live { Spinner(size: 12) }
+                    Text("\(title) · \(OthersRun.countText(count))")
+                        .kithText(.secondary)
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Palette.muted)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(minHeight: 44)
+                .background(Palette.panel, in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(PressScale())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(title), \(OthersRun.countText(count))\(live ? ", still going" : "")")
+            .accessibilityValue(expanded ? "Opened" : "Folded")
+            .accessibilityHint(expanded ? "Hides these messages" : "Opens these messages")
+        }
+    }
+}
