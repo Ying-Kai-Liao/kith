@@ -208,7 +208,7 @@ private struct DebugHooks: ViewModifier {
                 case "bots-share": shareScreen = "share-sheet"
                 case "bots-settings": app.showSettings = true
                 case "bots-people", "bots-edit", "bots-invite", "bots-result", "bots-detail", "bots-remove": botScreen = screen
-                case "agent", "agent-memory", "agent-settings", "call", "incoming-call": agentScreen = screen
+                case "agent", "agent-memory", "agent-settings", "agent-advanced", "agent-permissions", "agent-keys", "call", "incoming-call": agentScreen = screen
                 default: break // "crew", "crew-typing" and "board" (BotListView opens its Board tab) are the root
                 }
             }

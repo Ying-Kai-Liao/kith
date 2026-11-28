@@ -12,6 +12,8 @@ struct DetailsRequest: Identifiable {
     var tab: DetailsTab = .details
     /// A routine to open in its editor (Details page).
     var routineId: String?
+    /// A page of the agent page to open on (demo shots; the old sheet ignores it).
+    var subpage: AgentSubpage?
 }
 
 /// The details page's Call button: `blocked` is why it can't be used now.

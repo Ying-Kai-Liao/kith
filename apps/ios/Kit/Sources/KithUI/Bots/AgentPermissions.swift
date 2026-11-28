@@ -6,7 +6,7 @@ struct PermissionLine: Identifiable, Equatable {
     let id: String
     let text: String
     let detail: String?
-    /// Where the rule comes from ("Package", "You allowed it"); nil until the host sends `agentRules` with source tags.
+    /// Where the rule comes from ("Comes with it", "You allowed it"); nil until the host sends `agentRules` with source tags.
     var source: String?
     /// The owner can take it away from here: today only what "Always allow" remembered.
     let removable: Bool
@@ -48,7 +48,7 @@ enum AgentPermissions {
             let lines = own.enumerated().map { index, rule -> PermissionLine in
                 let owned = rule.source == "allowed.json" && rule.id != nil
                 return PermissionLine(id: owned ? "allowed/" + rule.id! : "\(list.key)/\(index)", text: rule.rule, detail: nil,
-                                      source: owned ? "You allowed it" : "Package", removable: owned)
+                                      source: owned ? "You allowed it" : "Comes with it", removable: owned)
             }
             return PermissionGroup(id: list.key, title: list.title,
                                    footer: list.key == "allow" && lines.contains { $0.removable } ? "A removed rule is gone at this agent's next run." : nil,
@@ -82,7 +82,7 @@ struct AgentPermissionsPage: View {
                     CardSection(group.title, footer: group.footer) {
                         if group.lines.isEmpty { SheetNote(text: group.emptyNote) }
                         ForEach(group.lines) { line in
-                            SheetRow(icon: group.id == "deny" ? "nosign" : "checkmark.shield", title: line.text, detail: line.source) {
+                            SheetRow(icon: Self.icon(group.id), title: line.text, detail: line.source) {
                                 if line.removable { remove(line) }
                             }
                         }
@@ -119,6 +119,14 @@ struct AgentPermissionsPage: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    private static func icon(_ group: String) -> String {
+        switch group {
+        case "deny": "nosign"
+        case "ask": "questionmark.circle"
+        default: "checkmark.shield"
         }
     }
 
