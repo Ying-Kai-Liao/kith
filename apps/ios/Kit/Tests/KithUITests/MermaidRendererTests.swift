@@ -6,17 +6,19 @@ import WebKit
 @testable import KithUI
 
 /// Diagrams draw with the bundled mermaid.js; anything mermaid can't draw is nil, so the chat shows the code.
-// Disabled: on the CI simulator the first WebKit render never completes (nil after 270 to 480 s, twice), though it
-// passes on a Mac. Re-enable once the renderer's cold start on a headless runner is understood.
-@MainActor @Suite(.serialized, .disabled("MermaidRenderer draws nothing on the CI simulator (WebKit cold start); passes locally")) struct MermaidRendererTests {
+@MainActor @Suite(.serialized) struct MermaidRendererTests {
+    /// The CI simulator has no GPU compositing: WebKit hands back a snapshot of the right size that is entirely
+    /// transparent (seen on CI: size correct, zero inked pixels). The pixels can only be checked on a Mac.
+    private static let snapshotsAreBlankHere = ProcessInfo.processInfo.environment["KITH_CI_SIMULATOR"] != nil
+
     @Test func drawsAFlowchartAndASequenceDiagram() async throws {
         let renderer = MermaidRenderer()
         let flowchart = try #require(await renderer.image("graph TD\nA[Start] --> B{Ready?}\nB -->|yes| C[Ship]\nB -->|no| A", dark: false))
         #expect(flowchart.size.width > 50 && flowchart.size.height > 100)
-        #expect(fillsItsPicture(flowchart))
+        #expect(fillsItsPicture(flowchart) || Self.snapshotsAreBlankHere)
         let sequence = try #require(await renderer.image("sequenceDiagram\nKai->>coder: add diagrams\ncoder-->>Kai: PR", dark: true))
         #expect(sequence.size.width > 100 && sequence.size.height > 50)
-        #expect(fillsItsPicture(sequence))
+        #expect(fillsItsPicture(sequence) || Self.snapshotsAreBlankHere)
         #expect(renderer.cached("sequenceDiagram\nKai->>coder: add diagrams\ncoder-->>Kai: PR", dark: true) === sequence)
     }
 
@@ -110,4 +112,17 @@ private final class Listener: @unchecked Sendable {
     }
 
     deinit { listener.cancel() }
+}
+
+/// A render that never answers is given up on at the limit, without needing WebKit.
+@MainActor @Suite struct MermaidRendererTimeoutTests {
+    @Test func aStuckRenderReturnsTheFallbackAtTheLimit() async {
+        let started = ContinuousClock.now
+        let result = await MermaidRenderer.bounded(.milliseconds(200), fallback: "gave up") {
+            try? await Task.sleep(for: .seconds(120))
+            return "finished"
+        }
+        #expect(result == "gave up")
+        #expect(ContinuousClock.now - started < .seconds(10))
+    }
 }

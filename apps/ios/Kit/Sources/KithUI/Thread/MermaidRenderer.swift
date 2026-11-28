@@ -22,13 +22,17 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
     static let maxSide: CGFloat = 4_000
     static let maxArea: CGFloat = 3_000_000
     private static let maxPixels: CGFloat = 8_000_000
-    var timeout: Duration = .seconds(5)
+    var timeout: Duration = .seconds(15)
+    /// For the web content process to start and load the page: slow on a loaded or freshly booted device (a CI
+    /// simulator needs close to a minute the first time), so long, but still bounded.
+    var setupTimeout: Duration = .seconds(60)
 
     private let cache = NSCache<NSString, UIImage>()
     private var failed = Set<String>()
     private var drawing: [String: Task<UIImage?, Never>] = [:]
     private var tail: Task<Void, Never>?
     private(set) var webView: WKWebView?
+    private var window: UIWindow?
     private var navigated = false
     private var loading: CheckedContinuation<Bool, Never>?
 
@@ -80,7 +84,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
     // MARK: - Drawing
 
     /// `.noPage` isn't the diagram's fault, so it's tried again next time; the others are remembered.
-    private enum Outcome { case drawn(UIImage), failed, timedOut, noPage }
+    private enum Outcome: @unchecked Sendable { case drawn(UIImage), failed, timedOut, noPage }
 
     private func draw(_ source: String, dark: Bool) async -> Outcome {
         guard let webView = await page() else { return .noPage }
@@ -100,6 +104,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
               width <= Self.maxSide, height <= Self.maxSide, width * height <= Self.maxArea
         else { return .failed }
         webView.frame = CGRect(x: 0, y: 0, width: width, height: height)
+        window?.frame = CGRect(x: 0, y: 0, width: width, height: height)
         let config = WKSnapshotConfiguration()
         config.rect = CGRect(x: 0, y: 0, width: width, height: height)
         // At most 2 pixels a point, fewer for a large diagram.
@@ -109,25 +114,27 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         return .drawn(UIImage(cgImage: cg, scale: CGFloat(cg.width) / width, orientation: .up))
     }
 
-    /// Runs `work`, or gives up after `limit`. The web view can't cancel a script, so the race is by hand.
-    private func within(_ limit: Duration, _ work: @escaping @MainActor () async -> Outcome) async -> Outcome {
-        final class Once {
-            var continuation: CheckedContinuation<Outcome, Never>?
-        }
-        let once = Once()
+    /// Runs `work`, or gives up after `limit` with `fallback`. The web view can't cancel a script, so the race is by hand.
+    static func bounded<T>(_ limit: Duration, fallback: T, _ work: @escaping @MainActor () async -> T) async -> T {
+        let once = Once<T>()
+        let spare = Spare(value: fallback)
         return await withCheckedContinuation { continuation in
             once.continuation = continuation
             Task { @MainActor in
-                let outcome = await work()
-                once.continuation?.resume(returning: outcome)
+                let value = await work()
+                once.continuation?.resume(returning: value)
                 once.continuation = nil
             }
             Task { @MainActor in
                 try? await Task.sleep(for: limit)
-                once.continuation?.resume(returning: .timedOut)
+                once.continuation?.resume(returning: spare.value)
                 once.continuation = nil
             }
         }
+    }
+
+    private func within(_ limit: Duration, _ work: @escaping @MainActor () async -> Outcome) async -> Outcome {
+        await Self.bounded(limit, fallback: .timedOut, work)
     }
 
     // MARK: - The page
@@ -136,8 +143,10 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         if let webView { return webView }
         guard let url = Bundle.module.url(forResource: "mermaid.min", withExtension: "js"),
               let mermaid = try? String(contentsOf: url, encoding: .utf8),
-              let rules = try? await WKContentRuleListStore.default().compileContentRuleList(
-                  forIdentifier: "kith-mermaid-block-all", encodedContentRuleList: Self.blockEverything)
+              let rules = await Self.bounded(.seconds(20), fallback: nil, {
+                  try? await WKContentRuleListStore.default().compileContentRuleList(
+                      forIdentifier: "kith-mermaid-block-all", encodedContentRuleList: Self.blockEverything)
+              })
         else { return nil }
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
@@ -155,14 +164,18 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         webView.navigationDelegate = self
         navigated = false
         self.webView = webView
-        let loaded = await withCheckedContinuation { continuation in
-            loading = continuation
-            webView.loadHTMLString(Self.html, baseURL: nil)
+        host(webView)
+        // A page that never reports back (a content process that is slow or stuck) must not hold every diagram.
+        let loaded = await Self.bounded(setupTimeout, fallback: false) {
+            await withCheckedContinuation { continuation in
+                self.loading = continuation
+                webView.loadHTMLString(Self.html, baseURL: nil)
+            }
         }
         // The first diagram on a fresh page is slow while mermaid warms up (seconds on an older phone), so one is
         // drawn here, with time to spare, rather than charged to a real diagram's timeout.
         guard loaded, self.webView === webView,
-              case .drawn = await within(.seconds(30), { await self.render("graph TD\nA", dark: false, in: webView) }),
+              case .drawn = await within(setupTimeout * 2, { await self.render("graph TD\nA", dark: false, in: webView) }),
               self.webView === webView
         else {
             discard()
@@ -171,9 +184,27 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         return webView
     }
 
+    /// A web view that is in no window counts as not visible: WebKit holds back its load, its paint and its snapshots
+    /// (on a CI simulator the first loads never finished and a snapshot never came back). So it sits in a window
+    /// that nobody can see or touch, under the app.
+    private func host(_ webView: WKWebView) {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        window.windowLevel = UIWindow.Level(rawValue: -1)
+        window.isUserInteractionEnabled = false
+        window.alpha = 0.01
+        window.addSubview(webView)
+        window.isHidden = false
+        self.window = window
+    }
+
     private func discard() {
         webView?.navigationDelegate = nil
         webView?.stopLoading()
+        webView?.removeFromSuperview()
+        window?.isHidden = true
+        window = nil
         webView = nil
         finishLoading(false)
     }
@@ -247,6 +278,16 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
       }
     })()
     """
+}
+
+/// The waiting side of a race: whichever of the work and the clock finishes first resumes it, once.
+@MainActor private final class Once<T> {
+    var continuation: CheckedContinuation<T, Never>?
+}
+
+/// Carries the fallback into the clock's task; it is only ever read on the main actor.
+private struct Spare<T>: @unchecked Sendable {
+    let value: T
 }
 
 private extension CGFloat {
