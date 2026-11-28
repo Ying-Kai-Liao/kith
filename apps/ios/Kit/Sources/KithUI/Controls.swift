@@ -366,7 +366,6 @@ public struct SegmentedChoice<ID: Hashable>: View {
     let options: [(id: ID, label: String)]
     @Namespace private var thumb
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
 
     public init(selection: Binding<ID>, options: [(id: ID, label: String)]) {
         _selection = selection
@@ -382,13 +381,13 @@ public struct SegmentedChoice<ID: Hashable>: View {
                 } label: {
                     Text(option.label)
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(on ? selectedInk : Palette.secondary)
+                        .foregroundStyle(on ? Palette.text : Palette.secondary)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background {
                             if on {
-                                Capsule().fill(thumbFill).matchedGeometryEffect(id: "thumb", in: thumb)
+                                Capsule().fill(Palette.raised).matchedGeometryEffect(id: "thumb", in: thumb)
                             }
                         }
                         // A 44 pt hit area around the thumb, without moving the track.
@@ -403,10 +402,6 @@ public struct SegmentedChoice<ID: Hashable>: View {
         .padding(3)
         .background(Palette.bubbleUser, in: Capsule())
     }
-
-    /// Dark mode's track is darker than the ground, so the raised thumb flips to the light end.
-    private var thumbFill: Color { colorScheme == .dark ? Palette.text : Palette.background }
-    private var selectedInk: Color { colorScheme == .dark ? Palette.background : Palette.text }
 }
 
 /// How `CardSection` draws its group: filled (Settings style), or outlined on the page like Grok
