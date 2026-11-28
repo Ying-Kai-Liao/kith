@@ -78,8 +78,7 @@ public struct InviteSheet: View {
                     }
                 }
             }
-            CardSection("Share agents", footer: model.offered.isEmpty ? "No agents on this computer yet."
-                        : "Can ask: answers, asks you before changing anything. Can work: can make changes.") {
+            CardSection("Share agents", footer: model.offered.isEmpty ? "No agents on this computer yet." : nil) {
                 ForEach(model.offered) { agent in agentRow(agent) }
             }
             if !model.rooms.isEmpty {
@@ -100,32 +99,54 @@ public struct InviteSheet: View {
                     }
                 }
             }
-            if !model.online {
-                Text("This computer is offline. Connect to it to make an invite.").font(.footnote).foregroundStyle(Palette.secondary)
-            }
-            if let error = model.people.error {
-                Text(error).font(.footnote).foregroundStyle(Palette.danger)
-            }
-            Button { Task { await model.create() } } label: {
-                ZStack {
-                    Text(model.joined ? "Share" : "Create invite").opacity(model.people.busy ? 0 : 1)
-                    if model.people.busy { Spinner(size: 18) }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Pinned so it stays in reach when agents, rooms and projects make the form long.
+            VStack(spacing: 10) {
+                if !model.online {
+                    Text("This computer is offline. Connect to it to make an invite.").font(.footnote).foregroundStyle(Palette.secondary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 28)
+                if let error = model.people.error {
+                    Text(error).font(.footnote).foregroundStyle(Palette.danger)
+                }
+                Button { Task { await model.create() } } label: {
+                    ZStack {
+                        Text(model.joined ? "Share" : "Create invite").opacity(model.people.busy ? 0 : 1)
+                        if model.people.busy { Spinner(size: 18) }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 28)
+                }
+                .buttonStyle(.primary)
+                .disabled(!model.canCreate)
             }
-            .buttonStyle(.primary)
-            .disabled(!model.canCreate)
+            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
+            .background(Palette.background)
+        }
+    }
+
+    @ViewBuilder private func face(_ agent: RoomAgent) -> some View {
+        if let bot = store.bots.values.first(where: { $0.hqAgent == agent.id }) {
+            BotAvatar(bot: bot, size: KithSize.botAvatarTopBar)
+        } else {
+            BotAvatar(portrait: nil, id: agent.id, size: KithSize.botAvatarTopBar)
         }
     }
 
     private func agentRow(_ agent: RoomAgent) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle(agent.name, isOn: Binding(get: { model.roles[agent.id] != nil }, set: { model.setAgent(agent.id, on: $0) }))
-                .toggleStyle(.kith)
-                .disabled(model.isHeld(agent.id))
+            Toggle(isOn: Binding(get: { model.roles[agent.id] != nil }, set: { model.setAgent(agent.id, on: $0) })) {
+                HStack(spacing: 10) {
+                    face(agent)
+                    Text(agent.name)
+                }
+            }
+            .toggleStyle(.kith)
+            .disabled(model.isHeld(agent.id))
             if let role = model.roles[agent.id] {
                 SegmentedChoice(selection: Binding(get: { role }, set: { model.roles[agent.id] = $0 }),
-                                options: InviteRole.allCases.map { ($0, $0.levelTitle) })
+                                options: [InviteRole.guest, .member].map { ($0, $0.levelTitle) })
+                Text(role == .member ? "Can make changes." : "Answers, and asks you before changing anything.")
+                    .font(.footnote).foregroundStyle(Palette.secondary)
                 if model.isHeld(agent.id) {
                     Text("\(model.who) has \(agent.name) already.").font(.footnote).foregroundStyle(Palette.secondary)
                 }
@@ -150,42 +171,50 @@ public struct InviteLinkView: View {
 
     public var body: some View {
         CardForm {
-            CardSection("Invite for \(name)", footer: "Single use, expires in 24 hours. Send it to them; they sign in with Google, Apple or GitHub.") {
-                Text(invite.link)
-                    .font(.system(.footnote, design: .monospaced))
-                    .foregroundStyle(Palette.text)
-                    .textSelection(.enabled)
-                    .lineLimit(4)
-                    .truncationMode(.middle)
-                if let joins { Text(joins).foregroundStyle(Palette.text) }
-                Button(copied ? "Copied" : "Copy link") {
+            if let code = QRCode.image(for: invite.link) {
+                Image(uiImage: code)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 220, height: 220)
+                    .padding(12)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .frame(maxWidth: .infinity)
+                    .accessibilityLabel("QR code of the invite link")
+            }
+            VStack(spacing: 4) {
+                Text("Invite for \(name)").font(.headline).foregroundStyle(Palette.text)
+                Text("Works once, for 24 hours.").font(.footnote).foregroundStyle(Palette.secondary)
+                if let joins { Text(joins).font(.footnote).foregroundStyle(Palette.secondary) }
+            }
+            .frame(maxWidth: .infinity)
+            .multilineTextAlignment(.center)
+            ShareLink(item: invite.link) {
+                Label("Share link", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 28)
+            }
+            .buttonStyle(.primary)
+            CardSection(footer: "They sign in with Google, Apple or GitHub.") {
+                Button {
                     UIPasteboard.general.string = invite.link
                     copied = true
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Palette.text)
-                ShareLink(item: invite.link) {
-                    Label("Share link", systemImage: "square.and.arrow.up")
+                } label: {
+                    Label(copied ? "Copied" : "Copy link", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .foregroundStyle(Palette.text)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .buttonStyle(.plain)
+                Text(invite.link)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(Palette.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            if let code = QRCode.image(for: invite.link) {
-                VStack(spacing: 8) {
-                    Image(uiImage: code)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 220, height: 220)
-                        .padding(12)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .accessibilityLabel("QR code of the invite link")
-                    Text("Or let them scan this with their camera.")
-                        .font(.caption)
-                        .foregroundStyle(Palette.secondary)
-                }
-                .frame(maxWidth: .infinity)
-            }
+        }
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(for: .seconds(2))
+            copied = false
         }
     }
 }
