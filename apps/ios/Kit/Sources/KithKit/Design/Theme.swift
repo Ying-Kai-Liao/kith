@@ -29,6 +29,8 @@ public enum Palette {
     public static let background = Color(light: 0xFFFFFF, dark: 0x14161B)
     public static let surface = Color(light: 0xF6F6FA, dark: 0x1E2129)
     public static let bubbleAgent = Color(light: 0xF6F6FA, dark: 0x1E2129)
+    /// A raised segmented thumb: lighter than the track in dark mode, white in light.
+    public static let raised = Color(light: 0xFFFFFF, dark: 0x565C6A)
     public static let bubbleUser = Color(light: 0xE7E8EE, dark: 0x2C303A)
     public static let border = Color(light: 0xE7E8EE, dark: 0x2C303A)
     public static let text = Color(light: 0x14161B, dark: 0xFFFFFF)
