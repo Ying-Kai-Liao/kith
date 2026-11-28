@@ -80,9 +80,16 @@ D1, Durable Objects) and signs you in with [Clerk](https://clerk.com), using Goo
 
 **What passes through:**
 
-- **Your chats, encrypted end to end.** The cloud can't read them and doesn't store them. When a device is offline,
-  its encrypted messages wait for it for up to 24 hours (`serve/cloud/src/relay.ts`,
+- **Your chats, encrypted end to end.** The cloud can't read them. Chats with your agents aren't stored there: when
+  a device is offline, its encrypted messages wait for it for up to 24 hours (`serve/cloud/src/relay.ts`,
   `serve/host/crates/wire/src/crypto.rs`).
+- **Chats with people**, encrypted end to end to each of your devices and theirs. The cloud keeps each message,
+  still encrypted, until every one of those devices has collected it, and deletes it after 30 days whether or not
+  they have. It never has the keys (`serve/cloud/src/routes/contacts.ts`, `serve/host/crates/wire/src/pc.rs`). It
+  does see who chats with whom, when, and how big each message is. It also keeps the list of your devices'
+  public keys, which is what the apps encrypt to; the chat tells you when someone adds a device.
+- **Removing someone** ends your chat with them at once: the cloud refuses new messages and drops what was still
+  waiting for their devices. What their devices already had stays on them.
 - **Webhooks** you point at your bots wait in the cloud while your Mac is offline. They're **not** encrypted there:
   the body and the forwarded headers are kept for up to 72 hours, or until your Mac collects them
   (`serve/cloud/src/relay.ts`).
@@ -91,7 +98,7 @@ D1, Durable Objects) and signs you in with [Clerk](https://clerk.com), using Goo
 **Deleting your account.** The apps don't have a button for this yet. When an account is deleted in Clerk, the cloud
 (`serve/cloud/src/routes/webhooks.ts`):
 
-- revokes its devices, grants, memberships and invites;
+- revokes its devices, grants, memberships and invites, and ends its contacts;
 - releases its computers;
 - marks the account as deleted.
 
@@ -128,6 +135,8 @@ People you invite chat on your Mac, with the agents you give them ([docs/invited
 - **Bots they bring from their own computer are different:** you can see that traffic
   ([docs/kith-bot-guests.md](docs/kith-bot-guests.md)).
 - The cloud keeps their account the same way it keeps yours.
+- You and people you invite can chat with each other directly. Those chats go through the cloud as above, and your
+  Mac keeps a copy of the whole history.
 
 ## Questions
 
