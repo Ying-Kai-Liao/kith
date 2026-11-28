@@ -120,7 +120,9 @@ private func store(_ host: FakeFeed, chats: [Bot] = [], debounce: Duration = .mi
         await s.load()
         let base = host.storyCalls
         s.entryArrived(); s.entryArrived(); s.entryArrived()
-        try await Task.sleep(for: .milliseconds(150))
+        try await settle { host.storyCalls > base }
+        // Once it has fired, give a second refetch time to show up before checking there is none.
+        try await Task.sleep(for: .milliseconds(300))
         #expect(host.storyCalls == base + 1)
     }
 
