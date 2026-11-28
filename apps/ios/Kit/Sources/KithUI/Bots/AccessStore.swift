@@ -46,7 +46,7 @@ final class AccessStore {
         #if DEBUG
         if DemoAccess.active(agent) {
             keys = .loaded(DemoAccess.keys); ledger = .loaded(DemoAccess.grants); people = DemoAccess.people
-            allowed = .loaded(DemoAccess.allowed)
+            allowed = .loaded(DemoAccess.allowed); rules = DemoAccess.rules
             return
         }
         #endif
@@ -157,6 +157,15 @@ enum DemoAccess {
         AllowedRule(id: "a1b2c3d4", rule: "Bash(ls /tmp)", reason: "[Data Exfiltration]",
                     added: ISO8601DateFormatter().string(from: .now.addingTimeInterval(-2 * 3600))),
     ])
+    /// Both sources: the package's allow / ask / deny, and one rule "Always allow" remembered (the only removable one).
+    static let rules: [HostContract.AgentRule] = [
+        .init(list: "allow", rule: "Read(~/projects/**)", source: "role/settings.json"),
+        .init(list: "allow", rule: "Bash(git status:*)", source: "role/settings.json"),
+        .init(list: "allow", rule: "Bash(ls /tmp)", source: "allowed.json", id: "a1b2c3d4", kind: "bash"),
+        .init(list: "ask", rule: "Bash(git push:*)", source: "role/settings.json"),
+        .init(list: "deny", rule: "Read(~/.ssh/**)", source: "role/settings.json"),
+        .init(list: "deny", rule: "Bash(rm -rf:*)", source: "role/settings.json"),
+    ]
     static let people = try? JSONDecoder().decode(AgentPeople.self, from: Data(
         #"{"agent":"coder","month":"2026-10","people":{"sam":4.2,"jo":0.8},"budgets":{"sam":20,"jo":null}}"#.utf8))
 }

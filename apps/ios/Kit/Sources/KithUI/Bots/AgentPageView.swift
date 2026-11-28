@@ -44,7 +44,7 @@ struct AgentPageView: View {
         self.botId = botId
         self.call = call
         routineId = request.routineId
-        _subpage = State(initialValue: request.routineId != nil ? .routines : Self.subpage(for: request.tab))
+        _subpage = State(initialValue: request.routineId != nil ? .routines : request.subpage ?? Self.subpage(for: request.tab))
     }
 
     /// The old sheet's tab, as the page that holds its things now.
