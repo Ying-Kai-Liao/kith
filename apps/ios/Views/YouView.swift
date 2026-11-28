@@ -104,7 +104,7 @@ struct YouView: View {
             if let store = app.currentStore { VoiceChatSettingsView(pushed: true).environment(store) }
         }
         .navigationDestination(isPresented: $showWidgets) { WidgetsAndActivitiesView() }
-        .navigationDestination(isPresented: $showNotifications) { SettingsView(pushed: true) }
+        .navigationDestination(isPresented: $showNotifications) { NotificationsSettingsView() }
         .navigationDestination(isPresented: $showSettings) { SettingsView(pushed: true) }
         .kithSheet(isPresented: $showKeys) {
             if let store = app.currentStore { KeysView(keys: KeysStore(store: store), hostName: store.hostName) }

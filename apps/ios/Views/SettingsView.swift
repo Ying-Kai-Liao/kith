@@ -10,12 +10,8 @@ struct SettingsView: View {
     @Environment(AppStore.self) private var app
     @Environment(AccountStore.self) private var accounts
     @Environment(\.openURL) private var openURL
-    @State private var notificationsAllowed: Bool?
-    @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage(Analytics.enabledKey) private var analyticsEnabled = true
     @AppStorage(LinkPreview.enabledKey) private var showLinkPictures = true
-    @AppStorage(TextSizePreference.key) private var textSize = TextSizePreference.system.rawValue
-    @AppStorage(AppearancePreference.key) private var appearance = AppearancePreference.system.rawValue
     @State private var pairing = false
     @State private var confirmStartOver = false
     @State private var aboutAnalytics = false
@@ -86,16 +82,7 @@ struct SettingsView: View {
                 LinkChatSection(store: linkStore)
             }
 
-            CardSection("Notifications, display", footer: "Get a result summary, a request for input, or a failure notice. Default text size and appearance follow iOS Settings; Small, Large and Extra large replace it inside Kith.") {
-                Toggle("Push notifications", isOn: $notificationsEnabled)
-                    .toggleStyle(.kithGreen)
-                    .onChange(of: notificationsEnabled) { PushRegistrar.shared.resync() }
-                notificationsRow
-                MenuRow("Text size", systemImage: "textformat.size", selection: $textSize,
-                        options: TextSizePreference.allCases.map { ($0.rawValue, $0.label) })
-                MenuRow("Appearance", systemImage: "circle.lefthalf.filled", selection: $appearance,
-                        options: AppearancePreference.allCases.map { ($0.rawValue, $0.label) })
-            }
+            NotificationsSection()
 
             CardSection("Privacy", footer: "Which features you use, never your messages, code or files. Helps us spot bugs sooner and make Kith better for you.") {
                 HStack(spacing: 4) {
@@ -169,7 +156,6 @@ struct SettingsView: View {
         .kithSheet(isPresented: $pairing) { PairingView(inModal: true) }
         .kithSheet(isPresented: $aboutAnalytics) { AnalyticsSheet() }
         .kithSheet(isPresented: $showLicenses) { LicensesSheet() }
-        .task { notificationsAllowed = await PushRegistrar.shared.isAllowed() }
         .task { if app.openWidgets { app.openWidgets = false; widgets = true } }
         .onChange(of: app.openWidgets) { _, open in if open { app.openWidgets = false; widgets = true } }
     }
@@ -185,6 +171,39 @@ struct SettingsView: View {
         accounts.computers.compactMap { accounts.store(for: $0.id) }.flatMap { store in
             store.hiddenBots.map { HiddenBot(store: store, bot: $0, id: "\(store.computer.id)/\($0.id)") }
         }
+    }
+
+}
+
+/// The Notifications page (You › Notifications): push, the system permission, text size and appearance. Settings
+/// shows the same section, so both places stay in step.
+struct NotificationsSettingsView: View {
+    var body: some View {
+        CardForm {
+            NotificationsSection()
+        }
+        .page("Notifications", pushed: true)
+    }
+}
+
+struct NotificationsSection: View {
+    @State private var notificationsAllowed: Bool?
+    @AppStorage("notificationsEnabled") private var notificationsEnabled = true
+    @AppStorage(TextSizePreference.key) private var textSize = TextSizePreference.system.rawValue
+    @AppStorage(AppearancePreference.key) private var appearance = AppearancePreference.system.rawValue
+
+    var body: some View {
+        CardSection("Notifications, display", footer: "Get a result summary, a request for input, or a failure notice. Default text size and appearance follow iOS Settings; Small, Large and Extra large replace it inside Kith.") {
+            Toggle("Push notifications", isOn: $notificationsEnabled)
+                .toggleStyle(.kithGreen)
+                .onChange(of: notificationsEnabled) { PushRegistrar.shared.resync() }
+            notificationsRow
+            MenuRow("Text size", systemImage: "textformat.size", selection: $textSize,
+                    options: TextSizePreference.allCases.map { ($0.rawValue, $0.label) })
+            MenuRow("Appearance", systemImage: "circle.lefthalf.filled", selection: $appearance,
+                    options: AppearancePreference.allCases.map { ($0.rawValue, $0.label) })
+        }
+        .task { notificationsAllowed = await PushRegistrar.shared.isAllowed() }
     }
 
     private var notificationsRow: some View {
