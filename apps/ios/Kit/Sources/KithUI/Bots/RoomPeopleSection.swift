@@ -241,9 +241,9 @@ struct AddPersonSheet: View {
         .task { await store.load(); await model.refreshAllRoomPeople() }
         .onChange(of: pick) { roles = [:] }
         .kithSheet(item: Binding(get: { invitingAgain.map { IdBox(id: $0) } }, set: { invitingAgain = $0?.id })) { box in
-            RoomInviteSheet(group: group, agents: parts.agents, people: store.people, personId: box.id)
+            InviteSheet(store: model, people: store.people, prefill: InvitePrefill(rooms: [group.id], personId: box.id))
         }
-        .kithSheet(isPresented: $invitingNew) { RoomInviteSheet(group: group, agents: parts.agents, people: store.people, personId: nil) }
+        .kithSheet(isPresented: $invitingNew) { InviteSheet(store: model, people: store.people, prefill: InvitePrefill(rooms: [group.id])) }
     }
 
     private func list(_ title: String, @ViewBuilder content: () -> some View) -> some View {

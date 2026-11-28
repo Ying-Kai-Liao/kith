@@ -93,6 +93,8 @@ private struct DebugHooks: ViewModifier {
     @State private var agentScreen: String?
     /// The share sheet demo shots (`share-sheet`, `share-link`).
     @State private var shareScreen: String?
+    /// The invite sheet demo shots (`invite`, `invite-agent`, `invite-link`).
+    @State private var inviteScreen: String?
     /// The bot guest demo shots (`bots-people`, `bots-edit`, `bots-invite`, `bots-result`, `bots-detail`, `bots-remove`).
     @State private var botScreen: String?
     /// The person page demo shots (`person`, `person-paused`).
@@ -115,6 +117,12 @@ private struct DebugHooks: ViewModifier {
             if let screen = shareScreen, let computer = app.accounts.computers.first, let store = app.accounts.store(for: computer.id) {
                 ShareAgentSheet(store: store, agent: "ada", name: "Ada", people: PeopleStore.demo(),
                                 created: screen == "share-link" ? DemoScreens.demoInvite : nil)
+            }
+        }
+        .kithSheet(isPresented: Binding(get: { inviteScreen != nil }, set: { if !$0 { inviteScreen = nil } })) {
+            if let screen = inviteScreen, let computer = app.accounts.computers.first, let store = app.accounts.store(for: computer.id) {
+                InviteSheet(store: store, people: PeopleStore.demo(), prefill: screen == "invite-agent" ? .agent("ada") : InvitePrefill(),
+                            created: screen == "invite-link" ? DemoScreens.demoInvite : nil)
             }
         }
         .kithSheet(isPresented: Binding(get: { personScreen != nil }, set: { if !$0 { personScreen = nil } })) {
@@ -203,6 +211,7 @@ private struct DebugHooks: ViewModifier {
                     if let computer = app.accounts.computers.first {
                         app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: "ada")
                     }
+                case "invite", "invite-agent", "invite-link": inviteScreen = screen
                 case "share-sheet", "share-link": shareScreen = screen
                 case "person", "person-paused": personScreen = screen
                 case "bots-share": shareScreen = "share-sheet"
