@@ -43,7 +43,10 @@ public struct KithSwitch: ToggleStyle {
                             Circle().fill(configuration.isOn && onTint == nil ? Palette.onAccent : .white).padding(2)
                         }
                 }
+                // A 44 pt hit area; the negative padding keeps the row's layout unchanged.
+                .padding(.vertical, 11)
                 .contentShape(Rectangle())
+                .padding(.vertical, -11)
                 .opacity(isEnabled ? 1 : 0.4)
             }
             .buttonStyle(.plain)
@@ -363,6 +366,7 @@ public struct SegmentedChoice<ID: Hashable>: View {
     let options: [(id: ID, label: String)]
     @Namespace private var thumb
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     public init(selection: Binding<ID>, options: [(id: ID, label: String)]) {
         _selection = selection
@@ -378,16 +382,19 @@ public struct SegmentedChoice<ID: Hashable>: View {
                 } label: {
                     Text(option.label)
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(on ? Palette.text : Palette.secondary)
+                        .foregroundStyle(on ? selectedInk : Palette.secondary)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background {
                             if on {
-                                Capsule().fill(Palette.background).matchedGeometryEffect(id: "thumb", in: thumb)
+                                Capsule().fill(thumbFill).matchedGeometryEffect(id: "thumb", in: thumb)
                             }
                         }
-                        .contentShape(Capsule())
+                        // A 44 pt hit area around the thumb, without moving the track.
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                        .padding(.vertical, -4)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
@@ -396,6 +403,10 @@ public struct SegmentedChoice<ID: Hashable>: View {
         .padding(3)
         .background(Palette.bubbleUser, in: Capsule())
     }
+
+    /// Dark mode's track is darker than the ground, so the raised thumb flips to the light end.
+    private var thumbFill: Color { colorScheme == .dark ? Palette.text : Palette.background }
+    private var selectedInk: Color { colorScheme == .dark ? Palette.background : Palette.text }
 }
 
 /// How `CardSection` draws its group: filled (Settings style), or outlined on the page like Grok
@@ -440,7 +451,10 @@ public struct TabChoice<ID: Hashable>: View {
                         .background {
                             if on { Capsule().fill(Palette.bubbleAgent).matchedGeometryEffect(id: "pill", in: pill) }
                         }
-                        .contentShape(Capsule())
+                        // A 44 pt hit area around the pill, without moving the row.
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                        .padding(.vertical, -6)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
@@ -476,7 +490,9 @@ public struct ChoiceList<ID: Hashable>: View {
                             .foregroundStyle(Palette.text)
                             .opacity(option.id == selection ? 1 : 0)
                     }
+                    .padding(.vertical, 11)
                     .contentShape(Rectangle())
+                    .padding(.vertical, -11)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(option.id == selection ? .isSelected : [])
@@ -648,7 +664,11 @@ public struct SearchField: View {
             TextField(prompt, text: $text).textFieldStyle(.plain).plainTextInput()
             if !text.isEmpty {
                 Button { text = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.tertiary)
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Palette.tertiary)
+                        .padding(14)
+                        .contentShape(Rectangle())
+                        .padding(-14)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
@@ -687,7 +707,9 @@ public struct Disclosure<Label: View, Content: View>: View {
                         .foregroundStyle(Palette.secondary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
+                .padding(.vertical, 11)
                 .contentShape(Rectangle())
+                .padding(.vertical, -11)
             }
             .buttonStyle(.plain)
             .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
