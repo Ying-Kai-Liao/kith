@@ -79,6 +79,8 @@ import WebKit
             bottom = max(bottom, y)
         }
     }
+    let inked = stride(from: 3, to: pixels.count, by: 4).filter { pixels[$0] > 0 }.count // TMPLOG
+    print("MERMAIDLOG fills size=\(width)x\(height) right=\(right) bottom=\(bottom) inked=\(inked)") // TMPLOG
     return right > width * 3 / 4 && bottom > height * 3 / 4
 }
 
