@@ -162,7 +162,9 @@ public struct PersonMemorySection: View {
     private func countLine(_ n: Int) -> String { n == 1 ? "1 note" : "\(n) notes" }
 
     private func makeModel(_ agent: String) -> PersonMemoryModel {
+        #if DEBUG
         if let notes = demo?[agent] { return PersonMemoryModel.demo(personId: personId, names: notes) }
+        #endif
         guard let botId = bot(agent)?.id else {
             // No bot for this agent here: nothing to ask, nothing to show.
             return PersonMemoryModel(personId: personId, list: { throw HqMemoryUnsupported() },
