@@ -1617,6 +1617,10 @@ jobs:
       # The Kit package's unit tests (KithKitTests, KithUITests) need a simulator, so xcodebuild, not swift test.
       - name: Test the Kit package on the simulator
         working-directory: apps/ios/Kit
+        # xcodebuild hands TEST_RUNNER_* to the test process without the prefix: MermaidRendererTests reads it to skip
+        # the pixel check, because this headless simulator returns blank web view snapshots.
+        env:
+          TEST_RUNNER_KITH_CI_SIMULATOR: "1"
         run: >-
           xcodebuild test
           -scheme KithKit-Package
