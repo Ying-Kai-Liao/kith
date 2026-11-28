@@ -20,6 +20,7 @@ struct YouView: View {
     @State private var showWidgets = false
     @State private var showSettings = false
     @State private var showKeys = false
+    @State private var showNotifications = false
 
     /// A guest (joined computers by invite only) has no usage, extensions or widgets: those are the owner's.
     private var ownerThings: Bool { accounts.computers.isEmpty || !accounts.ownedComputers.isEmpty }
@@ -36,7 +37,7 @@ struct YouView: View {
                 HStack(spacing: 12) {
                     ProfilePicture().frame(width: 44, height: 44).clipShape(Circle())
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(account.email ?? "This iPhone").font(.body.weight(.semibold)).foregroundStyle(Palette.text)
+                        Text(account.displayName ?? account.email ?? "This iPhone").font(.body.weight(.semibold)).foregroundStyle(Palette.text)
                         Text(accountSubtitle).font(.subheadline).foregroundStyle(Palette.secondary)
                     }
                     Spacer(minLength: 8)
@@ -71,7 +72,7 @@ struct YouView: View {
             }
 
             CardSection {
-                row("Notifications and display", "bell") { showSettings = true }
+                row("Notifications and display", "bell") { showNotifications = true }
                 if ownerThings, app.currentStore != nil {
                     row("Voice and calls", "waveform") { showVoice = true }
                     row("Widgets", "rectangle.stack") { showWidgets = true }
@@ -103,6 +104,7 @@ struct YouView: View {
             if let store = app.currentStore { VoiceChatSettingsView(pushed: true).environment(store) }
         }
         .navigationDestination(isPresented: $showWidgets) { WidgetsAndActivitiesView() }
+        .navigationDestination(isPresented: $showNotifications) { SettingsView(pushed: true) }
         .navigationDestination(isPresented: $showSettings) { SettingsView(pushed: true) }
         .kithSheet(isPresented: $showKeys) {
             if let store = app.currentStore { KeysView(keys: KeysStore(store: store), hostName: store.hostName) }
@@ -113,7 +115,9 @@ struct YouView: View {
         Button(action: action) {
             LinkRow {
                 HStack(spacing: 8) {
-                    Label(title, systemImage: icon)
+                    // A fixed icon column: SF Symbols differ in width, so the titles would not line up.
+                    Image(systemName: icon).frame(width: 24)
+                    Text(title)
                     if let detail {
                         Spacer(minLength: 8)
                         Text(detail).font(.subheadline).foregroundStyle(Palette.secondary).lineLimit(1)
