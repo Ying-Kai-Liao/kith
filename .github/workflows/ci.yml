@@ -1624,6 +1624,18 @@ jobs:
           -derivedDataPath build/dd
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO
+      # DEBUG-only code compiles in DevDebug, so only a Release build catches it (TestFlight failed after #1300).
+      # Same scheme and configuration as the TestFlight archive (project.yml: iOS, archive config Release).
+      - name: Archive iOS Release for a device (unsigned), as TestFlight does
+        run: >-
+          xcodebuild archive
+          -project apps/Kith.xcodeproj
+          -scheme iOS
+          -configuration Release
+          -derivedDataPath build/dd
+          -destination 'generic/platform=iOS'
+          -archivePath build/Kith.xcarchive
+          CODE_SIGNING_ALLOWED=NO
 
   desktop:
     needs: changes
