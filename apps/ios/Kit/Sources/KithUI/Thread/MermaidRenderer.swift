@@ -95,10 +95,8 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
     }
 
     private func render(_ source: String, dark: Bool, in webView: WKWebView) async -> Outcome {
-        print("MERMAIDLOG render start \(Date())") // TMPLOG
         let result = try? await webView.callAsyncJavaScript(
             "return await kithMermaid(source, dark)", arguments: ["source": source, "dark": dark], contentWorld: .page)
-        print("MERMAIDLOG js result \(String(describing: result)) \(Date())") // TMPLOG
         guard let size = result as? [Any], size.count == 2,
               let width = (size[0] as? NSNumber).map({ CGFloat($0.doubleValue) }),
               let height = (size[1] as? NSNumber).map({ CGFloat($0.doubleValue) }),
@@ -112,7 +110,6 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         // At most 2 pixels a point, fewer for a large diagram.
         let scale = min(2, (Self.maxPixels / (width * height)).squareRoot())
         config.snapshotWidth = NSNumber(value: Double(width * scale / webView.traitCollection.displayScale.clamped))
-        print("MERMAIDLOG snapshot start \(Date())") // TMPLOG
         guard let shot = try? await webView.takeSnapshot(configuration: config), let cg = shot.cgImage else { return .failed }
         return .drawn(UIImage(cgImage: cg, scale: CGFloat(cg.width) / width, orientation: .up))
     }
@@ -144,7 +141,6 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
 
     private func page() async -> WKWebView? {
         if let webView { return webView }
-        print("MERMAIDLOG page start \(Date())") // TMPLOG
         guard let url = Bundle.module.url(forResource: "mermaid.min", withExtension: "js"),
               let mermaid = try? String(contentsOf: url, encoding: .utf8),
               let rules = await Self.bounded(.seconds(20), fallback: nil, {
@@ -152,7 +148,6 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
                       forIdentifier: "kith-mermaid-block-all", encodedContentRuleList: Self.blockEverything)
               })
         else { return nil }
-        print("MERMAIDLOG rules compiled \(Date())") // TMPLOG
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         config.defaultWebpagePreferences.allowsContentJavaScript = false
@@ -177,7 +172,6 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
                 webView.loadHTMLString(Self.html, baseURL: nil)
             }
         }
-        print("MERMAIDLOG loaded \(Date())") // TMPLOG
         // The first diagram on a fresh page is slow while mermaid warms up (seconds on an older phone), so one is
         // drawn here, with time to spare, rather than charged to a real diagram's timeout.
         guard loaded, self.webView === webView,
@@ -199,6 +193,7 @@ final class MermaidRenderer: NSObject, WKNavigationDelegate {
         window.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
         window.windowLevel = UIWindow.Level(rawValue: -1)
         window.isUserInteractionEnabled = false
+        window.alpha = 0.01
         window.addSubview(webView)
         window.isHidden = false
         self.window = window
