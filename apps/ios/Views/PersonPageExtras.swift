@@ -79,6 +79,7 @@ struct DemoPersonPage: View {
         _people = State(initialValue: PeopleStore.demo(paused: paused))
     }
 
-    var body: some View { PersonPageView(personId: "sam", people: people, store: store) }
+    var body: some View { PersonPageView(personId: "sam", people: people, store: store, memoryDemo: [
+        "ada": ["preferences.md", "trip-plans.md", "recipes.md"], "remy": []]) }
 }
 #endif

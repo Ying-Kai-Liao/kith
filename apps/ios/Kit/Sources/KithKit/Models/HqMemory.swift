@@ -196,6 +196,76 @@ struct HqTidyUps: Decodable {
     }
 }
 
+/// `kithMemoryList` with `person`: what one agent keeps about one person, the files under `people/<person>/`.
+/// A host older than 0.4 ignores `person` and lists the whole agent; `supported` is false then, and the files
+/// aren't the person's, so nobody shows them.
+public struct HqPersonMemory: Decodable, Hashable, Sendable {
+    public var files: [HqMemoryFileEntry]
+    public var supported: Bool
+
+    private enum CodingKeys: String, CodingKey { case agent, shared }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let all: [HqMemoryFileEntry] = c.lenient(.agent) ?? []
+        let shared: [HqMemoryFileEntry] = c.lenient(.shared) ?? []
+        // A filtered answer has no shared files and only people/ ones; anything else means the filter wasn't applied.
+        files = all
+        supported = shared.isEmpty && all.allSatisfy { $0.name.hasPrefix("people/") }
+    }
+
+    public init(files: [HqMemoryFileEntry], supported: Bool = true) {
+        self.files = files
+        self.supported = supported
+    }
+
+    /// The files under `people/<person>/`, or none when the host didn't filter them.
+    public func files(of person: String) -> [HqMemoryFileEntry] {
+        guard supported else { return [] }
+        let prefix = HqPersonMemory.prefix(person)
+        return files.filter { $0.name.hasPrefix(prefix) }.sorted { $0.name < $1.name }
+    }
+
+    public static func prefix(_ person: String) -> String { "people/\(person)/" }
+}
+
+/// `kithMemoryForgetPerson`: the files removed, each with the version that brings it back.
+public struct HqPersonForget: Decodable, Hashable, Sendable {
+    public struct Removed: Decodable, Hashable, Sendable {
+        public var name: String
+        public var version: Int64?
+
+        private enum CodingKeys: String, CodingKey { case name, version }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            version = (c.lenient(.version) as HqMemoryVersion?)?.id
+        }
+
+        public init(name: String, version: Int64?) {
+            self.name = name
+            self.version = version
+        }
+    }
+
+    public var person: String
+    public var removed: [Removed]
+
+    private enum CodingKeys: String, CodingKey { case person, removed }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        person = c.lenient(.person) ?? ""
+        removed = c.lenient(.removed) ?? []
+    }
+
+    public init(person: String, removed: [Removed]) {
+        self.person = person
+        self.removed = removed
+    }
+}
+
 /// Thrown when the host has no `kithMemoryList` at all: it predates the memory files.
 public struct HqMemoryUnsupported: LocalizedError {
     public init() {}
@@ -236,6 +306,23 @@ extension HostClient {
         } catch where isUnknownMethod(error) {
             throw HqMemoryUnsupported()
         }
+    }
+
+    /// Owner only. A host without the person filter answers with the whole agent: check `supported`.
+    public func hqPersonMemory(botId: String, person: String) async throws -> HqPersonMemory {
+        struct Body: Encodable { var botId: String; var person: String }
+        do {
+            return try await call("kithMemoryList", Body(botId: botId, person: person))
+        } catch where isUnknownMethod(error) {
+            throw HqMemoryUnsupported()
+        }
+    }
+
+    /// Owner only. `name` (inside the person's folder) forgets one file; nil forgets the folder. Each removal is a
+    /// version, so `hqMemoryRestore` brings it back.
+    public func hqPersonForget(botId: String, person: String, name: String?) async throws -> HqPersonForget {
+        struct Body: Encodable { var botId: String; var person: String; var name: String? }
+        return try await call("kithMemoryForgetPerson", Body(botId: botId, person: person, name: name), timeout: 30)
     }
 
     public func hqMemoryRead(botId: String, shared: Bool, name: String) async throws -> HqMemoryText {
