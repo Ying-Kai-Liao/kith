@@ -6,6 +6,8 @@ import Testing
 private actor Sent {
     var invites: [(name: String?, personId: String?, agents: [String: InviteRole])] = []
     func add(_ name: String?, _ personId: String?, _ agents: [String: InviteRole]) { invites.append((name, personId, agents)) }
+    var access: [(personId: String, agents: [String: InviteRole]?, projects: [String]?)] = []
+    func addAccess(_ personId: String, _ agents: [String: InviteRole]?, _ projects: [String]?) { access.append((personId, agents, projects)) }
 }
 
 private struct FakeHost: PeopleHost {
@@ -18,11 +20,13 @@ private struct FakeHost: PeopleHost {
         return CreatedInvite(inviteId: "i", link: "https://example.test/join#x", expiresAt: 0, personId: personId ?? "new")
     }
     func revokeInvite(_ inviteId: String) async throws {}
-    func setPersonAccess(personId: String, agents: [String: InviteRole]?, projects: [String]?) async throws {}
+    func setPersonAccess(personId: String, agents: [String: InviteRole]?, projects: [String]?) async throws {
+        await sent.addAccess(personId, agents, projects)
+    }
     func revokePerson(_ personId: String) async throws {}
     func unrevokePerson(_ personId: String) async throws {}
     func audit(since: Date?, personId: String?) async throws -> [AuditRow] { [] }
-    func projectList() async throws -> [HQProject] { [] }
+    func projectList() async throws -> [HQProject] { [HQProject(id: "notes")] }
 }
 
 private let helper = RoomAgent(id: "helper", name: "Helper")
@@ -34,6 +38,7 @@ private func model(held: [HostPerson] = [], prefill: InvitePrefill = InvitePrefi
                    sent: Sent = Sent(), online: Bool = true) async -> InviteSheetModel {
     let people = PeopleStore(host: { FakeHost(sent: sent, held: held) })
     await people.load()
+    await people.loadProjects()
     return InviteSheetModel(people: people, offered: [helper, writer], rooms: rooms, prefill: prefill, online: online)
 }
 
@@ -105,5 +110,42 @@ private func model(held: [HostPerson] = [], prefill: InvitePrefill = InvitePrefi
         m.name = "Jo"
         await m.create()
         #expect(m.joinsLine == "Jo joins Studio when Jo accepts.")
+    }
+
+    @Test func aPersonWhoJoinedGetsAccessDirectlyNotANewLink() async {
+        let sent = Sent()
+        let sam = HostPerson(personId: "sam", name: "Sam", agents: ["helper": .member], projects: ["old"], joined: true)
+        let m = await model(held: [sam], prefill: InvitePrefill(agents: ["writer": .guest], personId: "sam"), sent: sent)
+        m.setProject("notes", on: true)
+        await m.create()
+        #expect(await sent.invites.isEmpty)
+        let access = await sent.access
+        #expect(access.count == 1)
+        #expect(access[0].personId == "sam" && access[0].agents == ["helper": .member, "writer": .guest] && access[0].projects == ["old", "notes"])
+        #expect(m.updated == "sam" && m.created == nil)
+    }
+
+    @Test func aPersonStillPendingGetsAFreshLink() async {
+        let sent = Sent()
+        let jo = HostPerson(personId: "jo", name: "Jo", agents: ["helper": .guest], joined: false)
+        let m = await model(held: [jo], prefill: InvitePrefill(agents: ["writer": .guest], personId: "jo"), sent: sent)
+        await m.create()
+        let invites = await sent.invites
+        #expect(invites.count == 1 && invites[0].personId == "jo")
+        #expect(await sent.access.isEmpty)
+        #expect(m.created != nil && m.updated == nil)
+    }
+
+    @Test func projectsAreOfferedAndFollowANewInviteAsAccess() async {
+        let sent = Sent()
+        let m = await model(prefill: .agent("helper"), sent: sent)
+        #expect(m.projects == ["notes"])
+        m.name = "Sam"
+        m.setProject("notes", on: true)
+        #expect(m.request.projects == ["notes"])
+        await m.create()
+        // The fake host never lists the new person, so the rooms can't be added yet: the owner is told, the link stays.
+        #expect(m.created != nil)
+        #expect(m.people.error?.contains("until Sam joins") == true)
     }
 }

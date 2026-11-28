@@ -28,6 +28,8 @@ public struct InviteRequest: Equatable, Sendable {
     public var personId: String?
     public var agents: [String: InviteRole]
     public var rooms: [String]
+    /// Host projects, the second kind of room the old Sharing flow offered; applied as access, never in the invite.
+    public var projects: [String] = []
 }
 
 /// The invite sheet's state: who, which agents at which level, which group rooms. The view draws it; `request` is
@@ -54,10 +56,14 @@ public final class InviteSheetModel {
     public var rooms: [Room]
     public var roles: [String: InviteRole]
     public var ticked: [String]
+    /// Host projects switched on (the old Sharing flow's "Rooms").
+    public var projectsTicked: [String] = []
     public var name = ""
     /// Nil is a new person.
     public var personId: String?
     public private(set) var created: CreatedInvite?
+    /// Set when the person had joined already: access was added directly and there is no link.
+    public private(set) var updated: String?
     /// The rooms the made invite adds the person to, for the result line.
     public private(set) var createdRooms: [String] = []
     /// The computer can't be reached: Create waits and the sheet says why.
@@ -92,6 +98,11 @@ public final class InviteSheetModel {
     /// An agent the chosen person has already: it stays on (taking one away is the person page's).
     public func isHeld(_ agent: String) -> Bool { held[agent] != nil }
 
+    /// A person who has joined gets access directly; a pending one gets a fresh link.
+    public var joined: Bool { personId.flatMap { people.person($0)?.joined } ?? false }
+    /// The host projects the sheet can offer.
+    public var projects: [String] { people.projects.map(\.id) }
+
     public var typedName: String { name.trimmingCharacters(in: .whitespaces) }
     public var who: String { personId.flatMap { people.person($0)?.name } ?? typedName }
 
@@ -114,22 +125,58 @@ public final class InviteSheetModel {
         if on { ticked.append(id) }
     }
 
+    public func setProject(_ id: String, on: Bool) {
+        projectsTicked.removeAll { $0 == id }
+        if on { projectsTicked.append(id) }
+    }
+
     public var canCreate: Bool {
-        online && created == nil && !people.busy && !roles.isEmpty && (personId != nil || !typedName.isEmpty)
+        online && created == nil && updated == nil && !people.busy && !roles.isEmpty && (personId != nil || !typedName.isEmpty)
     }
 
     /// What Create sends: a name for a new person, an id for an existing one, never both.
     public var request: InviteRequest {
-        InviteRequest(name: personId == nil ? typedName : nil, personId: personId, agents: roles, rooms: followed)
+        InviteRequest(name: personId == nil ? typedName : nil, personId: personId, agents: roles, rooms: followed, projects: projectsTicked)
     }
 
     /// The first tap wins: a second while the call runs, or after it made the invite, does nothing.
     public func create() async {
         guard canCreate else { return }
         let asked = request
+        if joined, let id = asked.personId, let person = people.person(id) {
+            await addDirectly(asked, to: person)
+            return
+        }
         guard let made = await people.createInvite(name: asked.name, personId: asked.personId, agents: asked.agents, rooms: asked.rooms) else { return }
         created = made
         createdRooms = asked.rooms.compactMap { id in rooms.first { $0.id == id }?.name }
+        // Projects are access, not part of the invite, so they follow it. The invite stays (its link is good); a failure
+        // to add them is shown, never swallowed.
+        guard !asked.projects.isEmpty else { return }
+        if let id = made.personId, let person = people.person(id) {
+            if await !people.setAccess(id, agents: person.agents.merging(asked.agents) { _, new in new },
+                                       projects: SharingMap.projectsAfterSharing(asked.projects, to: person)) {
+                people.error = "The invite is ready, but the rooms weren't added: \(people.error ?? "the computer refused")"
+            }
+        } else {
+            people.error = "The invite is ready, but the rooms can't be added until \(who) joins."
+        }
+    }
+
+    /// Someone who has joined: the access goes on them now, the way Sharing always did it.
+    private func addDirectly(_ asked: InviteRequest, to person: HostPerson) async {
+        let agents = person.agents.merging(asked.agents) { _, new in new }
+        let done: Bool
+        if asked.projects.isEmpty {
+            done = await people.writeAccess(personId: person.personId, agents: agents)
+        } else {
+            done = await people.setAccess(person.personId, agents: agents, projects: SharingMap.projectsAfterSharing(asked.projects, to: person))
+        }
+        guard done else { return }
+        if !asked.rooms.isEmpty, await !people.addToRooms(person.personId, rooms: asked.rooms) {
+            people.error = "Access was added, but the group rooms weren't: \(people.error ?? "the computer refused")"
+        }
+        updated = person.personId
     }
 
     /// "Mia joins Studio when Mia accepts."

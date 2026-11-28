@@ -34,16 +34,24 @@ public struct InviteSheet: View {
 
     public var body: some View {
         Group {
-            if let made = model.created {
+            if let done = model.updated {
+                CardForm {
+                    CardSection {
+                        Label("Shared with \(model.people.person(done)?.name ?? model.who).", systemImage: "checkmark.circle")
+                            .foregroundStyle(Palette.text)
+                    }
+                }
+            } else if let made = model.created {
                 InviteLinkView(invite: made, name: model.people.person(made.personId ?? "")?.name ?? model.who, joins: model.joinsLine)
             } else {
                 form
             }
         }
         .background(Palette.background)
-        .safeAreaInset(edge: .top, spacing: 0) { ModalHeader(model.created == nil ? "Add a friend" : "Invite ready") }
+        .safeAreaInset(edge: .top, spacing: 0) { ModalHeader(model.updated != nil ? "Shared" : model.created == nil ? "Add a friend" : "Invite ready") }
         .task {
             await model.people.load()
+            await model.people.loadProjects()
             await store.refreshAllRoomPeople()
             model.rooms = Self.rooms(on: store)
         }
@@ -84,6 +92,14 @@ public struct InviteSheet: View {
                     }
                 }
             }
+            if !model.projects.isEmpty {
+                CardSection("Rooms") {
+                    ForEach(model.projects, id: \.self) { project in
+                        Toggle(project, isOn: Binding(get: { model.projectsTicked.contains(project) }, set: { model.setProject(project, on: $0) }))
+                            .toggleStyle(.kith)
+                    }
+                }
+            }
             if !model.online {
                 Text("This computer is offline. Connect to it to make an invite.").font(.footnote).foregroundStyle(Palette.secondary)
             }
@@ -92,7 +108,7 @@ public struct InviteSheet: View {
             }
             Button { Task { await model.create() } } label: {
                 ZStack {
-                    Text("Create invite").opacity(model.people.busy ? 0 : 1)
+                    Text(model.joined ? "Share" : "Create invite").opacity(model.people.busy ? 0 : 1)
                     if model.people.busy { Spinner(size: 18) }
                 }
                 .frame(maxWidth: .infinity, minHeight: 28)
