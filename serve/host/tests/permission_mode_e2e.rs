@@ -26,7 +26,7 @@ async fn start(permission: &str) -> (Host, PathBuf) {
         ("KITH_AUTH", &home.join("auth.json").to_string_lossy()),
         ("KITH_STATE", &home.join("state").to_string_lossy()),
         ("KITH_HOME", &home.join("kith-home").to_string_lossy()),
-        ("RUST_LOG", "kith_serve=debug,kith_serve::agent=trace,kith_core=debug,kith_kernel=debug"),
+        ("RUST_LOG", "kith_serve=debug,kith_core=debug,kith_kernel=debug"),
     ])
     .await;
     (host, home)
