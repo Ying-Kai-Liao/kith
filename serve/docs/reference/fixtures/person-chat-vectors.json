@@ -1,0 +1,521 @@
+{
+  "_doc": [
+    "Person-chat wire vectors (phase4a-build.md section 3). Read by crates/wire/src/pc.rs, KithKit PersonChatCrypto and apps/desktop relay-core/pc.ts.",
+    "Encodings: every identifier (contact_id, msg_id, user_id, R, sender_key) is used as its UTF-8 string bytes inside hashes, aads, salts and signature inputs.",
+    "R is a device sign_pub as b64url without padding (43 chars) or \"computer:<id>\"; sender_key is the sender device sign_pub, b64url. epk, wrap, ct, sig, rhash, box_pub, secrets: b64url.",
+    "Recipients are sorted by the UTF-8 bytes of R in rhash and in the envelope. u64be(epoch) is 8 bytes big-endian. Nonces are 12 zero bytes (every key is single-use).",
+    "The private values are fixed test seeds, not live credentials. The text is made up.",
+    "open order of checks, and the error each fails with: directory (notInDirectory), rhash (badRhash), sig (badSignature), own entry (notRecipient), key agreement (zeroSharedSecret), wrap (badWrap), body (badCiphertext).",
+    "Seal refusals: no recipients (noRecipients), more than 32 (tooManyRecipients), a repeated R (duplicateRecipient)."
+  ],
+  "keys": {
+    "sender_sign_seed": "FVyj3G9g7yyfiK5lVMTxUrGYmutFSA5MwL-ly_oIsSQ",
+    "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+    "other_sender_key": "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8",
+    "device_a": {
+      "sign_seed": "wusPKOCsz232ZMgoQLh7VaRDSAnVAUh-Pv86jRxy-NY",
+      "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+      "box_secret": "qHwGeVMHiva-meQo7CEs8gHQPlR5eozA2-BBQPjscII",
+      "box_pub": "kXfgyO61euyvS-3NN1QBLsgHMZmli74FWDTT9W69nHQ"
+    },
+    "device_b": {
+      "sign_seed": "E7J6-Y9mDpmtgZ1WvMStv72WQtbufiEmzqHG-vwkhKI",
+      "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+      "box_secret": "NCJYAvYuUK2csvqoEeco-7A8UtfhSAFz59oLIwZAu1I",
+      "box_pub": "RhHy6RNyqzvJ1f6JyMdI_4RO9P4VH5LTqG24iwVrdUA"
+    },
+    "computer": {
+      "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+      "box_secret": "L2K1G4K54TSfxBxj2fImsdNgrV9yasaAI9IACmP3pH4",
+      "box_pub": "X2t-2jZNwJp5ZrGKimH3keLlQCgSML9oksraBGXtpEQ"
+    }
+  },
+  "seal": {
+    "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+    "epoch": 3,
+    "msg_id": "msg_01J0000000000000000000TEST",
+    "plaintext": "{\"v\":1,\"text\":\"See you at the lake on Saturday\",\"ts\":1796000000000,\"reply\":\"msg_01J0000000000000000000PREV\"}",
+    "content_key": "64UFyalNy6dP2oIq34WG8jtqtdTINuZTjuvSvcRsLjg",
+    "ephemerals": [
+      "7_hEf4u9D027Ss4JSC9ei8BqR5HQ803_VzV-Q-MDpR0",
+      "9VR-bjcgY2NCHsxcVR-ZQ1QTl-u4WA7Tjfm6D0EQ_eA",
+      "izbjyuEPNAbSXmqow29tx623tLdft3Qb9N31behaID0"
+    ],
+    "recipients": [
+      {
+        "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+        "box_pub": "RhHy6RNyqzvJ1f6JyMdI_4RO9P4VH5LTqG24iwVrdUA"
+      },
+      {
+        "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+        "box_pub": "X2t-2jZNwJp5ZrGKimH3keLlQCgSML9oksraBGXtpEQ"
+      },
+      {
+        "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+        "box_pub": "kXfgyO61euyvS-3NN1QBLsgHMZmli74FWDTT9W69nHQ"
+      }
+    ],
+    "aad_hex": "6b6974682f70632d6d73672f763163745f41414543417751464267634943516f4c4441304f447700000000000000036d73675f30314a3030303030303030303030303030303030303054455354",
+    "sig_input_hex": "6b6974682f70632f763163745f41414543417751464267634943516f4c4441304f447700000000000000036d73675f30314a3030303030303030303030303030303030303054455354397969714e49495748624365654541465376423241443656352d4b6b6f35536c4932417556675779336d38ccd1177e0d9ad0b1eb865dd01ce173a78360fdd811c7b8d783bf9c858d96aef2d1f182dbd99f2081164c43679516ce038333e3f4da787895ea94fda626bb40cb",
+    "expect": {
+      "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+      "epoch": 3,
+      "msg_id": "msg_01J0000000000000000000TEST",
+      "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+      "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+      "sig": "klqTtNgqznlOqOVf8imR2nPXp_fcpbMkM0vxvLg87yQE-OHgp_kBwZ9h0t1c3zsYiwRADWPsSONOhLCEYD1oCQ",
+      "rhash": "zNEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+      "recipients": [
+        {
+          "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+          "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+          "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+        },
+        {
+          "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+          "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+          "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+        },
+        {
+          "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+          "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+          "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+        }
+      ]
+    }
+  },
+  "box_sig": {
+    "input_example_hex": "6b6974682f70632d626f782f7631757365725f74657374766563746f72319177e0c8eeb57aecaf4bedcd3754012ec8073199a58bbe055834d3f56ebd9c74",
+    "cases": [
+      {
+        "name": "ok",
+        "user_id": "user_testvector1",
+        "sign_pub": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+        "box_pub": "kXfgyO61euyvS-3NN1QBLsgHMZmli74FWDTT9W69nHQ",
+        "sig": "eD1G07PLbYdfdJVlR0X1Wno9ov_1VzrTxLcem0V3nZ6DRGD0lEd0YM_9dFzeiRre3kDi56JAOrdNRyh3BTQ0Aw",
+        "valid": true
+      },
+      {
+        "name": "another user id",
+        "user_id": "user_testvector2",
+        "sign_pub": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+        "box_pub": "kXfgyO61euyvS-3NN1QBLsgHMZmli74FWDTT9W69nHQ",
+        "sig": "eD1G07PLbYdfdJVlR0X1Wno9ov_1VzrTxLcem0V3nZ6DRGD0lEd0YM_9dFzeiRre3kDi56JAOrdNRyh3BTQ0Aw",
+        "valid": false
+      },
+      {
+        "name": "another box key",
+        "user_id": "user_testvector1",
+        "sign_pub": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+        "box_pub": "RhHy6RNyqzvJ1f6JyMdI_4RO9P4VH5LTqG24iwVrdUA",
+        "sig": "eD1G07PLbYdfdJVlR0X1Wno9ov_1VzrTxLcem0V3nZ6DRGD0lEd0YM_9dFzeiRre3kDi56JAOrdNRyh3BTQ0Aw",
+        "valid": false
+      },
+      {
+        "name": "signed by another device",
+        "user_id": "user_testvector1",
+        "sign_pub": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+        "box_pub": "kXfgyO61euyvS-3NN1QBLsgHMZmli74FWDTT9W69nHQ",
+        "sig": "jQ0eSrzB3vqaDD00ObD_Xgt-IiaNrKSwOvA34lgYTUWB2RmaGLWReFMdtF9L711wbgZHXwwvQ8s3pZbu3cwgCg",
+        "valid": false
+      }
+    ]
+  },
+  "open": [
+    {
+      "name": "ok: device A",
+      "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+      "box_secret": "qHwGeVMHiva-meQo7CEs8gHQPlR5eozA2-BBQPjscII",
+      "directory": [
+        "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 3,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "klqTtNgqznlOqOVf8imR2nPXp_fcpbMkM0vxvLg87yQE-OHgp_kBwZ9h0t1c3zsYiwRADWPsSONOhLCEYD1oCQ",
+        "rhash": "zNEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+            "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+          }
+        ]
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "ok: device B",
+      "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+      "box_secret": "NCJYAvYuUK2csvqoEeco-7A8UtfhSAFz59oLIwZAu1I",
+      "directory": [
+        "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 3,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "klqTtNgqznlOqOVf8imR2nPXp_fcpbMkM0vxvLg87yQE-OHgp_kBwZ9h0t1c3zsYiwRADWPsSONOhLCEYD1oCQ",
+        "rhash": "zNEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+            "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+          }
+        ]
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "ok: the computer",
+      "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+      "box_secret": "L2K1G4K54TSfxBxj2fImsdNgrV9yasaAI9IACmP3pH4",
+      "directory": [
+        "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 3,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "klqTtNgqznlOqOVf8imR2nPXp_fcpbMkM0vxvLg87yQE-OHgp_kBwZ9h0t1c3zsYiwRADWPsSONOhLCEYD1oCQ",
+        "rhash": "zNEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+            "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+          }
+        ]
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "wrong recipient: R is not in the envelope",
+      "r": "jYDawdNwKldEsybws7QJQv5TZCiwQuSB4E1QPQzrj2w",
+      "box_secret": "qHwGeVMHiva-meQo7CEs8gHQPlR5eozA2-BBQPjscII",
+      "directory": [
+        "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 3,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "klqTtNgqznlOqOVf8imR2nPXp_fcpbMkM0vxvLg87yQE-OHgp_kBwZ9h0t1c3zsYiwRADWPsSONOhLCEYD1oCQ",
+        "rhash": "zNEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+            "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+          }
+        ]
+      },
+      "expect": "notRecipient"
+    },
+    {
+      "name": "wrong recipient: right R, another device's box key",
+      "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+      "box_secret": "NCJYAvYuUK2csvqoEeco-7A8UtfhSAFz59oLIwZAu1I",
+      "directory": [
+        "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 3,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "klqTtNgqznlOqOVf8imR2nPXp_fcpbMkM0vxvLg87yQE-OHgp_kBwZ9h0t1c3zsYiwRADWPsSONOhLCEYD1oCQ",
+        "rhash": "zNEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+            "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+          }
+        ]
+      },
+      "expect": "badWrap"
+    },
+    {
+      "name": "sender key is not in the directory",
+      "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+      "box_secret": "qHwGeVMHiva-meQo7CEs8gHQPlR5eozA2-BBQPjscII",
+      "directory": [
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 3,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "klqTtNgqznlOqOVf8imR2nPXp_fcpbMkM0vxvLg87yQE-OHgp_kBwZ9h0t1c3zsYiwRADWPsSONOhLCEYD1oCQ",
+        "rhash": "zNEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+            "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+          }
+        ]
+      },
+      "expect": "notInDirectory"
+    },
+    {
+      "name": "tampered rhash",
+      "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+      "box_secret": "qHwGeVMHiva-meQo7CEs8gHQPlR5eozA2-BBQPjscII",
+      "directory": [
+        "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 3,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "klqTtNgqznlOqOVf8imR2nPXp_fcpbMkM0vxvLg87yQE-OHgp_kBwZ9h0t1c3zsYiwRADWPsSONOhLCEYD1oCQ",
+        "rhash": "zdEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+            "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+          }
+        ]
+      },
+      "expect": "badRhash"
+    },
+    {
+      "name": "a wrap changed after signing (rhash stale)",
+      "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+      "box_secret": "qHwGeVMHiva-meQo7CEs8gHQPlR5eozA2-BBQPjscII",
+      "directory": [
+        "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 3,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "klqTtNgqznlOqOVf8imR2nPXp_fcpbMkM0vxvLg87yQE-OHgp_kBwZ9h0t1c3zsYiwRADWPsSONOhLCEYD1oCQ",
+        "rhash": "zNEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nD8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+            "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+          }
+        ]
+      },
+      "expect": "badRhash"
+    },
+    {
+      "name": "epoch changed, signature not redone",
+      "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+      "box_secret": "qHwGeVMHiva-meQo7CEs8gHQPlR5eozA2-BBQPjscII",
+      "directory": [
+        "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 4,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "klqTtNgqznlOqOVf8imR2nPXp_fcpbMkM0vxvLg87yQE-OHgp_kBwZ9h0t1c3zsYiwRADWPsSONOhLCEYD1oCQ",
+        "rhash": "zNEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+            "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+          }
+        ]
+      },
+      "expect": "badSignature"
+    },
+    {
+      "name": "wrong-epoch aad: epoch 4 correctly signed over a body sealed for epoch 3",
+      "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+      "box_secret": "qHwGeVMHiva-meQo7CEs8gHQPlR5eozA2-BBQPjscII",
+      "directory": [
+        "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 4,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "89GbGwd_IECap60QmM5ljaulW1aI4MLkg_nG-xeKQmFo_xc-EFnLzx7RAs8fdjW4DTQ6wJlmPARLU9lxNU6-AQ",
+        "rhash": "zNEXfg2a0LHrhl3QHOFzp4Ng_dgRx7jXg7-chY2WrvI",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "KsH9RfDiGcBZCwur6ZX6HcfbID3hQ47p07QdDSy0gxg",
+            "wrap": "4LHiGjxZQ7OPe8_92K6oxzGve8102fp20w0kWSgmGCrdm3ZPxoVz6ecgsJhUMu6J"
+          }
+        ]
+      },
+      "expect": "badCiphertext"
+    },
+    {
+      "name": "all-zero shared secret: epk is the zero point, everything else correctly signed",
+      "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+      "box_secret": "qHwGeVMHiva-meQo7CEs8gHQPlR5eozA2-BBQPjscII",
+      "directory": [
+        "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "jk7XLI8AKL6FEv3i0TajXA4lCWFyZXUWSQSe1elsCm8"
+      ],
+      "envelope": {
+        "contact_id": "ct_AAECAwQFBgcICQoLDA0ODw",
+        "epoch": 3,
+        "msg_id": "msg_01J0000000000000000000TEST",
+        "sender_key": "9yiqNIIWHbCeeEAFSvB2AD6V5-Kko5SlI2AuVgWy3m8",
+        "ct": "efHCFwJJD-9sfRa5cwokXqG2F8QykyPbiV03LyUhpAjy8V5gUkWjJenktsuLjqnsJ1eizpP3BYMqYI56jPns1AVdpdV5EFE7Yt42Dsox9ULgHKE8ExBx-Cs2R-grmPk072hPvwzpXDvmQ5wvDbIZz2XivPeDST7xNCTm9g",
+        "sig": "KQDAqlx93AG_W8YDYpXUoh38iky5C41t6XPtmydSORuHKGsNlUCcSVK5_b6D60eEACClSrn2wW_wp1tZy-9TDA",
+        "rhash": "0JpnX4pZG8g7rQWh_55QF4KXd35g3Z07xIQ293WZstA",
+        "recipients": [
+          {
+            "r": "computer:EInJMhZmduAbRtz0IVaZEA",
+            "epk": "tJlPIhVmutbuTGezZZQqYxihoo1K03TQ0h2NwYAO1SI",
+            "wrap": "nT8YE2-pYckk9ymMsmWrCtj4mkh9jfwtBXvzIDByaPz359jxISCoK_AicRWyWG97"
+          },
+          {
+            "r": "e5xo2ymTq9MovuEs_PDcQ7xVMH-P7StHQaKX6WUxl9c",
+            "epk": "QWHmSZFQJaaWqFhhvzx2T5cNpiN1JDOZ_2-tTz7AjyE",
+            "wrap": "WQhU3vMu5SGvsB45RvIfzJm-CNVL-hsPeHSPsURpg5upD87VoQHmStiVxhBjZYJr"
+          },
+          {
+            "r": "l0O6nmjN_q14QFRDqCNUmzOl_zWc4RoAajFZKmg01fs",
+            "epk": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "wrap": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          }
+        ]
+      },
+      "expect": "zeroSharedSecret"
+    }
+  ]
+}

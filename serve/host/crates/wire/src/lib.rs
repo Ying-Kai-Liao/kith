@@ -8,6 +8,7 @@ pub mod check;
 #[rustfmt::skip]
 pub mod cloud;
 pub mod crypto;
+pub mod pc;
 #[rustfmt::skip]
 pub mod kernel;
 #[rustfmt::skip]
