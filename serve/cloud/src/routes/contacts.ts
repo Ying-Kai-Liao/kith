@@ -7,7 +7,7 @@
 // base64url text, a Mac's key is `computer:<id>`); epk, wrap, rhash and the ct hash are raw bytes; an epoch is 8 bytes
 // big-endian.
 
-import { b64url, concat, fromB64url, sha256, utf8, verifyEd25519 } from "../auth";
+import { b64url, concat, fromB64url, randomId, sha256, utf8, verifyEd25519 } from "../auth";
 import { ApiError, body, device, host, notify, str, user, type Ctx } from "./common";
 import type { Env } from "../index";
 import type {
@@ -48,6 +48,7 @@ interface ContactRow {
   ended_at: number | null;
   made_rev: number;
   pgen: number;
+  op: string | null;
 }
 
 const other = (k: ContactRow, me: string) => (k.user_lo === me ? k.user_hi : k.user_lo);
@@ -473,15 +474,18 @@ async function tellOwnerComputers(c: Ctx, owner: string, them: string, cut: bool
 export async function endContact(c: Ctx, k: ContactRow, epoch: number, endedBy: string): Promise<ContactOutcome> {
   const owner = k.inviter_user_id;
   const them = other(k, owner);
-  const guard = "EXISTS (SELECT 1 FROM contacts WHERE contact_id = ?1 AND live = 0 AND epoch = ?2 AND ended_at = ?3)";
+  // The opening UPDATE writes a token of this call; every later statement checks it, so a call that lost a race (even one
+  // stamped in the same millisecond, which `Date.now()` can't tell apart) changes nothing.
+  const op = randomId("op_");
+  const guard = "EXISTS (SELECT 1 FROM contacts WHERE contact_id = ?1 AND op = ?7)";
   const ownersComputers = "(SELECT id FROM computers WHERE owner_user_id = ?4)";
-  const P = [k.contact_id, epoch, c.now, owner, them, endedBy];
-  const run = (sql: string, n: number) => c.env.DB.prepare(sql).bind(...P.slice(0, n));
+  const P = [k.contact_id, epoch, c.now, owner, them, endedBy, op];
+  const run = (sql: string, _n?: number) => c.env.DB.prepare(sql).bind(...P);
   const noRow = "NOT EXISTS (SELECT 1 FROM revocations WHERE owner_user_id = ?4 AND user_id = ?5)";
   const [ended] = await c.env.DB.batch([
     // The revocation row is read here, before this batch's own insert below: made_rev is 1 only when the remove makes it.
     run(
-      `UPDATE contacts SET live = 0, ended_by = ?6, ended_at = ?3, updated_at = ?3,
+      `UPDATE contacts SET live = 0, ended_by = ?6, ended_at = ?3, updated_at = ?3, op = ?7,
          made_rev = CASE WHEN ${noRow} THEN 1 ELSE 0 END, pgen = pgen + CASE WHEN ${noRow} THEN 1 ELSE 0 END
        WHERE contact_id = ?1 AND live = 1 AND epoch = ?2`,
       6,
@@ -541,16 +545,17 @@ export async function undoContact(c: Ctx, k: ContactRow, epoch: number, actor: s
   const revoked = await c.env.DB.prepare("SELECT revoked_at FROM revocations WHERE owner_user_id = ? AND user_id = ?")
     .bind(owner, them)
     .first<{ revoked_at: number }>();
-  const guard = "EXISTS (SELECT 1 FROM contacts WHERE contact_id = ?1 AND live = 1 AND epoch = ?2 + 1 AND updated_at = ?3 AND made_rev = 1)";
+  const op = randomId("op_");
+  const guard = "EXISTS (SELECT 1 FROM contacts WHERE contact_id = ?1 AND op = ?8 AND made_rev = 1)";
   const ownersComputers = "(SELECT id FROM computers WHERE owner_user_id = ?4)";
-  const P = [k.contact_id, epoch, c.now, owner, them, revoked?.revoked_at ?? 0, actor];
-  const run = (sql: string, n: number) => c.env.DB.prepare(sql).bind(...P.slice(0, n));
+  const P = [k.contact_id, epoch, c.now, owner, them, revoked?.revoked_at ?? 0, actor, op];
+  const run = (sql: string, _n?: number) => c.env.DB.prepare(sql).bind(...P);
   const [back] = await c.env.DB.batch([
     run(
-      `UPDATE contacts SET live = 1, epoch = epoch + 1, ended_by = NULL, ended_at = NULL, updated_at = ?3, pgen = pgen + made_rev
+      `UPDATE contacts SET live = 1, epoch = epoch + 1, ended_by = NULL, ended_at = NULL, updated_at = ?3, op = ?8, pgen = pgen + made_rev
        WHERE contact_id = ?1 AND live = 0 AND epoch = ?2 AND inviter_user_id = ?4 AND COALESCE(ended_by, '') != 'accountDeleted'
          AND EXISTS (SELECT 1 FROM accounts WHERE user_id = ?5 AND status = 'active')`,
-      5,
+      8,
     ),
     // The memberships this revoke cut (stamped with its own time) are active again; one ended before keeps its end.
     run(
@@ -571,7 +576,7 @@ export async function undoContact(c: Ctx, k: ContactRow, epoch: number, actor: s
       6,
     ),
     run(`DELETE FROM revocations WHERE owner_user_id = ?4 AND user_id = ?5 AND ${guard}`, 5),
-    run(`INSERT INTO audit_events(actor, action, target, result, created_at) SELECT ?7, 'contact.undo', ?5, 'ok', ?3 WHERE EXISTS (SELECT 1 FROM contacts WHERE contact_id = ?1 AND live = 1 AND epoch = ?2 + 1 AND updated_at = ?3)`, 7),
+    run(`INSERT INTO audit_events(actor, action, target, result, created_at) SELECT ?7, 'contact.undo', ?5, 'ok', ?3 WHERE EXISTS (SELECT 1 FROM contacts WHERE contact_id = ?1 AND op = ?8)`, 8),
   ]);
   if (back!.meta.changes === 1) {
     await tellOwnerComputers(c, owner, them, false);
@@ -592,12 +597,13 @@ export async function undoContact(c: Ctx, k: ContactRow, epoch: number, actor: s
 export async function pauseContact(c: Ctx, k: ContactRow, pgen: number | null, actor: string): Promise<ContactOutcome> {
   const owner = k.inviter_user_id;
   const them = other(k, owner);
-  const guard = "EXISTS (SELECT 1 FROM contacts WHERE contact_id = ?1 AND live = 1 AND updated_at = ?2)";
-  const P = [k.contact_id, c.now, owner, them, actor, pgen];
-  const run = (sql: string, n: number) => c.env.DB.prepare(sql).bind(...P.slice(0, n));
+  const op = randomId("op_");
+  const guard = "EXISTS (SELECT 1 FROM contacts WHERE contact_id = ?1 AND op = ?7)";
+  const P = [k.contact_id, c.now, owner, them, actor, pgen, op];
+  const run = (sql: string, _n?: number) => c.env.DB.prepare(sql).bind(...P);
   const mine = "(SELECT id FROM computers WHERE owner_user_id = ?3)";
   const [bumped] = await c.env.DB.batch([
-    run("UPDATE contacts SET pgen = pgen + 1, updated_at = ?2 WHERE contact_id = ?1 AND live = 1 AND (?6 IS NULL OR pgen = ?6)", 6),
+    run("UPDATE contacts SET pgen = pgen + 1, updated_at = ?2, op = ?7 WHERE contact_id = ?1 AND live = 1 AND (?6 IS NULL OR pgen = ?6)", 7),
     run(`INSERT OR IGNORE INTO revocations(owner_user_id, user_id, revoked_at) SELECT ?3, ?4, ?2 WHERE ${guard}`, 4),
     run(
       `UPDATE grants SET status = 'revoked', revoked_at = ?2, revoked_reason = 'membershipRevoked'
@@ -629,12 +635,13 @@ export async function resumeContact(c: Ctx, k: ContactRow, pgen: number | null, 
   const revoked = await c.env.DB.prepare("SELECT revoked_at FROM revocations WHERE owner_user_id = ? AND user_id = ?")
     .bind(owner, them)
     .first<{ revoked_at: number }>();
-  const guard = "EXISTS (SELECT 1 FROM contacts WHERE contact_id = ?1 AND live = 1 AND updated_at = ?2)";
-  const P = [k.contact_id, c.now, owner, them, revoked?.revoked_at ?? 0, pgen, actor];
-  const run = (sql: string, n: number) => c.env.DB.prepare(sql).bind(...P.slice(0, n));
+  const op = randomId("op_");
+  const guard = "EXISTS (SELECT 1 FROM contacts WHERE contact_id = ?1 AND op = ?8)";
+  const P = [k.contact_id, c.now, owner, them, revoked?.revoked_at ?? 0, pgen, actor, op];
+  const run = (sql: string, _n?: number) => c.env.DB.prepare(sql).bind(...P);
   const mine = "(SELECT id FROM computers WHERE owner_user_id = ?3)";
   const [bumped] = await c.env.DB.batch([
-    run("UPDATE contacts SET pgen = pgen + 1, updated_at = ?2 WHERE contact_id = ?1 AND live = 1 AND (?6 IS NULL OR pgen = ?6)", 6),
+    run("UPDATE contacts SET pgen = pgen + 1, updated_at = ?2, op = ?8 WHERE contact_id = ?1 AND live = 1 AND (?6 IS NULL OR pgen = ?6)", 8),
     run(`UPDATE memberships SET revoked_at = NULL WHERE user_id = ?4 AND revoked_at = ?5 AND computer_id IN ${mine} AND ${guard}`, 5),
     run(
       `INSERT INTO grants(id, computer_id, device_id, scopes, status, created_at)

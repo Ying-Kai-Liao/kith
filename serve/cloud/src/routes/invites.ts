@@ -93,7 +93,7 @@ async function ownerComputers(c: Ctx, ownerUserId: string): Promise<string[]> {
 }
 
 /** The account a host names in a person revoke or undo: one that exists and isn't the computer's owner. */
-async function revokeTarget(c: Ctx): Promise<{ owner: string; userId: string; computerId: string; epoch: number | null; pgen: number | null; mode: "pause" | "remove" }> {
+async function revokeTarget(c: Ctx): Promise<{ owner: string; userId: string; computerId: string; epoch: number | null; pgen: number | null; mode: "pause" | "remove" | null }> {
   const comp = await host(c);
   const b = body(c);
   const userId = str(b, "userId", 64);
@@ -104,14 +104,18 @@ async function revokeTarget(c: Ctx): Promise<{ owner: string; userId: string; co
   if (b.pgen !== undefined && b.pgen !== null && (!Number.isSafeInteger(b.pgen) || (b.pgen as number) < 0)) {
     throw new ApiError("badRequest", "Invalid pgen");
   }
+  // A request that says what it does must carry the generation it saw (§2.4): a remove its epoch, a pause its pgen. An
+  // unknown word is a pause, the least change (W3). Only a request with no mode (a host from before 4a) may omit them.
+  const mode = b.mode === undefined || b.mode === null ? null : b.mode === "remove" ? "remove" : "pause";
+  if (mode === "remove" && (b.epoch === undefined || b.epoch === null)) throw new ApiError("badRequest", "A remove names the contact epoch");
+  if (mode === "pause" && (b.pgen === undefined || b.pgen === null)) throw new ApiError("badRequest", "A pause names the pause generation");
   if (!comp.owner_user_id) throw new ApiError("forbidden", "Sign in on the computer to revoke people");
   if (userId === comp.owner_user_id) throw new ApiError("badRequest", "The owner can't be revoked");
   const known = await c.env.DB.prepare("SELECT 1 FROM accounts WHERE user_id = ?").bind(userId).first();
   if (!known) throw new ApiError("notFound", "No such account");
   return { owner: comp.owner_user_id, userId, computerId: comp.id, epoch: (b.epoch as number | undefined | null) ?? null,
     pgen: (b.pgen as number | undefined | null) ?? null,
-    // A missing or unknown mode is a pause: only a request that says "remove" can end a contact (§2.4).
-    mode: b.mode === "remove" ? "remove" : "pause",
+    mode,
   };
 }
 
@@ -135,11 +139,9 @@ export async function hostRevokePerson(c: Ctx): Promise<Responses["hostRevokePer
   const { owner, userId, computerId, epoch, pgen, mode } = await revokeTarget(c);
   const contact = await contactBetween(c.env, owner, userId);
   const mine = contact && contact.inviter_user_id === owner ? contact : null;
-  if (mine && mode === "remove") {
-    if (epoch === null) throw new ApiError("badRequest", "A remove names the contact epoch");
-    return personRevoked(await endContact(c, mine, epoch, `computer:${computerId}`));
-  }
-  if (mine) return personRevoked(await pauseContact(c, mine, pgen, `computer:${computerId}`));
+  if (mine && mode === "remove") return personRevoked(await endContact(c, mine, epoch!, `computer:${computerId}`));
+  // No mode (a host from before 4a) is a pause that ignores the generation; it can never end a contact.
+  if (mine) return personRevoked(await pauseContact(c, mine, mode === null ? null : pgen, `computer:${computerId}`));
   // The row first: an accept that races this either lands before (and its membership is cut below) or sees the row.
   await c.env.DB.batch([
     c.env.DB.prepare("INSERT OR IGNORE INTO revocations(owner_user_id, user_id, revoked_at) VALUES (?, ?, ?)").bind(owner, userId, c.now),
@@ -157,17 +159,19 @@ export async function hostRevokePerson(c: Ctx): Promise<Responses["hostRevokePer
 
 /** Undo of a person revoke: the row goes and every Mac of the owner is told; each clears the state in kith-auth. */
 export async function hostUnrevokePerson(c: Ctx): Promise<Responses["hostUnrevokePerson"]> {
-  const { owner, userId, computerId, epoch, pgen } = await revokeTarget(c);
+  const { owner, userId, computerId, epoch, pgen, mode } = await revokeTarget(c);
   const contact = await contactBetween(c.env, owner, userId);
   if (contact && contact.inviter_user_id === owner) {
-    // An ended contact comes back through the one path that moves its epoch (a host without an epoch means the ended
-    // one); a live one is a resume, unless the host names an epoch and no generation (a late copy of an undo). A resume
-    // of an ended contact (it names a generation only) is refused as `removed`.
-    const resume = pgen !== null && epoch === null;
-    if (contact.live ? epoch !== null && pgen === null : !resume) {
-      return personRevoked(await undoContact(c, contact, epoch ?? contact.epoch, `computer:${computerId}`));
-    }
-    return personRevoked(await resumeContact(c, contact, pgen, `computer:${computerId}`));
+    const actor = `computer:${computerId}`;
+    // What is being undone is said by the request, never guessed from the contact's state or from which fields are there:
+    // a second copy of an undo that finds the contact live must not run as a resume (§2.4).
+    if (mode === "remove") return personRevoked(await undoContact(c, contact, epoch!, actor));
+    if (mode === "pause") return personRevoked(await resumeContact(c, contact, pgen!, actor));
+    // A host from before 4a: the epoch ended now, or when live an ungated resume. It reads only the HTTP status, so a
+    // refusal is an error, never a 200 with ok:false (it would run its local undo anyway).
+    const out = contact.live ? await resumeContact(c, contact, null, actor) : await undoContact(c, contact, contact.epoch, actor);
+    if (out.status === "staleEpoch" || out.status === "stalePause" || out.status === "removed") throw new ApiError(out.status);
+    return personRevoked(out);
   }
   const revoked = await c.env.DB.prepare("SELECT revoked_at FROM revocations WHERE owner_user_id = ? AND user_id = ?")
     .bind(owner, userId)

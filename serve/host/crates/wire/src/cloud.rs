@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "8adb935ba1cc5b8344f1d1fb22556c6104ddca532e019c0829cfa1c69e5fbcee";
+pub const CONTRACT_SHA256: &str = "8ebd055464b0a3c07a7fa36530d7a88ca2beb87d2131f00bdebee5785861972c";
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -743,7 +743,7 @@ pub struct CreateInvite {
     pub expires_at: i64,
 }
 
-/// mode remove needs epoch, the contact epoch the Mac last pulled (an undo names the ended one); pgen is the pause generation it last pulled (a pause or resume names it, so a late copy of an old one changes nothing). Absent from a host that predates contacts: a revoke is then a pause.
+/// mode remove needs epoch, the contact epoch the Mac last pulled (an undo names the ended one); pgen is the pause generation it last pulled (a pause or resume names it, so a late copy of an old one changes nothing). A request that has a mode must carry its generation (epoch for remove, pgen for pause); only a request with no mode (a host from before contacts) may omit them: its revoke is a pause, its unrevoke undoes the epoch ended now or, when live, resumes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PersonRevoke {
@@ -1103,6 +1103,9 @@ pub enum ErrorCode {
     UnknownComputer,
     AlreadyClaimed,
     Conflict,
+    StaleEpoch,
+    StalePause,
+    Removed,
     TooMany,
     InviteUsed,
     Paused,
@@ -1134,6 +1137,9 @@ impl ErrorCode {
             "unknownComputer" => Self::UnknownComputer,
             "alreadyClaimed" => Self::AlreadyClaimed,
             "conflict" => Self::Conflict,
+            "staleEpoch" => Self::StaleEpoch,
+            "stalePause" => Self::StalePause,
+            "removed" => Self::Removed,
             "tooMany" => Self::TooMany,
             "inviteUsed" => Self::InviteUsed,
             "paused" => Self::Paused,
@@ -1164,6 +1170,9 @@ impl ErrorCode {
             Self::UnknownComputer => "unknownComputer",
             Self::AlreadyClaimed => "alreadyClaimed",
             Self::Conflict => "conflict",
+            Self::StaleEpoch => "staleEpoch",
+            Self::StalePause => "stalePause",
+            Self::Removed => "removed",
             Self::TooMany => "tooMany",
             Self::InviteUsed => "inviteUsed",
             Self::Paused => "paused",
@@ -1187,7 +1196,7 @@ impl ErrorCode {
             Self::Unauthenticated | Self::BadSignature | Self::Unauthorized => Some(401),
             Self::Forbidden | Self::AccountDeleted => Some(403),
             Self::NotFound | Self::UnknownComputer => Some(404),
-            Self::AlreadyClaimed | Self::Conflict | Self::TooMany | Self::InviteUsed | Self::Paused => Some(409),
+            Self::AlreadyClaimed | Self::Conflict | Self::StaleEpoch | Self::StalePause | Self::Removed | Self::TooMany | Self::InviteUsed | Self::Paused => Some(409),
             Self::ClaimExpired | Self::RequestExpired | Self::InviteExpired | Self::InviteRevoked => Some(410),
             Self::TooLarge => Some(413),
             Self::UpgradeRequired => Some(426),

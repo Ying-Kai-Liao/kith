@@ -449,7 +449,7 @@ describe("a host's person revoke: pause keeps the chat, remove ends it", () => {
   it("a revoke with no mode (an old host, or an unknown word) pauses: the cuts and the row, the contact and chat stay", async () => {
     const { kai, jas, host, contactId } = await pair();
     expect((await revoke(host, jas.userId)).body).toEqual({ ok: true, status: "ok", epoch: 1, live: true, pgen: 1 });
-    expect((await revoke(host, jas.userId, { mode: "banish" })).body.status).toBe("ok");
+    expect((await revoke(host, jas.userId, { mode: "banish", pgen: 1 })).body.status).toBe("ok");
     expect(await contactRow(contactId)).toMatchObject({ live: 1, epoch: 1, pgen: 2, made_rev: 0 });
     const st = await stateOf(host);
     expect(st.revoked).toEqual([jas.userId]);
@@ -460,7 +460,7 @@ describe("a host's person revoke: pause keeps the chat, remove ends it", () => {
     expect((await send(jas, contactId, seal(contactId, 1, jas.dev.key, await directory(jas, contactId)))).body.status).toBe("ok");
     expect(await count("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'contact.end' AND target = ?", jas.userId)).toBe(0);
     // Resume gives the agents back and the row goes.
-    expect((await unrevoke(host, jas.userId, { pgen: 2 })).body).toEqual({ ok: true, status: "ok", epoch: 1, live: true, pgen: 3 });
+    expect((await unrevoke(host, jas.userId, { mode: "pause", pgen: 2 })).body).toEqual({ ok: true, status: "ok", epoch: 1, live: true, pgen: 3 });
     expect((await stateOf(host)).revoked).toEqual([]);
     expect((await stateOf(host)).memberships).toEqual([expect.objectContaining({ userId: jas.userId })]);
     expect((await listContacts(kai)).body.contacts[0].paused).toBe(false);
@@ -468,12 +468,14 @@ describe("a host's person revoke: pause keeps the chat, remove ends it", () => {
 
   it("names the pause generation: a late copy of an older pause or resume changes nothing", async () => {
     const { jas, host, contactId } = await pair();
-    expect((await revoke(host, jas.userId, { pgen: 0 })).body.status).toBe("ok"); // pgen 1
-    expect((await revoke(host, jas.userId, { pgen: 0 })).body).toEqual({ ok: false, status: "stalePause", epoch: 1, live: true, pgen: 1 });
-    expect((await unrevoke(host, jas.userId, { pgen: 1 })).body.status).toBe("ok"); // pgen 2, active
+    const pause = (pgen: number) => revoke(host, jas.userId, { mode: "pause", pgen });
+    const resume = (pgen: number) => unrevoke(host, jas.userId, { mode: "pause", pgen });
+    expect((await pause(0)).body.status).toBe("ok"); // pgen 1
+    expect((await pause(0)).body).toEqual({ ok: false, status: "stalePause", epoch: 1, live: true, pgen: 1 });
+    expect((await resume(1)).body.status).toBe("ok"); // pgen 2, active
     // A late copy of the first resume must not un-pause a newer pause.
-    expect((await revoke(host, jas.userId, { pgen: 2 })).body.status).toBe("ok"); // pgen 3, paused
-    expect((await unrevoke(host, jas.userId, { pgen: 1 })).body.status).toBe("stalePause");
+    expect((await pause(2)).body.status).toBe("ok"); // pgen 3, paused
+    expect((await resume(1)).body.status).toBe("stalePause");
     expect((await stateOf(host)).revoked).toEqual([jas.userId]);
     expect(await contactRow(contactId)).toMatchObject({ pgen: 3, live: 1 });
   });
@@ -481,10 +483,14 @@ describe("a host's person revoke: pause keeps the chat, remove ends it", () => {
   it("remove needs its epoch, ends the contact and makes the row; the undo takes it away again", async () => {
     const { jas, host, contactId } = await pair();
     expect((await revoke(host, jas.userId, { mode: "remove" })).status).toBe(400);
+    expect((await revoke(host, jas.userId, { mode: "pause" })).status).toBe(400);
+    expect((await unrevoke(host, jas.userId, { mode: "remove" })).status).toBe(400);
+    expect((await unrevoke(host, jas.userId, { mode: "pause" })).status).toBe(400);
+    expect(await contactRow(contactId)).toMatchObject({ live: 1, pgen: 0 });
     expect((await revoke(host, jas.userId, { mode: "remove", epoch: 1 })).body).toEqual({ ok: true, status: "ok", epoch: 1, live: false, pgen: 1 });
     expect(await contactRow(contactId)).toMatchObject({ live: 0, made_rev: 1, ended_by: `computer:${host.cid}` });
     expect((await revoke(host, jas.userId, { mode: "remove", epoch: 1 })).body.status).toBe("alreadyEnded");
-    expect((await unrevoke(host, jas.userId, { epoch: 1 })).body).toMatchObject({ ok: true, status: "ok", epoch: 2, live: true });
+    expect((await unrevoke(host, jas.userId, { mode: "remove", epoch: 1 })).body).toMatchObject({ ok: true, status: "ok", epoch: 2, live: true });
     expect(await count("SELECT COUNT(*) AS n FROM revocations WHERE user_id = ?", jas.userId)).toBe(0);
     expect((await stateOf(host)).memberships).toEqual([expect.objectContaining({ userId: jas.userId })]);
     // An old host's undo (no epoch) of an ended contact means the ended one.
@@ -503,7 +509,7 @@ describe("a host's person revoke: pause keeps the chat, remove ends it", () => {
     expect(st.revoked).toEqual([jas.userId]);
     expect(st.memberships).toEqual([]);
     expect((await listContacts(kai)).body.contacts[0].paused).toBe(true);
-    expect((await unrevoke(host, jas.userId, { pgen: 1 })).body.status).toBe("ok");
+    expect((await unrevoke(host, jas.userId, { mode: "pause", pgen: 1 })).body.status).toBe("ok");
     expect((await stateOf(host)).memberships).toEqual([expect.objectContaining({ userId: jas.userId })]);
   });
 
@@ -511,15 +517,60 @@ describe("a host's person revoke: pause keeps the chat, remove ends it", () => {
     const { kai, jas, host, contactId } = await pair();
     await end(kai, contactId, 1);
     expect((await revoke(host, jas.userId)).body).toEqual({ ok: false, status: "removed", epoch: 1, live: false, pgen: 1 });
-    expect((await unrevoke(host, jas.userId, { pgen: 1 })).body).toMatchObject({ ok: false, status: "removed" });
+    expect((await unrevoke(host, jas.userId, { mode: "pause", pgen: 1 })).body).toMatchObject({ ok: false, status: "removed" });
     expect(await count("SELECT COUNT(*) AS n FROM revocations WHERE user_id = ?", jas.userId)).toBe(1);
     expect((await accept(jas, await invite(host))).status).toBe(410);
     expect(contactId).toBeTruthy();
   });
 
+  it("a second copy of an undo finding the contact live does not run as a resume (she stays paused)", async () => {
+    const { jas, host, contactId } = await pair();
+    await revoke(host, jas.userId, { mode: "pause", pgen: 0 }); // paused
+    await revoke(host, jas.userId, { mode: "remove", epoch: 1 }); // removed over the pause: made_rev 0
+    const undoCopy = () => unrevoke(host, jas.userId, { mode: "remove", epoch: 1 });
+    expect((await undoCopy()).body).toMatchObject({ ok: true, status: "ok", epoch: 2, live: true });
+    expect((await undoCopy()).body).toMatchObject({ ok: true, status: "alreadyLive", live: true });
+    expect((await stateOf(host)).revoked).toEqual([jas.userId]);
+    expect(await contactRow(contactId)).toMatchObject({ live: 1, epoch: 2 });
+    // And a third, after a later remove, is stale rather than bringing anything back.
+    await revoke(host, jas.userId, { mode: "remove", epoch: 2 });
+    expect((await undoCopy()).body).toMatchObject({ ok: false, status: "staleEpoch", epoch: 2, live: false });
+    expect(await contactRow(contactId)).toMatchObject({ live: 0 });
+  });
+
+  it("a no-mode unrevoke (an old host) is refused with an HTTP error, never a 200 with ok:false", async () => {
+    const { jas, host, contactId } = await pair();
+    await revoke(host, jas.userId, { mode: "remove", epoch: 1 });
+    // The other account is deleted: the contact can't be brought back.
+    const payload = { type: "user.deleted", data: { id: jas.userId } };
+    const id = `msg_${ref.b64url(ref.random(8))}`;
+    const now = new Date();
+    await call("POST", "/v1/webhooks/clerk", {
+      body: payload,
+      headers: {
+        "svix-id": id,
+        "svix-timestamp": String(Math.floor(now.getTime() / 1000)),
+        "svix-signature": new Webhook(env.CLERK_WEBHOOK_SECRET!).sign(id, now, JSON.stringify(payload)),
+      },
+    });
+    const r = await unrevoke(host, jas.userId);
+    expect(r.status).toBe(409);
+    expect(await contactRow(contactId)).toMatchObject({ live: 0 });
+  });
+
+  it("only a call's own token lets its later statements run: two calls in one millisecond don't both pass", async () => {
+    const { kai, jas, contactId } = await pair();
+    expect((await end(kai, contactId, 1)).body.status).toBe("ok");
+    const first = (await contactRow(contactId))!.op;
+    expect(first).toMatch(/^op_/);
+    await undo(kai, contactId, 1);
+    expect((await contactRow(contactId))!.op).not.toBe(first);
+    expect(await count("SELECT COUNT(*) AS n FROM revocations WHERE user_id = ?", jas.userId)).toBe(0);
+  });
+
   it("holds C-R when a pause and a remove race: an ended contact always has its row", async () => {
     const { kai, jas, host, contactId } = await pair();
-    await Promise.all([revoke(host, jas.userId), end(kai, contactId, 1), revoke(host, jas.userId, { pgen: 0 })]);
+    await Promise.all([revoke(host, jas.userId), end(kai, contactId, 1), revoke(host, jas.userId, { mode: "pause", pgen: 0 })]);
     const k = await contactRow(contactId);
     expect(await count("SELECT COUNT(*) AS n FROM revocations WHERE user_id = ?", jas.userId)).toBe(1);
     if (!k!.live) expect(k!.ended_by).toMatch(/^owner:/);

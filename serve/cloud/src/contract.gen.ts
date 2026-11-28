@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '8adb935ba1cc5b8344f1d1fb22556c6104ddca532e019c0829cfa1c69e5fbcee'
+export const CONTRACT_SHA256 = '8ebd055464b0a3c07a7fa36530d7a88ca2beb87d2131f00bdebee5785861972c'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -385,7 +385,7 @@ export interface CreateInvite {
   expiresAt: number
 }
 
-/** mode remove needs epoch, the contact epoch the Mac last pulled (an undo names the ended one); pgen is the pause generation it last pulled (a pause or resume names it, so a late copy of an old one changes nothing). Absent from a host that predates contacts: a revoke is then a pause. */
+/** mode remove needs epoch, the contact epoch the Mac last pulled (an undo names the ended one); pgen is the pause generation it last pulled (a pause or resume names it, so a late copy of an old one changes nothing). A request that has a mode must carry its generation (epoch for remove, pgen for pause); only a request with no mode (a host from before contacts) may omit them: its revoke is a pause, its unrevoke undoes the epoch ended now or, when live, resumes. */
 export interface PersonRevoke {
   userId: string
   epoch?: number | null
@@ -861,6 +861,9 @@ export const ERROR_STATUS = {
   unknownComputer: 404,
   alreadyClaimed: 409,
   conflict: 409,
+  staleEpoch: 409,
+  stalePause: 409,
+  removed: 409,
   tooMany: 409,
   inviteUsed: 409,
   paused: 409,

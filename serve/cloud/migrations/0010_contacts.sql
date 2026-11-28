@@ -12,6 +12,7 @@ CREATE TABLE contacts (
   ended_at        INTEGER,
   made_rev        INTEGER NOT NULL DEFAULT 0,     -- the remove inserted the revocations row, so its undo deletes it (§2.6)
   pgen            INTEGER NOT NULL DEFAULT 0,     -- pause generation: +1 at every pause, resume, and a remove or undo that moves the row
+  op              TEXT,                           -- a random token of the last end/undo/pause/resume: later statements of that call check it
   created_at      INTEGER NOT NULL,
   updated_at      INTEGER NOT NULL,
   UNIQUE (user_lo, user_hi),
