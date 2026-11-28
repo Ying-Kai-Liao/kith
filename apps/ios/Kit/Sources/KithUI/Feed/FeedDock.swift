@@ -1,20 +1,48 @@
 import KithKit
 import SwiftUI
 
+/// What the app target wires into the Feed's box so + and the call button work as in Crew: the pickers, the call, and
+/// the staged files. KithUI stays free of the app's pickers; the files go out after the text, only once it went.
+public struct FeedAttach {
+    public var hasFiles: Bool
+    /// The staged files' chips, drawn by the app.
+    public var strip: AnyView
+    public var onCall: () -> Void
+    public var onPhotos: () -> Void
+    public var onCamera: () -> Void
+    public var onFiles: () -> Void
+    /// The text went to this chat: send the staged files there.
+    public var onSent: (_ chat: String) -> Void
+
+    public init(hasFiles: Bool, strip: AnyView, onCall: @escaping () -> Void, onPhotos: @escaping () -> Void,
+                onCamera: @escaping () -> Void, onFiles: @escaping () -> Void, onSent: @escaping (_ chat: String) -> Void) {
+        self.hasFiles = hasFiles
+        self.strip = strip
+        self.onCall = onCall
+        self.onPhotos = onPhotos
+        self.onCamera = onCamera
+        self.onFiles = onFiles
+        self.onSent = onSent
+    }
+}
+
 /// The Feed's bottom box: Crew's own `ChatDock`, with the Feed's routing in its accessory slot. @ chips choose the
 /// agent; with none, the computer's pick shows as a chip to change. Nothing is sent on a pick the person has not seen.
 struct FeedDock: View {
     let composer: FeedComposer
     let onOpenChat: (_ chat: String, _ entry: String?) -> Void
+    let attach: FeedAttach?
     @State private var dictation = HomeDictation()
 
     var body: some View {
         ChatDock(text: Binding(get: { composer.text }, set: { composer.edit($0) }), placeholder: "Ask anyone",
-                 showsCall: false,
+                 hasAttachment: attach?.hasFiles ?? false,
                  onSend: send,
                  onMic: { dictation.toggle(current: composer.text) { composer.edit($0) } },
+                 onCall: { dictation.stop(); attach?.onCall() },
+                 onPhotos: { attach?.onPhotos() }, onCamera: { attach?.onCamera() }, onFiles: { attach?.onFiles() },
                  sendStyle: composer.canSend ? .ink : .muted, micListening: dictation.listening,
-                 canSend: composer.canSend, showsPlus: false) {
+                 canSend: composer.canSend) {
             accessory
         }
         .padding(.bottom, 4)
@@ -25,7 +53,11 @@ struct FeedDock: View {
 
     private func send() {
         dictation.stop()
-        Task { await composer.send() }
+        Task {
+            await composer.send()
+            // The files follow the text only when it went, to the chat it went to: a pick never seen sends nothing.
+            if let sent = composer.sent { attach?.onSent(sent.chat) }
+        }
     }
 
     private var accessory: some View {
@@ -37,6 +69,7 @@ struct FeedDock: View {
                 }
             }
             if let error = composer.error { Text(error).font(KithText.secondary.font).foregroundStyle(Palette.negative) }
+            if let attach, attach.hasFiles { attach.strip }
             chips
         }
         .padding(.horizontal, 14).padding(.top, 10)

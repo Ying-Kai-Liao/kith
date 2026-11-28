@@ -75,7 +75,7 @@ struct BotListView: View {
     /// Agents put to sleep from their menu, by row id, until they next work or get a message.
     @State private var sleepers: [String: CrewSleep] = [:]
 
-    fileprivate struct CallTarget: Identifiable {
+    struct CallTarget: Identifiable {
         let store: BotStore
         let botId: String
         let id: String
@@ -273,7 +273,7 @@ struct BotListView: View {
         .modifier(HomeSheets(
             editing: $editing, editingGroup: $editingGroup, confirmDelete: $confirmDelete, newChat: $newChat,
             inviting: $inviting, botSheet: $botSheet, sharingAgent: $sharingAgent, personTarget: $personTarget, crewPeople: crewPeople,
-            allStores: allStores, query: $query, files: $files, picking: $picking, calling: $calling,
+            crewShown: tab == .crew, allStores: allStores, query: $query, files: $files, picking: $picking, calling: $calling,
             pickingPhotos: $pickingPhotos, photoItems: $photoItems, pickingFiles: $pickingFiles, pickingCamera: $pickingCamera,
             pickChoices: pickChoices(for:), addPhotos: addPhotos, addFiles: addFiles, addCamera: { append(HomeAttachments.photos([$0])) }))
     }
@@ -855,6 +855,8 @@ private struct HomeSheets: ViewModifier {
     @Binding var sharingAgent: BotListView.ShareAgentTarget?
     @Binding var personTarget: CrewPersonTarget?
     let crewPeople: CrewPeople
+    /// The Feed has its own file importer; only one may be presented at a time.
+    let crewShown: Bool
     let allStores: [BotStore]
     @Binding var query: String
     @Binding var files: [OutgoingFile]
@@ -933,7 +935,7 @@ private struct HomeSheets: ViewModifier {
             // SwiftUI presents only one file importer in the stack: while a chat is pushed over Crew, its composer's
             // must be the only one, or + → Files there does nothing.
             .background {
-                if accounts.selection == nil {
+                if accounts.selection == nil && crewShown {
                     Color.clear.fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
                         if case .success(let urls) = result { addFiles(urls) }
                     }
