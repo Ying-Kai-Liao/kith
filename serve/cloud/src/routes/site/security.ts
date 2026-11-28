@@ -34,7 +34,8 @@ export const PAGE: SitePage = {
 <tbody>
 <tr><td>Keeps</td><td>The account records.</td></tr>
 <tr><td>Forwards</td><td>Encrypted frames between your devices and your Mac, without reading them.</td></tr>
-<tr><td>Never stores</td><td>Your chats. A device that was offline collects its messages from a mailbox of ciphertext, where they expire after 24 hours.</td></tr>
+<tr><td>Keeps for up to 30 days, encrypted</td><td>Your chats with people, until every device has collected them. The cloud never has the keys.</td></tr>
+<tr><td>Never stores</td><td>Your chats with agents. A device that was offline collects its messages from a mailbox of ciphertext, where they expire after 24 hours.</td></tr>
 <tr><td>Holds unencrypted</td><td>Webhooks waiting for a Mac that is offline. See the known gaps.</td></tr>
 </tbody></table></div>
 
