@@ -122,11 +122,25 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var unanswered: Bool?
     /// permission, a room turn's card in the owner's 1:1 with the agent: the room it came from.
     public var room: String?
+    /// user: who prompted it (host `prompter.rs`). Owner-only; nil on older entries and for members and bots: unknown.
+    public var prompter: EntryPrompter?
 
     public init(text: String? = nil, status: String? = nil, clientNonce: String? = nil) {
         self.text = text
         self.status = status
         self.clientNonce = clientNonce
+    }
+}
+
+/// Who prompted a user-side entry. `kind` is `app`, `terminal`, `manager`, `schedule`, `agent` or `person` (open: a
+/// later host may add more). `name` is the person or bot id, or a session label; a manager has none yet.
+public struct EntryPrompter: Codable, Hashable, Sendable {
+    public var kind: String
+    public var name: String?
+
+    public init(kind: String, name: String? = nil) {
+        self.kind = kind
+        self.name = name
     }
 }
 

@@ -42,8 +42,8 @@ public enum DemoScreens {
     /// The `botguest-*` demos: Rex (Sam's Grok bot) asked "personal"; its chat row and one conversation, shaped like a real host's.
     public static let botGuestChatId = "personal"
     public static let botGuestRoot = "bg-root"
-    /// The bot the `chat` demo opens.
-    public static let chatBotId = "coder"
+    /// The bot the `chat` demo opens. The `fold` demo has its own, so entries an earlier demo cached for "coder" don't mix in.
+    public static var chatBotId: String { name == "fold" ? "folder" : "coder" }
     /// What the Crew dock starts with: `crew-typing` shows it mid-search.
     public static var query: String { name == "crew-typing" ? "co" : "" }
     /// The demos that show more than one computer: a Mac that's offline and one that turned the phone away.
@@ -402,6 +402,27 @@ extension AccountStore {
                 "tail": "Want the long read summarised?", "rows": rows,
             ]]
             list = [entry("agent", ago: 1, data: ["text": "Morning brief: five items.", "final": true, "richCard": card])].compactMap { $0 }
+            threads = [:]
+        }
+        if DemoScreens.name == "fold" {
+            // The 1:1 fold: a run a manager started, a routine's run, an ask inside a run, then the owner's own turn.
+            func prompted(_ text: String, ago: Int64, _ kind: String, _ name: String? = nil) -> Entry? {
+                var prompter: [String: Any] = ["kind": kind]
+                if let name { prompter["name"] = name }
+                return entry("user", ago: ago, data: ["text": text, "prompter": prompter])
+            }
+            list = [
+                prompted("Add a test for the sweep", ago: 60, "manager"), reply(nil, ago: 58, "Test added."),
+                prompted("Run it", ago: 56, "manager"), reply(nil, ago: 54, "Passed: 12 tests."),
+                prompted("Draft the daily digest", ago: 40, "schedule", "daily digest"), reply(nil, ago: 38, "Digest drafted."),
+                prompted("Review the draft", ago: 30, "agent", "writer"), reply(nil, ago: 28, "Two small edits."),
+                entry("permission", ago: 27, data: [
+                    "title": "cargo test -p kith-host", "toolKind": "execute", "status": "pending", "cwd": "/Users/kai/kith",
+                    "options": [["optionId": "o1", "name": "Allow once", "kind": "allow_once"],
+                                ["optionId": "o3", "name": "Deny", "kind": "reject_once"]],
+                ]),
+                prompted("Thanks, ship it", ago: 5, "app"), reply(nil, ago: 4, "Shipped."),
+            ].compactMap { $0 }
             threads = [:]
         }
         store.entries[id] = list
