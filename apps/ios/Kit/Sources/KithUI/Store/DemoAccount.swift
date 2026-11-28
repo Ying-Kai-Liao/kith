@@ -373,15 +373,18 @@ extension AccountStore {
 /// The `share-*` demos: a fixed People list for the share sheet, so nothing talks to a host.
 extension PeopleStore {
     @MainActor
-    public static func demo() -> PeopleStore {
-        PeopleStore(host: { DemoPeopleHost() })
+    public static func demo(paused: Bool = false) -> PeopleStore {
+        PeopleStore(host: { DemoPeopleHost(paused: paused) })
     }
 }
 
 private struct DemoPeopleHost: PeopleHost {
+    /// The person page's paused shot: Sam is suspended.
+    var paused = false
+
     func people() async throws -> [HostPerson] {
         [HostPerson(personId: "maya", name: "Maya", agents: ["ada": .guest], joined: true),
-         HostPerson(personId: "sam", name: "Sam", agents: ["ada": .member, "remy": .guest], joined: true),
+         HostPerson(personId: "sam", name: "Sam", agents: ["ada": .member, "remy": .guest], joined: true, revoked: paused),
          HostPerson(personId: "lee", name: "Lee", agents: ["ada": .guest], joined: false, openInvites: 1)]
     }
     func invites() async throws -> [HostInvite] {
