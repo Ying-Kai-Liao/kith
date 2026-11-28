@@ -92,42 +92,30 @@ private struct ProviderCard: View {
                     if let top = provider.tightest { limitRow(top.label, top.percent, top.resetsShort()) }
                 } else {
                     ForEach(provider.windows) { w in limitRow(w.label, w.percent, w.resetsShort()) }
-                    if let readAt {
-                        infoRow("Read", PlanMeters.readLabel(readAt))
-                    } else {
-                        infoRow("Source", source)
-                        infoRow("Updated", Date(milliseconds: provider.updatedAt).formatted(date: .abbreviated, time: .shortened))
-                    }
+                    // One footer for every provider: when it was read, always relative.
+                    infoRow("Updated", PlanMeters.readLabel(readAt ?? Date(milliseconds: provider.updatedAt)))
                 }
             }
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
 
-    private var source: String {
-        switch provider.source {
-        case "claude": "Claude Code"
-        case "statusline": "Claude Code status line"
-        case "agent": "A running bot"
-        case "sessions": "Codex sessions"
-        default: provider.source
-        }
-    }
-
     /// The name, "NN% · resets …", and a 6 pt bar.
     private func limitRow(_ label: String, _ percent: Double, _ reset: String?) -> some View {
         let pct = Int(percent.rounded())
+        // Red always comes with a word (DESIGN.md): at 90% or more the bar turns red and the line says so.
+        let nearly = pct >= 90
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(label).font(.subheadline.weight(.medium)).foregroundStyle(Palette.text)
                 Spacer(minLength: 8)
-                Text(reset.map { "\(pct)% · \($0)" } ?? "\(pct)%")
-                    .font(.footnote.monospacedDigit()).foregroundStyle(Palette.secondary)
+                Text([ "\(pct)%", nearly ? "almost used up" : nil, reset ].compactMap { $0 }.joined(separator: " · "))
+                    .font(.footnote.monospacedDigit()).foregroundStyle(nearly ? Palette.danger : Palette.secondary)
             }
             Capsule().fill(Palette.accentDim).frame(height: 6)
                 .overlay(alignment: .leading) {
                     GeometryReader { geo in
-                        Capsule().fill(Palette.text).frame(width: geo.size.width * min(max(percent, 0), 100) / 100)
+                        Capsule().fill(nearly ? Palette.danger : Palette.text).frame(width: geo.size.width * min(max(percent, 0), 100) / 100)
                     }
                 }
         }
