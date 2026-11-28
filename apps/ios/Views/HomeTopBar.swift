@@ -150,6 +150,7 @@ struct HomeFeedStack: View {
 
 /// The Feed's pickers and call cover, the same ones Crew's dock raises.
 private struct FeedSheets: ViewModifier {
+    @Environment(AccountStore.self) private var accounts
     @Binding var picking: AgentPick?
     @Binding var calling: BotListView.CallTarget?
     @Binding var pickingPhotos: Bool
@@ -173,8 +174,13 @@ private struct FeedSheets: ViewModifier {
                 photoItems = []
                 addPhotos(items)
             }
-            .fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                if case .success(let urls) = result { addFiles(urls) }
+            // Only one file importer may be presented in the stack: while a chat is pushed, its composer's must be it.
+            .background {
+                if accounts.selection == nil {
+                    Color.clear.fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+                        if case .success(let urls) = result { addFiles(urls) }
+                    }
+                }
             }
             .fullScreenCover(isPresented: $pickingCamera) { CameraPicker(picked: addCamera).ignoresSafeArea() }
     }
