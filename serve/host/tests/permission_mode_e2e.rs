@@ -45,7 +45,8 @@ async fn house(host: &Host) -> String {
 /// mode is settled). The send is not repeated: the host answers a clientNonce it already saved with the saved entry
 /// and starts nothing (api/bots.rs, `find_by_nonce`), so a repeat could not start a turn and would only hide a lost
 /// one. The deadline is generous for a loaded CI box; a turn that never reaches the agent fails the test, with the
-/// requests and the chat's entries (the host's own notice, if any) in the message.
+/// requests, the chat's entries (the host's own notice, if any), what the stub kith was asked (whether the launch got as
+/// far as `--launch-json`), what the host's threads are blocked in and the end of the host's log in the message.
 async fn requests_after_a_turn(host: &Host, bot: &str, home: &Path) -> Vec<Value> {
     let deadline = Instant::now() + Duration::from_secs(90);
     host.call("send", json!({"botId": bot, "text": "go", "clientNonce": "n1"})).await;
@@ -57,7 +58,12 @@ async fn requests_after_a_turn(host: &Host, bot: &str, home: &Path) -> Vec<Value
         }
         if Instant::now() >= deadline {
             let history = host.call("history", json!({"botId": bot})).await;
-            panic!("the agent never got a prompt; requests {all:?}; chat {history}");
+            let calls = std::fs::read_to_string(home.join("calls.jsonl")).unwrap_or_default();
+            panic!(
+                "the agent never got a prompt; requests {all:?}; chat {history}; kith calls:\n{calls}{}{}",
+                host.threads(),
+                host.log_tail()
+            );
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -99,13 +105,8 @@ async fn an_invitees_run_never_starts_in_bypass() {
         chat = db.query_row("SELECT id FROM bots", [], |r| r.get(0)).unwrap();
     })
     .await;
-    // The restarted host has the bot as sam's before anything is sent.
-    for _ in 0..200 {
-        if host.roster().await.iter().any(|b| b["id"] == chat.as_str()) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    // No wait for the roster here: the owner's roster never lists an invitee's chat (api/events.rs), so a wait for it
+    // could only run out (it took 80 s of every run). The send reads the bot row itself, sam's since the restart.
     let requests = requests_after_a_turn(&host, &chat, &home).await;
     assert!(requests.iter().any(|r| r["method"] == "session/new" || r["method"] == "session/load"), "{requests:?}");
     assert!(set_modes(&requests).is_empty(), "{requests:?}");

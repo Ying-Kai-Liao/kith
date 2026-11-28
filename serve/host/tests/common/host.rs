@@ -75,6 +75,24 @@ impl Host {
         self.base = base;
     }
 
+    /// The end of the host's log (kept across restarts), for a failure message.
+    pub fn log_tail(&self) -> String {
+        super::log_tail(&super::host_log(&self.home))
+    }
+
+    /// What the host's threads are blocked in (Linux: each thread's name and kernel wait channel), for a failure
+    /// message: a turn stuck on a blocking call shows a thread outside the runtime's futex waits. Empty elsewhere.
+    pub fn threads(&self) -> String {
+        let Ok(tasks) = std::fs::read_dir(format!("/proc/{}/task", self.child.id())) else { return String::new() };
+        let read = |p: PathBuf| std::fs::read_to_string(p).unwrap_or_default().trim().to_owned();
+        let mut lines: Vec<String> = tasks
+            .flatten()
+            .map(|t| format!("{} {}", read(t.path().join("comm")), read(t.path().join("wchan"))))
+            .collect();
+        lines.sort();
+        format!("; the host's threads:\n{}", lines.join("\n"))
+    }
+
     pub async fn post(&self, method: &str, body: &Value) -> (bool, Value) {
         let response = reqwest::Client::new()
             .post(format!("{}/api/{method}", self.base))
