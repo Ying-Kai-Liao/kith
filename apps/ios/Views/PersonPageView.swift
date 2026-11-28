@@ -8,6 +8,8 @@ struct PersonPageView: View {
     let personId: String
     let people: PeopleStore
     let store: BotStore
+    /// Debug demos: made-up memory files per agent, no host.
+    var memoryDemo: [String: [String]]?
     @State private var confirm: Confirm?
     @State private var working = false
 
@@ -37,8 +39,10 @@ struct PersonPageView: View {
                         removeSection(person)
                     case .paused:
                         paused(person)
+                        memory(person)
                     case .active:
                         agentsSection(person)
+                        memory(person)
                         PersonRoomsSection(person: person, people: people, disabled: disabled)
                         PersonBotsSection(person: person, people: people, store: store)
                         pauseSection(person)
@@ -112,6 +116,12 @@ struct PersonPageView: View {
                 PersonAgentCard(person: person, agent: agent, people: people, store: store, disabled: disabled)
             }
         }
+    }
+
+    /// What each agent keeps about them: still there, and still forgettable, while they are paused.
+    private func memory(_ person: HostPerson) -> some View {
+        PersonMemorySection(personName: person.name, personId: person.personId, agents: person.agents.keys.sorted(),
+                            store: store, demo: memoryDemo)
     }
 
     private func pauseSection(_ person: HostPerson) -> some View {
