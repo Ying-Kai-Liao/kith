@@ -5,7 +5,7 @@ import Testing
 
 /// serve/docs/reference/fixtures/person-chat-vectors.json: the file the host's crates/wire/src/pc.rs and the desktop's
 /// relay-core/pc.test.ts are held to as well.
-private let pc: [String: Any] = {
+nonisolated(unsafe) private let pc: [String: Any] = {
     let url = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../../../../../serve/docs/reference/fixtures/person-chat-vectors.json").standardized
     return ((try? Data(contentsOf: url)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
 }()

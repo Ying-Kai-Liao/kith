@@ -27,6 +27,11 @@ private func shape(_ items: [ChatItem]) -> [String] {
     }
 }
 
+/// The first folded run: `ChatItem.build` leads with a time separator, so the run is not always at index 0.
+private func firstRun(_ items: [ChatItem]) -> ChatItem? {
+    items.first { if case .othersRun = $0.kind { return true } else { return false } }
+}
+
 private let sam = EntryPrompter(kind: "person", name: "sam")
 private let own = EntryPrompter(kind: "app")
 
@@ -48,7 +53,8 @@ private let own = EntryPrompter(kind: "app")
         entry(5, "user", "from a manager", prompter: EntryPrompter(kind: "manager")), entry(6, "agent", "r2"),
         entry(7, "user", "mine again", prompter: own), entry(8, "agent", "r3"),
     ])
-    #expect(shape(OthersRun.fold(list, working: false)) == ["e1", "e2", "run(4)", "e7", "e8"])
+    // A different prompter starts its own line (sam, then the manager), so two runs sit between the own prompts.
+    #expect(shape(OthersRun.fold(list, working: false)) == ["e1", "e2", "run(2)", "run(2)", "e7", "e8"])
 }
 
 @Test func anUnknownPrompterEndsARunAndStaysVisible() {
@@ -62,7 +68,7 @@ private let own = EntryPrompter(kind: "app")
     let list = items([entry(1, "user", "x", prompter: EntryPrompter(kind: "schedule", name: "daily digest"))])
     let folded = OthersRun.fold(list, working: false)
     #expect(shape(folded) == ["run(1)"])
-    guard case let .othersRun(group) = folded[0].kind, case let .othersRun(title, _, _) = group.reason else {
+    guard let run = firstRun(folded), case let .othersRun(group) = run.kind, case let .othersRun(title, _, _) = group.reason else {
         Issue.record("no run")
         return
     }
@@ -87,7 +93,7 @@ private let own = EntryPrompter(kind: "app")
 @Test func theRunAtTheEndOfTheChatIsLiveWhileAgentWorksOrStreams() {
     let done = items([entry(1, "user", "x", prompter: EntryPrompter(kind: "agent", name: "coder")), entry(2, "agent", "r")])
     func live(_ list: [ChatItem], working: Bool) -> Bool {
-        guard case let .othersRun(group) = OthersRun.fold(list, working: working)[0].kind,
+        guard let run = firstRun(OthersRun.fold(list, working: working)), case let .othersRun(group) = run.kind,
               case let .othersRun(_, _, live) = group.reason else { return false }
         return live
     }
@@ -118,8 +124,9 @@ private let own = EntryPrompter(kind: "app")
 @Test func aFoldedRunHoldsItsEntriesForJumpsAndSearch() {
     let folded = OthersRun.fold(items([entry(1, "user", "x", prompter: sam), entry(2, "agent", "r"),
                                        entry(3, "user", "mine", prompter: own)]), working: false)
-    #expect(folded[0].holds(entry: "e2"))
-    #expect(!folded[0].holds(entry: "e3"))
+    let run = firstRun(folded)
+    #expect(run?.holds(entry: "e2") == true)
+    #expect(run?.holds(entry: "e3") == false)
 }
 
 @Test func runTitles() {
