@@ -8,6 +8,7 @@ import {
   body,
   computerView,
   device,
+  dropRecipients,
   effectiveStatus,
   key,
   memberComputer,
@@ -25,6 +26,7 @@ import {
   type Ctx,
   type RequestRow,
 } from "./common";
+import { boxSigValid } from "./contacts";
 import { type ComputerAccess, type ComputerRole, DevicePlatformValues, HostPlatformValues, type Responses } from "../contract.gen";
 
 const CLAIM_TTL_MS = 5 * 60_000;
@@ -53,6 +55,7 @@ interface DeviceRow {
   last_used_at: number | null;
   revoked_at: number | null;
   clerk_sid: string | null;
+  box_pub: string | null;
 }
 
 const deviceView = (d: DeviceRow) => ({
@@ -69,6 +72,11 @@ export async function registerDevice(c: Ctx): Promise<Responses["registerDevice"
   const b = body(c);
   const name = str(b, "name");
   const platform = oneOf(b, "platform", DevicePlatformValues);
+  // The key person chats are sealed to, signed by the device key so the cloud can't swap it; both or neither.
+  const boxKey = b.boxKey === undefined || b.boxKey === null ? null : key(b, "boxKey", 32);
+  const boxSig = b.boxSig === undefined || b.boxSig === null ? null : key(b, "boxSig", 64);
+  if ((boxKey === null) !== (boxSig === null)) throw new ApiError("badRequest", "boxKey and boxSig go together");
+  if (boxKey && boxSig && !(await boxSigValid(s.kid, u.userId, boxKey, boxSig))) throw new ApiError("badRequest", "boxSig doesn't verify");
   // A key that signed its own retirement (even before the cloud saw it) never registers again.
   if (await c.env.DB.prepare("SELECT 1 FROM retired_keys WHERE sign_pub = ?").bind(s.kid).first()) {
     throw new ApiError("forbidden", "This device key was retired; create a new one");
@@ -87,16 +95,26 @@ export async function registerDevice(c: Ctx): Promise<Responses["registerDevice"
   if (existing?.revoked_at) throw new ApiError("forbidden", "This device key was revoked; create a new one");
   // Web <-> native would let a web key shed the session checks the relay applies to web keys.
   if (existing && (existing.platform === "web") !== (platform === "web")) throw new ApiError("conflict", "A device key keeps its platform kind");
+  // Set once: a different box key is a different device.
+  if (existing?.box_pub && boxKey && existing.box_pub !== boxKey) throw new ApiError("conflict", "This device already has a different box key");
   if (existing) {
     // Last write wins: a newer sign-in re-binds the row. A socket admitted under the older sid is not touched.
     // The tombstone is part of the write: a register in flight across a retire can't re-bind the row.
     const upd = await c.env.DB.prepare(
-      `UPDATE devices SET name = ?, platform = ?, last_used_at = ?, clerk_sid = ?
-       WHERE id = ? AND revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM retired_keys WHERE sign_pub = ?)`,
+      `UPDATE devices SET name = ?1, platform = ?2, last_used_at = ?3, clerk_sid = ?4,
+         box_pub = COALESCE(box_pub, ?7), box_sig = COALESCE(box_sig, ?8)
+       WHERE id = ?5 AND revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM retired_keys WHERE sign_pub = ?6)
+         AND (?7 IS NULL OR box_pub IS NULL OR box_pub = ?7)`,
     )
-      .bind(name, platform, c.now, sid, existing.id, s.kid)
+      .bind(name, platform, c.now, sid, existing.id, s.kid, boxKey, boxSig)
       .run();
-    if (upd.meta.changes !== 1) throw new ApiError("forbidden", "This device key was retired or revoked; create a new one");
+    if (upd.meta.changes !== 1) {
+      const now = await c.env.DB.prepare("SELECT box_pub, revoked_at FROM devices WHERE id = ?")
+        .bind(existing.id)
+        .first<{ box_pub: string | null; revoked_at: number | null }>();
+      if (!now?.revoked_at && boxKey && now?.box_pub && now.box_pub !== boxKey) throw new ApiError("conflict", "This device already has a different box key");
+      throw new ApiError("forbidden", "This device key was retired or revoked; create a new one");
+    }
     return { device: deviceView({ ...existing, name, platform }) };
   }
   const row: DeviceRow = {
@@ -108,19 +126,22 @@ export async function registerDevice(c: Ctx): Promise<Responses["registerDevice"
     last_used_at: c.now,
     revoked_at: null,
     clerk_sid: sid,
+    box_pub: boxKey,
   };
   await c.env.DB.prepare(
-    `INSERT INTO devices(id, owner_user_id, sign_pub, name, platform, created_at, last_used_at, clerk_sid)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM retired_keys WHERE sign_pub = ?)
+    `INSERT INTO devices(id, owner_user_id, sign_pub, name, platform, created_at, last_used_at, clerk_sid, box_pub, box_sig)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM retired_keys WHERE sign_pub = ?)
      ON CONFLICT(owner_user_id, sign_pub) DO NOTHING`,
   )
-    .bind(row.id, u.userId, row.sign_pub, name, platform, c.now, c.now, sid, s.kid)
+    .bind(row.id, u.userId, row.sign_pub, name, platform, c.now, c.now, sid, boxKey, boxSig, s.kid)
     .run();
   // A concurrent registration of the same key wins the insert; report whichever row exists.
   const saved = await c.env.DB.prepare("SELECT * FROM devices WHERE owner_user_id = ? AND sign_pub = ?")
     .bind(u.userId, s.kid)
     .first<DeviceRow>();
   if (!saved) throw new ApiError("forbidden", "This device key was retired; create a new one");
+  // A concurrent registration of the same key came with another box key first.
+  if (boxKey && saved.box_pub && saved.box_pub !== boxKey) throw new ApiError("conflict", "This device already has a different box key");
   return { device: deviceView(saved) };
 }
 
@@ -148,6 +169,9 @@ export async function revokeDevice(c: Ctx, [deviceId]: string[]): Promise<Respon
 /** Revokes one device: its grants and pending requests end, and its relay sockets close. */
 async function revokeDeviceRow(env: Env, deviceId: string, actor: string, now: number): Promise<void> {
   const { stmts, blocks } = await revokeGrants(env, "g.device_id = ?", [deviceId], "deviceRevoked", now);
+  const dev = await env.DB.prepare("SELECT sign_pub, owner_user_id FROM devices WHERE id = ?")
+    .bind(deviceId)
+    .first<{ sign_pub: string; owner_user_id: string }>();
   const pending = await env.DB.prepare("SELECT DISTINCT computer_id FROM access_requests WHERE device_id = ? AND status = 'pending'")
     .bind(deviceId)
     .all<{ computer_id: string }>();
@@ -160,6 +184,8 @@ async function revokeDeviceRow(env: Env, deviceId: string, actor: string, now: n
     ),
     audit(env, actor, "device.revoke", deviceId, "ok", now),
   ]);
+  // A revoked device collects nothing: its queued person chats go (a send racing this is refused by its device guard).
+  if (dev) await dropRecipients(env, "recipient_key = ? AND recipient_user_id = ?", [dev.sign_pub, dev.owner_user_id]);
   const computers = new Set([...blocks.keys(), ...pending.results.map((r) => r.computer_id)]);
   await Promise.all([...computers].map((id) => notify(env, id, blocks.get(id))));
 }

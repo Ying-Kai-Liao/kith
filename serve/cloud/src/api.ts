@@ -8,6 +8,7 @@ import type { Responses } from "./contract.gen";
 export { ApiError, type Ctx } from "./routes/common";
 export * from "./routes/account";
 export * from "./routes/botguests";
+export * from "./routes/contacts";
 export * from "./routes/host";
 export * from "./routes/invites";
 export * from "./routes/peers";
@@ -58,5 +59,17 @@ export async function sweep(env: Env, now: number): Promise<void> {
     env.DB.prepare("DELETE FROM audit_events WHERE created_at <= ?").bind(now - 30 * 86_400_000),
     // Unaccepted bot invites only: an accepted one is the record behind a bot device.
     env.DB.prepare("DELETE FROM bot_invites WHERE accepted_at IS NULL AND expires_at <= ?").bind(now - 7 * 86_400_000),
+    // Person chats are kept 30 days whether or not every device collected them (K12). The same ordered slice picks the
+    // rows in both statements; the second then takes messages that have no recipient left (this slice's, or an earlier one's).
+    env.DB.prepare(
+      `DELETE FROM pc_recipients WHERE msg_id IN
+         (SELECT msg_id FROM pc_messages WHERE expires_at <= ?1 ORDER BY expires_at, msg_id LIMIT ?2)`,
+    ).bind(now, PRUNE_BATCH),
+    env.DB.prepare(
+      `DELETE FROM pc_messages WHERE msg_id IN
+         (SELECT msg_id FROM pc_messages WHERE expires_at <= ?1
+            AND NOT EXISTS (SELECT 1 FROM pc_recipients r WHERE r.msg_id = pc_messages.msg_id)
+          ORDER BY expires_at, msg_id LIMIT ?2)`,
+    ).bind(now, PRUNE_BATCH),
   ]);
 }

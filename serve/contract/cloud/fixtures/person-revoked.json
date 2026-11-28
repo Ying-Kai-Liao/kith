@@ -1,0 +1,10 @@
+{
+  "type": "PersonRevoked",
+  "body": {
+    "ok": true,
+    "status": "alreadyEnded",
+    "epoch": 1,
+    "live": false,
+    "pgen": 3
+  }
+}

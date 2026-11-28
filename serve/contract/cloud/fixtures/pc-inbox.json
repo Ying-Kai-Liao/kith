@@ -1,0 +1,21 @@
+{
+  "type": "PcInbox",
+  "body": {
+    "messages": [
+      {
+        "msgId": "pm_AAAAAAAAAAAAAAAAAAAAAA",
+        "contactId": "ct_AAAAAAAAAAAAAAAAAAAAAA",
+        "epoch": 2,
+        "senderUserId": "user_3def",
+        "senderKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+        "ct": "Y2lwaGVydGV4dA",
+        "sig": "c2lnbmF0dXJl",
+        "epk": "ZXBr",
+        "wrap": "d3JhcA",
+        "recipientsHash": "aGFzaA",
+        "createdAt": 1793000000000
+      }
+    ],
+    "next": null
+  }
+}

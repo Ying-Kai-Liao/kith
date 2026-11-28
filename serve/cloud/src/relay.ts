@@ -161,6 +161,12 @@ export class ComputerRelay extends DurableObject<Env> {
     if (pathname === "/relay") return this.relay(req);
     if (pathname === "/internal/block" && req.method === "POST") return this.block(req);
     if (pathname === "/internal/hook" && req.method === "POST") return this.hook(req);
+    // A person-chat message is waiting for this computer. Its own frame, not `cloud.changed`: that one takes the Mac out
+    // of sync (the sync lease) and would hold her runs on every message.
+    if (pathname === "/internal/pc" && req.method === "POST") {
+      this.toHosts({ t: "pc.new" });
+      return Response.json({});
+    }
     if (pathname === "/internal/changed" && req.method === "POST") {
       this.toHosts({ t: "cloud.changed" });
       return Response.json({});

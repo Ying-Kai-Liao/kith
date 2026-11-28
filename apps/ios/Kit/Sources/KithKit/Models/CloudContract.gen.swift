@@ -5,7 +5,7 @@ import Foundation
 
 /// The cloud contract these types were made from.
 public enum CloudContract {
-    public static let sha256 = "95bab5665831780e18b30ac1b25840fc714ffb1b5ec803184d546b0157c0fd14"
+    public static let sha256 = "8ebd055464b0a3c07a7fa36530d7a88ca2beb87d2131f00bdebee5785861972c"
 }
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
@@ -78,6 +78,73 @@ public enum HostPlatform: String, Codable, Hashable, Sendable {
     }
 }
 
+/// How the cloud answered a person-chat send. ok: queued. duplicate: that msgId was already queued as is. contactEnded: the contact is over. staleEpoch: the contact is at another epoch (answer carries it). recipientsChanged: the devices to seal to changed (answer carries the fresh directory).
+public enum PcSendStatus: String, Codable, Hashable, Sendable {
+    case ok
+    case duplicate
+    case contactEnded
+    case staleEpoch
+    case recipientsChanged
+    /// A value this version doesn't know.
+    case unknown
+
+    /// A value this version doesn't know is `.unknown`.
+    public init(from decoder: Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
+
+/// Which side of a contact this account is: the one whose invite made it, or the one who accepted.
+public enum ContactRole: String, Codable, Hashable, Sendable {
+    case inviter
+    case invitee
+
+    /// A value this version doesn't know is `.invitee`.
+    public init(from decoder: Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .invitee
+    }
+}
+
+/// Who ended a contact, as this account sees it: me, the other person, or the system (an account was deleted).
+public enum ContactEndedBy: String, Codable, Hashable, Sendable {
+    case me
+    case them
+    case system
+
+    /// A value this version doesn't know is `.system`.
+    public init(from decoder: Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .system
+    }
+}
+
+/// What a host's person revoke does to the person's contact: pause cuts the agents lent and keeps the chat, remove ends the contact too. A missing or unknown mode is pause (the least change).
+public enum PersonRevokeMode: String, Codable, Hashable, Sendable {
+    case pause
+    case remove
+
+    /// A value this version doesn't know is `.pause`.
+    public init(from decoder: Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .pause
+    }
+}
+
+/// How the cloud answered an end, an undo, a pause or a resume of a contact. alreadyEnded and alreadyLive: a repeat of a change that stands. staleEpoch: the contact has moved on to another epoch since the named one (the answer carries it). stalePause: the pause generation named is not the current one (the answer carries it). removed: a pause or resume of a contact that is ended (use the undo).
+public enum ContactChange: String, Codable, Hashable, Sendable {
+    case ok
+    case alreadyEnded
+    case alreadyLive
+    case staleEpoch
+    case stalePause
+    case removed
+    /// A value this version doesn't know.
+    case unknown
+
+    /// A value this version doesn't know is `.unknown`.
+    public init(from decoder: Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
+
 /// The host's answer to an access request. The cloud refuses one it doesn't know.
 public enum Decision: String, Codable, Hashable, Sendable {
     case approve
@@ -128,14 +195,18 @@ public struct Me: Codable, Hashable, Sendable {
     }
 }
 
-/// Body of POST /v1/devices.
+/// Body of POST /v1/devices. boxKey (X25519, base64url) and boxSig (the device key's Ed25519 signature over 'kith/pc-box/v1' + userId + boxKey, base64url) are set once: they make the device a recipient of person chats. Absent from an app that predates them.
 public struct RegisterDevice: Codable, Hashable, Sendable {
     public var name: String
     public var platform: DevicePlatform
+    public var boxKey: String?
+    public var boxSig: String?
 
-    public init(name: String, platform: DevicePlatform) {
+    public init(name: String, platform: DevicePlatform, boxKey: String? = nil, boxSig: String? = nil) {
         self.name = name
         self.platform = platform
+        self.boxKey = boxKey
+        self.boxSig = boxSig
     }
 }
 
@@ -493,8 +564,9 @@ public struct HostState: Codable, Hashable, Sendable {
     public var revoked: [String]?
     public var peerRequests: [HostPeerRequest]?
     public var peers: [HostPeer]?
+    public var contacts: [HostContact]?
 
-    public init(owner: Owner? = nil, grants: [HostGrant], requests: [HostAccessRequest], memberships: [Membership]? = nil, botDevices: [BotDevice]? = nil, revoked: [String]? = nil, peerRequests: [HostPeerRequest]? = nil, peers: [HostPeer]? = nil) {
+    public init(owner: Owner? = nil, grants: [HostGrant], requests: [HostAccessRequest], memberships: [Membership]? = nil, botDevices: [BotDevice]? = nil, revoked: [String]? = nil, peerRequests: [HostPeerRequest]? = nil, peers: [HostPeer]? = nil, contacts: [HostContact]? = nil) {
         self.owner = owner
         self.grants = grants
         self.requests = requests
@@ -503,6 +575,28 @@ public struct HostState: Codable, Hashable, Sendable {
         self.revoked = revoked
         self.peerRequests = peerRequests
         self.peers = peers
+        self.contacts = contacts
+    }
+}
+
+/// The computer owner's contact with another account (person chats). endedBy is owner:<userId>, computer:<id>, accountDeleted or backfill; null while live. contacts is absent from a cloud that predates them.
+public struct HostContact: Codable, Hashable, Sendable {
+    public var userId: String
+    public var contactId: String
+    public var epoch: Int64
+    public var base: Int64
+    public var live: Bool
+    public var pgen: Int64?
+    public var endedBy: String?
+
+    public init(userId: String, contactId: String, epoch: Int64, base: Int64, live: Bool, pgen: Int64? = nil, endedBy: String? = nil) {
+        self.userId = userId
+        self.contactId = contactId
+        self.epoch = epoch
+        self.base = base
+        self.live = live
+        self.pgen = pgen
+        self.endedBy = endedBy
     }
 }
 
@@ -655,11 +749,245 @@ public struct CreateInvite: Codable, Hashable, Sendable {
     }
 }
 
+/// mode remove needs epoch, the contact epoch the Mac last pulled (an undo names the ended one); pgen is the pause generation it last pulled (a pause or resume names it, so a late copy of an old one changes nothing). A request that has a mode must carry its generation (epoch for remove, pgen for pause); only a request with no mode (a host from before contacts) may omit them: its revoke is a pause, its unrevoke undoes the epoch ended now or, when live, resumes.
 public struct PersonRevoke: Codable, Hashable, Sendable {
     public var userId: String
+    public var epoch: Int64?
+    public var mode: PersonRevokeMode?
+    public var pgen: Int64?
 
-    public init(userId: String) {
+    public init(userId: String, epoch: Int64? = nil, mode: PersonRevokeMode? = nil, pgen: Int64? = nil) {
         self.userId = userId
+        self.epoch = epoch
+        self.mode = mode
+        self.pgen = pgen
+    }
+}
+
+/// Answer to a person revoke or undo. status, epoch and live are null when the person has no contact (nothing but the revocation changed). A staleEpoch answer changed nothing: epoch is the contact's current one.
+public struct PersonRevoked: Codable, Hashable, Sendable {
+    public var ok: Bool
+    public var status: ContactChange?
+    public var epoch: Int64?
+    public var live: Bool?
+    public var pgen: Int64?
+
+    public init(ok: Bool, status: ContactChange? = nil, epoch: Int64? = nil, live: Bool? = nil, pgen: Int64? = nil) {
+        self.ok = ok
+        self.status = status
+        self.epoch = epoch
+        self.live = live
+        self.pgen = pgen
+    }
+}
+
+/// The other account of a contact, as that account's name and email are known.
+public struct ContactPerson: Codable, Hashable, Sendable {
+    public var userId: String
+    public var name: String?
+    public var email: String?
+
+    public init(userId: String, name: String? = nil, email: String? = nil) {
+        self.userId = userId
+        self.name = name
+        self.email = email
+    }
+}
+
+/// A device with a person-chat box key. boxSig is checked by the cloud at registration and by every sender.
+public struct DirectoryDevice: Codable, Hashable, Sendable {
+    public var userId: String
+    public var key: String
+    public var boxKey: String
+    public var boxSig: String
+    public var platform: String
+    public var name: String
+    public var addedAt: Int64
+
+    public init(userId: String, key: String, boxKey: String, boxSig: String, platform: String, name: String, addedAt: Int64) {
+        self.userId = userId
+        self.key = key
+        self.boxKey = boxKey
+        self.boxSig = boxSig
+        self.platform = platform
+        self.name = name
+        self.addedAt = addedAt
+    }
+}
+
+/// A claimed computer: a recipient under the key 'computer:<computerId>'.
+public struct DirectoryComputer: Codable, Hashable, Sendable {
+    public var userId: String
+    public var computerId: String
+    public var signKey: String
+    public var boxKey: String
+
+    public init(userId: String, computerId: String, signKey: String, boxKey: String) {
+        self.userId = userId
+        self.computerId = computerId
+        self.signKey = signKey
+        self.boxKey = boxKey
+    }
+}
+
+/// Every key a message of this contact is sealed to, of both accounts, sorted.
+public struct ContactDirectory: Codable, Hashable, Sendable {
+    public var devices: [DirectoryDevice]
+    public var computers: [DirectoryComputer]
+
+    public init(devices: [DirectoryDevice], computers: [DirectoryComputer]) {
+        self.devices = devices
+        self.computers = computers
+    }
+}
+
+/// One contact of the caller's. directory is there while the contact is live.
+public struct Contact: Codable, Hashable, Sendable {
+    public var contactId: String
+    public var other: ContactPerson
+    public var role: ContactRole
+    public var epoch: Int64
+    public var base: Int64
+    public var live: Bool
+    public var paused: Bool?
+    public var endedBy: ContactEndedBy?
+    public var endedAt: Int64?
+    public var directory: ContactDirectory?
+
+    public init(contactId: String, other: ContactPerson, role: ContactRole, epoch: Int64, base: Int64, live: Bool, paused: Bool? = nil, endedBy: ContactEndedBy? = nil, endedAt: Int64? = nil, directory: ContactDirectory? = nil) {
+        self.contactId = contactId
+        self.other = other
+        self.role = role
+        self.epoch = epoch
+        self.base = base
+        self.live = live
+        self.paused = paused
+        self.endedBy = endedBy
+        self.endedAt = endedAt
+        self.directory = directory
+    }
+}
+
+public struct ContactList: Codable, Hashable, Sendable {
+    public var contacts: [Contact]
+
+    public init(contacts: [Contact]) {
+        self.contacts = contacts
+    }
+}
+
+/// One recipient's wrap of the message key: key is a device key or 'computer:<id>'; epk and wrap are base64url.
+public struct PcRecipient: Codable, Hashable, Sendable {
+    public var key: String
+    public var epk: String
+    public var wrap: String
+
+    public init(key: String, epk: String, wrap: String) {
+        self.key = key
+        self.epk = epk
+        self.wrap = wrap
+    }
+}
+
+/// Body of a person-chat send. ct and sig are base64url; the cloud checks sig and the recipients' hash, never the plaintext.
+public struct PcSend: Codable, Hashable, Sendable {
+    public var msgId: String
+    public var epoch: Int64
+    public var ct: String
+    public var sig: String
+    public var recipients: [PcRecipient]
+
+    public init(msgId: String, epoch: Int64, ct: String, sig: String, recipients: [PcRecipient]) {
+        self.msgId = msgId
+        self.epoch = epoch
+        self.ct = ct
+        self.sig = sig
+        self.recipients = recipients
+    }
+}
+
+public struct PcSent: Codable, Hashable, Sendable {
+    public var status: PcSendStatus
+    public var msgId: String?
+    public var epoch: Int64?
+    public var directory: ContactDirectory?
+
+    public init(status: PcSendStatus, msgId: String? = nil, epoch: Int64? = nil, directory: ContactDirectory? = nil) {
+        self.status = status
+        self.msgId = msgId
+        self.epoch = epoch
+        self.directory = directory
+    }
+}
+
+/// A queued message for the asking device or computer: its own epk and wrap, and the hash of everyone's.
+public struct PcInboxItem: Codable, Hashable, Sendable {
+    public var msgId: String
+    public var contactId: String
+    public var epoch: Int64
+    public var senderUserId: String
+    public var senderKey: String
+    public var ct: String
+    public var sig: String
+    public var epk: String
+    public var wrap: String
+    public var recipientsHash: String
+    public var createdAt: Int64
+
+    public init(msgId: String, contactId: String, epoch: Int64, senderUserId: String, senderKey: String, ct: String, sig: String, epk: String, wrap: String, recipientsHash: String, createdAt: Int64) {
+        self.msgId = msgId
+        self.contactId = contactId
+        self.epoch = epoch
+        self.senderUserId = senderUserId
+        self.senderKey = senderKey
+        self.ct = ct
+        self.sig = sig
+        self.epk = epk
+        self.wrap = wrap
+        self.recipientsHash = recipientsHash
+        self.createdAt = createdAt
+    }
+}
+
+/// Up to 100 rows; next is the cursor for the page after, null at the end.
+public struct PcInbox: Codable, Hashable, Sendable {
+    public var messages: [PcInboxItem]
+    public var next: String?
+
+    public init(messages: [PcInboxItem], next: String? = nil) {
+        self.messages = messages
+        self.next = next
+    }
+}
+
+public struct PcAck: Codable, Hashable, Sendable {
+    public var msgIds: [String]
+
+    public init(msgIds: [String]) {
+        self.msgIds = msgIds
+    }
+}
+
+/// Body of an end or an undo: the epoch the caller saw.
+public struct ContactEpoch: Codable, Hashable, Sendable {
+    public var epoch: Int64
+
+    public init(epoch: Int64) {
+        self.epoch = epoch
+    }
+}
+
+public struct ContactChanged: Codable, Hashable, Sendable {
+    public var status: ContactChange
+    public var epoch: Int64
+    public var live: Bool
+    public var pgen: Int64?
+
+    public init(status: ContactChange, epoch: Int64, live: Bool, pgen: Int64? = nil) {
+        self.status = status
+        self.epoch = epoch
+        self.live = live
+        self.pgen = pgen
     }
 }
 
@@ -745,6 +1073,15 @@ public enum CloudPath {
     public static func hostRevokeMembership(_ membershipId: String) -> String { "v1/host/memberships/\(membershipId)/revoke" }
     public static let hostRevokePerson = "v1/host/people/revoke"
     public static let hostUnrevokePerson = "v1/host/people/unrevoke"
+    public static let listContacts = "v1/contacts"
+    public static func sendPersonChat(_ contactId: String) -> String { "v1/contacts/\(contactId)/messages" }
+    public static let pcInbox = "v1/pc/inbox"
+    public static let pcAck = "v1/pc/ack"
+    public static func endContact(_ contactId: String) -> String { "v1/contacts/\(contactId)/end" }
+    public static func undoEndContact(_ contactId: String) -> String { "v1/contacts/\(contactId)/undo" }
+    public static let hostPcInbox = "v1/host/pc/inbox"
+    public static let hostPcAck = "v1/host/pc/ack"
+    public static func hostSendPersonChat(_ contactId: String) -> String { "v1/host/contacts/\(contactId)/messages" }
     public static func acceptInvite(_ inviteId: String) -> String { "v1/invites/\(inviteId)/accept" }
     public static let hostCreateBotInvite = "v1/host/bot-invites"
     public static func hostRevokeBotInvite(_ inviteId: String) -> String { "v1/host/bot-invites/\(inviteId)/revoke" }
@@ -780,6 +1117,9 @@ public enum CloudErrorCode: String, Sendable {
     case unknownComputer
     case alreadyClaimed
     case conflict
+    case staleEpoch
+    case stalePause
+    case removed
     case tooMany
     case inviteUsed
     case paused
@@ -813,6 +1153,9 @@ public enum CloudErrorCode: String, Sendable {
         case .unknownComputer: 404
         case .alreadyClaimed: 409
         case .conflict: 409
+        case .staleEpoch: 409
+        case .stalePause: 409
+        case .removed: 409
         case .tooMany: 409
         case .inviteUsed: 409
         case .paused: 409
@@ -866,6 +1209,7 @@ extension CloudContract {
         case "Membership": _ = try d.decode(Membership.self, from: data)
         case "BotDevice": _ = try d.decode(BotDevice.self, from: data)
         case "HostState": _ = try d.decode(HostState.self, from: data)
+        case "HostContact": _ = try d.decode(HostContact.self, from: data)
         case "PeerComputer": _ = try d.decode(PeerComputer.self, from: data)
         case "PeerComputerList": _ = try d.decode(PeerComputerList.self, from: data)
         case "CreatePeerRequest": _ = try d.decode(CreatePeerRequest.self, from: data)
@@ -879,6 +1223,21 @@ extension CloudContract {
         case "Decided": _ = try d.decode(Decided.self, from: data)
         case "CreateInvite": _ = try d.decode(CreateInvite.self, from: data)
         case "PersonRevoke": _ = try d.decode(PersonRevoke.self, from: data)
+        case "PersonRevoked": _ = try d.decode(PersonRevoked.self, from: data)
+        case "ContactPerson": _ = try d.decode(ContactPerson.self, from: data)
+        case "DirectoryDevice": _ = try d.decode(DirectoryDevice.self, from: data)
+        case "DirectoryComputer": _ = try d.decode(DirectoryComputer.self, from: data)
+        case "ContactDirectory": _ = try d.decode(ContactDirectory.self, from: data)
+        case "Contact": _ = try d.decode(Contact.self, from: data)
+        case "ContactList": _ = try d.decode(ContactList.self, from: data)
+        case "PcRecipient": _ = try d.decode(PcRecipient.self, from: data)
+        case "PcSend": _ = try d.decode(PcSend.self, from: data)
+        case "PcSent": _ = try d.decode(PcSent.self, from: data)
+        case "PcInboxItem": _ = try d.decode(PcInboxItem.self, from: data)
+        case "PcInbox": _ = try d.decode(PcInbox.self, from: data)
+        case "PcAck": _ = try d.decode(PcAck.self, from: data)
+        case "ContactEpoch": _ = try d.decode(ContactEpoch.self, from: data)
+        case "ContactChanged": _ = try d.decode(ContactChanged.self, from: data)
         case "AcceptInvite": _ = try d.decode(AcceptInvite.self, from: data)
         case "InviteAccepted": _ = try d.decode(InviteAccepted.self, from: data)
         case "AcceptBotInvite": _ = try d.decode(AcceptBotInvite.self, from: data)

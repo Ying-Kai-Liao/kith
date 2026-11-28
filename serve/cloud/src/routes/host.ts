@@ -176,7 +176,28 @@ export async function hostState(c: Ctx): Promise<Responses["hostState"]> {
     revoked: await revokedOf(c, comp.owner_user_id),
     // Mac link pairings (designs/2026-10-29-mac-link), apart from grants so an older host never reads one as a device.
     ...(await peerState(c, comp)),
+    // The owner's contacts with other accounts (person chats); an older host ignores it.
+    contacts: await hostContacts(c, comp.owner_user_id),
   };
+}
+
+async function hostContacts(c: Ctx, ownerUserId: string | null): Promise<Responses["hostState"]["contacts"]> {
+  if (!ownerUserId) return [];
+  const { results } = await c.env.DB.prepare(
+    `SELECT contact_id, CASE WHEN user_lo = ?1 THEN user_hi ELSE user_lo END AS other, epoch, base, live, ended_by, pgen
+     FROM contacts WHERE user_lo = ?1 OR user_hi = ?1 ORDER BY created_at, contact_id`,
+  )
+    .bind(ownerUserId)
+    .all<{ contact_id: string; other: string; epoch: number; base: number; live: number; ended_by: string | null; pgen: number }>();
+  return results.map((k) => ({
+    userId: k.other,
+    contactId: k.contact_id,
+    epoch: k.epoch,
+    base: k.base,
+    live: k.live === 1,
+    pgen: k.pgen,
+    endedBy: k.live ? null : k.ended_by,
+  }));
 }
 
 async function hostRequest(c: Ctx, computerId: string, id: string): Promise<RequestRow> {

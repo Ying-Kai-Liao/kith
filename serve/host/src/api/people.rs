@@ -688,7 +688,7 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
     if everywhere {
         let (to, what) =
             if revoke { (path::HOST_REVOKE_PERSON, "revoked") } else { (path::HOST_UNREVOKE_PERSON, "restored") };
-        cloud::post(hub, to, &PersonRevoke { user_id: who.kith.clone() }).await.map_err(|e| {
+        cloud::post(hub, to, &PersonRevoke { user_id: who.kith.clone(), ..Default::default() }).await.map_err(|e| {
             anyhow!(
                 "{id} wasn't {what}: a change to someone's access has to reach your other computers through the Kith \
                  cloud, and it couldn't be reached ({e:#}). Try again once this computer is online."

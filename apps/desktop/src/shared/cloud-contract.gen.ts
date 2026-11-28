@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '95bab5665831780e18b30ac1b25840fc714ffb1b5ec803184d546b0157c0fd14'
+export const CONTRACT_SHA256 = '8ebd055464b0a3c07a7fa36530d7a88ca2beb87d2131f00bdebee5785861972c'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -36,6 +36,36 @@ export type HostPlatform = (typeof HostPlatformValues)[number]
 /** How a consumer reads a HostPlatform word: one this version doesn't know is 'unknown'. */
 export const decodeHostPlatform = (raw: unknown): HostPlatform | 'unknown' => known(HostPlatformValues, raw, 'unknown')
 
+/** How the cloud answered a person-chat send. ok: queued. duplicate: that msgId was already queued as is. contactEnded: the contact is over. staleEpoch: the contact is at another epoch (answer carries it). recipientsChanged: the devices to seal to changed (answer carries the fresh directory). */
+export const PcSendStatusValues = ['ok', 'duplicate', 'contactEnded', 'staleEpoch', 'recipientsChanged'] as const
+export type PcSendStatus = (typeof PcSendStatusValues)[number]
+/** How a consumer reads a PcSendStatus word: one this version doesn't know is 'unknown'. */
+export const decodePcSendStatus = (raw: unknown): PcSendStatus | 'unknown' => known(PcSendStatusValues, raw, 'unknown')
+
+/** Which side of a contact this account is: the one whose invite made it, or the one who accepted. */
+export const ContactRoleValues = ['inviter', 'invitee'] as const
+export type ContactRole = (typeof ContactRoleValues)[number]
+/** How a consumer reads a ContactRole word: one this version doesn't know is 'invitee'. */
+export const decodeContactRole = (raw: unknown): ContactRole => known(ContactRoleValues, raw, 'invitee')
+
+/** Who ended a contact, as this account sees it: me, the other person, or the system (an account was deleted). */
+export const ContactEndedByValues = ['me', 'them', 'system'] as const
+export type ContactEndedBy = (typeof ContactEndedByValues)[number]
+/** How a consumer reads a ContactEndedBy word: one this version doesn't know is 'system'. */
+export const decodeContactEndedBy = (raw: unknown): ContactEndedBy => known(ContactEndedByValues, raw, 'system')
+
+/** What a host's person revoke does to the person's contact: pause cuts the agents lent and keeps the chat, remove ends the contact too. A missing or unknown mode is pause (the least change). */
+export const PersonRevokeModeValues = ['pause', 'remove'] as const
+export type PersonRevokeMode = (typeof PersonRevokeModeValues)[number]
+/** How a consumer reads a PersonRevokeMode word: one this version doesn't know is 'pause'. */
+export const decodePersonRevokeMode = (raw: unknown): PersonRevokeMode => known(PersonRevokeModeValues, raw, 'pause')
+
+/** How the cloud answered an end, an undo, a pause or a resume of a contact. alreadyEnded and alreadyLive: a repeat of a change that stands. staleEpoch: the contact has moved on to another epoch since the named one (the answer carries it). stalePause: the pause generation named is not the current one (the answer carries it). removed: a pause or resume of a contact that is ended (use the undo). */
+export const ContactChangeValues = ['ok', 'alreadyEnded', 'alreadyLive', 'staleEpoch', 'stalePause', 'removed'] as const
+export type ContactChange = (typeof ContactChangeValues)[number]
+/** How a consumer reads a ContactChange word: one this version doesn't know is 'unknown'. */
+export const decodeContactChange = (raw: unknown): ContactChange | 'unknown' => known(ContactChangeValues, raw, 'unknown')
+
 /** The host's answer to an access request. The cloud refuses one it doesn't know. */
 export const DecisionValues = ['approve', 'deny'] as const
 export type Decision = (typeof DecisionValues)[number]
@@ -67,10 +97,12 @@ export interface Me {
   createdAt: number
 }
 
-/** Body of POST /v1/devices. */
+/** Body of POST /v1/devices. boxKey (X25519, base64url) and boxSig (the device key's Ed25519 signature over 'kith/pc-box/v1' + userId + boxKey, base64url) are set once: they make the device a recipient of person chats. Absent from an app that predates them. */
 export interface RegisterDevice {
   name: string
   platform: DevicePlatform
+  boxKey?: string | null
+  boxSig?: string | null
 }
 
 export interface RegisteredDevice {
@@ -261,6 +293,18 @@ export interface HostState {
   revoked?: string[] | null
   peerRequests?: HostPeerRequest[] | null
   peers?: HostPeer[] | null
+  contacts?: HostContact[] | null
+}
+
+/** The computer owner's contact with another account (person chats). endedBy is owner:<userId>, computer:<id>, accountDeleted or backfill; null while live. contacts is absent from a cloud that predates them. */
+export interface HostContact {
+  userId: string
+  contactId: string
+  epoch: number
+  base: number
+  live: boolean
+  pgen?: number | null
+  endedBy?: string | null
 }
 
 /** Another computer of this computer's account, which it may ask to pair with (Mac link). */
@@ -341,8 +385,131 @@ export interface CreateInvite {
   expiresAt: number
 }
 
+/** mode remove needs epoch, the contact epoch the Mac last pulled (an undo names the ended one); pgen is the pause generation it last pulled (a pause or resume names it, so a late copy of an old one changes nothing). A request that has a mode must carry its generation (epoch for remove, pgen for pause); only a request with no mode (a host from before contacts) may omit them: its revoke is a pause, its unrevoke undoes the epoch ended now or, when live, resumes. */
 export interface PersonRevoke {
   userId: string
+  epoch?: number | null
+  mode?: PersonRevokeMode | null
+  pgen?: number | null
+}
+
+/** Answer to a person revoke or undo. status, epoch and live are null when the person has no contact (nothing but the revocation changed). A staleEpoch answer changed nothing: epoch is the contact's current one. */
+export interface PersonRevoked {
+  ok: boolean
+  status?: ContactChange | null
+  epoch?: number | null
+  live?: boolean | null
+  pgen?: number | null
+}
+
+/** The other account of a contact, as that account's name and email are known. */
+export interface ContactPerson {
+  userId: string
+  name?: string | null
+  email?: string | null
+}
+
+/** A device with a person-chat box key. boxSig is checked by the cloud at registration and by every sender. */
+export interface DirectoryDevice {
+  userId: string
+  key: string
+  boxKey: string
+  boxSig: string
+  platform: string
+  name: string
+  addedAt: number
+}
+
+/** A claimed computer: a recipient under the key 'computer:<computerId>'. */
+export interface DirectoryComputer {
+  userId: string
+  computerId: string
+  signKey: string
+  boxKey: string
+}
+
+/** Every key a message of this contact is sealed to, of both accounts, sorted. */
+export interface ContactDirectory {
+  devices: DirectoryDevice[]
+  computers: DirectoryComputer[]
+}
+
+/** One contact of the caller's. directory is there while the contact is live. */
+export interface Contact {
+  contactId: string
+  other: ContactPerson
+  role: ContactRole
+  epoch: number
+  base: number
+  live: boolean
+  paused?: boolean | null
+  endedBy?: ContactEndedBy | null
+  endedAt?: number | null
+  directory?: ContactDirectory | null
+}
+
+export interface ContactList {
+  contacts: Contact[]
+}
+
+/** One recipient's wrap of the message key: key is a device key or 'computer:<id>'; epk and wrap are base64url. */
+export interface PcRecipient {
+  key: string
+  epk: string
+  wrap: string
+}
+
+/** Body of a person-chat send. ct and sig are base64url; the cloud checks sig and the recipients' hash, never the plaintext. */
+export interface PcSend {
+  msgId: string
+  epoch: number
+  ct: string
+  sig: string
+  recipients: PcRecipient[]
+}
+
+export interface PcSent {
+  status: PcSendStatus
+  msgId?: string | null
+  epoch?: number | null
+  directory?: ContactDirectory | null
+}
+
+/** A queued message for the asking device or computer: its own epk and wrap, and the hash of everyone's. */
+export interface PcInboxItem {
+  msgId: string
+  contactId: string
+  epoch: number
+  senderUserId: string
+  senderKey: string
+  ct: string
+  sig: string
+  epk: string
+  wrap: string
+  recipientsHash: string
+  createdAt: number
+}
+
+/** Up to 100 rows; next is the cursor for the page after, null at the end. */
+export interface PcInbox {
+  messages: PcInboxItem[]
+  next?: string | null
+}
+
+export interface PcAck {
+  msgIds: string[]
+}
+
+/** Body of an end or an undo: the epoch the caller saw. */
+export interface ContactEpoch {
+  epoch: number
+}
+
+export interface ContactChanged {
+  status: ContactChange
+  epoch: number
+  live: boolean
+  pgen?: number | null
 }
 
 /** token is h1 (the invite link's proof), never the token itself. */
@@ -397,6 +564,7 @@ export interface Types {
   Membership: Membership
   BotDevice: BotDevice
   HostState: HostState
+  HostContact: HostContact
   PeerComputer: PeerComputer
   PeerComputerList: PeerComputerList
   CreatePeerRequest: CreatePeerRequest
@@ -410,6 +578,21 @@ export interface Types {
   Decided: Decided
   CreateInvite: CreateInvite
   PersonRevoke: PersonRevoke
+  PersonRevoked: PersonRevoked
+  ContactPerson: ContactPerson
+  DirectoryDevice: DirectoryDevice
+  DirectoryComputer: DirectoryComputer
+  ContactDirectory: ContactDirectory
+  Contact: Contact
+  ContactList: ContactList
+  PcRecipient: PcRecipient
+  PcSend: PcSend
+  PcSent: PcSent
+  PcInboxItem: PcInboxItem
+  PcInbox: PcInbox
+  PcAck: PcAck
+  ContactEpoch: ContactEpoch
+  ContactChanged: ContactChanged
   AcceptInvite: AcceptInvite
   InviteAccepted: InviteAccepted
   AcceptBotInvite: AcceptBotInvite
@@ -418,8 +601,8 @@ export interface Types {
 export type TypeName = keyof Types
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
-/** true for an enum whose unknown values are 'unknown': AccessState, DevicePlatform, HostPlatform, Decision. */
-type IsOpen<T> = Same<T, AccessState> | Same<T, DevicePlatform> | Same<T, HostPlatform> | Same<T, Decision>
+/** true for an enum whose unknown values are 'unknown': AccessState, DevicePlatform, HostPlatform, PcSendStatus, ContactChange, Decision. */
+type IsOpen<T> = Same<T, AccessState> | Same<T, DevicePlatform> | Same<T, HostPlatform> | Same<T, PcSendStatus> | Same<T, ContactChange> | Same<T, Decision>
 /**
  * A type as a consumer receives it (see `receive`): a field of an enum whose unknown values are their own state may
  * also be 'unknown'; any other enum's unknown value already reads as the value the contract names. A `json` value
@@ -474,8 +657,17 @@ export const ROUTES = {
   hostCreateInvite: { method: 'POST', path: 'v1/host/invites', pattern: /^\/v1\/host\/invites$/, kind: 'json', request: 'CreateInvite', response: 'OkAnswer' },
   hostRevokeInvite: { method: 'POST', path: 'v1/host/invites/{inviteId}/revoke', pattern: /^\/v1\/host\/invites\/([A-Za-z0-9_-]{1,64})\/revoke$/, kind: 'json', response: 'OkAnswer' },
   hostRevokeMembership: { method: 'POST', path: 'v1/host/memberships/{membershipId}/revoke', pattern: /^\/v1\/host\/memberships\/([A-Za-z0-9_-]{1,64})\/revoke$/, kind: 'json', response: 'OkAnswer' },
-  hostRevokePerson: { method: 'POST', path: 'v1/host/people/revoke', pattern: /^\/v1\/host\/people\/revoke$/, kind: 'json', request: 'PersonRevoke', response: 'OkAnswer' },
-  hostUnrevokePerson: { method: 'POST', path: 'v1/host/people/unrevoke', pattern: /^\/v1\/host\/people\/unrevoke$/, kind: 'json', request: 'PersonRevoke', response: 'OkAnswer' },
+  hostRevokePerson: { method: 'POST', path: 'v1/host/people/revoke', pattern: /^\/v1\/host\/people\/revoke$/, kind: 'json', request: 'PersonRevoke', response: 'PersonRevoked' },
+  hostUnrevokePerson: { method: 'POST', path: 'v1/host/people/unrevoke', pattern: /^\/v1\/host\/people\/unrevoke$/, kind: 'json', request: 'PersonRevoke', response: 'PersonRevoked' },
+  listContacts: { method: 'GET', path: 'v1/contacts', pattern: /^\/v1\/contacts$/, kind: 'json', response: 'ContactList' },
+  sendPersonChat: { method: 'POST', path: 'v1/contacts/{contactId}/messages', pattern: /^\/v1\/contacts\/([A-Za-z0-9_-]{1,64})\/messages$/, kind: 'json', request: 'PcSend', response: 'PcSent' },
+  pcInbox: { method: 'GET', path: 'v1/pc/inbox', pattern: /^\/v1\/pc\/inbox$/, kind: 'json', response: 'PcInbox' },
+  pcAck: { method: 'POST', path: 'v1/pc/ack', pattern: /^\/v1\/pc\/ack$/, kind: 'json', request: 'PcAck', response: 'OkAnswer' },
+  endContact: { method: 'POST', path: 'v1/contacts/{contactId}/end', pattern: /^\/v1\/contacts\/([A-Za-z0-9_-]{1,64})\/end$/, kind: 'json', request: 'ContactEpoch', response: 'ContactChanged' },
+  undoEndContact: { method: 'POST', path: 'v1/contacts/{contactId}/undo', pattern: /^\/v1\/contacts\/([A-Za-z0-9_-]{1,64})\/undo$/, kind: 'json', request: 'ContactEpoch', response: 'ContactChanged' },
+  hostPcInbox: { method: 'GET', path: 'v1/host/pc/inbox', pattern: /^\/v1\/host\/pc\/inbox$/, kind: 'json', response: 'PcInbox' },
+  hostPcAck: { method: 'POST', path: 'v1/host/pc/ack', pattern: /^\/v1\/host\/pc\/ack$/, kind: 'json', request: 'PcAck', response: 'OkAnswer' },
+  hostSendPersonChat: { method: 'POST', path: 'v1/host/contacts/{contactId}/messages', pattern: /^\/v1\/host\/contacts\/([A-Za-z0-9_-]{1,64})\/messages$/, kind: 'json', request: 'PcSend', response: 'PcSent' },
   acceptInvite: { method: 'POST', path: 'v1/invites/{inviteId}/accept', pattern: /^\/v1\/invites\/([A-Za-z0-9_-]{1,64})\/accept$/, kind: 'json', request: 'AcceptInvite', response: 'InviteAccepted' },
   hostCreateBotInvite: { method: 'POST', path: 'v1/host/bot-invites', pattern: /^\/v1\/host\/bot-invites$/, kind: 'json', request: 'CreateInvite', response: 'OkAnswer' },
   hostRevokeBotInvite: { method: 'POST', path: 'v1/host/bot-invites/{inviteId}/revoke', pattern: /^\/v1\/host\/bot-invites\/([A-Za-z0-9_-]{1,64})\/revoke$/, kind: 'json', response: 'OkAnswer' },
@@ -536,8 +728,17 @@ export interface Responses {
   hostCreateInvite: OkAnswer
   hostRevokeInvite: OkAnswer
   hostRevokeMembership: OkAnswer
-  hostRevokePerson: OkAnswer
-  hostUnrevokePerson: OkAnswer
+  hostRevokePerson: PersonRevoked
+  hostUnrevokePerson: PersonRevoked
+  listContacts: ContactList
+  sendPersonChat: PcSent
+  pcInbox: PcInbox
+  pcAck: OkAnswer
+  endContact: ContactChanged
+  undoEndContact: ContactChanged
+  hostPcInbox: PcInbox
+  hostPcAck: OkAnswer
+  hostSendPersonChat: PcSent
   acceptInvite: InviteAccepted
   hostCreateBotInvite: OkAnswer
   hostRevokeBotInvite: OkAnswer
@@ -564,6 +765,12 @@ export interface Requests {
   hostCreateInvite: CreateInvite
   hostRevokePerson: PersonRevoke
   hostUnrevokePerson: PersonRevoke
+  sendPersonChat: PcSend
+  pcAck: PcAck
+  endContact: ContactEpoch
+  undoEndContact: ContactEpoch
+  hostPcAck: PcAck
+  hostSendPersonChat: PcSend
   acceptInvite: AcceptInvite
   hostCreateBotInvite: CreateInvite
   acceptBotInvite: AcceptBotInvite
@@ -610,6 +817,15 @@ export const paths = {
   hostRevokeMembership: (membershipId: string) => `v1/host/memberships/${membershipId}/revoke`,
   hostRevokePerson: () => `v1/host/people/revoke`,
   hostUnrevokePerson: () => `v1/host/people/unrevoke`,
+  listContacts: () => `v1/contacts`,
+  sendPersonChat: (contactId: string) => `v1/contacts/${contactId}/messages`,
+  pcInbox: () => `v1/pc/inbox`,
+  pcAck: () => `v1/pc/ack`,
+  endContact: (contactId: string) => `v1/contacts/${contactId}/end`,
+  undoEndContact: (contactId: string) => `v1/contacts/${contactId}/undo`,
+  hostPcInbox: () => `v1/host/pc/inbox`,
+  hostPcAck: () => `v1/host/pc/ack`,
+  hostSendPersonChat: (contactId: string) => `v1/host/contacts/${contactId}/messages`,
   acceptInvite: (inviteId: string) => `v1/invites/${inviteId}/accept`,
   hostCreateBotInvite: () => `v1/host/bot-invites`,
   hostRevokeBotInvite: (inviteId: string) => `v1/host/bot-invites/${inviteId}/revoke`,
@@ -645,6 +861,9 @@ export const ERROR_STATUS = {
   unknownComputer: 404,
   alreadyClaimed: 409,
   conflict: 409,
+  staleEpoch: 409,
+  stalePause: 409,
+  removed: 409,
   tooMany: 409,
   inviteUsed: 409,
   paused: 409,
@@ -682,6 +901,11 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     AccessState: { values: AccessStateValues, unknown: 'unknown' },
     DevicePlatform: { values: DevicePlatformValues, unknown: 'unknown' },
     HostPlatform: { values: HostPlatformValues, unknown: 'unknown' },
+    PcSendStatus: { values: PcSendStatusValues, unknown: 'unknown' },
+    ContactRole: { values: ContactRoleValues, unknown: 'invitee' },
+    ContactEndedBy: { values: ContactEndedByValues, unknown: 'system' },
+    PersonRevokeMode: { values: PersonRevokeModeValues, unknown: 'pause' },
+    ContactChange: { values: ContactChangeValues, unknown: 'unknown' },
     Decision: { values: DecisionValues, unknown: 'unknown' },
   },
   types: {
@@ -689,7 +913,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     OkAnswer: { fields: { ok: 'bool' } },
     Health: { fields: { ok: 'bool', version: 'string' } },
     Me: { fields: { userId: 'string', email: 'string?', createdAt: 'int' } },
-    RegisterDevice: { fields: { name: 'string', platform: 'DevicePlatform' } },
+    RegisterDevice: { fields: { name: 'string', platform: 'DevicePlatform', boxKey: 'string?', boxSig: 'string?' } },
     RegisteredDevice: { fields: { deviceId: 'string', deviceKey: 'string', name: 'string', platform: 'string', createdAt: 'int' } },
     DeviceRegistered: { fields: { device: 'RegisteredDevice' } },
     CloudDevice: { fields: { deviceId: 'string', deviceKey: 'string', name: 'string', platform: 'string?', createdAt: 'int?', lastUsedAt: 'int?', revoked: 'bool?' } },
@@ -714,7 +938,8 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     HostAccessRequest: { fields: { requestId: 'string', userId: 'string?', deviceKey: 'string', deviceName: 'string', platform: 'string', email: 'string?', commit: 'string', hostNonce: 'string?', deviceNonce: 'string?', createdAt: 'int', expiresAt: 'int' }, mayOmit: ['hostNonce', 'deviceNonce'] },
     Membership: { fields: { membershipId: 'string', userId: 'string', inviteId: 'string', email: 'string?' } },
     BotDevice: { fields: { botDeviceId: 'string', inviteId: 'string', deviceKey: 'string', name: 'string', provider: 'string?', createdAt: 'int' } },
-    HostState: { fields: { owner: 'Owner?', grants: '[HostGrant]', requests: '[HostAccessRequest]', memberships: '[Membership]?', botDevices: '[BotDevice]?', revoked: '[string]?', peerRequests: '[HostPeerRequest]?', peers: '[HostPeer]?' } },
+    HostState: { fields: { owner: 'Owner?', grants: '[HostGrant]', requests: '[HostAccessRequest]', memberships: '[Membership]?', botDevices: '[BotDevice]?', revoked: '[string]?', peerRequests: '[HostPeerRequest]?', peers: '[HostPeer]?', contacts: '[HostContact]?' } },
+    HostContact: { fields: { userId: 'string', contactId: 'string', epoch: 'int', base: 'int', live: 'bool', pgen: 'int?', endedBy: 'string?' } },
     PeerComputer: { fields: { computerId: 'string', name: 'string', platform: 'string?', signKey: 'string' } },
     PeerComputerList: { fields: { computers: '[PeerComputer]' } },
     CreatePeerRequest: { fields: { computerId: 'string', deviceKey: 'string', commit: 'string' } },
@@ -727,7 +952,22 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     HostDecision: { fields: { decision: 'Decision' } },
     Decided: { fields: { status: 'AccessState', grantId: 'string?' }, mayOmit: ['grantId'] },
     CreateInvite: { fields: { inviteId: 'string', tokenHash: 'string', expiresAt: 'int' } },
-    PersonRevoke: { fields: { userId: 'string' } },
+    PersonRevoke: { fields: { userId: 'string', epoch: 'int?', mode: 'PersonRevokeMode?', pgen: 'int?' } },
+    PersonRevoked: { fields: { ok: 'bool', status: 'ContactChange?', epoch: 'int?', live: 'bool?', pgen: 'int?' } },
+    ContactPerson: { fields: { userId: 'string', name: 'string?', email: 'string?' } },
+    DirectoryDevice: { fields: { userId: 'string', key: 'string', boxKey: 'string', boxSig: 'string', platform: 'string', name: 'string', addedAt: 'int' } },
+    DirectoryComputer: { fields: { userId: 'string', computerId: 'string', signKey: 'string', boxKey: 'string' } },
+    ContactDirectory: { fields: { devices: '[DirectoryDevice]', computers: '[DirectoryComputer]' } },
+    Contact: { fields: { contactId: 'string', other: 'ContactPerson', role: 'ContactRole', epoch: 'int', base: 'int', live: 'bool', paused: 'bool?', endedBy: 'ContactEndedBy?', endedAt: 'int?', directory: 'ContactDirectory?' }, mayOmit: ['directory'] },
+    ContactList: { fields: { contacts: '[Contact]' } },
+    PcRecipient: { fields: { key: 'string', epk: 'string', wrap: 'string' } },
+    PcSend: { fields: { msgId: 'string', epoch: 'int', ct: 'string', sig: 'string', recipients: '[PcRecipient]' } },
+    PcSent: { fields: { status: 'PcSendStatus', msgId: 'string?', epoch: 'int?', directory: 'ContactDirectory?' }, mayOmit: ['directory'] },
+    PcInboxItem: { fields: { msgId: 'string', contactId: 'string', epoch: 'int', senderUserId: 'string', senderKey: 'string', ct: 'string', sig: 'string', epk: 'string', wrap: 'string', recipientsHash: 'string', createdAt: 'int' } },
+    PcInbox: { fields: { messages: '[PcInboxItem]', next: 'string?' } },
+    PcAck: { fields: { msgIds: '[string]' } },
+    ContactEpoch: { fields: { epoch: 'int' } },
+    ContactChanged: { fields: { status: 'ContactChange', epoch: 'int', live: 'bool', pgen: 'int?' } },
     AcceptInvite: { fields: { token: 'string' } },
     InviteAccepted: { fields: { computerId: 'string', membershipId: 'string?' } },
     AcceptBotInvite: { fields: { token: 'string', name: 'string', provider: 'string?' } },

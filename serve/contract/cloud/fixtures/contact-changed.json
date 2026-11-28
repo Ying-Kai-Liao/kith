@@ -1,0 +1,9 @@
+{
+  "type": "ContactChanged",
+  "body": {
+    "status": "ok",
+    "epoch": 2,
+    "live": false,
+    "pgen": 1
+  }
+}

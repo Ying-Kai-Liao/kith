@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "95bab5665831780e18b30ac1b25840fc714ffb1b5ec803184d546b0157c0fd14";
+pub const CONTRACT_SHA256: &str = "8ebd055464b0a3c07a7fa36530d7a88ca2beb87d2131f00bdebee5785861972c";
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -146,6 +146,136 @@ impl HostPlatform {
     }
 }
 
+/// How the cloud answered a person-chat send. ok: queued. duplicate: that msgId was already queued as is. contactEnded: the contact is over. staleEpoch: the contact is at another epoch (answer carries it). recipientsChanged: the devices to seal to changed (answer carries the fresh directory).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PcSendStatus {
+    #[serde(rename = "ok")]
+    Ok,
+    #[serde(rename = "duplicate")]
+    Duplicate,
+    #[serde(rename = "contactEnded")]
+    ContactEnded,
+    #[serde(rename = "staleEpoch")]
+    StaleEpoch,
+    #[serde(rename = "recipientsChanged")]
+    RecipientsChanged,
+    /// A value this version doesn't know.
+    #[default]
+    #[serde(rename = "unknown", other)]
+    Unknown,
+}
+
+impl PcSendStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Duplicate => "duplicate",
+            Self::ContactEnded => "contactEnded",
+            Self::StaleEpoch => "staleEpoch",
+            Self::RecipientsChanged => "recipientsChanged",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Which side of a contact this account is: the one whose invite made it, or the one who accepted.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ContactRole {
+    #[serde(rename = "inviter")]
+    Inviter,
+    /// Also what a value this version doesn't know is read as.
+    #[default]
+    #[serde(rename = "invitee", other)]
+    Invitee,
+}
+
+impl ContactRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Inviter => "inviter",
+            Self::Invitee => "invitee",
+        }
+    }
+}
+
+/// Who ended a contact, as this account sees it: me, the other person, or the system (an account was deleted).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ContactEndedBy {
+    #[serde(rename = "me")]
+    Me,
+    #[serde(rename = "them")]
+    Them,
+    /// Also what a value this version doesn't know is read as.
+    #[default]
+    #[serde(rename = "system", other)]
+    System,
+}
+
+impl ContactEndedBy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Me => "me",
+            Self::Them => "them",
+            Self::System => "system",
+        }
+    }
+}
+
+/// What a host's person revoke does to the person's contact: pause cuts the agents lent and keeps the chat, remove ends the contact too. A missing or unknown mode is pause (the least change).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PersonRevokeMode {
+    #[serde(rename = "remove")]
+    Remove,
+    /// Also what a value this version doesn't know is read as.
+    #[default]
+    #[serde(rename = "pause", other)]
+    Pause,
+}
+
+impl PersonRevokeMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pause => "pause",
+            Self::Remove => "remove",
+        }
+    }
+}
+
+/// How the cloud answered an end, an undo, a pause or a resume of a contact. alreadyEnded and alreadyLive: a repeat of a change that stands. staleEpoch: the contact has moved on to another epoch since the named one (the answer carries it). stalePause: the pause generation named is not the current one (the answer carries it). removed: a pause or resume of a contact that is ended (use the undo).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ContactChange {
+    #[serde(rename = "ok")]
+    Ok,
+    #[serde(rename = "alreadyEnded")]
+    AlreadyEnded,
+    #[serde(rename = "alreadyLive")]
+    AlreadyLive,
+    #[serde(rename = "staleEpoch")]
+    StaleEpoch,
+    #[serde(rename = "stalePause")]
+    StalePause,
+    #[serde(rename = "removed")]
+    Removed,
+    /// A value this version doesn't know.
+    #[default]
+    #[serde(rename = "unknown", other)]
+    Unknown,
+}
+
+impl ContactChange {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::AlreadyEnded => "alreadyEnded",
+            Self::AlreadyLive => "alreadyLive",
+            Self::StaleEpoch => "staleEpoch",
+            Self::StalePause => "stalePause",
+            Self::Removed => "removed",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// The host's answer to an access request. The cloud refuses one it doesn't know.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Decision {
@@ -196,12 +326,16 @@ pub struct Me {
     pub created_at: i64,
 }
 
-/// Body of POST /v1/devices.
+/// Body of POST /v1/devices. boxKey (X25519, base64url) and boxSig (the device key's Ed25519 signature over 'kith/pc-box/v1' + userId + boxKey, base64url) are set once: they make the device a recipient of person chats. Absent from an app that predates them.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RegisterDevice {
     pub name: String,
     pub platform: DevicePlatform,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_sig: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -482,6 +616,23 @@ pub struct HostState {
     pub peer_requests: Option<Vec<HostPeerRequest>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peers: Option<Vec<HostPeer>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contacts: Option<Vec<HostContact>>,
+}
+
+/// The computer owner's contact with another account (person chats). endedBy is owner:<userId>, computer:<id>, accountDeleted or backfill; null while live. contacts is absent from a cloud that predates them.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HostContact {
+    pub user_id: String,
+    pub contact_id: String,
+    pub epoch: i64,
+    pub base: i64,
+    pub live: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pgen: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_by: Option<String>,
 }
 
 /// Another computer of this computer's account, which it may ask to pair with (Mac link).
@@ -592,10 +743,181 @@ pub struct CreateInvite {
     pub expires_at: i64,
 }
 
+/// mode remove needs epoch, the contact epoch the Mac last pulled (an undo names the ended one); pgen is the pause generation it last pulled (a pause or resume names it, so a late copy of an old one changes nothing). A request that has a mode must carry its generation (epoch for remove, pgen for pause); only a request with no mode (a host from before contacts) may omit them: its revoke is a pause, its unrevoke undoes the epoch ended now or, when live, resumes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PersonRevoke {
     pub user_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epoch: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<PersonRevokeMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pgen: Option<i64>,
+}
+
+/// Answer to a person revoke or undo. status, epoch and live are null when the person has no contact (nothing but the revocation changed). A staleEpoch answer changed nothing: epoch is the contact's current one.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonRevoked {
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<ContactChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epoch: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pgen: Option<i64>,
+}
+
+/// The other account of a contact, as that account's name and email are known.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactPerson {
+    pub user_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+/// A device with a person-chat box key. boxSig is checked by the cloud at registration and by every sender.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryDevice {
+    pub user_id: String,
+    pub key: String,
+    pub box_key: String,
+    pub box_sig: String,
+    pub platform: String,
+    pub name: String,
+    pub added_at: i64,
+}
+
+/// A claimed computer: a recipient under the key 'computer:<computerId>'.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryComputer {
+    pub user_id: String,
+    pub computer_id: String,
+    pub sign_key: String,
+    pub box_key: String,
+}
+
+/// Every key a message of this contact is sealed to, of both accounts, sorted.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactDirectory {
+    pub devices: Vec<DirectoryDevice>,
+    pub computers: Vec<DirectoryComputer>,
+}
+
+/// One contact of the caller's. directory is there while the contact is live.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Contact {
+    pub contact_id: String,
+    pub other: ContactPerson,
+    pub role: ContactRole,
+    pub epoch: i64,
+    pub base: i64,
+    pub live: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_by: Option<ContactEndedBy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<ContactDirectory>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactList {
+    pub contacts: Vec<Contact>,
+}
+
+/// One recipient's wrap of the message key: key is a device key or 'computer:<id>'; epk and wrap are base64url.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PcRecipient {
+    pub key: String,
+    pub epk: String,
+    pub wrap: String,
+}
+
+/// Body of a person-chat send. ct and sig are base64url; the cloud checks sig and the recipients' hash, never the plaintext.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PcSend {
+    pub msg_id: String,
+    pub epoch: i64,
+    pub ct: String,
+    pub sig: String,
+    pub recipients: Vec<PcRecipient>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PcSent {
+    pub status: PcSendStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub msg_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epoch: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<ContactDirectory>,
+}
+
+/// A queued message for the asking device or computer: its own epk and wrap, and the hash of everyone's.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PcInboxItem {
+    pub msg_id: String,
+    pub contact_id: String,
+    pub epoch: i64,
+    pub sender_user_id: String,
+    pub sender_key: String,
+    pub ct: String,
+    pub sig: String,
+    pub epk: String,
+    pub wrap: String,
+    pub recipients_hash: String,
+    pub created_at: i64,
+}
+
+/// Up to 100 rows; next is the cursor for the page after, null at the end.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PcInbox {
+    pub messages: Vec<PcInboxItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PcAck {
+    pub msg_ids: Vec<String>,
+}
+
+/// Body of an end or an undo: the epoch the caller saw.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactEpoch {
+    pub epoch: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactChanged {
+    pub status: ContactChange,
+    pub epoch: i64,
+    pub live: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pgen: Option<i64>,
 }
 
 /// token is h1 (the invite link's proof), never the token itself.
@@ -712,6 +1034,23 @@ pub mod path {
     }
     pub const HOST_REVOKE_PERSON: &str = "/v1/host/people/revoke";
     pub const HOST_UNREVOKE_PERSON: &str = "/v1/host/people/unrevoke";
+    pub const LIST_CONTACTS: &str = "/v1/contacts";
+    pub fn send_person_chat(contact_id: &str) -> String {
+        format!("/v1/contacts/{contact_id}/messages")
+    }
+    pub const PC_INBOX: &str = "/v1/pc/inbox";
+    pub const PC_ACK: &str = "/v1/pc/ack";
+    pub fn end_contact(contact_id: &str) -> String {
+        format!("/v1/contacts/{contact_id}/end")
+    }
+    pub fn undo_end_contact(contact_id: &str) -> String {
+        format!("/v1/contacts/{contact_id}/undo")
+    }
+    pub const HOST_PC_INBOX: &str = "/v1/host/pc/inbox";
+    pub const HOST_PC_ACK: &str = "/v1/host/pc/ack";
+    pub fn host_send_person_chat(contact_id: &str) -> String {
+        format!("/v1/host/contacts/{contact_id}/messages")
+    }
     pub fn accept_invite(invite_id: &str) -> String {
         format!("/v1/invites/{invite_id}/accept")
     }
@@ -764,6 +1103,9 @@ pub enum ErrorCode {
     UnknownComputer,
     AlreadyClaimed,
     Conflict,
+    StaleEpoch,
+    StalePause,
+    Removed,
     TooMany,
     InviteUsed,
     Paused,
@@ -795,6 +1137,9 @@ impl ErrorCode {
             "unknownComputer" => Self::UnknownComputer,
             "alreadyClaimed" => Self::AlreadyClaimed,
             "conflict" => Self::Conflict,
+            "staleEpoch" => Self::StaleEpoch,
+            "stalePause" => Self::StalePause,
+            "removed" => Self::Removed,
             "tooMany" => Self::TooMany,
             "inviteUsed" => Self::InviteUsed,
             "paused" => Self::Paused,
@@ -825,6 +1170,9 @@ impl ErrorCode {
             Self::UnknownComputer => "unknownComputer",
             Self::AlreadyClaimed => "alreadyClaimed",
             Self::Conflict => "conflict",
+            Self::StaleEpoch => "staleEpoch",
+            Self::StalePause => "stalePause",
+            Self::Removed => "removed",
             Self::TooMany => "tooMany",
             Self::InviteUsed => "inviteUsed",
             Self::Paused => "paused",
@@ -848,7 +1196,7 @@ impl ErrorCode {
             Self::Unauthenticated | Self::BadSignature | Self::Unauthorized => Some(401),
             Self::Forbidden | Self::AccountDeleted => Some(403),
             Self::NotFound | Self::UnknownComputer => Some(404),
-            Self::AlreadyClaimed | Self::Conflict | Self::TooMany | Self::InviteUsed | Self::Paused => Some(409),
+            Self::AlreadyClaimed | Self::Conflict | Self::StaleEpoch | Self::StalePause | Self::Removed | Self::TooMany | Self::InviteUsed | Self::Paused => Some(409),
             Self::ClaimExpired | Self::RequestExpired | Self::InviteExpired | Self::InviteRevoked => Some(410),
             Self::TooLarge => Some(413),
             Self::UpgradeRequired => Some(426),
@@ -893,6 +1241,7 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "Membership" => serde_json::from_value::<Membership>(value).map(drop),
         "BotDevice" => serde_json::from_value::<BotDevice>(value).map(drop),
         "HostState" => serde_json::from_value::<HostState>(value).map(drop),
+        "HostContact" => serde_json::from_value::<HostContact>(value).map(drop),
         "PeerComputer" => serde_json::from_value::<PeerComputer>(value).map(drop),
         "PeerComputerList" => serde_json::from_value::<PeerComputerList>(value).map(drop),
         "CreatePeerRequest" => serde_json::from_value::<CreatePeerRequest>(value).map(drop),
@@ -906,6 +1255,21 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "Decided" => serde_json::from_value::<Decided>(value).map(drop),
         "CreateInvite" => serde_json::from_value::<CreateInvite>(value).map(drop),
         "PersonRevoke" => serde_json::from_value::<PersonRevoke>(value).map(drop),
+        "PersonRevoked" => serde_json::from_value::<PersonRevoked>(value).map(drop),
+        "ContactPerson" => serde_json::from_value::<ContactPerson>(value).map(drop),
+        "DirectoryDevice" => serde_json::from_value::<DirectoryDevice>(value).map(drop),
+        "DirectoryComputer" => serde_json::from_value::<DirectoryComputer>(value).map(drop),
+        "ContactDirectory" => serde_json::from_value::<ContactDirectory>(value).map(drop),
+        "Contact" => serde_json::from_value::<Contact>(value).map(drop),
+        "ContactList" => serde_json::from_value::<ContactList>(value).map(drop),
+        "PcRecipient" => serde_json::from_value::<PcRecipient>(value).map(drop),
+        "PcSend" => serde_json::from_value::<PcSend>(value).map(drop),
+        "PcSent" => serde_json::from_value::<PcSent>(value).map(drop),
+        "PcInboxItem" => serde_json::from_value::<PcInboxItem>(value).map(drop),
+        "PcInbox" => serde_json::from_value::<PcInbox>(value).map(drop),
+        "PcAck" => serde_json::from_value::<PcAck>(value).map(drop),
+        "ContactEpoch" => serde_json::from_value::<ContactEpoch>(value).map(drop),
+        "ContactChanged" => serde_json::from_value::<ContactChanged>(value).map(drop),
         "AcceptInvite" => serde_json::from_value::<AcceptInvite>(value).map(drop),
         "InviteAccepted" => serde_json::from_value::<InviteAccepted>(value).map(drop),
         "AcceptBotInvite" => serde_json::from_value::<AcceptBotInvite>(value).map(drop),

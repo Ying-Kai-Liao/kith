@@ -1,0 +1,8 @@
+{
+  "type": "PcSent",
+  "body": {
+    "status": "ok",
+    "msgId": "pm_AAAAAAAAAAAAAAAAAAAAAA",
+    "epoch": null
+  }
+}

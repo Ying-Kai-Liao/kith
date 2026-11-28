@@ -3,7 +3,7 @@
 
 import { Webhook } from "svix";
 import type { Env } from "../index";
-import { ApiError, audit, notify, ownsComputers, revokeGrants, revokeMemberAccess, type Ctx } from "./common";
+import { ApiError, audit, dropRecipients, notify, ownsComputers, revokeGrants, revokeMemberAccess, type Ctx } from "./common";
 import type { Responses } from "../contract.gen";
 
 export async function clerkWebhook(c: Ctx): Promise<Responses["clerkWebhook"]> {
@@ -94,8 +94,15 @@ async function deleteAccount(env: Env, userId: string, now: number): Promise<voi
       now,
       userId,
     ),
+    // Its contacts end with it. No revocation row: that is the owner's removal route, and the other side is simply left.
+    env.DB.prepare(
+      `UPDATE contacts SET live = 0, ended_by = 'accountDeleted', ended_at = ?1, updated_at = ?1
+       WHERE live = 1 AND (user_lo = ?2 OR user_hi = ?2)`,
+    ).bind(now, userId),
     audit(env, "system", "account.delete", userId, "ok", now),
   ]);
+  // Its own queued person chats go; what it sent stays for the other side until collected or 30 days.
+  await dropRecipients(env, "recipient_user_id = ?", [userId]);
   const computers = new Set([...blocks.keys(), ...owned.results.map((r) => r.id), ...member.computers]);
   await Promise.all([...computers].map((id) => notify(env, id, blocks.get(id))));
 }
