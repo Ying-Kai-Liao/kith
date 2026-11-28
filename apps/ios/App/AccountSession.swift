@@ -46,6 +46,11 @@ final class AccountSession {
     let cloudURL: URL?
     var isSignedIn: Bool { userID != nil }
     var email: String? { clerk?.user?.primaryEmailAddress?.emailAddress }
+    /// The signed-in person's name as Clerk has it; nil when they have not set one (the email stands in).
+    var displayName: String? {
+        let parts = [clerk?.user?.firstName, clerk?.user?.lastName].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
     var avatarURL: URL? {
         guard let image = clerk?.user?.imageUrl, let url = URL(string: image), url.scheme == "https" else { return nil }
         return url
